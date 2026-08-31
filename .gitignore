@@ -1,0 +1,30 @@
+# ===== 凭据（绝不提交）=====
+.env
+.env.*
+!.env.example
+
+# ===== 构建产物 =====
+dist/
+dist_stale/
+build-upload/
+# SEA 二进制构建产物（非源码）
+deploy/linux/bundle.js
+deploy/linux/docker-manager-yanzi
+deploy/linux/docker-manager-yanzi-linux-x64.zip
+
+# ===== 发布临时文件 =====
+.notes-*.md
+
+# ===== 依赖与运行时数据 =====
+node_modules/
+data/
+logs/
+
+# ===== 本地记忆 / 产物（不入库）=====
+.workbuddy/
+
+# ===== SEA 临时构建产物 =====
+deploy/linux/sea-prep.blob
+
+# ===== 临时测试目录 =====
+.tmp-*/

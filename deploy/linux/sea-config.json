@@ -1,0 +1,7 @@
+{
+  "main": "D:/AI/WorkBuddy/docker-unraid/deploy/linux/bundle.js",
+  "output": "D:/AI/WorkBuddy/docker-unraid/deploy/linux/sea-prep.blob",
+  "disableExperimentalSEAWarning": true,
+  "useSnapshot": false,
+  "useCodeCache": true
+}

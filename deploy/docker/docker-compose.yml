@@ -1,0 +1,28 @@
+# Docker Manager Yanzi — 容器化部署
+# 用法（在本目录下）:
+#   docker compose up -d          # 启动
+#   docker compose logs -f        # 看日志
+#   docker compose down           # 停止
+services:
+  docker-manager-yanzi:
+    image: docker-manager-yanzi:latest
+    container_name: docker-manager-yanzi
+    restart: unless-stopped
+    ports:
+      - "5024:5024"
+    volumes:
+      # 挂载宿主机 Docker socket —— 容器内管理宿主机上的容器/堆栈/镜像/卷
+      - /var/run/docker.sock:/var/run/docker.sock
+      # 数据 / 日志 / 配置（与 Linux 二进制部署相同的 data/logs/config 布局）
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./config:/app/config
+    environment:
+      TZ: Asia/Shanghai
+      # PORT: 5024          # 改端口时同步修改上方 ports 映射
+      # DATA_DIR: /app/data
+      # LOG_DIR: /app/logs
+      # CONFIG_DIR: /app/config
+    # 容器内以 root 运行（操作挂载的 docker.sock 需要写权限）
+    # 若宿主机 docker 组 gid 固定，可改为非 root 运行，例如:
+    # user: "1000:993"

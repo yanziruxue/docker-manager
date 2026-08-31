@@ -1,0 +1,16 @@
+# Docker 构建上下文排除（docker build 使用）
+node_modules
+dist
+server/dist
+.git
+.gitignore
+.workbuddy
+build-upload
+.env
+*.log
+*.zip
+*.tar.gz
+deploy
+server/engines.json
+server/settings.json
+server/active_engine.json

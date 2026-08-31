@@ -1,0 +1,21 @@
+deploy/linux/
+├── build-bundle.cmd              # 1. Windows 开发机构建（双击运行，生成 bundle.js）
+├── docker-manager-yanzi          # 2. Windows 交叉构建的 Linux SEA 二进制（ELF）
+├── install.sh                    # 3. Linux 安装（systemd 部署到 /opt/docker-manager-yanzi）
+├── uninstall.sh                  # 4. Linux 卸载（--keep / --purge）
+├── docker-manager-yanzi.service  # systemd 服务定义
+├── make-package.py               # 打包 docker-manager-yanzi-linux-x64.zip（保留权限位）
+└── README.md                     # 完整安装/更新/卸载说明
+
+
+部署流程：
+
+Windows:  npm run build:binary          → 生成 bundle.js
+          （SEA 交叉构建见工作日志，产出 docker-manager-yanzi 二进制）
+          python make-package.py        → docker-manager-yanzi-linux-x64.zip
+Linux:    cd /opt
+          unzip docker-manager-yanzi-linux-x64.zip
+          cd docker-manager-yanzi
+          sudo bash install.sh          → 安装 + 启动（systemd）
+
+数据/日志/配置：安装目录下 data/ logs/ config/ 三个子目录。

@@ -1,0 +1,91 @@
+{
+  "docker": {
+    "defaultRestartPolicy": "unless-stopped",
+    "defaultNetworkMode": "bridge",
+    "pollingInterval": 5,
+    "puid": "99",
+    "pgid": "100",
+    "tz": "Asia/Shanghai",
+    "composeStoragePath": "compose-manager"
+  },
+  "registries": [
+    {
+      "id": "r1",
+      "name": "阿里云镜像加速",
+      "url": "https://registry.cn-hangzhou.aliyuncs.com",
+      "username": "",
+      "password": "",
+      "isMirror": true
+    }
+  ],
+  "notifications": {
+    "webhookEnabled": false,
+    "webhookUrl": "",
+    "emailEnabled": false,
+    "emailSmtp": "",
+    "emailPort": 587,
+    "emailUser": "",
+    "events": {
+      "containerDown": true,
+      "updateAvailable": true,
+      "updateComplete": false,
+      "buildFailed": true
+    }
+  },
+  "backup": {
+    "mode": 1,
+    "autoBackupEnabled": false,
+    "backupPath": "docker-compose-backup-manager",
+    "lastBackup": "",
+    "simpleFrequency": "0 3 * * 0",
+    "simpleRetentionCount": 5,
+    "weekly": {
+      "enabled": true,
+      "day": "Saturday",
+      "time": "23:00",
+      "retention": 6
+    },
+    "monthly": {
+      "enabled": true,
+      "dayOfMonth": 0,
+      "time": "23:00",
+      "retention": 8
+    },
+    "yearly": {
+      "enabled": true,
+      "date": "12-31",
+      "time": "23:00"
+    }
+  },
+  "pathFavorites": [
+    {
+      "id": "p1",
+      "name": "应用数据",
+      "path": "/mnt/user/appdata"
+    },
+    {
+      "id": "p2",
+      "name": "媒体库",
+      "path": "/mnt/user/media"
+    },
+    {
+      "id": "p3",
+      "name": "下载目录",
+      "path": "/mnt/user/downloads"
+    },
+    {
+      "id": "p4",
+      "name": "系统配置",
+      "path": "/mnt/user/system"
+    }
+  ],
+  "updateScheduler": {
+    "enabled": false,
+    "checkFrequency": "0 3 * * *",
+    "autoPull": false
+  },
+  "user": {
+    "username": "admin",
+    "sessionTimeout": 30
+  }
+}

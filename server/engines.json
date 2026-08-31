@@ -1,0 +1,18 @@
+[
+  {
+    "name": "158",
+    "connectionType": "ssh",
+    "socketPath": "",
+    "tcpAddress": "",
+    "sshHost": "192.168.2.158",
+    "sshPort": 22,
+    "sshUsername": "root",
+    "sshAuthType": "password",
+    "sshPassword": "Root@gnzs123",
+    "sshKey": "",
+    "sshPassphrase": "",
+    "id": "e1785475330520",
+    "status": "connected",
+    "dockerVersion": "v18.09.0"
+  }
+]

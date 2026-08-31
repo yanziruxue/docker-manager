@@ -1,0 +1,48 @@
+{
+  "name": "docker-stack-manager",
+  "version": "1.6.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:server": "tsx server/index.ts",
+    "dev:all": "concurrently -n server,vite -c blue,green \"tsx server/index.ts\" \"vite --host --port 8088\"",
+    "build": "vite build && tsc -p server/tsconfig.json",
+    "build:frontend": "vite build",
+    "build:server": "tsc -p server/tsconfig.json",
+    "build:binary": "vite build && node scripts/build-binary.mjs",
+    "build:linux": "bash deploy/linux/build.sh",
+    "build:bundle": "cmd /c deploy\\linux\\build-bundle.cmd",
+    "release": "node scripts/publish-release.mjs",
+    "publish": "bash scripts/publish.sh",
+    "start": "node server/dist/index.js",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "cors": "^2.8.6",
+    "dockerode": "^5.0.1",
+    "express": "^5.2.1",
+    "lucide-react": "^0.453.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tsx": "^4.23.1",
+    "ws": "^8.21.1"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/dockerode": "^4.0.1",
+    "@types/express": "^5.0.6",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@types/ws": "^8.18.1",
+    "@vitejs/plugin-react": "^4.3.3",
+    "autoprefixer": "^10.4.20",
+    "concurrently": "^10.0.4",
+    "esbuild": "^0.25.10",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.15",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11"
+  }
+}

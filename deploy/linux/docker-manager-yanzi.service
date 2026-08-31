@@ -1,0 +1,41 @@
+[Unit]
+Description=Docker Manager Yanzi — 多引擎 Docker 管理面板
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+
+[Service]
+Type=simple
+User=docker-manager-yanzi
+Group=docker-manager-yanzi
+# 允许访问 Docker socket（docker 组权限）
+SupplementaryGroups=docker
+# 进程 cwd 即安装目录，数据/日志/配置分别保存在 data/ logs/ config/ 子目录
+WorkingDirectory=/opt/docker-manager-yanzi
+Environment=NODE_ENV=production
+# 固定 PATH：确保 spawnSync 能找到 docker / docker-compose（与 root shell 一致）
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+# docker CLI 配置隔离：ProtectHome=yes 会屏蔽 /home 下的 ~/.docker，
+# 指向安装目录内可写目录，避免 "Error loading config file: permission denied" 干扰 compose 检测
+Environment="DOCKER_CONFIG=/opt/docker-manager-yanzi/config/docker-cli"
+ExecStart=/opt/docker-manager-yanzi/docker-manager-yanzi
+Restart=always
+RestartSec=5
+
+# 安全加固
+# 注意：必须关闭 NoNewPrivileges，否则 sudo（setuid）会被 no_new_privs 拦截，
+# 导致「镜像加速源 → 写入 /etc/docker/daemon.json / 重启 docker」无法提权执行。
+NoNewPrivileges=no
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+# /var/run 通常是 /run 的符号链接，同时声明两条路径避免挂载隔离后找不到可写目标
+# 安装目录整体可写：在线升级需要替换安装目录下的二进制文件（mv 覆盖，无需 root）
+# /etc/docker 可写：设置页需要读写 daemon.json 的 registry-mirrors（配合 sudo 提权）
+ReadWritePaths=/opt/docker-manager-yanzi /run/docker.sock /var/run/docker.sock /etc/docker
+
+# 日志
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
