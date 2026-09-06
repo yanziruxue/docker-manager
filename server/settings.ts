@@ -1,0 +1,173 @@
+import fs from "node:fs";
+import { configPath } from "./paths.js";
+
+const SETTINGS_FILE = configPath("settings.json");
+
+/** 默认值版本号：默认列 / 默认语言等「默认值」变更时 +1，触发一次性迁移覆盖老配置 */
+const DEFAULTS_VERSION = 2;
+
+const DEFAULT_SETTINGS = {
+  docker: {
+    defaultRestartPolicy: "unless-stopped",
+    defaultNetworkMode: "bridge",
+    pollingInterval: 5,
+    puid: "99",
+    pgid: "100",
+    tz: "Asia/Shanghai",
+    composeStoragePath: "compose-manager",
+    composeMode: "auto",
+    menuLanguage: "en",
+    logLevel: "info",
+    /**
+     * 镜像加速源（pull-through 型，如 docker.m.daocloud.io）列表。
+     * v1.5.0 起与 /etc/docker/daemon.json 的 registry-mirrors 双向同步：
+     * 设置页保存时写回 daemon.json，页面加载时以 daemon.json 内容为准回读。
+     */
+    registryMirrors: [],
+    /**
+     * 拉取时是否把镜像名改写为 `<加速源>/<仓库>`（v1.4.0 及更早的兼容行为）。
+     * 默认 false：加速源写入 daemon.json 后由守护进程自行生效，不再改写镜像名——
+     * 避免把「仅代理私有仓库 / fnnas 类」的源用于 Docker Hub 镜像名改写导致 404。
+     * 旧配置（registryMirrors 非空）迁移时自动置 true，保持原有拉取行为不变。
+     */
+    rewriteImageNames: false,
+  },
+  notifications: {
+    webhookEnabled: false,
+    webhookUrl: "",
+    emailEnabled: false,
+    emailSmtp: "",
+    emailPort: 587,
+    emailUser: "",
+    events: {
+      containerDown: true,
+      updateAvailable: true,
+      updateComplete: false,
+      buildFailed: true,
+    },
+  },
+  backup: {
+    mode: 1,
+    autoBackupEnabled: false,
+    backupPath: "docker-compose-backup-manager",
+    lastBackup: "",
+    simpleFrequency: "0 3 * * 0",
+    simpleRetentionCount: 5,
+    weekly: { enabled: true, day: "Saturday", time: "23:00", retention: 6 },
+    monthly: { enabled: true, dayOfMonth: 0, time: "23:00", retention: 8 },
+    yearly: { enabled: true, date: "12-31", time: "23:00" },
+  },
+  pathFavorites: [
+    { id: "p1", name: "应用数据", path: "/mnt/user/appdata" },
+    { id: "p2", name: "媒体库", path: "/mnt/user/media" },
+    { id: "p3", name: "下载目录", path: "/mnt/user/downloads" },
+    { id: "p4", name: "系统配置", path: "/mnt/user/system" },
+  ],
+  updateScheduler: {
+    enabled: false,
+    checkFrequency: "0 3 * * *",
+    autoPull: false,
+  },
+  user: {
+    username: "admin",
+    sessionTimeout: 30,
+  },
+  update: {
+    /** 是否自动检查更新（仓库地址已固定写死在 updater.ts，无需配置） */
+    autoCheck: false,
+  },
+  /**
+   * 各页面默认可见列（页面「列」下拉可临时调整，设置页「列显隐」保存为默认值）。
+   * v1.9.2 收敛默认显示项：容器隐藏 镜像/运行时长/重启策略，镜像隐藏 SHA-256，
+   * 数据卷隐藏 驱动；堆栈子表新增列控制，默认隐藏「镜像」。
+   */
+  columnVisibility: {
+    containers: ["icon","name","status","tags","ports","actions"],
+    images: ["repository","tag","id","size","createdAt","associatedContainers","actions"],
+    volumes: ["name","mountpoint","size","createdAt","associatedContainers","inUse","actions"],
+    stacks: ["name","status","network","ip","ports","update"],
+  },
+  /** 全局彩色标签库（设置页「标签管理」维护，可挂到堆栈 LABELS 服务条目） */
+  tags: [],
+  /**
+   * 弹窗设置：操作结果弹窗的自动关闭延迟（秒）。
+   * 启动堆栈等操作完成后，弹窗显示倒计时并在 autoCloseDelay 秒后自动关闭；
+   * 0 = 不自动关闭。设置页「弹窗设置」可调整。
+   */
+  modal: {
+    autoCloseDelay: 5,
+  },
+  /**
+   * Compose 模板（系统设置 → Compose 管理 维护）：
+   * 编辑堆栈时一键填入到 services.<服务> 下的属性行（4 空格缩进层级）。
+   * 每项为一行 compose 属性文本，值留空则填入后由用户补全。
+   */
+  compose: {
+    templates: [
+      "network_mode: ",
+      "restart: ",
+      "container_name: ",
+    ],
+  },
+};
+
+export function getSettings(): any {
+  try {
+    if (fs.existsSync(SETTINGS_FILE)) {
+      const parsed = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8"));
+      // docker / update 段做二级合并：旧配置文件已存在对应段时，
+      // 其中缺失的新增字段（如 docker.registryMirrors）能自动继承默认值
+      const mergedDocker = { ...DEFAULT_SETTINGS.docker, ...(parsed?.docker || {}) };
+      // 迁移旧版单一 registryMirror 字符串 → registryMirrors 数组（向后兼容）
+      if (!Array.isArray(mergedDocker.registryMirrors)) {
+        mergedDocker.registryMirrors =
+          typeof (mergedDocker as any).registryMirror === "string" && (mergedDocker as any).registryMirror.trim()
+            ? [(mergedDocker as any).registryMirror.trim()]
+            : [];
+        delete (mergedDocker as any).registryMirror;
+      }
+      // 迁移：旧配置若已填过加速源，说明依赖「改写镜像名」拉取，保持原行为（true）；
+      // 新配置默认 false，改由 daemon.json registry-mirrors 生效
+      if (typeof mergedDocker.rewriteImageNames !== "boolean") {
+        mergedDocker.rewriteImageNames = mergedDocker.registryMirrors.length > 0;
+      }
+      // 迁移：容器列默认值补入「标签」列（旧配置无此列时插到「状态」之后）
+      let mergedColumns = { ...DEFAULT_SETTINGS.columnVisibility, ...(parsed?.columnVisibility || {}) };
+      if (Array.isArray(mergedColumns.containers) && !mergedColumns.containers.includes("tags")) {
+        const arr = [...mergedColumns.containers];
+        const statusIdx = arr.indexOf("status");
+        if (statusIdx >= 0) arr.splice(statusIdx + 1, 0, "tags");
+        else arr.push("tags");
+        mergedColumns.containers = arr;
+      }
+      // 迁移（一次性，v1.9.2）：老配置沿用旧的默认列与英文菜单，升级后重置为新默认值
+      // （容器隐藏 镜像/运行时长/重启策略、镜像隐藏 SHA、数据卷隐藏 驱动、菜单默认中文）
+      if ((parsed as any).defaultsVersion !== DEFAULTS_VERSION) {
+        mergedColumns = { ...DEFAULT_SETTINGS.columnVisibility };
+        mergedDocker.menuLanguage = "zh";
+      }
+      return {
+        ...DEFAULT_SETTINGS,
+        ...parsed,
+        docker: mergedDocker,
+        update: { ...DEFAULT_SETTINGS.update, ...(parsed?.update || {}) },
+        modal: { ...DEFAULT_SETTINGS.modal, ...(parsed?.modal || {}) },
+        compose: {
+          templates: Array.isArray(parsed?.compose?.templates)
+            ? parsed.compose.templates.map((x: any) => String(x ?? ""))
+            : DEFAULT_SETTINGS.compose.templates,
+        },
+        columnVisibility: mergedColumns,
+        defaultsVersion: DEFAULTS_VERSION,
+      };
+    }
+  } catch {
+    // 文件损坏则用默认
+  }
+  return DEFAULT_SETTINGS;
+}
+
+export function saveSettings(settings: any): any {
+  fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), "utf-8");
+  return settings;
+}
