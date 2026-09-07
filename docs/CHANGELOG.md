@@ -17,6 +17,61 @@
 
 ---
 
+## v1.13.0 — 2026-09-07
+
+新增登录鉴权与账户管理（Minor）。参考 bookmarkhub 的「登录与账户管理」设计，按本项目（个人自托管 NAS 工具）定位裁剪为 **单管理员模式**，不做多用户与角色。
+
+- **登录门卫 AuthGate（`src/App.tsx`）**：启动并发请求 `GET /api/auth/init-status`（是否已初始化）与 `GET /api/auth/me`（是否已登录），三态分流 —— 未初始化 → `SetupWizard`；未登录 → `LoginPage`；已登录 → 主应用。
+- **账户存储（`server/users.ts` + `<data>/users.json`）**：密码用 Node `crypto.scrypt` + 随机 16 字节 salt 哈希，`timingSafeEqual` 防时序攻击；**仅存 hash 与 salt，无明文**。
+- **会话（`server/auth.ts`）**：32 字节随机 token 存服务端内存 Map；Cookie `docker-manager-yanzi_session`（`httpOnly` + `sameSite=lax`）；TTL 取自 `设置 → 用户 → 会话超时`（默认 30 分钟）；服务重启即失效，需重新登录。
+- **鉴权守卫**：`app.use("/api", …)` 对除 `/api/auth/*` 外所有接口强制登录（未登录 401）；终端 WebSocket `/ws/terminal` 建连时校验会话，未登录拒绝（1008）。
+- **前端联动**：`request()` 统一 `credentials: "include"`；非鉴权接口返回 401 时派发 `auth:unauthorized`，App 监听后回登录页；主数据加载 effect 改为依赖登录态，登录后才拉取（修复「未登录时预先拉取必然失败且登录后不重试」）。
+- **顶栏**：显示当前用户名 + 登出按钮。
+- **系统设置**：「用户与权限」更名为 **「用户」**；原只读用户名占位卡片替换为「当前账户」（用户名取自登录账户 + 会话超时分钟数）与「修改密码」（原密码 + 新密码 + 确认，≥6 位）。`UserConfig.username` 降级为历史可选字段，不再展示/编辑。
+
+验证：
+- `npm run build`（vite + 后端 tsc）通过。
+- 冒烟测试（临时 DATA_DIR/CONFIG_DIR + 独立端口）：init-status=false → 未登录 `/api/engines` 401 → init 建号成功并下发 Cookie → 带 Cookie `/api/engines` 200 → me 返回用户 → 错误原密码改密 400、正确原密码 200 → 登出后 me 401 → 新密码登录成功、旧密码 401 → 已初始化再 init 409；`users.json` 仅含 hash/salt。
+- ⚠️ 现有部署升级后首次启动会进入初始化向导，需先创建管理员账号。
+
+## v1.12.5 — 2026-09-07
+
+- 拉取镜像进度显示优化（Patch）：修复「启动堆栈拉取镜像」（CmdOutputModal）与 compose 拉取时逐帧刷屏打印日志的问题。
+  - 根因：`stackActionStream` 的 `onData` 把 `docker compose pull` 每个数据块（含 `\r` 原地刷新的层进度帧）直接推送，前端累积显示 → 同一镜像层每次大小变化都追加新行。
+  - 后端新增按层 id 去重的行缓冲（`displayLines` + `layerIdOf`/`appendDisplayLine`），按 `\r/\n` 切帧（修复 `\r` 刷新两帧粘连），同一层 id 原地覆盖、只更新大小，不再持续打印新行；每次推送聚合后的完整快照（覆盖式）。
+  - 前端 `runStackActionStream` 的 `onChunk` 由累积（`buf += text`）改为覆盖式（`buf = text`）显示快照。
+  - 普通镜像拉取（Images 页 PullOutputPanel）本就走 pull task 的 `pushOutput` 按层去重，不受影响；本次改动使其与堆栈拉取行为一致。
+  - 验证：`npm run build`（vite + 后端 tsc）通过。
+
+## v1.12.4 — 2026-09-07
+### 堆栈管理页 列显隐 与 容器子表 列显隐 解耦（Patch）
+- **根因**：此前工具栏「列」按钮本应控制堆栈管理主页，却错误驱动了容器子表的列显隐（其默认值来自 `设置 → 列显隐默认值 → 堆栈管理（实际为容器子表）`）。
+- **主页列显隐真正控制主页**：工具栏「列」按钮改为控制堆栈管理主页主表格（`name/status/tags/containers/uptime/update`），新增独立状态 `visibleStackColumns`，列表项来自 `设置 → 列显隐 → 堆栈管理`。
+- **容器子表列显隐独立控制子表**：弹窗内「显示列」切换仅控制弹窗内容器列表（`name/image/status/network/ip/ports/update`），来自 `设置 → 列显隐 → 容器子表`（原 `stacks`）。两者完全解耦，互不干扰。
+- **设置项拆分**：`columnVisibility` 新增 `stackList`（主页）键，原 `stacks` 键明确为容器子表；类型 `ColumnVisibility`、前后端 `DEFAULT_SETTINGS` 同步；旧配置无 `stackList` 时回退默认值，不破坏已有设置。
+- **提示文案移动**：「点击状态列弹出容器子表」（Info 图标）由「全部状态」视图每行右侧的「说明」列，移至工具栏「列」按钮**左边**，并移除原每行「说明」列（避免重复）。
+- 验证：前端 `tsc --noEmit` 通过；`npm run build`（vite + 后端 tsc）通过。
+
+## v1.12.3 — 2026-09-07
+### 容器子表改为弹窗 + 点击状态列触发（Patch）
+- **容器子表由行内展开改为弹窗展示**：移除原「左键行展开/收起」的内联容器子表与展开箭头列；新增 `containersModal` 状态。
+- **触发方式改为点击状态列**：状态列 `StatusBadge` 包进可点击按钮，点击即弹出该堆栈的容器子表弹窗（`Modal` 组件，size=lg，可点遮罩/ESC 关闭）。弹窗内保留 Profiles 展示、列显隐切换（与系统设置 → 列显隐 → 堆栈管理联动）、容器右键菜单（启动/停止/重启/终端等）。
+- **「全部状态」视图行内说明**：当状态筛选为「全部状态」时，每行右侧新增「说明」列，提示「点击状态列弹出容器子表」（带 Info 图标）；切换其它状态筛选时该列自动隐藏，保持表头与数据列对齐。
+- 左键点击行不再触发展开（仅右键菜单保留全部操作）；空容器堆栈弹窗内显示「该堆栈暂无容器」占位。
+- 验证：前端 `tsc --noEmit` 通过；`npm run build:frontend` + SEA bundle 通过。
+
+## v1.12.2 — 2026-09-07
+### Compose 模板支持「末尾」填入 + 标签随机色/RGB 手动（Patch）
+- **Compose 管理：模板新增「填入位置」开关（服务内 / 末尾）**
+  - `ComposeConfig.templates` 由 `string[]` 改为 `ComposeTemplate[]`（`{ content: string; insert: "service" | "end" }`）；`server/settings.ts` 默认值与合并逻辑向后兼容旧 `string[]`（自动归一化为 `{content, insert:"service"}`）。
+  - 栈编辑器右侧一键填入面板每项显示位置徽标（服务内/末尾）；`insertTemplateBlock` 新增 `insert` 参数：`end` 模式把模板**追加到 compose 文本最后一行**，`service` 模式保持插入第一个服务内部；两者均保留手动缩进、支持多行、值留空自动补全（末尾模式无服务名上下文，`container_name` 不补全）。
+  - 系统设置「Compose 管理」模板项改为：内容多行 textarea + 服务内/末尾切换按钮 + 删除。
+- **标签管理：默认随机色 + 手动 RGB**
+  - 新建标签默认色改为随机（`randomTagColor()`，HSL 固定饱和度/亮度保证鲜明可读），不再轮换固定色板。
+  - 每个标签行新增手动 RGB 控件：原生取色器 + R/G/B 数值输入（0–255），改动实时换算 hex 写入 `color`；`hexToRgb` / `rgbToHex` 工具加入 `components/TagPicker.tsx`。
+- 左键堆栈项目维持现状（展开/收起容器子表），按用户确认不修改。
+- 验证：前后端 `tsc --noEmit` 通过。
+
 ## v1.12.1 — 2026-09-07
 ### 一键填入模板：支持多行 + 手动缩进 + 值留空自动补全（Patch）
 - **「编辑堆栈 → Compose」页右侧一键填入模板重构**

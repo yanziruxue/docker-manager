@@ -60,6 +60,16 @@ import { COMPOSE_DIR } from "./paths.js";
 import { createEmbeddedStatic, type EmbeddedDist } from "./serve-embedded.js";
 import { setLogLevel, getLogLevel, createLogger } from "./logger.js";
 import { WebSocketServer } from "ws";
+import {
+  countUsers,
+  getUserByUsername,
+  createUser,
+  updateUserPassword,
+  findUserById,
+  verifyPassword,
+  ensureUsersDir,
+} from "./users.js";
+import { createSession, getSessionUser, destroySession, requireAuth } from "./auth.js";
 
 // 尝试加载嵌入式前端数据（仅二进制构建时可用）
 // BUILD_BINARY 由 esbuild define 注入，仅二进制构建时为 true
@@ -94,6 +104,13 @@ try {
   // 设置读取失败，使用默认 info 级别
 }
 
+// 确保用户存储文件就位（首次部署无用户 → 前端进入初始化向导）
+try {
+  ensureUsersDir();
+} catch {
+  // 用户存储初始化失败不阻断服务启动
+}
+
 const apiLog = createLogger("API");
 // Node.js SEA 中 __filename/__dirname 不可用，用 process.execPath 替代
 const __filename = BUILD_BINARY ? process.execPath : fileURLToPath(import.meta.url);
@@ -101,6 +118,89 @@ const __dirname = path.dirname(__filename);
 
 app.use(cors());
 app.use(express.json());
+
+// ============ 鉴权（公开路由，无需登录） ============
+app.get("/api/auth/init-status", (_req, res) => {
+  res.json({ success: true, data: { initialized: countUsers() > 0 } });
+});
+
+app.post("/api/auth/init", (req, res) => {
+  if (countUsers() > 0) {
+    res.status(409).json({ success: false, error: "系统已初始化" });
+    return;
+  }
+  const { username, password } = req.body || {};
+  if (!username || !username.trim() || !password) {
+    res.status(400).json({ success: false, error: "缺少用户名或密码" });
+    return;
+  }
+  if (password.length < 6) {
+    res.status(400).json({ success: false, error: "密码至少 6 位" });
+    return;
+  }
+  try {
+    const user = createUser(username, password);
+    createSession(res, user.id);
+    res.json({ success: true, data: { id: user.id, username: user.username, role: user.role } });
+  } catch (e: any) {
+    res.status(400).json({ success: false, error: e?.message || "创建账户失败" });
+  }
+});
+
+app.post("/api/auth/login", (req, res) => {
+  const { username, password } = req.body || {};
+  const user = getUserByUsername(username || "");
+  if (!user || !verifyPassword(password || "", user)) {
+    res.status(401).json({ success: false, error: "用户名或密码错误" });
+    return;
+  }
+  createSession(res, user.id);
+  res.json({ success: true, data: { id: user.id, username: user.username, role: user.role } });
+});
+
+app.post("/api/auth/logout", (req, res) => {
+  destroySession(req, res);
+  res.json({ success: true });
+});
+
+app.get("/api/auth/me", (req, res) => {
+  const user = getSessionUser(req);
+  if (!user) {
+    res.status(401).json({ success: false, error: "未登录" });
+    return;
+  }
+  res.json({ success: true, data: user });
+});
+
+app.post("/api/auth/password", requireAuth, (req, res) => {
+  const user = (req as any).user;
+  const { oldPassword, newPassword } = req.body || {};
+  if (!newPassword || newPassword.length < 6) {
+    res.status(400).json({ success: false, error: "新密码至少 6 位" });
+    return;
+  }
+  const record = findUserById(user.id);
+  if (!record) {
+    res.status(404).json({ success: false, error: "用户不存在" });
+    return;
+  }
+  if (!verifyPassword(oldPassword || "", record)) {
+    res.status(400).json({ success: false, error: "原密码错误" });
+    return;
+  }
+  try {
+    updateUserPassword(user.id, newPassword);
+    res.json({ success: true });
+  } catch (e: any) {
+    res.status(400).json({ success: false, error: e?.message || "修改密码失败" });
+  }
+});
+
+// 鉴权守卫：除 /api/auth 外，所有 /api 路由必须登录
+app.use("/api", (req, res, next) => {
+  if (req.path.startsWith("/auth")) return next();
+  return requireAuth(req, res, next);
+});
 
 // ============ 引擎 API ============
 
@@ -1147,6 +1247,12 @@ wss.on("connection", async (ws, req) => {
 
   if (!engineId || !containerId) {
     ws.close(1008, "Missing engineId or containerId");
+    return;
+  }
+
+  // 会话校验：未登录拒绝终端连接
+  if (!getSessionUser(req)) {
+    ws.close(1008, "Unauthorized");
     return;
   }
 

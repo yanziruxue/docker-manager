@@ -34,6 +34,45 @@ export function hexWithAlpha(color: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
+/** 生成随机标签色（HSL→hex，固定饱和度/亮度，颜色鲜明且可读） */
+export function randomTagColor(): string {
+  const h = Math.floor(Math.random() * 360);
+  const s = 0.68;
+  const l = 0.55;
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = l - c / 2;
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  if (h < 60) [r, g, b] = [c, x, 0];
+  else if (h < 120) [r, g, b] = [x, c, 0];
+  else if (h < 180) [r, g, b] = [0, c, x];
+  else if (h < 240) [r, g, b] = [0, x, c];
+  else if (h < 300) [r, g, b] = [x, 0, c];
+  else [r, g, b] = [c, 0, x];
+  const toHex = (v: number) => Math.round((v + m) * 255).toString(16).padStart(2, "0");
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+/** 6 位 hex → {r,g,b}（非法返回 null） */
+export function hexToRgb(color: string): { r: number; g: number; b: number } | null {
+  const c = color && /^#[0-9a-fA-F]{6}$/.test(color) ? color.toLowerCase() : null;
+  if (!c) return null;
+  return {
+    r: parseInt(c.slice(1, 3), 16),
+    g: parseInt(c.slice(3, 5), 16),
+    b: parseInt(c.slice(5, 7), 16),
+  };
+}
+
+/** rgb(0-255) → 6 位 hex */
+export function rgbToHex(r: number, g: number, b: number): string {
+  const clamp = (v: number) => Math.max(0, Math.min(255, Math.round(v)));
+  const toHex = (v: number) => clamp(v).toString(16).padStart(2, "0");
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
 /** 单颗彩色标签 chip：色点 + 名称，浅色半透明底与描边 */
 export function TagChip({
   tag,

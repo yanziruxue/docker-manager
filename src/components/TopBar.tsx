@@ -1,6 +1,7 @@
 import React, { useState } from "react";
-import { Bell, Search, RefreshCw, ChevronRight, X, Info, CheckCircle, AlertTriangle, AlertCircle, ChevronsRight } from "lucide-react";
+import { Bell, Search, RefreshCw, ChevronRight, X, Info, CheckCircle, AlertTriangle, AlertCircle, ChevronsRight, UserCircle, LogOut } from "lucide-react";
 import type { ActivityLog } from "../types";
+import type { AuthUser } from "../api";
 
 interface TopBarProps {
   title: string;
@@ -11,6 +12,10 @@ interface TopBarProps {
   unreadCount?: number;
   onMarkAllRead?: () => void;
   actions?: React.ReactNode;
+  /** 当前登录用户 */
+  user?: AuthUser | null;
+  /** 点击登出 */
+  onLogout?: () => void;
 }
 
 const levelIcon: Record<ActivityLog["type"], React.ReactNode> = {
@@ -27,7 +32,7 @@ const levelBg: Record<ActivityLog["type"], string> = {
   error: "bg-red-50",
 };
 
-export function TopBar({ title, breadcrumb, onRefresh, onNavigate, notifications = [], unreadCount = 0, onMarkAllRead, actions }: TopBarProps) {
+export function TopBar({ title, breadcrumb, onRefresh, onNavigate, notifications = [], unreadCount = 0, onMarkAllRead, actions, user, onLogout }: TopBarProps) {
   const [showNotifications, setShowNotifications] = useState(false);
   const recentNotifications = notifications.slice(0, 5);
 
@@ -141,6 +146,24 @@ export function TopBar({ title, breadcrumb, onRefresh, onNavigate, notifications
             </>
           )}
         </div>
+
+        {user && (
+          <div className="flex items-center gap-1 pl-3 border-l border-slate-200">
+            <span className="flex items-center gap-1.5 text-sm text-slate-600" title={user.username}>
+              <UserCircle size={16} className="text-slate-400" />
+              {user.username}
+            </span>
+            {onLogout && (
+              <button
+                onClick={onLogout}
+                className="p-2 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                title="退出登录"
+              >
+                <LogOut size={16} />
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </header>
   );

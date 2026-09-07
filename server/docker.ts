@@ -1513,12 +1513,37 @@ export async function stackActionStream(
   const { cmd: composeCmd, baseArgs: composeBase } = getComposeCmd();
   const chunks: string[] = [];
 
+  // —— 拉取进度去重缓冲：同一镜像层只保留最新一行（仅大小变化），避免 compose 进度逐帧刷屏 ——
+  // 跨步骤共享：一次操作的多步（如 强制更新 = pull + up）输出汇聚到同一份去重快照。
+  const displayLines: string[] = [];
+  let lineBuf = "";
+  const layerIdOf = (s: string): string | undefined => {
+    const m = s.match(COMPOSE_LAYER_LINE_RE);
+    if (m) return m[1];
+    const m2 = s.match(/^([0-9a-f]{7,64}):/);
+    return m2 ? m2[1] : undefined;
+  };
+  const appendDisplayLine = (raw: string): void => {
+    const line = raw.trim();
+    if (!line) return;
+    const id = layerIdOf(line);
+    if (id) {
+      for (let i = displayLines.length - 1; i >= 0; i--) {
+        if (layerIdOf(displayLines[i]) === id) { displayLines[i] = line; return; }
+      }
+      displayLines.push(line);
+    } else {
+      displayLines.push(line);
+    }
+  };
+
   /** 异步执行单步 compose 命令，输出逐块推送 */
   const runStep = (stepArgs: string[], timeout: number, pullSink?: { cache: { task?: PullTaskInternal } }): Promise<string> =>
     new Promise((resolve, reject) => {
       const full = [...composeBase, ...stepArgs];
       const header = `$ ${composeCmd} ${full.join(" ")}`;
-      onChunk(`${header}\n`);
+      appendDisplayLine(header);
+      onChunk(displayLines.join("\n"));
       const child = spawn(composeCmd, full, {
         cwd,
         timeout,
@@ -1528,21 +1553,29 @@ export async function stackActionStream(
       });
       let merged = "";
       const onData = (buf: Buffer) => {
-        const text = buf.toString("utf-8").replace(/\r/g, "");
-        merged += text;
-        onChunk(text);
-        // 含拉取语义的步骤：把层进度行喂给合成拉取任务（镜像管理页可见）
-        if (pullSink) {
-          for (const rawLine of text.split("\n")) {
-            const line = rawLine.trim();
-            if (!line) continue;
+        const text = buf.toString("utf-8");
+        merged += text.replace(/\r/g, "");
+        // 按 \r/\n 切帧（\r 是 compose 进度行原地刷新边界，避免两帧粘连成一行）
+        lineBuf += text;
+        const parts = lineBuf.split(/\r\n|\r|\n/);
+        lineBuf = parts.pop() || "";
+        for (const p of parts) {
+          const line = p.trim();
+          if (!line) continue;
+          // 同一层 id 原地覆盖：只更新大小，不持续追加新行
+          appendDisplayLine(line);
+          // 含拉取语义的步骤：把层进度行喂给合成拉取任务（镜像管理页可见）
+          if (pullSink) {
             const m = line.match(COMPOSE_LAYER_LINE_RE);
-            if (!m) continue;
-            const task = ensureStackPullTask(engine.id, stackName, stepArgs, pullSink.cache);
-            // 归一化成 handleCliPullLine 认识的 `id: status ...` 格式
-            handleCliPullLine(task, line.replace(/^.*?([0-9a-f]{7,64})\s+/, "$1: "));
+            if (m) {
+              const task = ensureStackPullTask(engine.id, stackName, stepArgs, pullSink.cache);
+              // 归一化成 handleCliPullLine 认识的 `id: status ...` 格式
+              handleCliPullLine(task, line.replace(/^.*?([0-9a-f]{7,64})\s+/, "$1: "));
+            }
           }
         }
+        // 推送聚合后的完整快照（前端覆盖式显示，不再逐帧累积刷屏）
+        onChunk(displayLines.join("\n"));
       };
       child.stdout?.on("data", onData);
       child.stderr?.on("data", onData);

@@ -69,7 +69,6 @@ const DEFAULT_SETTINGS = {
     autoPull: false,
   },
   user: {
-    username: "admin",
     sessionTimeout: 30,
   },
   update: {
@@ -85,6 +84,7 @@ const DEFAULT_SETTINGS = {
     containers: ["icon","name","status","tags","ports","actions"],
     images: ["repository","tag","id","size","createdAt","associatedContainers","actions"],
     volumes: ["name","mountpoint","size","createdAt","associatedContainers","inUse","actions"],
+    stackList: ["name","status","tags","containers","uptime","update"],
     stacks: ["name","status","network","ip","ports","update"],
   },
   /** 全局彩色标签库（设置页「标签管理」维护，可挂到堆栈 LABELS 服务条目） */
@@ -99,14 +99,14 @@ const DEFAULT_SETTINGS = {
   },
   /**
    * Compose 模板（系统设置 → Compose 管理 维护）：
-   * 编辑堆栈时一键填入到 services.<服务> 下的属性行（4 空格缩进层级）。
-   * 每项为一行 compose 属性文本，值留空则填入后由用户补全。
+   * 编辑堆栈时一键填入。insert=service 填到 services 第一个服务内部；insert=end 追加到文本末尾。
+   * content 为可多行 compose 文本（缩进手动输入），值留空则填入后由用户补全。
    */
   compose: {
     templates: [
-      "network_mode: ",
-      "restart: ",
-      "container_name: ",
+      { content: "network_mode: ", insert: "service" },
+      { content: "restart: ", insert: "service" },
+      { content: "container_name: ", insert: "service" },
     ],
   },
 };
@@ -154,7 +154,11 @@ export function getSettings(): any {
         modal: { ...DEFAULT_SETTINGS.modal, ...(parsed?.modal || {}) },
         compose: {
           templates: Array.isArray(parsed?.compose?.templates)
-            ? parsed.compose.templates.map((x: any) => String(x ?? ""))
+            ? parsed.compose.templates.map((x: any) =>
+                typeof x === "string"
+                  ? { content: x, insert: "service" }
+                  : { content: String(x?.content ?? ""), insert: x?.insert === "end" ? "end" : "service" }
+              )
             : DEFAULT_SETTINGS.compose.templates,
         },
         columnVisibility: mergedColumns,

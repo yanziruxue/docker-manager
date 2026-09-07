@@ -14,8 +14,7 @@ import {
   Search,
   Plus,
   Upload,
-  ChevronDown,
-  ChevronRight,
+  Info,
   Lock,
   RefreshCw,
   Package,
@@ -40,7 +39,7 @@ import {
   ArrowLeftRight,
   Columns,
 } from "lucide-react";
-import type { Stack, StackContainer, ResourceTag } from "../types";
+import type { Stack, StackContainer, ResourceTag, ComposeTemplate } from "../types";
 import { convert, type ConvertResult } from "../lib/compose-convert";
 import {
   createStackApi,
@@ -300,21 +299,46 @@ interface StacksProps {
   menuLanguage?: "en" | "zh";
   /** 全局标签库（来自系统设置 → 标签管理），LABELS 编辑器选择与列表聚合展示共用 */
   tagLibrary?: ResourceTag[];
-  /** 展开容器子表默认可见列（来自系统设置 → 列显隐 → 堆栈管理） */
+  /** 堆栈管理页默认可见列（来自系统设置 → 列显隐 → 堆栈管理）；控制主页主表格 */
   defaultVisibleColumns?: string[];
+  /** 容器子表默认可见列（来自系统设置 → 列显隐 → 容器子表）；控制弹窗内子表，与主页完全独立 */
+  defaultSubColumns?: string[];
   /** 操作结果弹窗自动关闭延迟（秒），来自系统设置 → 弹窗设置；0/未设 = 不自动关闭 */
   autoCloseDelay?: number;
   /** 一键填入模板（来自系统设置 → Compose 管理） */
-  composeTemplates?: string[];
+  composeTemplates?: ComposeTemplate[];
 }
 
-export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLanguage = "zh", tagLibrary = [], defaultVisibleColumns, autoCloseDelay = 5, composeTemplates = [] }: StacksProps) {
+export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLanguage = "zh", tagLibrary = [], defaultVisibleColumns, defaultSubColumns, autoCloseDelay = 5, composeTemplates = [] }: StacksProps) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   // 排序：默认按堆栈名称升序；名称/状态/标签/容器数 列头可点击切换
   const [sortKey, setSortKey] = useState<"name" | "status" | "tags" | "containers">("name");
   const [sortDir, setSortDir] = useState<1 | -1>(1);
-  // 展开容器子表的列显隐（取代原「基本/高级视图」切换）：镜像默认隐藏
+  // 堆栈管理页 列显隐（来自系统设置 → 列显隐 → 堆栈管理）：控制主页主表格列
+  type StackColumnKey = "name" | "status" | "tags" | "containers" | "uptime" | "update";
+  const allStackColumns: { key: StackColumnKey; label: string }[] = [
+    { key: "name", label: "堆栈名称" },
+    { key: "status", label: "状态" },
+    { key: "tags", label: "标签" },
+    { key: "containers", label: "容器" },
+    { key: "uptime", label: "运行时长" },
+    { key: "update", label: "更新" },
+  ];
+  const [visibleStackColumns, setVisibleStackColumns] = useState<Set<StackColumnKey>>(
+    defaultVisibleColumns && defaultVisibleColumns.length > 0
+      ? new Set(defaultVisibleColumns as StackColumnKey[])
+      : new Set(allStackColumns.map((c) => c.key))
+  );
+  const [showColumnPicker, setShowColumnPicker] = useState(false);
+  const columnPickerRef = useRef<HTMLDivElement>(null);
+  const toggleStackColumn = (key: StackColumnKey) => {
+    const next = new Set(visibleStackColumns);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    setVisibleStackColumns(next);
+  };
+  // 容器子表 列显隐（来自系统设置 → 列显隐 → 容器子表）：控制弹窗内子表，与主页完全独立
   type SubColumnKey = "name" | "image" | "status" | "network" | "ip" | "ports" | "update";
   const allSubColumns: { key: SubColumnKey; label: string }[] = [
     { key: "name", label: "容器名称" },
@@ -326,12 +350,10 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
     { key: "update", label: "更新" },
   ];
   const [visibleColumns, setVisibleColumns] = useState<Set<SubColumnKey>>(
-    defaultVisibleColumns && defaultVisibleColumns.length > 0
-      ? new Set(defaultVisibleColumns as SubColumnKey[])
+    defaultSubColumns && defaultSubColumns.length > 0
+      ? new Set(defaultSubColumns as SubColumnKey[])
       : new Set(allSubColumns.map((c) => c.key))
   );
-  const [showColumnPicker, setShowColumnPicker] = useState(false);
-  const columnPickerRef = useRef<HTMLDivElement>(null);
   const toggleColumn = (key: SubColumnKey) => {
     const next = new Set(visibleColumns);
     if (next.has(key)) next.delete(key);
@@ -348,7 +370,7 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
-  const [expandedStacks, setExpandedStacks] = useState<Set<string>>(new Set());
+  const [containersModal, setContainersModal] = useState<Stack | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; stack: Stack; container?: StackContainer } | null>(null);
   const [editStack, setEditStack] = useState<Stack | null>(null);
@@ -416,7 +438,7 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
     const isActive = () => activeStackRef.current === stackName;
     const closer = streamStackActions(engineId, stackName, actions, {
       onChunk: (text) => {
-        buf += text;
+        buf = text;
         if (isActive()) patchOutput({ output: buf });
       },
       onDone: (output) => {
@@ -585,13 +607,6 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
     else setSelected(new Set(filtered.map((s) => s.id)));
   };
 
-  const toggleExpand = (id: string) => {
-    const next = new Set(expandedStacks);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    setExpandedStacks(next);
-  };
-
   // 菜单标签中英对照
   const L = (en: string, zh: string) => (menuLanguage === "zh" ? zh : en);
 
@@ -710,26 +725,33 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
         </div>
 
         <div className="flex items-center gap-2">
-          {/* 列显隐（展开容器子表），位置与其他页面一致：主按钮左侧 */}
+          {/* 提示：点击状态列弹出容器子表，置于列显隐按钮左边 */}
+          <span
+            className="inline-flex items-center gap-1 text-xs text-slate-400"
+            title={L("Click the status column to pop up the container sub-table", "点击状态列可弹出容器子表")}
+          >
+            <Info size={12} className="text-blue-400" /> 点击状态列弹出容器子表
+          </span>
+          {/* 列显隐（堆栈管理页），位置与其他页面一致：主按钮左侧 */}
           <div className="relative" ref={columnPickerRef}>
             <button
               onClick={() => setShowColumnPicker(!showColumnPicker)}
               className="flex items-center gap-1.5 px-3 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
-              title="选择展开容器后显示的列"
+              title="选择堆栈管理页显示的列"
             >
               <Columns size={14} /> 列
             </button>
             {showColumnPicker && (
               <div className="absolute right-0 top-full mt-1 w-44 bg-white rounded-lg border border-slate-200 shadow-lg z-50 py-1">
-                {allSubColumns.map((col) => (
+                {allStackColumns.map((col) => (
                   <label
                     key={col.key}
                     className="flex items-center gap-2 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 cursor-pointer"
                   >
                     <input
                       type="checkbox"
-                      checked={visibleColumns.has(col.key)}
-                      onChange={() => toggleColumn(col.key)}
+                      checked={visibleStackColumns.has(col.key)}
+                      onChange={() => toggleStackColumn(col.key)}
                       className="rounded border-slate-300 text-blue-500 focus:ring-blue-500/20"
                     />
                     {col.label}
@@ -773,13 +795,12 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
                   {selected.size === filtered.length && filtered.length > 0 ? <CheckSquare size={16} /> : <SquareIcon size={16} />}
                 </button>
               </th>
-              <th className="w-8 px-2"></th>
-              <SortableTh label="堆栈名称" sortKey={sortKey} dir={sortDir} sortId="name" onSort={toggleSort} />
-              <SortableTh label="状态" sortKey={sortKey} dir={sortDir} sortId="status" onSort={toggleSort} />
-              <SortableTh label="标签" sortKey={sortKey} dir={sortDir} sortId="tags" onSort={toggleSort} />
-              <SortableTh label="容器" align="center" sortKey={sortKey} dir={sortDir} sortId="containers" onSort={toggleSort} />
-              <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3">运行时长</th>
-              <th className="text-center text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3">更新</th>
+              {visibleStackColumns.has("name") && <SortableTh label="堆栈名称" sortKey={sortKey} dir={sortDir} sortId="name" onSort={toggleSort} />}
+              {visibleStackColumns.has("status") && <SortableTh label="状态" sortKey={sortKey} dir={sortDir} sortId="status" onSort={toggleSort} />}
+              {visibleStackColumns.has("tags") && <SortableTh label="标签" sortKey={sortKey} dir={sortDir} sortId="tags" onSort={toggleSort} />}
+              {visibleStackColumns.has("containers") && <SortableTh label="容器" align="center" sortKey={sortKey} dir={sortDir} sortId="containers" onSort={toggleSort} />}
+              {visibleStackColumns.has("uptime") && <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3">运行时长</th>}
+              {visibleStackColumns.has("update") && <th className="text-center text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3">更新</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-50">
@@ -788,18 +809,13 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
                 <tr
                   className={`hover:bg-slate-50 transition-colors cursor-context-menu ${selected.has(stack.id) ? "bg-blue-50/50" : ""}`}
                   onContextMenu={(e) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, stack }); }}
-                  onClick={() => toggleExpand(stack.id)}
                 >
                   <td className="px-4 py-3" onClick={(e) => { e.stopPropagation(); toggleSelect(stack.id); }}>
                     <button className="text-slate-400 hover:text-blue-500">
                       {selected.has(stack.id) ? <CheckSquare size={16} className="text-blue-500" /> : <SquareIcon size={16} />}
                     </button>
                   </td>
-                  <td className="px-2">
-                    <button className="text-slate-400 hover:text-slate-600">
-                      {expandedStacks.has(stack.id) ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                    </button>
-                  </td>
+                  {visibleStackColumns.has("name") && (
                   <td className="px-3 py-3">
                     <div className="flex items-center gap-2.5">
                       <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center overflow-hidden flex-shrink-0">
@@ -819,17 +835,35 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
                       </div>
                     </div>
                   </td>
-                  <td className="px-3 py-3"><StatusBadge status={stack.status} /></td>
+                  )}
+                  {visibleStackColumns.has("status") && (
+                  <td className="px-3 py-3">
+                    <button
+                      onClick={() => setContainersModal(stack)}
+                      title={L("Click status to view container sub-table", "点击状态列查看容器子表")}
+                      className="inline-flex items-center rounded-md ring-1 ring-transparent hover:ring-blue-300 hover:bg-blue-50 px-1.5 py-0.5 transition-colors"
+                    >
+                      <StatusBadge status={stack.status} />
+                    </button>
+                  </td>
+                  )}
+                  {visibleStackColumns.has("tags") && (
                   <td className="px-3 py-3">
                     {(() => {
                       const st = collectStackTags(stack);
                       return st.length > 0 ? <TagGroup tags={st} max={2} /> : <span className="text-xs text-slate-300">—</span>;
                     })()}
                   </td>
+                  )}
+                  {visibleStackColumns.has("containers") && (
                   <td className="px-3 py-3 text-center">
                     <span className="text-sm font-bold text-slate-700">{stack.runningContainers}<span className="text-slate-400 font-normal">/{stack.totalContainers}</span></span>
                   </td>
+                  )}
+                  {visibleStackColumns.has("uptime") && (
                   <td className="px-3 py-3"><span className="text-sm text-slate-500">{stack.uptime}</span></td>
+                  )}
+                  {visibleStackColumns.has("update") && (
                   <td className="px-3 py-3 text-center">
                     {stack.hasUpdate ? (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 text-amber-600 text-xs rounded-full border border-amber-100">
@@ -839,81 +873,9 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
                       <CheckCircle2 size={14} className="text-green-400 inline-block" />
                     )}
                   </td>
+                  )}
                   {/* 操作列已移除：所有操作统一走右键菜单 */}
                 </tr>
-                {/* Expanded Container Sub-table */}
-                {expandedStacks.has(stack.id) && (
-                  <tr className="bg-slate-50/50">
-                    <td colSpan={8} className="px-8 py-0">
-                      <div className="animate-slide-down">
-                        {/* Profiles */}
-                        {stack.profiles.length > 0 && (
-                          <div className="flex items-center gap-2 py-2 border-b border-slate-100">
-                            <TagIcon size={12} className="text-slate-400" />
-                            <span className="text-xs text-slate-500">Profiles:</span>
-                            {stack.profiles.map((p) => (
-                              <Tag key={p} text={p} color={p === stack.settings.defaultProfiles[0] ? "blue" : "slate"} />
-                            ))}
-                            <span className="text-xs text-slate-400 ml-2">默认: {stack.settings.defaultProfiles.join(", ") || "无"}</span>
-                          </div>
-                        )}
-
-                        {/* Container Table */}
-                        <table className="w-full">
-                          <thead>
-                            <tr className="bg-slate-50/50">
-                              {visibleColumns.has("name") && <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-2">容器名称</th>}
-                              {visibleColumns.has("image") && <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-2">镜像</th>}
-                              {visibleColumns.has("status") && <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-2">状态</th>}
-                              {visibleColumns.has("network") && <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-2">网络</th>}
-                              {visibleColumns.has("ip") && <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-2">容器 IP</th>}
-                              {visibleColumns.has("ports") && <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-2">端口</th>}
-                              {visibleColumns.has("update") && <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-2">更新</th>}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {stack.containers.map((container) => (
-                              <tr
-                                key={container.name}
-                                className="hover:bg-white transition-colors cursor-context-menu border-b border-slate-50 last:border-0"
-                                onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setContextMenu({ x: e.clientX, y: e.clientY, stack, container }); }}
-                              >
-                                {visibleColumns.has("name") && (
-                                  <td className="px-3 py-2.5">
-                                    <span className="text-sm font-medium text-slate-700">{container.name}</span>
-                                    {container.isPinned && <Tag text="已固定" color="green" />}
-                                  </td>
-                                )}
-                                {visibleColumns.has("image") && (
-                                  <td className="px-3 py-2.5">
-                                    <span className="text-xs font-mono text-slate-600" title={`${container.image}:${container.tag}`}>{shortImageRef(container.image)}</span>
-                                    <span className="text-xs font-mono text-slate-400">:{container.tag}</span>
-                                  </td>
-                                )}
-                                {visibleColumns.has("status") && <td className="px-3 py-2.5"><StatusBadge status={container.status} /></td>}
-                                {visibleColumns.has("network") && <td className="px-3 py-2.5"><span className="text-xs text-slate-500">{container.network}</span></td>}
-                                {visibleColumns.has("ip") && <td className="px-3 py-2.5"><span className="text-xs font-mono text-slate-500">{container.ip}</span></td>}
-                                {visibleColumns.has("ports") && <td className="px-3 py-2.5"><span className="text-xs font-mono text-slate-500">{container.ports}</span></td>}
-                                {visibleColumns.has("update") && (
-                                  <td className="px-3 py-2.5">
-                                    {container.hasUpdate ? (
-                                      <span className="flex items-center gap-1 text-xs text-amber-600"><RefreshCw size={10} /> 可更新</span>
-                                    ) : (
-                                      <CheckCircle2 size={14} className="text-green-400" />
-                                    )}
-                                    {container.hasUpdate && (
-                                      <button className="text-xs text-blue-600 hover:underline ml-2">强制更新</button>
-                                    )}
-                                  </td>
-                                )}
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </td>
-                  </tr>
-                )}
               </React.Fragment>
             ))}
           </tbody>
@@ -944,6 +906,110 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
 
       {/* Stack Log Modal */}
       {logStack && <StackLogModal stack={logStack} onClose={() => setLogStack(null)} engineId={engineId} />}
+
+      {/* Container Sub-table Modal（点击状态列弹出，查看该堆栈的容器列表） */}
+      {containersModal && (
+        <Modal
+          open
+          onClose={() => setContainersModal(null)}
+          title={`${L("Containers", "容器子表")} · ${containersModal.name}`}
+          size="lg"
+          dismissable
+        >
+          <div className="space-y-3">
+            {/* Profiles */}
+            {containersModal.profiles.length > 0 && (
+              <div className="flex items-center gap-2 py-2 border-b border-slate-100">
+                <TagIcon size={12} className="text-slate-400" />
+                <span className="text-xs text-slate-500">Profiles:</span>
+                {containersModal.profiles.map((p) => (
+                  <Tag key={p} text={p} color={p === containersModal.settings.defaultProfiles[0] ? "blue" : "slate"} />
+                ))}
+                <span className="text-xs text-slate-400 ml-2">默认: {containersModal.settings.defaultProfiles.join(", ") || "无"}</span>
+              </div>
+            )}
+
+            {/* 列显隐控制 */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-slate-400">显示列:</span>
+              {allSubColumns.map((c) => (
+                <button
+                  key={c.key}
+                  onClick={() => toggleColumn(c.key)}
+                  className={`px-2 py-0.5 rounded-full text-xs border transition-colors ${
+                    visibleColumns.has(c.key)
+                      ? "bg-blue-50 border-blue-200 text-blue-600"
+                      : "bg-slate-50 border-slate-200 text-slate-400"
+                  }`}
+                >
+                  {c.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Container Table */}
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-slate-50">
+                    {visibleColumns.has("name") && <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-2">容器名称</th>}
+                    {visibleColumns.has("image") && <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-2">镜像</th>}
+                    {visibleColumns.has("status") && <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-2">状态</th>}
+                    {visibleColumns.has("network") && <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-2">网络</th>}
+                    {visibleColumns.has("ip") && <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-2">容器 IP</th>}
+                    {visibleColumns.has("ports") && <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-2">端口</th>}
+                    {visibleColumns.has("update") && <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-2">更新</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {containersModal.containers.length === 0 ? (
+                    <tr>
+                      <td colSpan={visibleColumns.size || 1} className="px-3 py-8 text-center text-sm text-slate-400">该堆栈暂无容器</td>
+                    </tr>
+                  ) : (
+                    containersModal.containers.map((container) => (
+                      <tr
+                        key={container.name}
+                        className="hover:bg-slate-50 transition-colors cursor-context-menu border-b border-slate-50 last:border-0"
+                        onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setContextMenu({ x: e.clientX, y: e.clientY, stack: containersModal, container }); }}
+                      >
+                        {visibleColumns.has("name") && (
+                          <td className="px-3 py-2.5">
+                            <span className="text-sm font-medium text-slate-700">{container.name}</span>
+                            {container.isPinned && <Tag text="已固定" color="green" />}
+                          </td>
+                        )}
+                        {visibleColumns.has("image") && (
+                          <td className="px-3 py-2.5">
+                            <span className="text-xs font-mono text-slate-600" title={`${container.image}:${container.tag}`}>{shortImageRef(container.image)}</span>
+                            <span className="text-xs font-mono text-slate-400">:{container.tag}</span>
+                          </td>
+                        )}
+                        {visibleColumns.has("status") && <td className="px-3 py-2.5"><StatusBadge status={container.status} /></td>}
+                        {visibleColumns.has("network") && <td className="px-3 py-2.5"><span className="text-xs text-slate-500">{container.network}</span></td>}
+                        {visibleColumns.has("ip") && <td className="px-3 py-2.5"><span className="text-xs font-mono text-slate-500">{container.ip}</span></td>}
+                        {visibleColumns.has("ports") && <td className="px-3 py-2.5"><span className="text-xs font-mono text-slate-500">{container.ports}</span></td>}
+                        {visibleColumns.has("update") && (
+                          <td className="px-3 py-2.5">
+                            {container.hasUpdate ? (
+                              <span className="flex items-center gap-1 text-xs text-amber-600"><RefreshCw size={10} /> 可更新</span>
+                            ) : (
+                              <CheckCircle2 size={14} className="text-green-400" />
+                            )}
+                            {container.hasUpdate && (
+                              <button className="text-xs text-blue-600 hover:underline ml-2">强制更新</button>
+                            )}
+                          </td>
+                        )}
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {/* Command Output Modal（启动/停止/重启/拉取/构建/删除/备份/批量 的 tail 文本输出，统一复用） */}
       <CmdOutputModal data={cmdOutput} onClose={closeOutput} />
@@ -993,14 +1059,33 @@ function completeEmptyValue(line: string, svcName: string): string {
 }
 
 /**
- * 将一段模板（可多行）插入到 compose 文本中 services 下第一个服务内部。
- * - 缩进由模板自身决定（用户手动输入空格），不再强制 4 空格层级；
- * - 模板内每一行原样保留（支持多行内容）；值留空的项按 COMPOSE_VALUE_DEFAULTS 补全；
- * - 服务块内已存在同名 key 时跳过（避免重复键）；
- * - 未找到 services: / 服务行时返回结构错误原因。
+ * 将一段模板（可多行）插入到 compose 文本。
+ * - insert="service"：插到 services 下第一个服务内部（缩进由模板自身决定，用户手动输入空格）；
+ * - insert="end"：追加到 compose 文本的最后一行（末尾）。
+ * 模板内每一行原样保留（支持多行内容）；值留空的项按 COMPOSE_VALUE_DEFAULTS 补全；
+ * 服务块内已存在同名 key 时跳过（避免重复键）；未找到 services: / 服务行时（仅 service 模式）返回结构错误原因。
  */
-function insertTemplateBlock(compose: string, block: string): { next: string; ok: boolean; reason?: string } {
+function insertTemplateBlock(
+  compose: string,
+  block: string,
+  insert: "service" | "end"
+): { next: string; ok: boolean; reason?: string } {
   const lines = compose.split("\n");
+  const blockLines = block
+    .split("\n")
+    // 末尾模式无服务名可注入，传 "" 即可（container_name 等键不会补全，符合预期）
+    .map((l) => completeEmptyValue(l, ""));
+  const contentLines = blockLines.filter((l) => l.trim() !== "");
+  if (contentLines.length === 0) return { next: compose, ok: false, reason: "模板内容为空，无法填入" };
+
+  if (insert === "end") {
+    // 去掉尾部空行后直接追加到文件末尾（保留一个换行分隔）
+    while (lines.length > 0 && lines[lines.length - 1].trim() === "") lines.pop();
+    lines.push(...blockLines);
+    return { next: lines.join("\n"), ok: true };
+  }
+
+  // ---- service 模式：插入到第一个服务内部 ----
   const svcIdx = lines.findIndex((l) => /^services\s*:\s*(#.*)?$/.test(l));
   if (svcIdx < 0) return { next: compose, ok: false, reason: "未找到 services: 顶层键，无法定位填入位置" };
 
@@ -1026,11 +1111,8 @@ function insertTemplateBlock(compose: string, block: string): { next: string; ok
   }
   if (svcLineIdx < 0) return { next: compose, ok: false, reason: "services: 下没有任何服务，无法定位填入位置" };
 
-  const blockLines = block.split("\n").map((l) => completeEmptyValue(l, svcName));
-  const contentLines = blockLines.filter((l) => l.trim() !== "");
-  if (contentLines.length === 0) return { next: compose, ok: false, reason: "模板内容为空，无法填入" };
-
-  // 重复 key 检查：块内首行 key 若已在服务块内存在则跳过
+  // 末尾模式补全用的 svcName 已失效（上面用 "" 跑了一次），此处用真实 svcName 重新补全
+  const finalBlockLines = block.split("\n").map((l) => completeEmptyValue(l, svcName));
   const firstKey = contentLines[0].match(/^\s*([A-Za-z0-9_.\-]+)\s*:/)?.[1];
   if (firstKey) {
     for (let i = svcLineIdx + 1; i < lines.length; i++) {
@@ -1046,11 +1128,11 @@ function insertTemplateBlock(compose: string, block: string): { next: string; ok
   // 插入位置：服务名行之后，跳过空行/注释，插到服务块顶部
   let insertAt = svcLineIdx + 1;
   while (insertAt < lines.length && (!lines[insertAt].trim() || /^\s*#/.test(lines[insertAt]))) insertAt++;
-  lines.splice(insertAt, 0, ...blockLines);
+  lines.splice(insertAt, 0, ...finalBlockLines);
   return { next: lines.join("\n"), ok: true };
 }
 
-function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = [], composeTemplates = [] }: { stack: Stack; onClose: () => void; engineId?: string; onRefresh?: () => void; tagLibrary?: ResourceTag[]; composeTemplates?: string[] }) {
+function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = [], composeTemplates = [] }: { stack: Stack; onClose: () => void; engineId?: string; onRefresh?: () => void; tagLibrary?: ResourceTag[]; composeTemplates?: ComposeTemplate[] }) {
   const [activeTab, setActiveTab] = useState<"compose" | "env" | "webui" | "settings">("compose");
   const [composeContent, setComposeContent] = useState(stack.composeContent);
   const [envContent, setEnvContent] = useState(stack.envContent || "");
@@ -1062,9 +1144,9 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
   const [saveSuccess, setSaveSuccess] = useState(false);
   /** 一键填入模板面板的瞬时提示（同名跳过 / 结构错误原因） */
   const [tplHint, setTplHint] = useState<string | null>(null);
-  /** 填入单个模板项：插到 services 第一个服务内部，缩进由模板自身决定，同名 key 已存在则跳过并提示 */
-  const applyComposeTemplate = (tpl: string) => {
-    const res = insertTemplateBlock(composeContent, tpl);
+  /** 填入单个模板项：按模板自身 insert 模式插入，缩进由模板自身决定，同名 key 已存在则跳过并提示 */
+  const applyComposeTemplate = (tpl: ComposeTemplate) => {
+    const res = insertTemplateBlock(composeContent, tpl.content, tpl.insert);
     if (!res.ok) { setTplHint(res.reason || "无法填入"); return; }
     setComposeContent(res.next);
     setTplHint(null);
@@ -1074,9 +1156,9 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
     let cur = composeContent;
     const skipped: string[] = [];
     for (const tpl of composeTemplates) {
-      const res = insertTemplateBlock(cur, tpl);
+      const res = insertTemplateBlock(cur, tpl.content, tpl.insert);
       if (res.ok) cur = res.next;
-      else skipped.push((tpl.split("\n")[0].split(":")[0] || tpl).trim() || "空模板");
+      else skipped.push((tpl.content.split("\n")[0].split(":")[0] || tpl.content).trim() || "空模板");
     }
     setComposeContent(cur);
     setTplHint(skipped.length ? `已跳过：${skipped.join("、")}` : null);
@@ -1332,17 +1414,21 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
                 {composeTemplates.length > 0 && (
                   <div className="w-52 shrink-0 flex flex-col border border-slate-200 rounded-lg bg-slate-50/60 overflow-hidden">
                     <div className="px-3 py-2 border-b border-slate-100 text-xs font-semibold text-slate-500">
-                      一键填入（services 下）
+                      一键填入
                     </div>
                     <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
                       {composeTemplates.map((tpl, i) => (
                         <button
                           key={i}
                           onClick={() => applyComposeTemplate(tpl)}
-                          title={`填入: ${tpl}`}
+                          title={`填入: ${tpl.content}\n位置: ${tpl.insert === "end" ? "末尾" : "服务内"}`}
                           className="w-full text-left px-2 py-1.5 rounded-md border border-slate-200 bg-white font-mono text-[11px] leading-relaxed text-slate-600 hover:border-blue-400 hover:text-blue-600 transition-colors whitespace-pre-wrap break-words"
                         >
-                          {tpl.trim() || `（空模板 ${i + 1}）`}
+                          <span className="inline-block mb-0.5 px-1 rounded bg-slate-100 text-[9px] text-slate-400 uppercase">
+                            {tpl.insert === "end" ? "末尾" : "服务内"}
+                          </span>
+                          {"\n"}
+                          {tpl.content.trim() || `（空模板 ${i + 1}）`}
                         </button>
                       ))}
                     </div>

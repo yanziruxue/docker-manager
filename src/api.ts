@@ -22,13 +22,67 @@ export class ApiError extends Error {
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${url}`, {
     headers: { "Content-Type": "application/json" },
+    credentials: "include",
     ...options,
   });
-  const json = await res.json();
+  // 会话失效（非鉴权接口）：通知 App 回到登录页
+  if (res.status === 401 && !url.startsWith("/auth/")) {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new Event("auth:unauthorized"));
+    }
+  }
+  const json = await res.json().catch(() => ({ success: false, error: "响应解析失败" }));
   if (!res.ok || !json.success) {
     throw new ApiError(json.error || "请求失败", json.code, res.status);
   }
   return json.data as T;
+}
+
+// ============ 鉴权 API ============
+
+export interface AuthUser {
+  id: string;
+  username: string;
+  role: string;
+}
+
+/** 是否已初始化（存在用户） */
+export function getAuthInitStatus(): Promise<{ initialized: boolean }> {
+  return request<{ initialized: boolean }>("/auth/init-status");
+}
+
+/** 首次部署创建管理员账号 */
+export function initAccount(username: string, password: string): Promise<AuthUser> {
+  return request<AuthUser>("/auth/init", {
+    method: "POST",
+    body: JSON.stringify({ username, password }),
+  });
+}
+
+/** 登录 */
+export function login(username: string, password: string): Promise<AuthUser> {
+  return request<AuthUser>("/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ username, password }),
+  });
+}
+
+/** 登出 */
+export function logout(): Promise<void> {
+  return request<void>("/auth/logout", { method: "POST" });
+}
+
+/** 当前登录用户 */
+export function getMe(): Promise<AuthUser> {
+  return request<AuthUser>("/auth/me");
+}
+
+/** 修改当前用户密码（单管理员：必须校验原密码） */
+export function changeMyPassword(oldPassword: string, newPassword: string): Promise<void> {
+  return request<void>("/auth/password", {
+    method: "POST",
+    body: JSON.stringify({ oldPassword, newPassword }),
+  });
 }
 
 // ============ 引擎 API ============

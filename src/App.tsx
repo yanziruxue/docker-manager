@@ -22,7 +22,13 @@ import {
   checkUpdateApi,
   applyUpdateApi,
   fetchAppVersion,
+  getAuthInitStatus,
+  getMe,
+  logout,
+  type AuthUser,
 } from "./api";
+import { SetupWizard } from "./components/auth/SetupWizard";
+import { LoginPage } from "./components/auth/LoginPage";
 import {
   transformContainers,
   transformImages,
@@ -56,6 +62,63 @@ export default function App() {
   // 最新 settings 引用：6 小时定时轮询的 doCheck 闭包需读取用户最新保存的 autoUpdate / ignoredVersion
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
+
+  // ============ 鉴权门卫 ============
+  // authState: loading(启动检测) → setup(首次初始化) / login(未登录) / authed(已登录)
+  const [authState, setAuthState] = useState<"loading" | "setup" | "login" | "authed">("loading");
+  const [me, setMe] = useState<AuthUser | null>(null);
+
+  // 启动检测：并发判断「是否已初始化」与「当前是否已登录」
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [init, meRes] = await Promise.all([
+          getAuthInitStatus().catch(() => ({ initialized: false })),
+          getMe().catch(() => null),
+        ]);
+        if (cancelled) return;
+        if (meRes) {
+          setMe(meRes);
+          setAuthState("authed");
+        } else if (!init.initialized) {
+          setAuthState("setup");
+        } else {
+          setAuthState("login");
+        }
+      } catch {
+        if (!cancelled) setAuthState("login");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // 运行中会话失效（任意非鉴权接口返回 401）→ 回到登录页
+  useEffect(() => {
+    const onUnauth = () => {
+      setMe(null);
+      setAuthState("login");
+    };
+    window.addEventListener("auth:unauthorized", onUnauth);
+    return () => window.removeEventListener("auth:unauthorized", onUnauth);
+  }, []);
+
+  const handleAuthDone = (user: AuthUser) => {
+    setMe(user);
+    setAuthState("authed");
+  };
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } catch {
+      /* 忽略登出请求错误，仍强制回登录页 */
+    }
+    setMe(null);
+    setAuthState("login");
+  };
 
   // 侧边栏折叠状态（localStorage 持久化）
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
@@ -118,7 +181,9 @@ export default function App() {
   };
 
   // 初始化：加载引擎列表、活跃引擎 ID、系统设置
+  // 依赖 authState：仅在登录态就绪后拉取（未登录时 /api 一律 401，提前拉取会静默失败且登录后不会重试）
   useEffect(() => {
+    if (authState !== "authed") return;
     let updateTimer: ReturnType<typeof setInterval> | null = null;
     (async () => {
       try {
@@ -165,7 +230,7 @@ export default function App() {
     return () => {
       if (updateTimer) clearInterval(updateTimer);
     };
-  }, []);
+  }, [authState]);
 
   // 活跃引擎变化时拉取数据
   const loadEngineData = useCallback(async (engineId: string) => {
@@ -404,6 +469,21 @@ export default function App() {
 
   const showDataState = page !== "settings" && activeEngineId;
 
+  if (authState !== "authed") {
+    if (authState === "loading") {
+      return (
+        <div className="flex h-screen items-center justify-center bg-slate-50">
+          <div className="flex flex-col items-center gap-3 text-slate-400">
+            <div className="w-8 h-8 border-3 border-slate-200 border-t-blue-500 rounded-full animate-spin" />
+            <span className="text-sm">正在初始化…</span>
+          </div>
+        </div>
+      );
+    }
+    if (authState === "setup") return <SetupWizard onDone={handleAuthDone} />;
+    return <LoginPage onDone={handleAuthDone} />;
+  }
+
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden">
       <Sidebar
@@ -426,6 +506,8 @@ export default function App() {
           onNavigate={handleNavigate}
           notifications={activities}
           unreadCount={unreadCount}
+          user={me}
+          onLogout={handleLogout}
           onMarkAllRead={() => {
             const allIds = new Set(activities.map((a) => a.id));
             setReadNotificationIds(allIds);
@@ -467,7 +549,8 @@ export default function App() {
               tagLibrary={settings?.tags || []}
               autoCloseDelay={settings?.modal?.autoCloseDelay ?? 5}
               composeTemplates={settings?.compose?.templates ?? []}
-              defaultVisibleColumns={settings?.columnVisibility?.stacks}
+              defaultVisibleColumns={settings?.columnVisibility?.stackList}
+              defaultSubColumns={settings?.columnVisibility?.stacks}
             />
           )}
           {page === "images" && (
@@ -518,6 +601,7 @@ export default function App() {
               engines={engines}
               onSaveSettings={handleSaveSettings}
               onUpdateAvailableChange={setAppUpdateAvailable}
+              currentUser={me}
             />
           )}
         </main>

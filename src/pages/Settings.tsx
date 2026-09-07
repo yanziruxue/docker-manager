@@ -40,11 +40,14 @@ import {
   Languages,
   Tags as TagsIcon,
   FileCode2,
+  KeyRound,
+  LogOut,
 } from "lucide-react";
-import type { SystemSettings, BackupMode, DockerEngine, UpdateInfo, UpdateState, ResourceTag } from "../types";
+import type { SystemSettings, BackupMode, DockerEngine, UpdateInfo, UpdateState, ResourceTag, ComposeTemplate } from "../types";
 import { Card, FormField, Input, Select, Toggle, IconButton } from "../components/UI";
+import { changeMyPassword, type AuthUser } from "../api";
 import { Tag } from "../components/Badge";
-import { TAG_PALETTE, TagChip, normalizeTagColor, hexWithAlpha } from "../components/TagPicker";
+import { TAG_PALETTE, TagChip, normalizeTagColor, hexWithAlpha, randomTagColor, hexToRgb, rgbToHex } from "../components/TagPicker";
 import { Modal, ConfirmDialog } from "../components/Modal";
 import { CmdOutputModal, useCmdOutput } from "../components/CmdOutputModal";
 import {
@@ -138,20 +141,25 @@ function getDefaultSettings(): SystemSettings {
     },
     pathFavorites: [],
     updateScheduler: { enabled: false, checkFrequency: "0 3 * * *", autoPull: false },
-    user: { username: "admin", sessionTimeout: 30 },
+    user: { sessionTimeout: 30 },
     update: { autoCheck: false, autoUpdate: false, ignoredVersion: "" },
     columnVisibility: {
       containers: ["icon","name","status","tags","ports","actions"],
       images: ["repository","tag","id","size","createdAt","associatedContainers","actions"],
       volumes: ["name","mountpoint","size","createdAt","associatedContainers","inUse","actions"],
       stacks: ["name","status","network","ip","ports","update"],
+      stackList: ["name","status","tags","containers","uptime","update"],
     },
     tags: [],
     modal: {
       autoCloseDelay: 5,
     },
     compose: {
-      templates: ["network_mode: ", "restart: ", "container_name: "],
+      templates: [
+        { content: "network_mode: ", insert: "service" },
+        { content: "restart: ", insert: "service" },
+        { content: "container_name: ", insert: "service" },
+      ],
     },
     defaultsVersion: 2,
   };
@@ -166,9 +174,86 @@ interface SettingsProps {
   onSaveSettings?: (settings: SystemSettings) => Promise<void>;
   /** 更新可用状态变化时回传，用于同步全局侧边栏「系统设置」角标 */
   onUpdateAvailableChange?: (available: boolean) => void;
+  /** 当前登录用户（用于「用户」区块展示与改密） */
+  currentUser?: AuthUser | null;
 }
 
-export function Settings({ settings, activeEngineId, engines, onActiveEngineChange, onEnginesChange, onSaveSettings, onUpdateAvailableChange }: SettingsProps) {
+/** 「用户」区块：修改当前登录账户密码（单管理员，需校验原密码） */
+function ChangePasswordForm({ username }: { username?: string }) {
+  const [oldPassword, setOldPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    setError(null);
+    setSuccess(false);
+    if (!oldPassword) {
+      setError("请输入原密码");
+      return;
+    }
+    if (newPassword.length < 6) {
+      setError("新密码至少 6 位");
+      return;
+    }
+    if (newPassword !== confirm) {
+      setError("两次输入的新密码不一致");
+      return;
+    }
+    setBusy(true);
+    try {
+      await changeMyPassword(oldPassword, newPassword);
+      setSuccess(true);
+      setOldPassword("");
+      setNewPassword("");
+      setConfirm("");
+    } catch (e: any) {
+      setError(e?.message || "修改密码失败");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-3 gap-4">
+        <FormField label="原密码" required>
+          <Input value={oldPassword} onChange={setOldPassword} type="password" placeholder="••••••••" />
+        </FormField>
+        <FormField label="新密码" required hint="至少 6 位">
+          <Input value={newPassword} onChange={setNewPassword} type="password" placeholder="••••••••" />
+        </FormField>
+        <FormField label="确认新密码" required>
+          <Input value={confirm} onChange={setConfirm} type="password" placeholder="••••••••" />
+        </FormField>
+      </div>
+
+      {error && (
+        <div className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{error}</div>
+      )}
+      {success && (
+        <div className="text-xs text-green-700 bg-green-50 border border-green-100 rounded-lg px-3 py-2">
+          密码已更新
+        </div>
+      )}
+
+      <div className="flex items-center gap-3">
+        <button
+          onClick={submit}
+          disabled={busy}
+          className="flex items-center gap-1.5 px-4 py-2 text-sm text-white bg-blue-500 rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-60"
+        >
+          {busy && <Loader2 size={14} className="animate-spin" />} 修改密码
+        </button>
+        {username && <span className="text-xs text-slate-400">当前账户：{username}</span>}
+      </div>
+    </div>
+  );
+}
+
+export function Settings({ settings, activeEngineId, engines, onActiveEngineChange, onEnginesChange, onSaveSettings, onUpdateAvailableChange, currentUser }: SettingsProps) {
   const [activeSection, setActiveSection] = useState("docker");
   const [data, setData] = useState<SystemSettings>(settings || getDefaultSettings());
   const [settingsLoaded, setSettingsLoaded] = useState(!!settings);
@@ -714,9 +799,9 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
       errors.push("引擎配置：Compose 文件存储路径不能为空");
     }
 
-    // 用户配置校验
-    if (!data.user.username.trim()) {
-      errors.push("用户与权限：用户名不能为空");
+    // 用户配置校验（用户名由登录账户管理，此处仅校验会话超时）
+    if (!(Number(data.user.sessionTimeout) > 0)) {
+      errors.push("用户：会话超时必须大于 0 分钟");
     }
 
     // 通知配置校验
@@ -772,7 +857,7 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
 
   const sections = [
     { key: "docker", label: "引擎配置", icon: <Container size={16} /> },
-    { key: "user", label: "用户与权限", icon: <User size={16} /> },
+    { key: "user", label: "用户", icon: <User size={16} /> },
     { key: "columns", label: "列显隐默认值", icon: <Columns size={16} /> },
     { key: "tags", label: "标签管理", icon: <TagsIcon size={16} /> },
     { key: "compose", label: "Compose 管理", icon: <FileCode2 size={16} /> },
@@ -786,9 +871,9 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
   // ============ 标签库（设置 → 标签管理，全局 ResourceTag 列表） ============
   const tags = Array.isArray(data.tags) ? data.tags : [];
   const setTags = (next: ResourceTag[]) => setData({ ...data, tags: next });
-  /** 新建空标签：轮换色板，名称聚焦由渲染端 input 完成 */
+  /** 新建空标签：默认随机色，名称聚焦由渲染端 input 完成 */
   const addTag = () => {
-    const color = TAG_PALETTE[tags.length % TAG_PALETTE.length];
+    const color = randomTagColor();
     setTags([...tags, { id: `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, name: "", color }]);
   };
   const patchTag = (id: string, patch: Partial<ResourceTag>) =>
@@ -1449,16 +1534,27 @@ docker-compose version</code>
         {activeSection === "user" && (
           <div className="max-w-2xl space-y-5">
             <div>
-              <h2 className="text-lg font-semibold text-slate-800 mb-1">用户与权限</h2>
-              <p className="text-sm text-slate-500">管理员账号配置</p>
+              <h2 className="text-lg font-semibold text-slate-800 mb-1">用户</h2>
+              <p className="text-sm text-slate-500">登录账户与会话</p>
             </div>
 
-            <Card title="管理员账号" icon={<User size={16} />}>
+            <Card title="当前账户" icon={<User size={16} />}>
               <div className="space-y-4">
-                <FormField label="用户名" hint="管理员账号为系统内置，不可修改">
-                  <Input value={data.user.username} onChange={() => {}} disabled />
+                <FormField label="用户名" hint="登录用户名由账户体系管理，不支持在此修改">
+                  <Input value={currentUser?.username || ""} onChange={() => {}} disabled />
+                </FormField>
+                <FormField label="会话超时（分钟）" hint="空闲超过该时长后需重新登录；改动在下次登录时生效">
+                  <Input
+                    value={String(data.user.sessionTimeout)}
+                    onChange={(val) => update("user", "sessionTimeout", parseInt(val, 10) || 0)}
+                    type="number"
+                  />
                 </FormField>
               </div>
+            </Card>
+
+            <Card title="修改密码" icon={<KeyRound size={16} />}>
+              <ChangePasswordForm username={currentUser?.username} />
             </Card>
           </div>
         )}
@@ -1470,7 +1566,7 @@ docker-compose version</code>
               <p className="text-sm text-slate-500">设置各页面表格的默认可见列</p>
             </div>
 
-            {(["containers", "images", "volumes", "stacks"] as const).map((page) => {
+            {(["containers", "images", "volumes", "stackList", "stacks"] as const).map((page) => {
               const allColumns: Record<string, { key: string; label: string }[]> = {
                 containers: [
                   { key: "icon", label: "图标" },
@@ -1503,6 +1599,14 @@ docker-compose version</code>
                   { key: "inUse", label: "使用中" },
                   { key: "actions", label: "操作" },
                 ],
+                stackList: [
+                  { key: "name", label: "堆栈名称" },
+                  { key: "status", label: "状态" },
+                  { key: "tags", label: "标签" },
+                  { key: "containers", label: "容器" },
+                  { key: "uptime", label: "运行时长" },
+                  { key: "update", label: "更新" },
+                ],
                 stacks: [
                   { key: "name", label: "容器名称" },
                   { key: "image", label: "镜像" },
@@ -1514,7 +1618,7 @@ docker-compose version</code>
                 ],
               };
 
-              const pageLabel: Record<string, string> = { containers: "容器管理", images: "镜像管理", volumes: "数据卷管理", stacks: "堆栈管理（容器子表）" };
+              const pageLabel: Record<string, string> = { containers: "容器管理", images: "镜像管理", volumes: "数据卷管理", stackList: "堆栈管理", stacks: "容器子表" };
               const current = data.columnVisibility?.[page] || allColumns[page].map(c => c.key);
 
               const toggleCol = (key: string) => {
@@ -2204,7 +2308,7 @@ docker-compose version</code>
               <p className="text-sm text-slate-500">
                 维护「编辑堆栈 → Compose」页右侧的一键填入模板。每项可填一行或多行 compose 内容（如 restart: unless-stopped），
                 缩进请手动输入空格；值留空的项填入时自动补全（restart→unless-stopped、network_mode→bridge、container_name→服务名 等）。
-                填入位置为 services 下第一个服务内部。
+                每项可单独选择填入位置：<b>服务内</b>（services 下第一个服务内部）或 <b>末尾</b>（追加到 compose 文本最后一行）。
               </p>
             </div>
 
@@ -2213,7 +2317,12 @@ docker-compose version</code>
               icon={<FileCode2 size={16} />}
               actions={
                 <button
-                  onClick={() => update("compose", "templates", [...(data.compose?.templates || []), ""])}
+                  onClick={() =>
+                    update("compose", "templates", [
+                      ...(data.compose?.templates || []),
+                      { content: "", insert: "service" as const },
+                    ])
+                  }
                   className="flex items-center gap-1 px-3 py-1.5 text-sm text-white bg-blue-500 rounded-lg hover:bg-blue-600 transition-colors"
                 >
                   <Plus size={14} /> 新增模板项
@@ -2227,28 +2336,52 @@ docker-compose version</code>
                   <p className="text-xs text-slate-400 mt-1">新增后可在堆栈编辑器里一键填入</p>
                 </div>
               ) : (
-                <div className="space-y-2">
+                <div className="space-y-3">
                   {(data.compose?.templates || []).map((tpl, i) => (
-                    <div key={i} className="flex items-start gap-2">
-                      <span className="text-xs text-slate-400 font-mono w-10 text-right shrink-0 pt-2">{i + 1}.</span>
+                    <div key={i} className="rounded-lg border border-slate-200 p-2.5">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-xs text-slate-400 font-mono w-8 text-right shrink-0">{i + 1}.</span>
+                        {/* 填入位置切换 */}
+                        <div className="flex items-center rounded-md border border-slate-200 overflow-hidden text-xs shrink-0">
+                          {(["service", "end"] as const).map((m) => (
+                            <button
+                              key={m}
+                              type="button"
+                              onClick={() => {
+                                const next = [...(data.compose?.templates || [])];
+                                next[i] = { ...next[i], insert: m };
+                                update("compose", "templates", next);
+                              }}
+                              className={`px-2.5 py-1 transition-colors ${
+                                (tpl.insert || "service") === m
+                                  ? "bg-blue-500 text-white"
+                                  : "bg-white text-slate-500 hover:bg-slate-50"
+                              }`}
+                            >
+                              {m === "service" ? "服务内" : "末尾"}
+                            </button>
+                          ))}
+                        </div>
+                        <div className="flex-1" />
+                        <IconButton
+                          icon={<Trash2 size={14} />}
+                          title="删除该模板项"
+                          onClick={() =>
+                            update("compose", "templates", (data.compose?.templates || []).filter((_, j) => j !== i))
+                          }
+                        />
+                      </div>
                       <textarea
-                        value={tpl}
-                        rows={tpl.split("\n").length > 1 ? tpl.split("\n").length : 2}
+                        value={tpl.content}
+                        rows={tpl.content.split("\n").length > 1 ? tpl.content.split("\n").length : 2}
                         placeholder={"如: restart: unless-stopped\n    labels:\n      - traefik.enable=true"}
                         onChange={(e) => {
                           const next = [...(data.compose?.templates || [])];
-                          next[i] = e.target.value;
+                          next[i] = { ...next[i], content: e.target.value };
                           update("compose", "templates", next);
                         }}
-                        className="flex-1 resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-mono text-slate-700 leading-relaxed focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-blue-300"
+                        className="w-full resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-mono text-slate-700 leading-relaxed focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-blue-300"
                         spellCheck={false}
-                      />
-                      <IconButton
-                        icon={<Trash2 size={14} />}
-                        title="删除该模板项"
-                        onClick={() =>
-                          update("compose", "templates", (data.compose?.templates || []).filter((_, j) => j !== i))
-                        }
                       />
                     </div>
                   ))}
@@ -2256,7 +2389,7 @@ docker-compose version</code>
               )}
               <p className="text-xs text-slate-400 mt-3">
                 示例：network_mode: （留空自动补 bridge）、restart: unless-stopped、container_name: （留空自动补服务名）、labels: （多行请手动缩进）。
-                保存后立即生效；栈编辑器内点击模板项即可填入。
+                「服务内」填到第一个服务下，「末尾」追加到文件最后一行。保存后立即生效。
               </p>
             </Card>
           </div>
@@ -2319,10 +2452,15 @@ docker-compose version</code>
                 <div className="space-y-2">
                   {tags.map((tag) => {
                     const color = normalizeTagColor(tag.color);
+                    const rgb = hexToRgb(tag.color) || { r: 100, g: 116, b: 139 };
+                    const setRgb = (patch: Partial<{ r: number; g: number; b: number }>) => {
+                      const next = { ...rgb, ...patch };
+                      patchTag(tag.id, { color: rgbToHex(next.r, next.g, next.b) });
+                    };
                     return (
                       <div
                         key={tag.id}
-                        className="flex items-center gap-3 px-3 py-2.5 rounded-lg border border-slate-200 hover:border-slate-300 transition-colors"
+                        className="flex flex-wrap items-center gap-3 px-3 py-2.5 rounded-lg border border-slate-200 hover:border-slate-300 transition-colors"
                       >
                         {/* 色板快速换色 */}
                         <div className="flex items-center gap-1 flex-shrink-0">
@@ -2339,12 +2477,38 @@ docker-compose version</code>
                             />
                           ))}
                         </div>
+                        {/* 手动 RGB：原生取色器 + R/G/B 数值输入 */}
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
+                          <input
+                            type="color"
+                            value={color}
+                            onChange={(e) => patchTag(tag.id, { color: e.target.value })}
+                            title="取色器"
+                            className="w-7 h-7 rounded cursor-pointer border border-slate-200 bg-white p-0.5"
+                          />
+                          {(["r", "g", "b"] as const).map((ch) => (
+                            <label key={ch} className="flex items-center gap-1 text-[10px] text-slate-400 uppercase">
+                              {ch}
+                              <input
+                                type="number"
+                                min={0}
+                                max={255}
+                                value={rgb[ch]}
+                                onChange={(e) => {
+                                  const v = Math.max(0, Math.min(255, Math.floor(Number(e.target.value) || 0)));
+                                  setRgb({ [ch]: v });
+                                }}
+                                className="w-12 px-1.5 py-1 text-xs text-slate-700 border border-slate-200 rounded focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400"
+                              />
+                            </label>
+                          ))}
+                        </div>
                         {/* 名称编辑 */}
                         <Input
                           value={tag.name}
                           onChange={(val) => patchTag(tag.id, { name: val })}
                           placeholder="标签名称，如：媒体、下载、开发"
-                          className="flex-1"
+                          className="flex-1 min-w-[140px]"
                         />
                         {/* 实时预览 */}
                         <div className="w-28 flex-shrink-0 flex justify-center">

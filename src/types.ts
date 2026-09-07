@@ -360,7 +360,8 @@ export interface UpdateSchedulerConfig {
 }
 
 export interface UserConfig {
-  username: string;
+  /** 登录用户名（历史字段：已由鉴权账户体系接管，保留仅为兼容旧配置，不再展示/编辑） */
+  username?: string;
   sessionTimeout: number; // minutes
 }
 
@@ -385,13 +386,22 @@ export interface ColumnVisibility {
   containers: string[];  // 容器管理页面默认可见列
   images: string[];      // 镜像管理页面默认可见列
   volumes: string[];     // 数据卷管理页面默认可见列
-  stacks: string[];      // 堆栈管理页面「展开容器」子表默认可见列
+  stackList: string[];   // 堆栈管理页面（主表格）默认可见列
+  stacks: string[];      // 容器子表默认可见列（与 stackList 完全独立）
+}
+
+/** Compose 一键填入模板项 */
+export interface ComposeTemplate {
+  /** 模板内容（可多行 compose 文本，缩进由用户手动输入） */
+  content: string;
+  /** 填入位置：service = services 下第一个服务内部；end = 追加到 compose 文本最后一行 */
+  insert: "service" | "end";
 }
 
 /** Compose 模板设置（系统设置 → Compose 管理 维护） */
 export interface ComposeConfig {
-  /** 一键填入模板项（每项形如 `restart: unless-stopped`，填入 services.<服务> 下 4 空格层级） */
-  templates: string[];
+  /** 一键填入模板项 */
+  templates: ComposeTemplate[];
 }
 
 // ============ 系统更新（OTA）类型 ============
