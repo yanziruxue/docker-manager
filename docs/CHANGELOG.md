@@ -17,6 +17,18 @@
 
 ---
 
+## v1.12.1 — 2026-09-07
+### 一键填入模板：支持多行 + 手动缩进 + 值留空自动补全（Patch）
+- **「编辑堆栈 → Compose」页右侧一键填入模板重构**
+  - 取消强制 4 空格缩进层级：填入时不再自动计算 `svcIndent+2` 并加空格，改为**完整保留模板自身的缩进（用户手动输入空格）**，插入到 `services` 下第一个服务内部。
+  - 支持**多行内容**：每个模板项可为一段 compose 文本（如 `labels:` 带子项），原样逐行插入。
+  - **值留空自动补全**：模板行 `key:` 后无值时，按已知键填入默认（`restart→unless-stopped`、`network_mode→bridge`、`container_name→服务名`、`privileged→false`、`tty→true`、`stdin_open→true`、`init→true`、`stop_grace_period→10s`）；未知键留空原样保留。
+  - 去重逻辑收敛到「服务块内同名 key 已存在则跳过并提示」（不再依赖固定缩进层级判断）。
+- **系统设置「Compose 管理」模板编辑器**
+  - 模板项由单行 `Input` 改为多行 `textarea`（`resize-y`，随内容高度自适应），可输入多行；说明文案同步更新（缩进手动输入、值留空自动补全）。
+  - 栈编辑器右侧模板面板按钮由 `truncate`（单行截断）改为 `whitespace-pre-wrap break-words`，多行模板可完整显示。
+- 验证：前后端 `tsc --noEmit` 通过；核心插入/补全/去重逻辑单测通过。
+
 ## v1.12.0 — 2026-09-07
 ### 复合增强：Compose 管理页 / ENV 编辑器 / 后台拉取可见 / 多项修复（Minor）
 - **系统设置新增「Compose 管理」页**

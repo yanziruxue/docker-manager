@@ -966,12 +966,40 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
 
 // ============ Stack Editor Modal (4 tabs) ============
 
+/** 值留空时填入的默认值（键 → 取值函数，svcName 为第一个服务名）。 */
+const COMPOSE_VALUE_DEFAULTS: Record<string, (svcName: string) => string> = {
+  restart: () => "unless-stopped",
+  network_mode: () => "bridge",
+  container_name: (svcName) => svcName,
+  privileged: () => "false",
+  tty: () => "true",
+  stdin_open: () => "true",
+  init: () => "true",
+  stop_grace_period: () => "10s",
+};
+
 /**
- * 在 compose 文本中为 services 下第一个服务插入一行属性（服务名下一层级，标准即 4 空格）。
- * - 同名 key 已存在于该服务块时跳过（ok=false + reason），避免产生重复键；
+ * 为一行 compose 内容补全留空的值（仅当冒号后无任何非空内容时）。
+ * 保留模板自身的缩进（手动空格），不强制层级。
+ */
+function completeEmptyValue(line: string, svcName: string): string {
+  const m = line.match(/^(\s*)([A-Za-z0-9_.\-]+)\s*:\s*(.*)$/);
+  if (!m) return line;
+  const [, indent, key, val] = m;
+  if (val.trim() !== "") return line; // 已有值，原样保留
+  const def = COMPOSE_VALUE_DEFAULTS[key];
+  if (def) return `${indent}${key}: ${def(svcName)}`;
+  return line; // 未知键且无值，原样保留（无法推断默认）
+}
+
+/**
+ * 将一段模板（可多行）插入到 compose 文本中 services 下第一个服务内部。
+ * - 缩进由模板自身决定（用户手动输入空格），不再强制 4 空格层级；
+ * - 模板内每一行原样保留（支持多行内容）；值留空的项按 COMPOSE_VALUE_DEFAULTS 补全；
+ * - 服务块内已存在同名 key 时跳过（避免重复键）；
  * - 未找到 services: / 服务行时返回结构错误原因。
  */
-function insertServiceProperty(compose: string, templateLine: string): { next: string; ok: boolean; reason?: string } {
+function insertTemplateBlock(compose: string, block: string): { next: string; ok: boolean; reason?: string } {
   const lines = compose.split("\n");
   const svcIdx = lines.findIndex((l) => /^services\s*:\s*(#.*)?$/.test(l));
   if (svcIdx < 0) return { next: compose, ok: false, reason: "未找到 services: 顶层键，无法定位填入位置" };
@@ -979,39 +1007,46 @@ function insertServiceProperty(compose: string, templateLine: string): { next: s
   const indentOf = (l: string) => (l.match(/^(\s*)/) || ["", ""])[1].length;
   const baseIndent = indentOf(lines[svcIdx]);
 
-  // services: 下第一个服务名行（第一行缩进大于 services 的非空行）
+  // services: 下第一个服务名行
   let svcLineIdx = -1;
   let svcIndent = -1;
+  let svcName = "";
   for (let i = svcIdx + 1; i < lines.length; i++) {
     const l = lines[i];
     if (!l.trim() || /^\s*#/.test(l)) continue;
     const ind = indentOf(l);
     if (ind <= baseIndent) break;
-    svcLineIdx = i;
-    svcIndent = ind;
+    const m = l.match(/^\s*([A-Za-z0-9_.\-]+)\s*:/);
+    if (m) {
+      svcName = m[1];
+      svcLineIdx = i;
+      svcIndent = ind;
+    }
     break;
   }
   if (svcLineIdx < 0) return { next: compose, ok: false, reason: "services: 下没有任何服务，无法定位填入位置" };
 
-  const propIndent = svcIndent + 2;
-  const key = (templateLine.split(":")[0] || "").trim();
+  const blockLines = block.split("\n").map((l) => completeEmptyValue(l, svcName));
+  const contentLines = blockLines.filter((l) => l.trim() !== "");
+  if (contentLines.length === 0) return { next: compose, ok: false, reason: "模板内容为空，无法填入" };
 
-  // 服务块内同名 key 检查（缩进等于属性行层级的行）
-  for (let i = svcLineIdx + 1; i < lines.length; i++) {
-    const l = lines[i];
-    if (!l.trim()) continue;
-    const ind = indentOf(l);
-    if (ind <= svcIndent) break; // 离开服务块
-    if (ind === propIndent) {
-      const m = l.trim().match(/^([^:#]+):/);
-      if (m && m[1].trim() === key) return { next: compose, ok: false, reason: `属性 ${key} 已存在，已跳过` };
+  // 重复 key 检查：块内首行 key 若已在服务块内存在则跳过
+  const firstKey = contentLines[0].match(/^\s*([A-Za-z0-9_.\-]+)\s*:/)?.[1];
+  if (firstKey) {
+    for (let i = svcLineIdx + 1; i < lines.length; i++) {
+      const l = lines[i];
+      if (!l.trim() || /^\s*#/.test(l)) continue;
+      const ind = indentOf(l);
+      if (ind <= svcIndent) break; // 离开服务块
+      const km = l.match(/^\s*([A-Za-z0-9_.\-]+)\s*:/);
+      if (km && km[1] === firstKey) return { next: compose, ok: false, reason: `属性 ${firstKey} 已存在，已跳过` };
     }
   }
 
-  // 插入位置：服务名行之后的第一个属性行之前（跳过空行/注释）
+  // 插入位置：服务名行之后，跳过空行/注释，插到服务块顶部
   let insertAt = svcLineIdx + 1;
   while (insertAt < lines.length && (!lines[insertAt].trim() || /^\s*#/.test(lines[insertAt]))) insertAt++;
-  lines.splice(insertAt, 0, `${" ".repeat(propIndent)}${templateLine.trimEnd()}`);
+  lines.splice(insertAt, 0, ...blockLines);
   return { next: lines.join("\n"), ok: true };
 }
 
@@ -1027,9 +1062,9 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
   const [saveSuccess, setSaveSuccess] = useState(false);
   /** 一键填入模板面板的瞬时提示（同名跳过 / 结构错误原因） */
   const [tplHint, setTplHint] = useState<string | null>(null);
-  /** 填入单个模板项：插到 services 第一个服务内部（4 空格层级），同名 key 已存在则跳过并提示 */
+  /** 填入单个模板项：插到 services 第一个服务内部，缩进由模板自身决定，同名 key 已存在则跳过并提示 */
   const applyComposeTemplate = (tpl: string) => {
-    const res = insertServiceProperty(composeContent, tpl);
+    const res = insertTemplateBlock(composeContent, tpl);
     if (!res.ok) { setTplHint(res.reason || "无法填入"); return; }
     setComposeContent(res.next);
     setTplHint(null);
@@ -1039,9 +1074,9 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
     let cur = composeContent;
     const skipped: string[] = [];
     for (const tpl of composeTemplates) {
-      const res = insertServiceProperty(cur, tpl);
+      const res = insertTemplateBlock(cur, tpl);
       if (res.ok) cur = res.next;
-      else skipped.push((tpl.split(":")[0] || tpl).trim() || "空模板");
+      else skipped.push((tpl.split("\n")[0].split(":")[0] || tpl).trim() || "空模板");
     }
     setComposeContent(cur);
     setTplHint(skipped.length ? `已跳过：${skipped.join("、")}` : null);
@@ -1305,7 +1340,7 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
                           key={i}
                           onClick={() => applyComposeTemplate(tpl)}
                           title={`填入: ${tpl}`}
-                          className="w-full text-left px-2 py-1.5 rounded-md border border-slate-200 bg-white font-mono text-xs text-slate-600 hover:border-blue-400 hover:text-blue-600 transition-colors truncate"
+                          className="w-full text-left px-2 py-1.5 rounded-md border border-slate-200 bg-white font-mono text-[11px] leading-relaxed text-slate-600 hover:border-blue-400 hover:text-blue-600 transition-colors whitespace-pre-wrap break-words"
                         >
                           {tpl.trim() || `（空模板 ${i + 1}）`}
                         </button>

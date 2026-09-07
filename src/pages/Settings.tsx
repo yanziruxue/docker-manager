@@ -2202,8 +2202,9 @@ docker-compose version</code>
             <div>
               <h2 className="text-lg font-semibold text-slate-800 mb-1">Compose 管理</h2>
               <p className="text-sm text-slate-500">
-                维护「编辑堆栈 → Compose」页右侧的一键填入模板。每项一行 compose 属性（如 restart: unless-stopped），
-                填入时自动放到 services 下第一个服务内部（4 空格缩进层级）；值留空的项填入后请自行补全。
+                维护「编辑堆栈 → Compose」页右侧的一键填入模板。每项可填一行或多行 compose 内容（如 restart: unless-stopped），
+                缩进请手动输入空格；值留空的项填入时自动补全（restart→unless-stopped、network_mode→bridge、container_name→服务名 等）。
+                填入位置为 services 下第一个服务内部。
               </p>
             </div>
 
@@ -2228,16 +2229,19 @@ docker-compose version</code>
               ) : (
                 <div className="space-y-2">
                   {(data.compose?.templates || []).map((tpl, i) => (
-                    <div key={i} className="flex items-center gap-2">
-                      <span className="text-xs text-slate-400 font-mono w-10 text-right shrink-0">{i + 1}.</span>
-                      <Input
+                    <div key={i} className="flex items-start gap-2">
+                      <span className="text-xs text-slate-400 font-mono w-10 text-right shrink-0 pt-2">{i + 1}.</span>
+                      <textarea
                         value={tpl}
-                        placeholder="如: restart: unless-stopped"
-                        onChange={(v) => {
+                        rows={tpl.split("\n").length > 1 ? tpl.split("\n").length : 2}
+                        placeholder={"如: restart: unless-stopped\n    labels:\n      - traefik.enable=true"}
+                        onChange={(e) => {
                           const next = [...(data.compose?.templates || [])];
-                          next[i] = v;
+                          next[i] = e.target.value;
                           update("compose", "templates", next);
                         }}
+                        className="flex-1 resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-mono text-slate-700 leading-relaxed focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-blue-300"
+                        spellCheck={false}
                       />
                       <IconButton
                         icon={<Trash2 size={14} />}
@@ -2251,7 +2255,8 @@ docker-compose version</code>
                 </div>
               )}
               <p className="text-xs text-slate-400 mt-3">
-                示例：network_mode: 、restart: unless-stopped、container_name: 、labels: 。保存后立即生效。
+                示例：network_mode: （留空自动补 bridge）、restart: unless-stopped、container_name: （留空自动补服务名）、labels: （多行请手动缩进）。
+                保存后立即生效；栈编辑器内点击模板项即可填入。
               </p>
             </Card>
           </div>
