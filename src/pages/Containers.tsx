@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import {
   Play,
   Square,
@@ -28,7 +29,7 @@ import {
 } from "lucide-react";
 import type { Container, LogEntry } from "../types";
 import { StatusBadge, Tag } from "../components/Badge";
-import { Modal, ConfirmDialog } from "../components/Modal";
+import { ConfirmDialog } from "../components/Modal";
 import { Toggle, ProgressBar, IconButton, EmptyState, SortableTh } from "../components/UI";
 import { TagGroup } from "../components/TagPicker";
 import { LoadingState, ErrorState } from "../components/DataState";
@@ -639,9 +640,10 @@ function ContainerDetailModal({
 
   const filteredLogs = logLevel === "all" ? logs : logs.filter((l) => l.level === logLevel);
 
-  return (
-    <Modal open={true} onClose={onClose} size="xl">
-      <div className="-mx-6 -my-4">
+  // 与堆栈管理「编辑堆栈」一致的弹出方式：底部升起的抽屉式弹窗（90vw × 90vh）
+  return createPortal(
+    <div className="fixed inset-0 z-[1000] bg-black/40 flex flex-col">
+      <div className="modal-content bg-white rounded-t-xl shadow-2xl w-full max-w-[90vw] h-[90vh] mx-auto mt-auto flex flex-col">
         {/* Header */}
         <div className="flex items-center gap-3 px-6 pt-4 pb-3 border-b border-slate-100">
           <div className="w-10 h-10 rounded-lg bg-slate-100 flex items-center justify-center overflow-hidden">
@@ -764,10 +766,14 @@ function ContainerDetailModal({
         </div>
 
         {/* Content */}
-        <div className="px-6 py-4 max-h-[60vh] overflow-y-auto">
-          {tab === "info" && <ContainerInfoTab container={container} />}
+        <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+          {tab === "info" && (
+            <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4">
+              <ContainerInfoTab container={container} />
+            </div>
+          )}
           {tab === "logs" && (
-            <div>
+            <div className="flex-1 min-h-0 flex flex-col px-6 py-4">
               <div className="flex items-center gap-3 mb-3">
                 <select value={logLevel} onChange={(e) => setLogLevel(e.target.value)} className="px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg bg-white">
                   <option value="all">全部级别</option>
@@ -793,7 +799,7 @@ function ContainerDetailModal({
               <div
                   ref={logsScrollRef}
                   onScroll={handleLogsScroll}
-                  className="bg-slate-900 rounded-lg p-4 max-h-[50vh] overflow-y-auto font-mono text-xs"
+                  className="flex-1 min-h-0 bg-slate-900 rounded-lg p-4 overflow-y-auto font-mono text-xs"
                 >
                 {logsLoading && (
                   <div className="flex items-center gap-2 text-slate-500 py-2">
@@ -822,7 +828,7 @@ function ContainerDetailModal({
             </div>
           )}
           {tab === "stats" && (
-            <div>
+            <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4">
               {statsLoading && (
                 <div className="flex items-center gap-2 text-slate-500 py-8 justify-center">
                   <RefreshCw size={16} className="animate-spin" />
@@ -885,15 +891,18 @@ function ContainerDetailModal({
             </div>
           )}
           {tab === "terminal" && (
-            <XTermTerminal
-              engineId={engineId}
-              containerId={container.id}
-              containerName={container.name}
-            />
+            <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4">
+              <XTermTerminal
+                engineId={engineId}
+                containerId={container.id}
+                containerName={container.name}
+              />
+            </div>
           )}
         </div>
       </div>
-    </Modal>
+    </div>,
+    document.body
   );
 }
 

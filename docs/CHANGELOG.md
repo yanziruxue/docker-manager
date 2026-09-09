@@ -17,6 +17,17 @@
 
 ---
 
+## v1.15.9 — 2026-09-09
+
+### 容器详情弹窗改为与堆栈管理一致的「底部升起抽屉」样式
+- **背景**：容器管理页的容器详情弹窗用的是通用 `Modal`（居中卡片 `size="xl"`，`max-h-[90vh]`），与堆栈管理页「编辑堆栈」的弹出方式（底部升起、90vw × 90vh）不统一，且日志/终端可用高度受限（日志区写死 `max-h-[50vh]`）。
+- **改动**：`src/pages/Containers.tsx`
+  - `ContainerDetailModal` 改为 `createPortal` 自定义层，复刻 `StackEditorModal` 的结构：`fixed inset-0 z-[1000] bg-black/40 flex flex-col` + 内容区 `modal-content ... max-w-[90vw] h-[90vh] mx-auto mt-auto rounded-t-xl flex flex-col`（`mt-auto` 实现底部升起，`rounded-t-xl` 只有顶部圆角）。
+  - 内容区由「整体 `max-h-[60vh] overflow-y-auto`」改为 `flex-1 min-h-0 flex flex-col overflow-hidden`，四个页签各自持滚动容器：基本信息/资源监控/终端 `flex-1 min-h-0 overflow-y-auto`；日志页签改为 `flex-1 min-h-0 flex flex-col`，日志区由 `max-h-[50vh]` 改为 `flex-1 min-h-0`，随抽屉高度自适应。
+  - 关闭方式不变（Header 右上角 X；不响应遮罩点击与 ESC，与堆栈编辑弹窗一致）。移除不再使用的 `Modal` 导入（页面仍用 `ConfirmDialog`）。
+- **验证**：前端 + 后端 `tsc --noEmit` 全绿，`npm run build:frontend` 通过。
+- **说明**：`XTermTerminal` 内部仍为 `height: 50vh; min-height: 300px`，在 90vh 抽屉内不会溢出（约 625px < 865px@961 视口），暂不调整。
+
 ## v1.15.8 — 2026-09-09
 
 ### 堆栈操作执行期间状态列显示「执行中」
