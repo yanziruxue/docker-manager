@@ -88,12 +88,16 @@ function highlightLine(line: string): string {
     commentPart = line.slice(hashIdx);
   }
   let html = "";
-  const dashMatch = /^(\s*)(-\s+)(.*)$/.exec(codePart);
+  // 列表项：缩进 / 短横 / 短横后空白 / 内容 分开捕获——
+  // 短横后的空白必须原样拼回高亮层，否则 <pre> 显示比 textarea 原文少一个空格，
+  // 导致「- TZ=...」显示成「-TZ=...」且高亮层与透明文字错位（v1.15.1 修复）
+  const dashMatch = /^(\s*)(-)(\s*)(.*)$/.exec(codePart);
   let body = codePart;
   if (dashMatch) {
     html += escapeHtml(dashMatch[1]);
     html += `<span style="color:${COLORS.dash}">-</span>`;
-    body = dashMatch[3];
+    html += escapeHtml(dashMatch[3]);
+    body = dashMatch[4];
   } else {
     const ind = /^(\s*)/.exec(codePart);
     const ws = ind ? ind[1] : "";

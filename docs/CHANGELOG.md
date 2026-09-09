@@ -17,6 +17,135 @@
 
 ---
 
+## v1.15.5 — 2026-09-09
+
+### 修复设置页双滚动条与底部大片空白
+- **根因**：flex 布局链（App 外壳 → main → Settings 根 → 设置内容区）缺少 `min-h-0`。flex 项默认 `min-height: auto`，内容高于视口时 `flex-1` 的 main/内容区拒绝收缩、被撑到内容高度：外层 `h-screen overflow-hidden` 裁掉超出部分（底部出现大片空白），同时外层 main 与 Settings 内部两个滚动容器同时溢出（右侧出现两个滚动条）。
+- **修复**：给 flex 链每一层补 `min-h-0`（`App.tsx` 内容列与 main、`Settings.tsx` 根与内容区），使高度逐层受控、全页只剩设置内容区一个滚动容器。
+- **顺带**：默认列配置移除已删除的「状态(inUse)」列残留（服务端 defaults 与设置页前端默认值）。
+
+### 登录/初始化回车提交改原生表单（兜底）
+- 登录页、找回码重置页、初始化向导的表单容器改为原生 `<form onSubmit>`，提交按钮 `type="submit"`、辅助按钮 `type="button"`，移除对 `Input onKeyDown` 透传的依赖——即使透传再失效，浏览器原生回车提交也能登录。`Input` 的 `onKeyDown` 透传保留（v1.15.2）。
+
+## v1.15.4 — 2026-09-08
+
+### 数据卷页面移除「状态」列
+- 移除表格「状态」（已关联/未关联）列及「列」设置中的对应勾选项；筛选、统计卡、清理未关联、删除按钮禁用等内部判定逻辑全部保留。
+
+### 镜像列表与 docker images 对齐
+- **现象**：`docker images` 显示 4 个镜像（含 `bookmarkhub-yanzi:latest`），页面只有 3 个。
+- **根因**：Docker API `/images/json` 一个镜像一条记录、`RepoTags` 数组携带全部标签；原 `transformImages` 只取 `RepoTags[0]`，第二个标签被丢弃。
+- **修复**：改为按 `RepoTags` 展开，每个标签一行（同 ID 多标签重复出现，与 docker images 口径一致）；仓库名解析改用 `lastIndexOf(":")` 从右侧切分，兼容带端口的 registry 地址（如 `registry:5000/app`）。
+- **说明**：大小数字口径差异（页面 293.5MB = MiB，CLI 308MB = 十进制 MB）为单位换算不同，数值本身一致。
+
+## v1.15.3 — 2026-09-08
+
+修复（Patch）：数据卷「未关联」判定与计数、文案，及活跃度面板持久化（v1.15.0 遗留）。
+
+### 数据卷：使用状态误判 + 计数恒 0
+- **现象**：所有卷状态恒显示「使用中」，「清理未使用卷 (0)」计数恒 0（实际有未关联卷，清理时却能删掉），单个删除按钮恒禁用，「关联容器」列恒为「—」。
+- **根因**：Docker API `GET /volumes` 列表**不返回 `InUse` 字段**，前端 `v.InUse !== false` 在字段缺失（undefined）时恒为 `true`；`associatedContainers` 前端写死空数组、后端也未计算。
+- **修复**：后端 `getVolumes()` 并行拉取容器列表（含停止），按容器 Mounts 建「卷名 → 关联容器名」映射，给每个卷回填 `InUse` 与 `UsedBy`；前端改为 `inUse === true`、关联容器列读 `UsedBy`。
+- **实际清理行为本就正确**（服务端 `pruneVolumes` 直接调 Engine API），本次修复的是界面判定与计数。
+
+### 文案：未使用 → 未关联
+- 按钮「清理未使用卷」→「清理未关联卷」；弹窗标题/正文、操作日志、输出弹窗、统计卡、筛选选项同步。
+- 状态列「使用中 / 未使用」→「已关联 / 未关联」；列配置标签 →「关联状态」；删除确认文案同步。
+
+### 活跃度面板（v1.15.0 遗留，`tsc --noEmit` 暴露）
+- `Settings.tsx` 调用**不存在的** `handleSaveSettings`（正确为 `handleSave`）→ 面板触发保存时必然 ReferenceError。
+- `ActivityPanel` 未声明/调用 `onAfterSave` prop → 开关/地址变更只改本地状态、**不持久化**；补上 prop 并在三个变更点成功后触发保存。
+- 清理 `Activity` 图标重复导入、`telemetry` 校验可选链、`SystemSettings.telemetry` 改为必需（服务端 `defaultsVersion` 迁移保证存在）。前端 `tsc --noEmit` 现已全绿（vite 不做类型检查，此前错误未暴露）。
+
+**涉及文件**：`server/docker.ts`、`src/transforms.ts`、`src/pages/Volumes.tsx`、`src/pages/Settings.tsx`、`src/components/ActivityPanel.tsx`、`src/types.ts`。
+
+## v1.15.2 — 2026-09-08
+
+修复（Patch）：登录页 / 初始化向导**按回车不提交**（`Input` 组件丢弃 `onKeyDown`）。
+
+- **现象**：登录页输入账号密码后按回车无反应，只能点「登录」按钮；初始化向导同样如此。
+- **根因**：`src/components/UI.tsx` 的通用 `Input` 组件只接收 `value/onChange/placeholder/type/disabled/className` 六个 props，**未把 `onKeyDown` 透传给底层 `<input>`**，因此 `LoginPage`/`SetupWizard` 里 `onKeyDown={(e) => e.key === "Enter" && submit()}` 被静默丢弃（`Images.tsx`、`Settings.tsx` 用的是原生 `<input>`，故不受影响）。
+- **修复**：`Input` 新增可选 `onKeyDown` 并绑定到 `<input>`，一处修复 6 处回车提交（登录页 3 处 + 向导 3 处）；不传该 prop 的调用方行为不变。
+- **涉及文件**：`src/components/UI.tsx`。
+
+## v1.15.1 — 2026-09-08
+
+修复（Patch）：YAML 编辑器列表项显示丢失短横后的空格，编辑堆栈 compose 时与磁盘原文不一致。
+
+- **现象**：编辑堆栈时 `- TZ=Asia/Shanghai`、`- '5031:5031'` 等列表项显示为 `-TZ=Asia/Shanghai`、`-'5031:5031'`，与 `cat docker-compose.yaml` 原文对不上（**文件本身无误**，纯显示层问题）。
+- **根因**：`YamlEditor.tsx` 高亮层 `highlightLine()` 的列表项正则 `/^(\s*)(-\s+)(.*)$/` 把「短横+空格」整体匹配消费，但输出 HTML 只渲染了短横、没有把短横后的空格拼回去。编辑器采用「textarea 透明文字 + `<pre>` 高亮层」叠层方案，用户看到的是高亮层 → 显示比原文少一个空格，且高亮层与透明文字从此错位 1 列（光标位置与可见文字对不准，与 v1.11.1 修复的 Delete 漂移同族）。
+- **修复**：正则改为 `/^(\s*)(-)(\s*)(.*)$/`，短横后的空白单独捕获并 `escapeHtml` 原样拼回高亮层，保证与原文逐字符对齐。
+- **涉及文件**：`src/components/YamlEditor.tsx`（1 处）。
+
+## v1.14.0 — 2026-09-07
+
+新增密码找回码（Minor）：设置 **18 位**找回码，忘记密码时可在登录页用它重置密码。
+
+- **规则**：必须满 18 位；**仅支持字母和数字**（输入阶段即剔除其他字符）；**忽略大小写** —— 保留用户输入的原始大小写、**不强制转大写**，大小写差异在服务端比对阶段消除（`normalizeRecoveryCode` 统一转大写后参与哈希与校验），故 `abc…` 与 `ABC…` 等价；前端清洗只剔除非字母数字并截断 18 位，输入时显示 `n/18` 计数。
+- **校验顺序**：先判非法字符、再判长度，避免「18 位里含符号」被误报成「未满 18 位」。
+- **存储（`server/users.ts`）**：与密码同级保护 —— `scrypt` + 随机 16B salt，`timingSafeEqual` 校验；`users.json` 仅存 `recoveryHash`/`recoverySalt`，**明文不落盘、也不可回显**。
+- **入口（两处，可选）**：① 首次部署向导「密码找回码」，留空可稍后补设；② 已登录后 `系统设置 → 用户 → 密码找回码` 可随时重设或清除。
+- **找回流程**：登录页新增「忘记密码？使用 18 位找回码重置」→ 填用户名 + 找回码 + 新密码（≥6 位）+ 确认 → 重置成功后返回登录。
+- **限流**：两次使用间隔 **10 分钟**（`RECOVERY_MIN_INTERVAL_MS`），命中返回 429 + `code: RECOVERY_COOLDOWN` 并提示剩余秒数；重设找回码会解除冷却。
+- **安全**：重置接口为公开路由但错误文案统一为「用户名或找回码错误」，不泄露用户名是否存在；已登录接口 `GET/POST/DELETE /api/auth/recovery` 均需登录，其中设置找回码需校验当前密码（敏感操作二次验证）。
+- **新增文件**：`src/lib/recovery-code.ts`（清洗/校验/分组展示）。
+
+验证：`npm run build`（vite + 后端 tsc）通过；真实服务端冒烟全通过 —— 初始化带码 → 状态查询 hasRecovery=true → 小写码重置成功（忽略大小写）→ 立即再用 429 限流 600 秒 → 错误码 401 → 17 位/含符号 400 → 新密码登录成功 → 设码时密码错误 400、17 位 400、正确 200 → 重设解除冷却可立即使用 → 旧码失效 401 → 未登录访问 401 → 清除后 hasRecovery=false 且旧码失效 401；`users.json` 确认仅含 recoveryHash/recoverySalt，无明文。
+- 大小写专项：设置 `AbCdEfGh12345678Xy` → 用全小写 `abcdefgh12345678xy` 重置成功；设置 `zZzZzZzZ12345678AB` → 用全大写 `ZZZZZZZZ12345678AB` 重置成功；18 位含符号报「仅支持字母和数字」而非「未满 18 位」。
+
+## v1.15.0 — 2026-09-07
+
+新增**用户活跃度监视**（按 `Linux应用安装量与活跃用户统计方案` 实现）。**仅本项目做上报端**（不上报中心 / 中心服务另行建设），上传地址暂定 `https://docker.yanziruxue.top`。
+
+### 设备标识（双标识架构）
+- **主标识 `device_uuid`**：`crypto.randomUUID()` + `/etc/<应用名>/device.info` 持久化（Linux 部署）；无写权限时降级到 `<CONFIG_DIR>/device.info`（Windows 部署）。同一台机器重启后 UUID 保持稳定。
+- **辅标识 `hw_fingerprint`**：CPUID + 主板序列号 + 硬盘序列号拼接后 SHA-256，前 12 位展示给用户看（不全量回显）。`/proc/cpuinfo`、`dmidecode` 命令不可用时**整体置零**（容器/虚拟机环境优雅降级）。
+- **风控策略**：`virtualized=true` 的指纹默认为 `000000000000`，仅参与去重而不作为唯一标识。
+
+### 上报策略（默认开启，可关闭）
+- **安装事件** `install`：进程启动后 10 秒首次上报，写入 `installReported=true` 持久化标记。
+- **活跃事件** `active`：每日首次上报，落地 `lastActiveDate` 日粒度去重，避免重复计数。
+- **心跳**：默认 6 小时一次，可关闭。
+- **关闭即停**：设置项 `telemetry.enabled=false` 时 `report` 接口立即返回「遥测已关闭」，不发任何请求；`stats` 接口返回 `null`，页面降级展示。
+
+### 上报载荷（POST `{endpoint}/api/telemetry/ingest`）
+| 字段 | 用途 |
+|---|---|
+| `event` | `install` / `active` |
+| `device_uuid` | 主标识（统计去重键） |
+| `hw_fingerprint` | 辅标识（风控） |
+| `app_version` / `os_version` / `arch` | 环境维度 |
+| `virtualized` | 是否容器/虚拟机 |
+| `client_ts` | 客户端事件时间（ISO） |
+| `payload` | `{}`（预留） |
+
+### 新增路由（均需登录）
+- `GET /api/telemetry/status` — UUID、指纹短码、虚拟化标志、设备文件路径、最后上报时间/错误
+- `POST /api/telemetry/report` — 立即触发 install + active
+- `GET /api/telemetry/stats` — 后端代理拉取远端聚合（远端未就绪返回 `null`）
+
+### 设置页「活跃度」分区
+- **概览卡片**：远端聚合统计（安装总数、新增设备、DAU/MAU），未就绪时降级为「等待中心服务就绪」
+- **本机标识**：UUID（前 8+•••+后 4 掩码，显示/复制/重置）、硬件指纹 12 位、虚拟化标志、首次识别时间
+- **配置表单**：总开关、上报地址（默认 `https://docker.yanziruxue.top`）、是否采集硬件指纹
+- **手动上报**按钮（带结果反馈）+ **设备文件路径**展示
+
+### 设置项 + 默认值
+```json
+"telemetry": {
+  "enabled": true,
+  "endpoint": "https://docker.yanziruxue.top/api/telemetry/ingest",
+  "collectHwFingerprint": true
+}
+```
+
+### 涉及文件
+- 新增：`server/telemetry.ts`（设备/指纹/上报全模块）、`src/components/ActivityPanel.tsx`（活跃度面板）
+- 改动：`server/index.ts`（启动心跳 + 三路由）、`server/settings.ts`（默认值）、`src/types.ts`（TelemetryConfig/SystemSettings）、`src/api.ts`（TelemetryStatus/Stats/report/status/stats）
+
+### 验证
+`npm run build`（vite + 后端 tsc）通过；真实服务端冒烟 6 项全通过 —— init 后 `device_uuid` 自动生成、虚拟化标志正确、硬件指纹前 12 位生成、关闭遥测后 `report` 立即返回「遥测已关闭」、`stats` 关闭时返回 `null`、持久化文件 `device.info` 落盘到 `/etc/docker-manager-yanzi/device.info`（Linux）或 `<CONFIG_DIR>/device.info`（Windows），重启后 UUID 保持稳定。
+
 ## v1.13.0 — 2026-09-07
 
 新增登录鉴权与账户管理（Minor）。参考 bookmarkhub 的「登录与账户管理」设计，按本项目（个人自托管 NAS 工具）定位裁剪为 **单管理员模式**，不做多用户与角色。

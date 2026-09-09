@@ -51,11 +51,15 @@ export function getAuthInitStatus(): Promise<{ initialized: boolean }> {
   return request<{ initialized: boolean }>("/auth/init-status");
 }
 
-/** 首次部署创建管理员账号 */
-export function initAccount(username: string, password: string): Promise<AuthUser> {
+/** 首次部署创建管理员账号（recoveryCode 可选，留空可后续在设置页补设） */
+export function initAccount(
+  username: string,
+  password: string,
+  recoveryCode?: string
+): Promise<AuthUser> {
   return request<AuthUser>("/auth/init", {
     method: "POST",
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({ username, password, recoveryCode }),
   });
 }
 
@@ -77,11 +81,106 @@ export function getMe(): Promise<AuthUser> {
   return request<AuthUser>("/auth/me");
 }
 
+// ---------- 遥测（安装量与活跃度，仅上报端） ----------
+
+export interface TelemetryStatus {
+  enabled: boolean;
+  endpoint: string;
+  collectHwFingerprint: boolean;
+  uuid: string;
+  hwFingerprintShort: string;
+  virtualized: boolean;
+  createdAt: string;
+  installReported: boolean;
+  lastActiveDate: string;
+  lastReportAt?: string;
+  lastError?: string;
+  deviceFile: string;
+  appVersion: string;
+  osVersion: string;
+  arch: string;
+}
+
+/** 远端统计服务端聚合数据（服务端未就绪时为 null） */
+export interface TelemetryStats {
+  /** 安装总次数（含重装） */
+  installs: number;
+  /** 新增设备数（按 device_uuid 去重） */
+  newDevices: number;
+  /** 日活 */
+  dau: number;
+  /** 月活 */
+  mau: number;
+  /** 近 N 日趋势 */
+  trend?: { date: string; dau: number; installs: number }[];
+}
+
+/** 本机设备标识与上报状态 */
+export function fetchTelemetryStatus(): Promise<TelemetryStatus> {
+  return request<TelemetryStatus>("/telemetry/status");
+}
+
+/** 立即上报一次（force=true，忽略当日已报） */
+export function reportTelemetryNow(): Promise<{
+  sent: string[];
+  error?: string;
+  status: TelemetryStatus;
+}> {
+  return request("/telemetry/report", { method: "POST" });
+}
+
+/** 拉取统计服务端聚合数据（后端代理，未就绪返回 null） */
+export function fetchTelemetryStats(): Promise<TelemetryStats | null> {
+  return request<TelemetryStats | null>("/telemetry/stats");
+}
+
 /** 修改当前用户密码（单管理员：必须校验原密码） */
 export function changeMyPassword(oldPassword: string, newPassword: string): Promise<void> {
   return request<void>("/auth/password", {
     method: "POST",
     body: JSON.stringify({ oldPassword, newPassword }),
+  });
+}
+
+// ============ 密码找回码 ============
+
+export interface RecoveryStatus {
+  /** 找回码要求的长度（位） */
+  length: number;
+  hasRecovery: boolean;
+  setAt: string | null;
+  lastUsedAt: string | null;
+  /** 距下次可使用还需等待的毫秒数（0 = 立即可用） */
+  cooldownRemainingMs: number;
+}
+
+/** 找回码状态（不回显明文） */
+export function getRecoveryStatus(): Promise<RecoveryStatus> {
+  return request<RecoveryStatus>("/auth/recovery");
+}
+
+/** 设置/重设找回码（需当前密码） */
+export function setRecoveryCode(code: string, password: string): Promise<void> {
+  return request<void>("/auth/recovery", {
+    method: "POST",
+    body: JSON.stringify({ code, password }),
+  });
+}
+
+/** 清除找回码 */
+export function clearRecoveryCode(): Promise<void> {
+  return request<void>("/auth/recovery", { method: "DELETE" });
+}
+
+/** 通过找回码重置密码（无需登录；两次使用间隔 10 分钟） */
+export function resetPasswordByRecovery(
+  username: string,
+  code: string,
+  newPassword: string
+): Promise<void> {
+  return request<void>("/auth/reset-by-recovery", {
+    method: "POST",
+    body: JSON.stringify({ username, code, newPassword }),
   });
 }
 

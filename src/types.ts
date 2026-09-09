@@ -439,6 +439,16 @@ export interface UpdateState {
   etaSeconds?: number | null;
 }
 
+/** 安装量与活跃度遥测上报配置（仅上报端，不含聚合统计） */
+export interface TelemetryConfig {
+  /** 是否启用上报（默认开启，可在「活跃度」页关闭） */
+  enabled: boolean;
+  /** 统计服务端地址（上报与拉取出数的基址） */
+  endpoint: string;
+  /** 是否采集硬件指纹（仅风控用，不参与统计去重） */
+  collectHwFingerprint: boolean;
+}
+
 export interface SystemSettings {
   docker: DockerConfig;
   notifications: NotificationConfig;
@@ -454,6 +464,8 @@ export interface SystemSettings {
   modal: ModalConfig;
   /** Compose 模板（一键填入项） */
   compose: ComposeConfig;
+  /** 安装量与活跃度遥测上报配置（服务端 defaultsVersion 迁移保证存在） */
+  telemetry: TelemetryConfig;
   /** 默认值版本号：服务端据此判断是否需要把老配置重置为新默认值 */
   defaultsVersion?: number;
 }

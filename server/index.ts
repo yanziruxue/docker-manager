@@ -57,6 +57,12 @@ import { getSettings, saveSettings } from "./settings.js";
 import { readDaemonConfigInfo, writeDaemonConfig, restartDockerService, refreshPrivileges } from "./daemon-config.js";
 import { CURRENT_VERSION, getInstallDir, checkForUpdate, performUpdate, performUpdateFromUpload, getUpdateState, getUpdateDir, markUpdateError, saveUploadPackage, getPendingUpload, getPendingUploadPath, schedulePendingExpiry, discardPendingUpload, cancelPendingExpiry } from "./updater.js";
 import { COMPOSE_DIR } from "./paths.js";
+import {
+  getTelemetryStatus,
+  reportOnce,
+  startTelemetryHeartbeat,
+  fetchRemoteStats,
+} from "./telemetry.js";
 import { createEmbeddedStatic, type EmbeddedDist } from "./serve-embedded.js";
 import { setLogLevel, getLogLevel, createLogger } from "./logger.js";
 import { WebSocketServer } from "ws";
@@ -68,6 +74,14 @@ import {
   findUserById,
   verifyPassword,
   ensureUsersDir,
+  validateRecoveryCode,
+  verifyRecoveryCode,
+  setRecoveryCode,
+  clearRecoveryCode,
+  markRecoveryCodeUsed,
+  recoveryCooldownRemainingMs,
+  hasRecoveryCode,
+  RECOVERY_CODE_LENGTH,
 } from "./users.js";
 import { createSession, getSessionUser, destroySession, requireAuth } from "./auth.js";
 
@@ -107,6 +121,8 @@ try {
 // 确保用户存储文件就位（首次部署无用户 → 前端进入初始化向导）
 try {
   ensureUsersDir();
+  // 启动遥测心跳：install / active 上报，任何失败均静默、不影响主业务
+  startTelemetryHeartbeat();
 } catch {
   // 用户存储初始化失败不阻断服务启动
 }
@@ -129,7 +145,7 @@ app.post("/api/auth/init", (req, res) => {
     res.status(409).json({ success: false, error: "系统已初始化" });
     return;
   }
-  const { username, password } = req.body || {};
+  const { username, password, recoveryCode } = req.body || {};
   if (!username || !username.trim() || !password) {
     res.status(400).json({ success: false, error: "缺少用户名或密码" });
     return;
@@ -138,8 +154,16 @@ app.post("/api/auth/init", (req, res) => {
     res.status(400).json({ success: false, error: "密码至少 6 位" });
     return;
   }
+  // 找回码可选：留空则后续可在「系统设置 → 用户」补设
+  if (recoveryCode) {
+    const err = validateRecoveryCode(recoveryCode);
+    if (err) {
+      res.status(400).json({ success: false, error: err });
+      return;
+    }
+  }
   try {
-    const user = createUser(username, password);
+    const user = createUser(username, password, recoveryCode);
     createSession(res, user.id);
     res.json({ success: true, data: { id: user.id, username: user.username, role: user.role } });
   } catch (e: any) {
@@ -196,10 +220,130 @@ app.post("/api/auth/password", requireAuth, (req, res) => {
   }
 });
 
+// ============ 密码找回码 ============
+
+/** 找回码状态（已登录）：仅回显是否已设置与最近使用时间，不回显明文 */
+app.get("/api/auth/recovery", requireAuth, (req, res) => {
+  const user = (req as any).user;
+  const record = findUserById(user.id);
+  if (!record) {
+    res.status(404).json({ success: false, error: "用户不存在" });
+    return;
+  }
+  res.json({
+    success: true,
+    data: {
+      length: RECOVERY_CODE_LENGTH,
+      hasRecovery: hasRecoveryCode(record),
+      setAt: record.recoverySetAt || null,
+      lastUsedAt: record.recoveryLastUsedAt || null,
+      cooldownRemainingMs: recoveryCooldownRemainingMs(record),
+    },
+  });
+});
+
+/** 设置/重设找回码（需校验当前密码，属敏感操作） */
+app.post("/api/auth/recovery", requireAuth, (req, res) => {
+  const user = (req as any).user;
+  const { code, password } = req.body || {};
+  const err = validateRecoveryCode(code || "");
+  if (err) {
+    res.status(400).json({ success: false, error: err });
+    return;
+  }
+  const record = findUserById(user.id);
+  if (!record) {
+    res.status(404).json({ success: false, error: "用户不存在" });
+    return;
+  }
+  if (!verifyPassword(password || "", record)) {
+    res.status(400).json({ success: false, error: "当前密码错误" });
+    return;
+  }
+  try {
+    setRecoveryCode(user.id, code);
+    res.json({ success: true });
+  } catch (e: any) {
+    res.status(400).json({ success: false, error: e?.message || "设置找回码失败" });
+  }
+});
+
+/** 清除找回码 */
+app.delete("/api/auth/recovery", requireAuth, (req, res) => {
+  const user = (req as any).user;
+  try {
+    clearRecoveryCode(user.id);
+    res.json({ success: true });
+  } catch (e: any) {
+    res.status(400).json({ success: false, error: e?.message || "清除找回码失败" });
+  }
+});
+
+/**
+ * 通过找回码重置密码（公开路由，无需登录）。
+ * 限流：两次使用间隔 10 分钟，避免找回码泄露后被高频利用。
+ */
+app.post("/api/auth/reset-by-recovery", (req, res) => {
+  const { username, code, newPassword } = req.body || {};
+  const fmtErr = validateRecoveryCode(code || "");
+  if (fmtErr) {
+    res.status(400).json({ success: false, error: fmtErr });
+    return;
+  }
+  if (!newPassword || newPassword.length < 6) {
+    res.status(400).json({ success: false, error: "新密码至少 6 位" });
+    return;
+  }
+  const record = getUserByUsername(username || "");
+  // 统一错误文案：不泄露「用户名是否存在」
+  if (!record || !verifyRecoveryCode(code, record)) {
+    res.status(401).json({ success: false, error: "用户名或找回码错误" });
+    return;
+  }
+  const waitMs = recoveryCooldownRemainingMs(record);
+  if (waitMs > 0) {
+    res.status(429).json({
+      success: false,
+      error: `找回码使用过于频繁，请 ${Math.ceil(waitMs / 1000)} 秒后再试`,
+      code: "RECOVERY_COOLDOWN",
+    });
+    return;
+  }
+  try {
+    updateUserPassword(record.id, newPassword);
+    markRecoveryCodeUsed(record.id);
+    res.json({ success: true });
+  } catch (e: any) {
+    res.status(400).json({ success: false, error: e?.message || "重置密码失败" });
+  }
+});
+
 // 鉴权守卫：除 /api/auth 外，所有 /api 路由必须登录
 app.use("/api", (req, res, next) => {
   if (req.path.startsWith("/auth")) return next();
   return requireAuth(req, res, next);
+});
+
+// ============ 遥测 API（安装量与活跃度，仅上报端）============
+
+/** 本机设备标识与上报状态 */
+app.get("/api/telemetry/status", (_req, res) => {
+  res.json({ success: true, data: getTelemetryStatus() });
+});
+
+/** 立即上报一次（页面「立即上报」按钮；force=true 忽略当日已报） */
+app.post("/api/telemetry/report", async (_req, res) => {
+  const r = await reportOnce(true);
+  res.json({ success: true, data: { ...r, status: getTelemetryStatus() } });
+});
+
+/**
+ * 拉取统计服务端聚合数据（后端代理转发，规避浏览器跨域）。
+ * 服务端未就绪或离线时返回 null，页面优雅降级。
+ */
+app.get("/api/telemetry/stats", async (_req, res) => {
+  const stats = await fetchRemoteStats();
+  res.json({ success: true, data: stats });
 });
 
 // ============ 引擎 API ============

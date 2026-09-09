@@ -1061,11 +1061,27 @@ function toPublicInfo(task: PullTaskInternal): PullTaskInfo {
  */
 export async function getVolumes(engine: DockerEngine): Promise<any> {
   const docker = getDocker(engine);
-  const result = await withTimeout(docker.listVolumes(), 10000);
+  // Docker API 的 /volumes 列表不返回 InUse 字段，需按容器 Mounts 自行判定：
+  // 并行拉一次容器列表（含停止），建「卷名 -> 关联容器名」映射，回填 InUse / UsedBy
+  const [result, containers] = await Promise.all([
+    withTimeout(docker.listVolumes(), 10000),
+    withTimeout(docker.listContainers({ all: true }), 10000).catch(() => [] as any[]),
+  ]);
   const volumes: any[] = result?.Volumes || [];
+  const volumeContainers = new Map<string, string[]>();
+  for (const c of containers) {
+    for (const m of c.Mounts || []) {
+      if (!m.Name) continue; // 只关注命名卷（bind mount 无 Name）
+      const arr = volumeContainers.get(m.Name) || [];
+      arr.push(c.Names?.[0]?.replace(/^\//, "") || c.Id?.slice(0, 12) || "");
+      volumeContainers.set(m.Name, arr);
+    }
+  }
   if (volumes.length > 0) {
     const sizes = getVolumeSizes(engine);
     for (const v of volumes) {
+      v.InUse = volumeContainers.has(v.Name);
+      if (v.InUse) v.UsedBy = volumeContainers.get(v.Name);
       const bytes = sizes.get(v.Name);
       if (typeof bytes === "number" && bytes >= 0) {
         v.UsageData = { Size: bytes, RefCount: v.UsageData?.RefCount ?? (v.InUse ? 1 : 0) };

@@ -42,10 +42,25 @@ import {
   FileCode2,
   KeyRound,
   LogOut,
+  ShieldCheck,
+  ShieldAlert,
+  Radio,
+  Copy as CopyIcon,
+  Send,
 } from "lucide-react";
 import type { SystemSettings, BackupMode, DockerEngine, UpdateInfo, UpdateState, ResourceTag, ComposeTemplate } from "../types";
 import { Card, FormField, Input, Select, Toggle, IconButton } from "../components/UI";
-import { changeMyPassword, type AuthUser } from "../api";
+import { ActivityPanel, DEFAULT_TELEMETRY } from "../components/ActivityPanel";
+import type { TelemetryConfig } from "../types";
+import {
+  changeMyPassword,
+  getRecoveryStatus,
+  setRecoveryCode,
+  clearRecoveryCode,
+  type AuthUser,
+  type RecoveryStatus,
+} from "../api";
+import { sanitizeRecoveryInput, validateRecoveryCode, RECOVERY_LENGTH } from "../lib/recovery-code";
 import { Tag } from "../components/Badge";
 import { TAG_PALETTE, TagChip, normalizeTagColor, hexWithAlpha, randomTagColor, hexToRgb, rgbToHex } from "../components/TagPicker";
 import { Modal, ConfirmDialog } from "../components/Modal";
@@ -73,6 +88,8 @@ import {
   fetchBackupsApi,
   deleteBackupApi,
   type BackupFileInfo,
+  fetchTelemetryStatus,
+  type TelemetryStatus,
 } from "../api";
 
 /** 字节/秒 → 人类可读速度；0/无效值返回空串 */
@@ -142,11 +159,16 @@ function getDefaultSettings(): SystemSettings {
     pathFavorites: [],
     updateScheduler: { enabled: false, checkFrequency: "0 3 * * *", autoPull: false },
     user: { sessionTimeout: 30 },
+    telemetry: {
+      enabled: true,
+      endpoint: "https://docker.yanziruxue.top/api/telemetry/ingest",
+      collectHwFingerprint: true,
+    },
     update: { autoCheck: false, autoUpdate: false, ignoredVersion: "" },
     columnVisibility: {
       containers: ["icon","name","status","tags","ports","actions"],
       images: ["repository","tag","id","size","createdAt","associatedContainers","actions"],
-      volumes: ["name","mountpoint","size","createdAt","associatedContainers","inUse","actions"],
+      volumes: ["name","mountpoint","size","createdAt","associatedContainers","actions"],
       stacks: ["name","status","network","ip","ports","update"],
       stackList: ["name","status","tags","containers","uptime","update"],
     },
@@ -249,6 +271,163 @@ function ChangePasswordForm({ username }: { username?: string }) {
         </button>
         {username && <span className="text-xs text-slate-400">当前账户：{username}</span>}
       </div>
+    </div>
+  );
+}
+
+/** 「用户」区块：18 位密码找回码管理（服务端仅存哈希，明文不可回显） */
+function RecoveryCodeForm() {
+  const [status, setStatus] = useState<RecoveryStatus | null>(null);
+  const [code, setCode] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      setStatus(await getRecoveryStatus());
+    } catch {
+      setStatus(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const submit = async () => {
+    setError(null);
+    setSuccess(null);
+    const fmtErr = validateRecoveryCode(code);
+    if (fmtErr) {
+      setError(fmtErr);
+      return;
+    }
+    if (!password) {
+      setError("请输入当前密码");
+      return;
+    }
+    setBusy(true);
+    try {
+      await setRecoveryCode(code, password);
+      setSuccess("找回码已更新，请妥善保存");
+      setCode("");
+      setPassword("");
+      await load();
+    } catch (e: any) {
+      setError(e?.message || "设置找回码失败");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const doClear = async () => {
+    setError(null);
+    setSuccess(null);
+    setBusy(true);
+    try {
+      await clearRecoveryCode();
+      setSuccess("已清除找回码");
+      setConfirmClear(false);
+      await load();
+    } catch (e: any) {
+      setError(e?.message || "清除失败");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleString("zh-CN") : "—");
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+        {status?.hasRecovery ? (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-green-50 text-green-700 rounded-full border border-green-100">
+            <ShieldCheck size={11} /> 已设置
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 text-amber-700 rounded-full border border-amber-100">
+            <ShieldAlert size={11} /> 未设置
+          </span>
+        )}
+        <span className="text-slate-400">设置时间：{fmt(status?.setAt ?? null)}</span>
+        <span className="text-slate-400">上次使用：{fmt(status?.lastUsedAt ?? null)}</span>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <FormField
+          label={`新找回码（${RECOVERY_LENGTH} 位）`}
+          required
+          hint="仅字母和数字，忽略大小写"
+        >
+          <div className="relative">
+            <Input
+              value={code}
+              onChange={(v) => setCode(sanitizeRecoveryInput(v))}
+              placeholder={`${RECOVERY_LENGTH} 位字母或数字`}
+              className="pr-12 font-mono tracking-wider"
+            />
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-slate-400 tabular-nums pointer-events-none">
+              {code.length}/{RECOVERY_LENGTH}
+            </span>
+          </div>
+        </FormField>
+        <FormField label="当前密码" required hint="敏感操作，需二次验证">
+          <Input
+            value={password}
+            onChange={setPassword}
+            type="password"
+            placeholder="••••••••"
+          />
+        </FormField>
+      </div>
+
+      {error && (
+        <div className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+          {error}
+        </div>
+      )}
+      {success && (
+        <div className="text-xs text-green-700 bg-green-50 border border-green-100 rounded-lg px-3 py-2">
+          {success}
+        </div>
+      )}
+
+      <div className="flex items-center gap-3">
+        <button
+          onClick={submit}
+          disabled={busy}
+          className="flex items-center gap-1.5 px-4 py-2 text-sm text-white bg-blue-500 rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-60"
+        >
+          {busy && <Loader2 size={14} className="animate-spin" />} 保存找回码
+        </button>
+        {status?.hasRecovery && (
+          <button
+            onClick={() => setConfirmClear(true)}
+            disabled={busy}
+            className="flex items-center gap-1.5 px-3 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors disabled:opacity-60"
+          >
+            <Trash2 size={14} /> 清除
+          </button>
+        )}
+        <span className="text-xs text-slate-400">
+          找回码仅以哈希存储，无法在此查看；忘记密码时可在登录页用它重置
+        </span>
+      </div>
+
+      <ConfirmDialog
+        open={confirmClear}
+        onClose={() => setConfirmClear(false)}
+        onConfirm={doClear}
+        title="清除找回码"
+        message="清除后将无法通过找回码重置密码，只能重新设置。确认清除？"
+        confirmText="清除"
+        danger
+        loading={busy}
+      />
     </div>
   );
 }
@@ -804,6 +983,21 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
       errors.push("用户：会话超时必须大于 0 分钟");
     }
 
+    // 活跃度配置校验
+    if (data.telemetry?.enabled && !data.telemetry.endpoint?.trim()) {
+      errors.push("活跃度：开启时上报地址不能为空");
+    }
+    if (data.telemetry?.endpoint?.trim()) {
+      try {
+        const u = new URL(data.telemetry.endpoint.trim());
+        if (u.protocol !== "http:" && u.protocol !== "https:") {
+          errors.push("活跃度：上报地址必须是 http(s):// 开头");
+        }
+      } catch {
+        errors.push("活跃度：上报地址格式不合法");
+      }
+    }
+
     // 通知配置校验
     if (data.notifications.webhookEnabled && !data.notifications.webhookUrl.trim()) {
       errors.push("通知配置：Webhook URL 不能为空");
@@ -865,6 +1059,7 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
     { key: "notifications", label: "通知配置", icon: <Bell size={16} /> },
     { key: "backup", label: "备份管理", icon: <Package size={16} /> },
     { key: "scheduler", label: "更新调度器", icon: <Clock size={16} /> },
+    { key: "activity", label: "活跃度", icon: <Activity size={16} /> },
     { key: "update", label: "系统更新", icon: <Download size={16} /> },
   ];
 
@@ -921,7 +1116,7 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
   };
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-full min-h-0">
       {/* Settings Sidebar */}
       <div className="w-56 border-r border-slate-200 bg-white p-3 flex-shrink-0">
         <div className="space-y-0.5">
@@ -946,8 +1141,8 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
       </div>
 
       {/* Settings Content */}
-      <div className="flex-1 flex flex-col min-w-0">
-        <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 flex flex-col min-w-0 min-h-0">
+        <div className="flex-1 min-h-0 overflow-y-auto p-6">
           {activeSection === "docker" && (
           <div className="max-w-3xl space-y-5">
             <div>
@@ -1556,6 +1751,10 @@ docker-compose version</code>
             <Card title="修改密码" icon={<KeyRound size={16} />}>
               <ChangePasswordForm username={currentUser?.username} />
             </Card>
+
+            <Card title="密码找回码" icon={<ShieldCheck size={16} />}>
+              <RecoveryCodeForm />
+            </Card>
           </div>
         )}
 
@@ -1596,7 +1795,6 @@ docker-compose version</code>
                   { key: "size", label: "大小" },
                   { key: "createdAt", label: "创建时间" },
                   { key: "associatedContainers", label: "关联容器" },
-                  { key: "inUse", label: "使用中" },
                   { key: "actions", label: "操作" },
                 ],
                 stackList: [
@@ -2057,6 +2255,23 @@ docker-compose version</code>
                 </div>
               </div>
             </Card>
+          </div>
+        )}
+
+        {activeSection === "activity" && (
+          <div className="max-w-2xl space-y-5">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-800 mb-1">活跃度</h2>
+              <p className="text-sm text-slate-500">设备标识、硬件指纹与上报配置（停用即不再发送任何数据）</p>
+            </div>
+
+            <ActivityPanel
+              telemetry={data.telemetry}
+              onPatch={async (patch) => { setData({ ...data, telemetry: { ...data.telemetry, ...patch } }); return true; }}
+              onAfterSave={async () => {
+                await handleSave();
+              }}
+            />
           </div>
         )}
 

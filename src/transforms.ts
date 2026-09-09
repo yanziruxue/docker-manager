@@ -106,25 +106,35 @@ export function transformContainers(raw: any[]): Container[] {
   });
 }
 
-/** 转换镜像列表 */
+/** 转换镜像列表：与 docker images 口径一致，每个标签一行（同 ID 多标签会重复出现） */
 export function transformImages(raw: any[]): DockerImage[] {
-  return raw.map((img) => {
-    const repoTag = img.RepoTags?.[0] || "<none>:<none>";
-    const [repository, tag] = repoTag.split(":");
+  const out: DockerImage[] = [];
+  for (const img of raw) {
     const fullSha = (img.Id || "").replace("sha256:", "");
-    const isDangling = !img.RepoTags || img.RepoTags.length === 0 || (repository === "<none>" && tag === "<none>");
-    return {
-      id: fullSha.slice(0, 12),
-      repository: repository || "<none>",
-      tag: tag || "<none>",
-      size: formatBytes(img.Size || 0),
-      createdAt: img.Created ? timeAgo(img.Created * 1000) : "",
-      associatedContainers: [],
-      associatedCount: img.Containers || 0,
-      isDangling,
-      sha256: fullSha,
-    };
-  });
+    const id = fullSha.slice(0, 12);
+    const size = formatBytes(img.Size || 0);
+    const createdAt = img.Created ? timeAgo(img.Created * 1000) : "";
+    const tags: string[] = img.RepoTags?.length ? img.RepoTags : ["<none>:<none>"];
+    for (const repoTag of tags) {
+      // 仓库名可能含 registry 端口/路径（如 docker.lms.run/postgres），从右侧切最后一个冒号
+      const idx = repoTag.lastIndexOf(":");
+      const repository = idx > 0 ? repoTag.slice(0, idx) : repoTag;
+      const tag = idx > 0 ? repoTag.slice(idx + 1) : "<none>";
+      const isDangling = repository === "<none>" && tag === "<none>";
+      out.push({
+        id,
+        repository,
+        tag,
+        size,
+        createdAt,
+        associatedContainers: [],
+        associatedCount: img.Containers || 0,
+        isDangling,
+        sha256: fullSha,
+      });
+    }
+  }
+  return out;
 }
 
 /** 转换数据卷列表 */
@@ -144,14 +154,17 @@ export function transformVolumes(raw: any): DockerVolume[] {
       mountpoint: v.Mountpoint || "",
       size: sizeStr,
       createdAt: v.CreatedAt || "",
-      associatedContainers: [],
+      // 后端 getVolumes 按容器 Mounts 回填的关联容器名（v1.15.3 起有值；此前恒为空数组）
+      associatedContainers: Array.isArray(v.UsedBy) ? v.UsedBy : [],
       labels: (v.Labels && Object.keys(v.Labels).length > 0)
         ? Object.entries(v.Labels).map(([k, val]) => ({ key: k, value: String(val) }))
         : undefined,
       options: (v.Options && Object.keys(v.Options).length > 0)
         ? Object.entries(v.Options).map(([k, val]) => ({ key: k, value: String(val) }))
         : undefined,
-      inUse: v.InUse !== false,
+      // Docker API 卷列表本身无 InUse 字段，由后端按容器 Mounts 判定后回填（v1.15.3）。
+      // 旧写法 `v.InUse !== false` 在字段缺失（undefined）时恒为 true，导致所有卷显示「使用中」、未关联计数恒 0
+      inUse: v.InUse === true,
     };
   });
 }

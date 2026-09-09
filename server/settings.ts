@@ -83,7 +83,7 @@ const DEFAULT_SETTINGS = {
   columnVisibility: {
     containers: ["icon","name","status","tags","ports","actions"],
     images: ["repository","tag","id","size","createdAt","associatedContainers","actions"],
-    volumes: ["name","mountpoint","size","createdAt","associatedContainers","inUse","actions"],
+    volumes: ["name","mountpoint","size","createdAt","associatedContainers","actions"],
     stackList: ["name","status","tags","containers","uptime","update"],
     stacks: ["name","status","network","ip","ports","update"],
   },
@@ -108,6 +108,15 @@ const DEFAULT_SETTINGS = {
       { content: "restart: ", insert: "service" },
       { content: "container_name: ", insert: "service" },
     ],
+  },
+  /**
+   * 安装量与活跃度遥测（系统设置 → 活跃度）：
+   * 仅上报 install / active 事件到统计服务端，不含聚合统计能力。
+   */
+  telemetry: {
+    enabled: true,
+    endpoint: "https://docker.yanziruxue.top",
+    collectHwFingerprint: true,
   },
 };
 

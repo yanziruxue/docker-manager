@@ -57,9 +57,9 @@ export function Volumes({ volumes, loading, error, engineId, defaultVisibleColum
     const space = typeof result.SpaceReclaimed === "number" ? result.SpaceReclaimed : 0;
     const lines: string[] = [];
     if (deleted.length === 0) {
-      lines.push("无未使用数据卷需要清理");
+      lines.push("无未关联数据卷需要清理");
     } else {
-      lines.push(`已删除 ${deleted.length} 个未使用数据卷：`);
+      lines.push(`已删除 ${deleted.length} 个未关联数据卷：`);
       for (const v of deleted) lines.push(`- ${v}`);
     }
     lines.push(`释放空间：${formatBytes(space)}`);
@@ -85,18 +85,18 @@ export function Volumes({ volumes, loading, error, engineId, defaultVisibleColum
     if (!engineId) return;
     try {
       const result = await pruneVolumesApi(engineId);
-      addOpLog({ action: "清理未使用数据卷", target: "全部未使用卷", status: "success", engineId });
-      showOutput({ title: "清理未使用数据卷", name: "全部未使用卷", output: formatVolumePrune(result) });
+      addOpLog({ action: "清理未关联数据卷", target: "全部未关联卷", status: "success", engineId });
+      showOutput({ title: "清理未关联数据卷", name: "全部未关联卷", output: formatVolumePrune(result) });
       setConfirmCleanUnused(false);
       onRefresh?.();
     } catch (e: any) {
-      addOpLog({ action: "清理未使用数据卷", target: "全部未使用卷", status: "failed", detail: e.message || "清理失败", engineId });
-      showOutput({ title: "清理未使用数据卷", name: "全部未使用卷", output: e.message || "清理失败", failed: true });
+      addOpLog({ action: "清理未关联数据卷", target: "全部未关联卷", status: "failed", detail: e.message || "清理失败", engineId });
+      showOutput({ title: "清理未关联数据卷", name: "全部未关联卷", output: e.message || "清理失败", failed: true });
       setConfirmCleanUnused(false);
     }
   };
 
-  type ColumnKey = "name" | "driver" | "mountpoint" | "size" | "associatedContainers" | "createdAt" | "inUse" | "actions";
+  type ColumnKey = "name" | "driver" | "mountpoint" | "size" | "associatedContainers" | "createdAt" | "actions";
   const allColumns: { key: ColumnKey; label: string }[] = [
     { key: "name", label: "卷名称" },
     { key: "driver", label: "驱动" },
@@ -104,7 +104,6 @@ export function Volumes({ volumes, loading, error, engineId, defaultVisibleColum
     { key: "size", label: "大小" },
     { key: "associatedContainers", label: "关联容器" },
     { key: "createdAt", label: "创建时间" },
-    { key: "inUse", label: "状态" },
     { key: "actions", label: "操作" },
   ];
 
@@ -200,7 +199,7 @@ export function Volumes({ volumes, loading, error, engineId, defaultVisibleColum
             </div>
             <div>
               <p className="text-2xl font-bold text-slate-700">{volumes.filter((v) => v.inUse).length}</p>
-              <p className="text-xs text-slate-400">使用中</p>
+              <p className="text-xs text-slate-400">已关联</p>
             </div>
           </div>
         </div>
@@ -211,7 +210,7 @@ export function Volumes({ volumes, loading, error, engineId, defaultVisibleColum
             </div>
             <div>
               <p className="text-2xl font-bold text-slate-700">{unusedCount}</p>
-              <p className="text-xs text-slate-400">未使用</p>
+              <p className="text-xs text-slate-400">未关联</p>
             </div>
           </div>
         </div>
@@ -246,8 +245,8 @@ export function Volumes({ volumes, loading, error, engineId, defaultVisibleColum
             className="px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 bg-white"
           >
             <option value="all">全部</option>
-            <option value="inuse">使用中</option>
-            <option value="unused">未使用</option>
+            <option value="inuse">已关联</option>
+            <option value="unused">未关联</option>
           </select>
           <span className="text-sm text-slate-400">{filtered.length} 个数据卷</span>
         </div>
@@ -286,7 +285,7 @@ export function Volumes({ volumes, loading, error, engineId, defaultVisibleColum
             onClick={() => setConfirmCleanUnused(true)}
             className="flex items-center gap-1.5 px-3 py-2 text-sm text-amber-600 border border-amber-200 rounded-lg hover:bg-amber-50 transition-colors"
           >
-            <AlertTriangle size={14} /> 清理未使用卷 ({unusedCount})
+            <AlertTriangle size={14} /> 清理未关联卷 ({unusedCount})
           </button>
           <button
             onClick={onRefresh}
@@ -314,7 +313,6 @@ export function Volumes({ volumes, loading, error, engineId, defaultVisibleColum
                 {visibleColumns.has("mountpoint") && <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-3 whitespace-nowrap">挂载点</th>}
                 {visibleColumns.has("size") && <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-3 whitespace-nowrap">大小</th>}
                 {visibleColumns.has("associatedContainers") && <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-3 whitespace-nowrap">关联容器</th>}
-                {visibleColumns.has("inUse") && <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-3 whitespace-nowrap">状态</th>}
                 {visibleColumns.has("createdAt") && <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-3 whitespace-nowrap">创建时间</th>}
                 {visibleColumns.has("actions") && <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-3 whitespace-nowrap">操作</th>}
               </tr>
@@ -371,19 +369,6 @@ export function Volumes({ volumes, loading, error, engineId, defaultVisibleColum
                       </div>
                     </td>
                   )}
-                  {visibleColumns.has("inUse") && (
-                    <td className="px-3 py-3 whitespace-nowrap">
-                      {volume.inUse ? (
-                        <span className="flex items-center gap-1 text-xs text-green-600">
-                          <CheckCircle2 size={12} /> 使用中
-                        </span>
-                      ) : (
-                        <span className="flex items-center gap-1 text-xs text-amber-500">
-                          <AlertTriangle size={12} /> 未使用
-                        </span>
-                      )}
-                    </td>
-                  )}
                   {visibleColumns.has("createdAt") && (
                     <td className="px-3 py-3 whitespace-nowrap">
                       <span className="text-xs text-slate-500">{volume.createdAt || "—"}</span>
@@ -398,7 +383,7 @@ export function Volumes({ volumes, loading, error, engineId, defaultVisibleColum
                             { label: "导出", icon: <Download size={14} />, onClick: () => {} },
                             { separator: true },
                             {
-                              label: volume.inUse ? "删除（使用中）" : "删除",
+                              label: volume.inUse ? "删除（已关联）" : "删除",
                               icon: <Trash2 size={14} />,
                               danger: true,
                               disabled: volume.inUse,
@@ -454,7 +439,7 @@ export function Volumes({ volumes, loading, error, engineId, defaultVisibleColum
               <div className="p-3 bg-slate-50 rounded-lg">
                 <p className="text-xs text-slate-400 mb-1">状态</p>
                 <p className={`text-sm font-medium ${detailVolume.inUse ? "text-green-600" : "text-amber-500"}`}>
-                  {detailVolume.inUse ? "使用中" : "未使用"}
+                  {detailVolume.inUse ? "已关联" : "未关联"}
                 </p>
               </div>
             </div>
@@ -528,7 +513,7 @@ export function Volumes({ volumes, loading, error, engineId, defaultVisibleColum
         onClose={() => { setConfirmDelete(null); setDeleteError(null); }}
         onConfirm={() => { if (confirmDelete) { handleRemoveVolume(confirmDelete); } }}
         title="删除数据卷"
-        message="确定要删除此数据卷吗？删除后数据将不可恢复。仅未使用的卷可以删除。"
+        message="确定要删除此数据卷吗？删除后数据将不可恢复。仅未关联的卷可以删除。"
         confirmText="删除"
         danger
         loading={deleting}
@@ -540,13 +525,13 @@ export function Volumes({ volumes, loading, error, engineId, defaultVisibleColum
         open={confirmCleanUnused}
         onClose={() => setConfirmCleanUnused(false)}
         onConfirm={() => { handlePruneVolumes(); setConfirmCleanUnused(false); }}
-        title="清理未使用数据卷"
-        message={`将删除 ${unusedCount} 个未使用的数据卷。此操作不可撤销。`}
+        title="清理未关联数据卷"
+        message={`将删除 ${unusedCount} 个未关联的数据卷。此操作不可撤销。`}
         confirmText="清理"
         danger
       />
 
-      {/* 命令输出弹窗（清理未使用数据卷的 tail 文本） */}
+      {/* 命令输出弹窗（清理未关联数据卷的 tail 文本） */}
       <CmdOutputModal data={cmdOutput} onClose={closeOutput} />
 
       {/* Create Volume Modal */}
