@@ -484,8 +484,9 @@ export default function App() {
     return <LoginPage onDone={handleAuthDone} />;
   }
 
+  // relative：为内部 absolute 元素建立包含块，防止其逃逸到初始包含块撑高文档
   return (
-    <div className="flex h-screen bg-slate-50 overflow-hidden">
+    <div className="relative flex h-screen bg-slate-50 overflow-hidden">
       <Sidebar
         active={page}
         onNavigate={handleNavigate}

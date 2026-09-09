@@ -17,6 +17,13 @@ body,
     sans-serif;
 }
 
+/* 固定外壳：禁止文档级滚动，避免第二根滚动条与视口下方空白。
+   应用为满屏布局（外壳 h-screen + overflow-hidden），页面内部各自滚动。 */
+html,
+body {
+  overflow: hidden;
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 8px;
