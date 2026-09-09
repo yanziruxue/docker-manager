@@ -843,7 +843,8 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
                       title={L("Click status to view container sub-table", "点击状态列查看容器子表")}
                       className="inline-flex items-center rounded-md ring-1 ring-transparent hover:ring-blue-300 hover:bg-blue-50 px-1.5 py-0.5 transition-colors"
                     >
-                      <StatusBadge status={stack.status} />
+                      {/* 操作后台执行期间优先显示「执行中」，完成后自动回到真实状态 */}
+                      <StatusBadge status={operatingStacks.has(stack.name) ? "operating" : stack.status} />
                     </button>
                   </td>
                   )}
@@ -985,7 +986,7 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
                             <span className="text-xs font-mono text-slate-400">:{container.tag}</span>
                           </td>
                         )}
-                        {visibleColumns.has("status") && <td className="px-3 py-2.5"><StatusBadge status={container.status} /></td>}
+                        {visibleColumns.has("status") && <td className="px-3 py-2.5"><StatusBadge status={operatingStacks.has(container.name) ? "operating" : container.status} /></td>}
                         {visibleColumns.has("network") && <td className="px-3 py-2.5"><span className="text-xs text-slate-500">{container.network}</span></td>}
                         {visibleColumns.has("ip") && <td className="px-3 py-2.5"><span className="text-xs font-mono text-slate-500">{container.ip}</span></td>}
                         {visibleColumns.has("ports") && <td className="px-3 py-2.5"><span className="text-xs font-mono text-slate-500">{container.ports}</span></td>}

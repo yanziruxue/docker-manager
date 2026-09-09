@@ -12,13 +12,15 @@ const statusConfig: Record<string, { color: string; label: string; dot: string }
   updating: { color: "bg-purple-100 text-purple-700 border-purple-200", label: "更新中", dot: "bg-purple-500" },
   partial: { color: "bg-amber-100 text-amber-700 border-amber-200", label: "部分运行", dot: "bg-amber-500" },
   error: { color: "bg-red-100 text-red-700 border-red-200", label: "错误", dot: "bg-red-500" },
+  // 操作正在后台执行（compose up/down/pull/restart/build、备份等）
+  operating: { color: "bg-blue-100 text-blue-700 border-blue-200", label: "执行中", dot: "bg-blue-500" },
 };
 
 export function StatusBadge({ status }: BadgeProps) {
   const config = statusConfig[status] || statusConfig.stopped;
   return (
     <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium border ${config.color}`}>
-      <span className={`w-1.5 h-1.5 rounded-full ${config.dot} ${status === "running" || status === "updating" || status === "restarting" ? "animate-pulse" : ""}`} />
+      <span className={`w-1.5 h-1.5 rounded-full ${config.dot} ${status === "running" || status === "updating" || status === "restarting" || status === "operating" ? "animate-pulse" : ""}`} />
       {config.label}
     </span>
   );

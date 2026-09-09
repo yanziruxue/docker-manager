@@ -1837,7 +1837,7 @@ docker-compose version</code>
                       return (
                         <label
                           key={col.key}
-                          className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer select-none transition-colors ${
+                          className={`relative flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer select-none transition-colors ${
                             checked
                               ? "bg-blue-50 border-blue-200 text-blue-700"
                               : "bg-white border-slate-200 text-slate-500 hover:border-slate-300"
