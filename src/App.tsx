@@ -25,6 +25,7 @@ import {
   getAuthInitStatus,
   getMe,
   logout,
+  ApiError,
   type AuthUser,
 } from "./api";
 import { SetupWizard } from "./components/auth/SetupWizard";
@@ -104,6 +105,28 @@ export default function App() {
     window.addEventListener("auth:unauthorized", onUnauth);
     return () => window.removeEventListener("auth:unauthorized", onUnauth);
   }, []);
+
+  // 会话心跳：会话为「绝对过期」，服务端不因请求而续期。
+  // 每分钟探一次 /api/auth/me，即使页面静止、无任何业务请求，超时后也会自动回到登录页。
+  useEffect(() => {
+    if (authState !== "authed") return;
+    let stopped = false;
+    const id = setInterval(async () => {
+      try {
+        await getMe();
+      } catch (e) {
+        // 仅明确的 401（会话已超时）才登出；网络抖动 / 后端重启不误判
+        if (!stopped && e instanceof ApiError && e.statusCode === 401) {
+          setMe(null);
+          setAuthState("login");
+        }
+      }
+    }, 60 * 1000);
+    return () => {
+      stopped = true;
+      clearInterval(id);
+    };
+  }, [authState]);
 
   const handleAuthDone = (user: AuthUser) => {
     setMe(user);

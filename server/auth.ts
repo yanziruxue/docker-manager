@@ -9,20 +9,20 @@ import { dataPath } from "./paths.js";
 /**
  * 会话鉴权（单管理员模式）。
  * - 会话存内存 Map，键为 token 的 SHA-256 摘要（内存与落盘均不出现明文 token），
- *   并持久化到 <data>/sessions.json —— 服务重启（含 OTA 重启）后自动恢复，无需重新登录。
+ *   并持久化到 <data>/sessions.json —— 服务重启（含 OTA 重启）后按**原到期时间**恢复，
+ *   不会因重启而重置计时。
  * - Cookie httpOnly + sameSite=lax，降低 XSS 窃取与 CSRF 风险。
  * - TTL 取自 settings.user.sessionTimeout（分钟），默认 30。
- * - **滑动过期**：命中有效会话即续期，使其表现为「空闲超时」——
- *   只要 TTL 分钟内有任意请求，就一直保持登录；停止访问满 TTL 分钟后才过期。
+ * - **绝对过期**：会话在创建时刻即固定 expiresAt = 创建时间 + TTL，期间任何请求都不延长。
+ *   无论有无请求，只要登录时长超过设定值就失效，需重新登录。
  */
 
 export const SESSION_COOKIE = "docker-manager-yanzi_session";
 
 interface Session {
   userId: string;
+  /** 绝对到期时间（创建时固定，不随请求延长） */
   expiresAt: number;
-  /** 上次重下发 Cookie 的时间（节流用） */
-  cookieAt?: number;
 }
 
 /** 键为 token 的 SHA-256 摘要 */
@@ -30,11 +30,6 @@ const sessions = new Map<string, Session>();
 
 /** 会话落盘文件（含 token 摘要，不含明文 token） */
 const SESSIONS_FILE = dataPath("sessions.json");
-/** 落盘节流：滑动续期很频繁，避免每次请求都写磁盘 */
-const PERSIST_INTERVAL_MS = 30 * 1000;
-/** Cookie 重下发节流：避免每个 API 响应都带 Set-Cookie */
-const COOKIE_REFRESH_MS = 60 * 1000;
-let lastPersistAt = 0;
 
 function tokenHash(raw: string): string {
   return crypto.createHash("sha256").update(raw).digest("hex");
@@ -56,13 +51,13 @@ function sessionTtlMs(): number {
   return ttl;
 }
 
-/** 设置页保存后调用：使 TTL 缓存立即失效（改「会话超时」后无需重启即生效） */
+/** 设置页保存后调用：使 TTL 缓存立即失效（改「会话超时」后无需重启即生效，对新登录的会话生效） */
 export function invalidateSessionTtlCache(): void {
   ttlCacheMs = 0;
   ttlCacheAt = 0;
 }
 
-// ---------- 持久化（跨重启恢复） ----------
+// ---------- 持久化（跨重启按原到期时间恢复） ----------
 
 function loadSessions(): void {
   try {
@@ -83,26 +78,21 @@ function loadSessions(): void {
       sessions.set(item.tokenHash, {
         userId: item.userId,
         expiresAt: item.expiresAt,
-        cookieAt: item.cookieAt,
       });
       alive++;
     }
-    if (alive) console.log(`[auth] 已恢复 ${alive} 个会话（跨重启保持登录）`);
+    if (alive) console.log(`[auth] 已恢复 ${alive} 个会话（按原到期时间继续计时）`);
   } catch {
     /* 文件损坏则从空开始 */
   }
 }
 
-function persistSessions(force = false): void {
-  const now = Date.now();
-  if (!force && now - lastPersistAt < PERSIST_INTERVAL_MS) return;
-  lastPersistAt = now;
+function persistSessions(): void {
   try {
     const arr = [...sessions.entries()].map(([tokenHash, s]) => ({
       tokenHash,
       userId: s.userId,
       expiresAt: s.expiresAt,
-      cookieAt: s.cookieAt,
     }));
     fs.writeFileSync(SESSIONS_FILE, JSON.stringify({ sessions: arr }, null, 2), "utf-8");
   } catch {
@@ -132,7 +122,7 @@ function parseCookies(req: CookieCarrier): Record<string, string> {
 
 /**
  * 当前会话用户（无效/过期返回 null）。
- * 命中有效会话时滑动续期（空闲超时语义），并节流写盘。
+ * 绝对过期：仅判断 expiresAt，命中有效会话也**不续期**。
  */
 export function getSessionUser(req: CookieCarrier): { id: string; username: string; role: string } | null {
   const raw = parseCookies(req)[SESSION_COOKIE];
@@ -140,37 +130,32 @@ export function getSessionUser(req: CookieCarrier): { id: string; username: stri
   const key = tokenHash(raw);
   const s = sessions.get(key);
   if (!s) return null;
-  const now = Date.now();
-  if (s.expiresAt < now) {
+  if (s.expiresAt <= Date.now()) {
     sessions.delete(key);
-    persistSessions(true);
+    persistSessions();
     return null;
   }
   const user = findUserById(s.userId);
   if (!user) {
     sessions.delete(key);
-    persistSessions(true);
+    persistSessions();
     return null;
   }
-  // 滑动续期：只要在 TTL 内活动，就持续保持登录
-  s.expiresAt = now + sessionTtlMs();
-  persistSessions();
   return { id: user.id, username: user.username, role: user.role };
 }
 
-/** 创建会话并下发 Cookie */
+/** 创建会话并下发 Cookie（expiresAt 与 Cookie maxAge 均为绝对到期时间） */
 export function createSession(res: Response, userId: string): void {
   const token = crypto.randomBytes(32).toString("hex");
   const ttl = sessionTtlMs();
-  const now = Date.now();
-  sessions.set(tokenHash(token), { userId, expiresAt: now + ttl, cookieAt: now });
+  sessions.set(tokenHash(token), { userId, expiresAt: Date.now() + ttl });
   res.cookie(SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
     maxAge: ttl,
     path: "/",
   });
-  persistSessions(true);
+  persistSessions();
 }
 
 /** 销毁会话（登出） */
@@ -178,33 +163,17 @@ export function destroySession(req: Request, res: Response): void {
   const raw = parseCookies(req)[SESSION_COOKIE];
   if (raw) {
     sessions.delete(tokenHash(raw));
-    persistSessions(true);
+    persistSessions();
   }
   res.clearCookie(SESSION_COOKIE, { path: "/" });
 }
 
-/** 鉴权中间件：未登录返回 401；命中会话时同步刷新 Cookie 有效期 */
+/** 鉴权中间件：未登录/已超时返回 401（不做任何续期） */
 export function requireAuth(req: Request, res: Response, next: NextFunction): void {
   const user = getSessionUser(req);
   if (!user) {
     res.status(401).json({ success: false, error: "未登录或会话已过期" });
     return;
-  }
-  const raw = parseCookies(req)[SESSION_COOKIE];
-  const s = raw ? sessions.get(tokenHash(raw)) : undefined;
-  if (raw && s) {
-    const now = Date.now();
-    // 节流重下发 Cookie，使其 maxAge 与服务端滑动过期保持同步
-    if (!s.cookieAt || now - s.cookieAt > COOKIE_REFRESH_MS) {
-      s.cookieAt = now;
-      res.cookie(SESSION_COOKIE, raw, {
-        httpOnly: true,
-        sameSite: "lax",
-        maxAge: sessionTtlMs(),
-        path: "/",
-      });
-      persistSessions(true);
-    }
   }
   (req as any).user = user;
   next();
