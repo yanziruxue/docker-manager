@@ -84,7 +84,7 @@ import {
   hasRecoveryCode,
   RECOVERY_CODE_LENGTH,
 } from "./users.js";
-import { createSession, getSessionUser, destroySession, requireAuth } from "./auth.js";
+import { createSession, getSessionUser, destroySession, requireAuth, invalidateSessionTtlCache } from "./auth.js";
 
 // 尝试加载嵌入式前端数据（仅二进制构建时可用）
 // BUILD_BINARY 由 esbuild define 注入，仅二进制构建时为 true
@@ -998,6 +998,8 @@ app.get("/api/settings", (_req, res) => {
 /** 保存系统设置 */
 app.put("/api/settings", (req, res) => {
   const settings = saveSettings(req.body);
+  // 「会话超时」等设置变更后使 TTL 缓存立即失效，无需重启即生效
+  invalidateSessionTtlCache();
   // 动态更新日志级别
   if (settings?.docker?.logLevel) {
     setLogLevel(settings.docker.logLevel);
