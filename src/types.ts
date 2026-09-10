@@ -355,8 +355,45 @@ export interface PathFavorite {
 
 export interface UpdateSchedulerConfig {
   enabled: boolean;
-  checkFrequency: string; // e.g. "0 3 * * *"
+  /** 检查频率模式：每天 / 每周 / 每月（不使用 Cron 表达式） */
+  mode: "daily" | "weekly" | "monthly";
+  /** 检查时刻（24 小时制） */
+  hour: number;
+  minute: number;
+  /** 每周模式下的星期几：0=周日 … 6=周六 */
+  dayOfWeek: number;
+  /** 每月模式下的日期：1-31 */
+  dayOfMonth: number;
+  /** 检查到更新后是否自动拉取镜像 */
   autoPull: boolean;
+}
+
+/** 单个引擎的检查结果（更新调度器状态用） */
+export interface SchedulerEngineResult {
+  engineId: string;
+  name: string;
+  checked: number;
+  updates: number;
+  skipped?: boolean;
+  error?: string;
+}
+
+/** 最近一次检查汇总 */
+export interface SchedulerLastResult {
+  checked: number;
+  updates: number;
+  byEngine: SchedulerEngineResult[];
+  at: string;
+}
+
+/** 更新调度器实时状态 */
+export interface SchedulerStatus {
+  enabled: boolean;
+  running: boolean;
+  lastCheck: string | null;
+  lastResult: SchedulerLastResult | null;
+  nextCheck: string | null;
+  config: UpdateSchedulerConfig;
 }
 
 export interface UserConfig {

@@ -259,7 +259,6 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "dangling" | "used" | "unused">("all");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
-  const [confirmCleanDangling, setConfirmCleanDangling] = useState(false);
   const [confirmCleanUnused, setConfirmCleanUnused] = useState(false);
   const [showColumnPicker, setShowColumnPicker] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -409,25 +408,6 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
       setForceDeleteAvailable(e instanceof ApiError && e.code === "IMAGE_REFERENCED");
     } finally {
       setDeleting(false);
-    }
-  };
-
-  const handlePruneDangling = async () => {
-    if (!engineId) return;
-    setPruning(true);
-    setPruneError(null);
-    try {
-      const result = await pruneImagesApi(engineId);
-      addOpLog({ action: "清理悬空镜像", target: "全部悬空镜像", status: "success", engineId });
-      showOutput({ title: "清理悬空镜像", name: "全部悬空镜像", output: formatImagePrune(result) });
-      setConfirmCleanDangling(false);
-      onRefresh?.();
-    } catch (e: any) {
-      addOpLog({ action: "清理悬空镜像", target: "全部悬空镜像", status: "failed", detail: e.message || "清理失败", engineId });
-      showOutput({ title: "清理悬空镜像", name: "全部悬空镜像", output: e.message || "清理失败", failed: true });
-      setConfirmCleanDangling(false);
-    } finally {
-      setPruning(false);
     }
   };
 
@@ -629,13 +609,6 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
             )}
           </div>
           <button
-            onClick={() => setConfirmCleanDangling(true)}
-            disabled={danglingCount === 0}
-            className="flex items-center gap-1.5 px-3 py-2 text-sm text-white bg-amber-500 rounded-lg hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Trash2 size={14} /> 清理悬空 ({danglingCount})
-          </button>
-          <button
             onClick={() => setConfirmCleanUnused(true)}
             disabled={unusedCount === 0}
             className="flex items-center gap-1.5 px-3 py-2 text-sm text-white bg-red-500 rounded-lg hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -813,18 +786,6 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
       />
 
       <ConfirmDialog
-        open={confirmCleanDangling}
-        onClose={() => { setConfirmCleanDangling(false); setPruneError(null); }}
-        onConfirm={() => { handlePruneDangling(); }}
-        title="清理悬空镜像"
-        message={`将删除 ${danglingCount} 个悬空镜像，释放约 ${danglingSize.toFixed(0)} MB 空间。此操作不可撤销。`}
-        confirmText="清理"
-        danger
-        loading={pruning}
-        errorMessage={pruneError}
-      />
-
-      <ConfirmDialog
         open={confirmCleanUnused}
         onClose={() => { setConfirmCleanUnused(false); setPruneError(null); }}
         onConfirm={() => { handlePruneUnused(); }}
@@ -836,7 +797,7 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
         errorMessage={pruneError}
       />
 
-      {/* 命令输出弹窗（清理悬空镜像的 tail 文本） */}
+      {/* 命令输出弹窗（清理镜像的 tail 文本） */}
       <CmdOutputModal data={cmdOutput} onClose={closeOutput} />
 
       {/* ===== 镜像拉取弹窗 ===== */}

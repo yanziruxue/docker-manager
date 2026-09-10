@@ -64,8 +64,18 @@ const DEFAULT_SETTINGS = {
     { id: "p4", name: "系统配置", path: "/mnt/user/system" },
   ],
   updateScheduler: {
-    enabled: false,
-    checkFrequency: "0 3 * * *",
+    /** 是否启用全局自动更新检查（默认开启） */
+    enabled: true,
+    /** 检查频率模式：每天 / 每周 / 每月（不使用 Cron 表达式） */
+    mode: "daily", // "daily" | "weekly" | "monthly"
+    /** 检查时刻（24 小时制） */
+    hour: 1,
+    minute: 0,
+    /** 每周模式下的星期几：0=周日 … 6=周六，默认周一 */
+    dayOfWeek: 1,
+    /** 每月模式下的日期：1-31，默认 1 号 */
+    dayOfMonth: 1,
+    /** 检查到更新后是否自动拉取镜像 */
     autoPull: false,
   },
   user: {
@@ -84,7 +94,7 @@ const DEFAULT_SETTINGS = {
     containers: ["icon","name","status","tags","ports","actions"],
     images: ["repository","tag","id","size","createdAt","associatedContainers","actions"],
     volumes: ["name","mountpoint","size","createdAt","associatedContainers","actions"],
-    stackList: ["name","status","tags","containers","uptime","update"],
+    stackList: ["icon","name","status","tags","containers","uptime","update"],
     stacks: ["name","status","network","ip","ports","update"],
   },
   /** 全局彩色标签库（设置页「标签管理」维护，可挂到堆栈 LABELS 服务条目） */
@@ -154,6 +164,20 @@ export function getSettings(): any {
       if ((parsed as any).defaultsVersion !== DEFAULTS_VERSION) {
         mergedColumns = { ...DEFAULT_SETTINGS.columnVisibility };
         mergedDocker.menuLanguage = "zh";
+      }
+      // 迁移：旧版 updateScheduler 用 checkFrequency(Cron) 表达频率，新版本改用 mode/hour/minute/dayOfWeek/dayOfMonth
+      let updateScheduler = { ...DEFAULT_SETTINGS.updateScheduler, ...(parsed?.updateScheduler || {}) };
+      if ((parsed?.updateScheduler as any)?.checkFrequency && typeof (parsed.updateScheduler as any).checkFrequency === "string") {
+        const old = parsed.updateScheduler as any;
+        updateScheduler = {
+          enabled: !!old.enabled,
+          mode: "daily",
+          hour: 3,
+          minute: 0,
+          dayOfWeek: 1,
+          dayOfMonth: 1,
+          autoPull: !!old.autoPull,
+        };
       }
       return {
         ...DEFAULT_SETTINGS,

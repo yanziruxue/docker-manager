@@ -7,6 +7,11 @@ interface ModalProps {
   title?: React.ReactNode;
   children: React.ReactNode;
   size?: "sm" | "md" | "lg" | "xl" | "full";
+  /**
+   * 内容区容器样式。默认带 padding 且自身滚动；
+   * 需要内部 flex 布局（如多页签 + 各自滚动）时传 "flex-1 min-h-0 flex flex-col overflow-hidden"。
+   */
+  bodyClassName?: string;
   footer?: React.ReactNode;
   /**
    * 是否允许点击遮罩 / ESC 关闭。
@@ -24,7 +29,7 @@ const sizeMap = {
   full: "max-w-[95vw] h-[90vh]",
 };
 
-export function Modal({ open, onClose, title, children, size = "md", footer, dismissable = false }: ModalProps) {
+export function Modal({ open, onClose, title, children, size = "md", bodyClassName, footer, dismissable = false }: ModalProps) {
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
       // dismissable 为 false 时屏蔽 ESC 关闭，防止误触丢失编辑内容
@@ -59,7 +64,7 @@ export function Modal({ open, onClose, title, children, size = "md", footer, dis
             </button>
           </div>
         )}
-        <div className="flex-1 overflow-y-auto px-6 py-4">{children}</div>
+        <div className={bodyClassName ?? "flex-1 overflow-y-auto px-6 py-4"}>{children}</div>
         {footer && (
           <div className="flex items-center justify-end gap-3 px-6 py-3 border-t border-slate-100 bg-slate-50 rounded-b-xl">
             {footer}

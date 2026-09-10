@@ -1,5 +1,4 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
-import { createPortal } from "react-dom";
 import {
   Play,
   Square,
@@ -316,8 +315,9 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
   const [sortKey, setSortKey] = useState<"name" | "status" | "tags" | "containers">("name");
   const [sortDir, setSortDir] = useState<1 | -1>(1);
   // 堆栈管理页 列显隐（来自系统设置 → 列显隐 → 堆栈管理）：控制主页主表格列
-  type StackColumnKey = "name" | "status" | "tags" | "containers" | "uptime" | "update";
+  type StackColumnKey = "icon" | "name" | "status" | "tags" | "containers" | "uptime" | "update";
   const allStackColumns: { key: StackColumnKey; label: string }[] = [
+    { key: "icon", label: "图标" },
     { key: "name", label: "堆栈名称" },
     { key: "status", label: "状态" },
     { key: "tags", label: "标签" },
@@ -795,11 +795,12 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
                   {selected.size === filtered.length && filtered.length > 0 ? <CheckSquare size={16} /> : <SquareIcon size={16} />}
                 </button>
               </th>
+              {visibleStackColumns.has("icon") && <th className="text-center text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3 w-14">图标</th>}
               {visibleStackColumns.has("name") && <SortableTh label="堆栈名称" sortKey={sortKey} dir={sortDir} sortId="name" onSort={toggleSort} />}
-              {visibleStackColumns.has("status") && <SortableTh label="状态" sortKey={sortKey} dir={sortDir} sortId="status" onSort={toggleSort} />}
-              {visibleStackColumns.has("tags") && <SortableTh label="标签" sortKey={sortKey} dir={sortDir} sortId="tags" onSort={toggleSort} />}
+              {visibleStackColumns.has("status") && <SortableTh label="状态" align="center" sortKey={sortKey} dir={sortDir} sortId="status" onSort={toggleSort} />}
+              {visibleStackColumns.has("tags") && <SortableTh label="标签" align="center" sortKey={sortKey} dir={sortDir} sortId="tags" onSort={toggleSort} />}
               {visibleStackColumns.has("containers") && <SortableTh label="容器" align="center" sortKey={sortKey} dir={sortDir} sortId="containers" onSort={toggleSort} />}
-              {visibleStackColumns.has("uptime") && <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3">运行时长</th>}
+              {visibleStackColumns.has("uptime") && <th className="text-center text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3">运行时长</th>}
               {visibleStackColumns.has("update") && <th className="text-center text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3">更新</th>}
             </tr>
           </thead>
@@ -815,45 +816,53 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
                       {selected.has(stack.id) ? <CheckSquare size={16} className="text-blue-500" /> : <SquareIcon size={16} />}
                     </button>
                   </td>
+                  {visibleStackColumns.has("icon") && (
+                    <td className="px-3 py-3">
+                      <div className="flex justify-center">
+                        <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center overflow-hidden flex-shrink-0">
+                          {stack.icon ? <img src={stack.icon} alt="" className="w-7 h-7 rounded" /> : <Layers size={16} className="text-slate-400" />}
+                        </div>
+                      </div>
+                    </td>
+                  )}
                   {visibleStackColumns.has("name") && (
                   <td className="px-3 py-3">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center overflow-hidden flex-shrink-0">
-                        {stack.icon ? <img src={stack.icon} alt="" className="w-7 h-7 rounded" /> : <Layers size={16} className="text-slate-400" />}
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-sm font-medium text-slate-700">{stack.name}</span>
+                        {stack.locked && <Lock size={12} className="text-amber-500" />}
+                        {stack.isIndirect && <Tag text="间接" color="amber" />}
+                        {stack.isGitSource && <GitBranch size={12} className="text-slate-400" />}
+                        {stack.hasBuild && <Tag text="Build" color="purple" />}
+                        {stack.settings.autoUpdateEnabled && <Bell size={12} className="text-blue-400" />}
+                        {!stack.settings.visible && <EyeOff size={12} className="text-slate-400" />}
                       </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-sm font-medium text-slate-700">{stack.name}</span>
-                          {stack.locked && <Lock size={12} className="text-amber-500" />}
-                          {stack.isIndirect && <Tag text="间接" color="amber" />}
-                          {stack.isGitSource && <GitBranch size={12} className="text-slate-400" />}
-                          {stack.hasBuild && <Tag text="Build" color="purple" />}
-                          {stack.settings.autoUpdateEnabled && <Bell size={12} className="text-blue-400" />}
-                          {!stack.settings.visible && <EyeOff size={12} className="text-slate-400" />}
-                        </div>
-                        <span className="text-xs text-slate-400 truncate block">{stack.description}</span>
-                      </div>
+                      <span className="text-xs text-slate-400 truncate block">{stack.description}</span>
                     </div>
                   </td>
                   )}
                   {visibleStackColumns.has("status") && (
                   <td className="px-3 py-3">
-                    <button
-                      onClick={() => setContainersModal(stack)}
-                      title={L("Click status to view container sub-table", "点击状态列查看容器子表")}
-                      className="inline-flex items-center rounded-md ring-1 ring-transparent hover:ring-blue-300 hover:bg-blue-50 px-1.5 py-0.5 transition-colors"
-                    >
-                      {/* 操作后台执行期间优先显示「执行中」，完成后自动回到真实状态 */}
-                      <StatusBadge status={operatingStacks.has(stack.name) ? "operating" : stack.status} />
-                    </button>
+                    <div className="flex justify-center">
+                      <button
+                        onClick={() => setContainersModal(stack)}
+                        title={L("Click status to view container sub-table", "点击状态列查看容器子表")}
+                        className="inline-flex items-center rounded-md ring-1 ring-transparent hover:ring-blue-300 hover:bg-blue-50 px-1.5 py-0.5 transition-colors"
+                      >
+                        {/* 操作后台执行期间优先显示「执行中」，完成后自动回到真实状态 */}
+                        <StatusBadge status={operatingStacks.has(stack.name) ? "operating" : stack.status} />
+                      </button>
+                    </div>
                   </td>
                   )}
                   {visibleStackColumns.has("tags") && (
                   <td className="px-3 py-3">
-                    {(() => {
-                      const st = collectStackTags(stack);
-                      return st.length > 0 ? <TagGroup tags={st} max={2} /> : <span className="text-xs text-slate-300">—</span>;
-                    })()}
+                    <div className="flex justify-center">
+                      {(() => {
+                        const st = collectStackTags(stack);
+                        return st.length > 0 ? <TagGroup tags={st} max={2} /> : <span className="text-xs text-slate-300">—</span>;
+                      })()}
+                    </div>
                   </td>
                   )}
                   {visibleStackColumns.has("containers") && (
@@ -862,7 +871,7 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
                   </td>
                   )}
                   {visibleStackColumns.has("uptime") && (
-                  <td className="px-3 py-3"><span className="text-sm text-slate-500">{stack.uptime}</span></td>
+                  <td className="px-3 py-3 text-center"><span className="text-sm text-slate-500">{stack.uptime}</span></td>
                   )}
                   {visibleStackColumns.has("update") && (
                   <td className="px-3 py-3 text-center">
@@ -1350,9 +1359,15 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
     setEnvContent(lines.join("\n"));
   };
 
-  return createPortal(
-    <div className="fixed inset-0 z-[1000] bg-black/40 flex flex-col">
-      <div className="modal-content bg-white rounded-t-xl shadow-2xl w-full max-w-[90vw] h-[90vh] mx-auto mt-auto flex flex-col">
+  // 居中弹窗（与容器详情一致）；bodyClassName 让内部保持 flex 布局
+  return (
+    <Modal
+      open={true}
+      onClose={onClose}
+      size="full"
+      dismissable
+      bodyClassName="flex-1 min-h-0 flex flex-col overflow-hidden"
+    >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-3 border-b border-slate-200">
           <div className="flex items-center gap-3">
@@ -1779,7 +1794,7 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
         </div>
 
         {/* Footer status bar (Unraid style) */}
-        <div className="flex items-center justify-between px-6 py-2.5 border-t border-slate-200 bg-slate-50">
+        <div className="flex items-center justify-between px-6 py-2.5 border-t border-slate-200 bg-slate-50 rounded-b-xl">
           <div className="flex items-center gap-5 text-xs min-w-0">
             <span className="flex items-center gap-1.5 flex-shrink-0">
               <span className="text-slate-400">PROJECT DIR</span>
@@ -1882,9 +1897,7 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
             </div>
           </div>
         </Modal>
-      </div>
-    </div>,
-    document.body
+    </Modal>
   );
 }
 

@@ -54,6 +54,7 @@ import {
   detectComposeModes,
 } from "./docker.js";
 import { getSettings, saveSettings } from "./settings.js";
+import { startUpdateScheduler, getSchedulerStatus, runSchedulerCheckNow } from "./scheduler.js";
 import { readDaemonConfigInfo, writeDaemonConfig, restartDockerService, refreshPrivileges } from "./daemon-config.js";
 import { CURRENT_VERSION, getInstallDir, checkForUpdate, performUpdate, performUpdateFromUpload, getUpdateState, getUpdateDir, markUpdateError, saveUploadPackage, getPendingUpload, getPendingUploadPath, schedulePendingExpiry, discardPendingUpload, cancelPendingExpiry } from "./updater.js";
 import { COMPOSE_DIR } from "./paths.js";
@@ -1008,6 +1009,21 @@ app.put("/api/settings", (req, res) => {
 /** 获取当前日志级别（运行时） */
 app.get("/api/settings/log-level", (_req, res) => {
   res.json({ success: true, data: { logLevel: getLogLevel() } });
+});
+
+/** 更新调度器状态（最后一次检查时间 / 下次检查时间 / 统计） */
+app.get("/api/update-scheduler/status", (_req, res) => {
+  res.json({ success: true, data: getSchedulerStatus() });
+});
+
+/** 立即触发一次更新检查 */
+app.post("/api/update-scheduler/check-now", async (_req, res) => {
+  try {
+    const result = await runSchedulerCheckNow();
+    res.json({ success: true, data: result });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || "检查失败" });
+  }
 });
 
 /** 检测服务器上可用的 Compose 命令 */

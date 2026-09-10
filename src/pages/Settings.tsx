@@ -51,7 +51,7 @@ import {
 import type { SystemSettings, BackupMode, DockerEngine, UpdateInfo, UpdateState, ResourceTag, ComposeTemplate } from "../types";
 import { Card, FormField, Input, Select, Toggle, IconButton } from "../components/UI";
 import { ActivityPanel, DEFAULT_TELEMETRY } from "../components/ActivityPanel";
-import type { TelemetryConfig } from "../types";
+import type { TelemetryConfig, SchedulerStatus } from "../types";
 import {
   changeMyPassword,
   getRecoveryStatus,
@@ -90,6 +90,8 @@ import {
   type BackupFileInfo,
   fetchTelemetryStatus,
   type TelemetryStatus,
+  getSchedulerStatusApi,
+  runSchedulerCheckApi,
 } from "../api";
 
 /** 字节/秒 → 人类可读速度；0/无效值返回空串 */
@@ -107,6 +109,15 @@ function formatEta(sec?: number | null): string {
   const m = Math.floor(sec / 60);
   const s = sec % 60;
   return s > 0 ? `${m} 分 ${s} 秒` : `${m} 分`;
+}
+
+/** ISO 时间 → 本地 "YYYY-MM-DD HH:mm" */
+function fmtDateTime(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "—";
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 /** 剩余毫秒 → mm:ss 倒计时（如 09:59）；负数或无效值归零显示 00:00 */
@@ -157,7 +168,7 @@ function getDefaultSettings(): SystemSettings {
       yearly: { enabled: true, date: "12-31", time: "23:00" },
     },
     pathFavorites: [],
-    updateScheduler: { enabled: false, checkFrequency: "0 3 * * *", autoPull: false },
+    updateScheduler: { enabled: true, mode: "daily", hour: 1, minute: 0, dayOfWeek: 1, dayOfMonth: 1, autoPull: false },
     user: { sessionTimeout: 30 },
     telemetry: {
       enabled: true,
@@ -170,7 +181,7 @@ function getDefaultSettings(): SystemSettings {
       images: ["repository","tag","id","size","createdAt","associatedContainers","actions"],
       volumes: ["name","mountpoint","size","createdAt","associatedContainers","actions"],
       stacks: ["name","status","network","ip","ports","update"],
-      stackList: ["name","status","tags","containers","uptime","update"],
+      stackList: ["icon","name","status","tags","containers","uptime","update"],
     },
     tags: [],
     modal: {
@@ -444,6 +455,45 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
       setSettingsLoaded(true);
     }
   }, [settings]);
+
+  // 更新调度器状态（进入调度器页时轮询）
+  const [schedulerStatus, setSchedulerStatus] = useState<SchedulerStatus | null>(null);
+  const [checkingNow, setCheckingNow] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const s = await getSchedulerStatusApi();
+        if (alive) setSchedulerStatus(s);
+      } catch {
+        /* 忽略轮询错误 */
+      }
+    };
+    if (activeSection === "scheduler") {
+      load();
+      const t = setInterval(load, 30000);
+      return () => {
+        alive = false;
+        clearInterval(t);
+      };
+    }
+    return () => {
+      alive = false;
+    };
+  }, [activeSection]);
+
+  const handleRunCheck = async () => {
+    setCheckingNow(true);
+    try {
+      const r = await runSchedulerCheckApi();
+      setSchedulerStatus((prev) => (prev ? { ...prev, lastResult: r, lastCheck: r.at, running: false } : prev));
+      setToast({ type: "success", message: `检查完成：检查 ${r.checked} 个，发现 ${r.updates} 个有可用更新` });
+    } catch (e: any) {
+      setToast({ type: "error", message: e?.message || "检查失败" });
+    } finally {
+      setCheckingNow(false);
+    }
+  };
 
   // 引擎管理状态
   const [enginesLoading, setEnginesLoading] = useState(false);
@@ -1798,6 +1848,7 @@ docker-compose version</code>
                   { key: "actions", label: "操作" },
                 ],
                 stackList: [
+                  { key: "icon", label: "图标" },
                   { key: "name", label: "堆栈名称" },
                   { key: "status", label: "状态" },
                   { key: "tags", label: "标签" },
@@ -2207,7 +2258,7 @@ docker-compose version</code>
           <div className="max-w-2xl space-y-5">
             <div>
               <h2 className="text-lg font-semibold text-slate-800 mb-1">更新调度器</h2>
-              <p className="text-sm text-slate-500">全局自动更新检查频率配置</p>
+              <p className="text-sm text-slate-500">全局自动更新检查（基于 SHA-256 digest 精确比较镜像版本）</p>
             </div>
 
             <Card title="自动更新检查" icon={<RefreshCw size={16} />}>
@@ -2215,44 +2266,132 @@ docker-compose version</code>
                 <div className="flex items-center justify-between">
                   <div>
                     <span className="text-sm text-slate-600">启用全局自动更新检查</span>
-                    <p className="text-xs text-slate-400 mt-0.5">基于 SHA-256 digest 精确比较镜像版本</p>
+                    <p className="text-xs text-slate-400 mt-0.5">默认每天凌晨 1 点检查所有镜像版本</p>
                   </div>
                   <Toggle active={data.updateScheduler.enabled} onChange={(val) => update("updateScheduler", "enabled", val)} />
                 </div>
                 {data.updateScheduler.enabled && (
                   <>
-                    <FormField label="检查频率" hint="Cron 表达式，默认每天凌晨 3 点">
-                      <Input value={data.updateScheduler.checkFrequency} onChange={(val) => update("updateScheduler", "checkFrequency", val)} placeholder="0 3 * * *" />
+                    <FormField label="检查频率" hint="不使用 Cron 表达式，按下方选项设置">
+                      <div className="flex gap-2">
+                        {(["daily", "weekly", "monthly"] as const).map((m) => (
+                          <button
+                            key={m}
+                            onClick={() => update("updateScheduler", "mode", m)}
+                            className={`flex-1 px-3 py-2 text-sm rounded-lg border transition-colors ${
+                              data.updateScheduler.mode === m
+                                ? "border-blue-500 bg-blue-50 text-blue-600 font-medium"
+                                : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                            }`}
+                          >
+                            {m === "daily" ? "每天" : m === "weekly" ? "每周" : "每月"}
+                          </button>
+                        ))}
+                      </div>
                     </FormField>
-                    <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
-                      <span className="text-sm text-slate-600">自动拉取镜像</span>
-                      <Toggle active={data.updateScheduler.autoPull} onChange={(val) => update("updateScheduler", "autoPull", val)} size="sm" />
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <FormField label="小时" hint="0-23">
+                        <Select
+                          value={String(data.updateScheduler.hour)}
+                          onChange={(v) => update("updateScheduler", "hour", Number(v))}
+                          options={Array.from({ length: 24 }, (_, i) => ({ value: String(i), label: String(i).padStart(2, "0") }))}
+                        />
+                      </FormField>
+                      <FormField label="分钟" hint="0-59">
+                        <Select
+                          value={String(data.updateScheduler.minute)}
+                          onChange={(v) => update("updateScheduler", "minute", Number(v))}
+                          options={Array.from({ length: 60 }, (_, i) => ({ value: String(i), label: String(i).padStart(2, "0") }))}
+                        />
+                      </FormField>
                     </div>
-                    <div className="flex items-center gap-2 mt-2">
-                      <button className="flex items-center gap-1.5 px-3 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">
-                        <RefreshCw size={14} /> 立即检查全部
-                      </button>
-                      <span className="text-xs text-slate-400">上次检查: 2026-07-29 03:00:12</span>
+
+                    {data.updateScheduler.mode === "weekly" && (
+                      <FormField label="星期几" hint="0=周日 … 6=周六">
+                        <Select
+                          value={String(data.updateScheduler.dayOfWeek)}
+                          onChange={(v) => update("updateScheduler", "dayOfWeek", Number(v))}
+                          options={[
+                            { value: "0", label: "周日" },
+                            { value: "1", label: "周一" },
+                            { value: "2", label: "周二" },
+                            { value: "3", label: "周三" },
+                            { value: "4", label: "周四" },
+                            { value: "5", label: "周五" },
+                            { value: "6", label: "周六" },
+                          ]}
+                        />
+                      </FormField>
+                    )}
+
+                    {data.updateScheduler.mode === "monthly" && (
+                      <FormField label="每月几号" hint="1-31">
+                        <Select
+                          value={String(data.updateScheduler.dayOfMonth)}
+                          onChange={(v) => update("updateScheduler", "dayOfMonth", Number(v))}
+                          options={Array.from({ length: 31 }, (_, i) => ({ value: String(i + 1), label: `${i + 1} 号` }))}
+                        />
+                      </FormField>
+                    )}
+
+                    <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                      <span className="text-sm text-slate-600">检查到更新后自动拉取镜像</span>
+                      <Toggle active={data.updateScheduler.autoPull} onChange={(val) => update("updateScheduler", "autoPull", val)} size="sm" />
                     </div>
                   </>
                 )}
               </div>
             </Card>
 
-            <Card title="更新统计" icon={<Globe size={16} />}>
-              <div className="grid grid-cols-3 gap-4">
-                <div className="text-center p-3 bg-blue-50 rounded-lg">
-                  <p className="text-2xl font-bold text-blue-600">12</p>
-                  <p className="text-xs text-slate-500">已检查镜像</p>
+            <Card title="检查状态" icon={<Clock size={16} />}>
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div className="p-3 bg-slate-50 rounded-lg">
+                    <p className="text-xs text-slate-400">上次检查</p>
+                    <p className="text-slate-700 mt-1">{schedulerStatus?.lastCheck ? fmtDateTime(schedulerStatus.lastCheck) : "尚未检查"}</p>
+                  </div>
+                  <div className="p-3 bg-slate-50 rounded-lg">
+                    <p className="text-xs text-slate-400">下次检查</p>
+                    <p className="text-slate-700 mt-1">{schedulerStatus?.nextCheck ? fmtDateTime(schedulerStatus.nextCheck) : "—"}</p>
+                  </div>
                 </div>
-                <div className="text-center p-3 bg-amber-50 rounded-lg">
-                  <p className="text-2xl font-bold text-amber-600">2</p>
-                  <p className="text-xs text-slate-500">有可用更新</p>
+                {schedulerStatus?.lastResult && (
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="text-center p-3 bg-blue-50 rounded-lg">
+                      <p className="text-2xl font-bold text-blue-600">{schedulerStatus.lastResult.checked}</p>
+                      <p className="text-xs text-slate-500">已检查镜像</p>
+                    </div>
+                    <div className="text-center p-3 bg-amber-50 rounded-lg">
+                      <p className="text-2xl font-bold text-amber-600">{schedulerStatus.lastResult.updates}</p>
+                      <p className="text-xs text-slate-500">有可用更新</p>
+                    </div>
+                    <div className="text-center p-3 bg-slate-50 rounded-lg">
+                      <p className="text-2xl font-bold text-slate-600">{schedulerStatus.lastResult.byEngine.length}</p>
+                      <p className="text-xs text-slate-500">引擎数</p>
+                    </div>
+                  </div>
+                )}
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleRunCheck}
+                    disabled={checkingNow || !!schedulerStatus?.running}
+                    className="flex items-center gap-1.5 px-3 py-2 text-sm text-white bg-blue-500 rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <RefreshCw size={14} className={checkingNow ? "animate-spin" : ""} /> 立即检查全部
+                  </button>
+                  {schedulerStatus?.running && <span className="text-xs text-slate-400">检查进行中…</span>}
                 </div>
-                <div className="text-center p-3 bg-green-50 rounded-lg">
-                  <p className="text-2xl font-bold text-green-600">3</p>
-                  <p className="text-xs text-slate-500">已固定 (SHA-256)</p>
-                </div>
+                {schedulerStatus?.lastResult?.byEngine?.filter((e) => e.error || e.skipped).length ? (
+                  <div className="text-xs text-slate-400 space-y-1">
+                    {schedulerStatus.lastResult.byEngine.filter((e) => e.error).map((e, i) => (
+                      <p key={`err-${i}`}>⚠ {e.name}：{e.error}</p>
+                    ))}
+                    {schedulerStatus.lastResult.byEngine.filter((e) => e.skipped).map((e, i) => (
+                      <p key={`skip-${i}`}>○ {e.name}：未连接，已跳过</p>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             </Card>
           </div>

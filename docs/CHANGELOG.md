@@ -17,6 +17,110 @@
 
 ---
 
+## v1.15.16 — 2026-09-10
+
+### 更新调度器落地为真实后台定时检查
+- **背景**：原「更新调度器」仅有前端配置（Cron 字符串），后端无执行逻辑，且页面展示的检查时间 / 更新统计为硬编码假数据。本次完善为真正可按计划定时检查所有镜像版本的后台调度器。
+- **改动**
+  - `server/settings.ts`：`updateScheduler` 默认值改为 `{enabled:true, mode:"daily", hour:1, minute:0, dayOfWeek:1, dayOfMonth:1, autoPull:false}`（**默认开启，每天凌晨 1 点**）；旧 `checkFrequency`(Cron) 配置迁移为新模式（保留 enabled/autoPull，频率近似映射到每天 3:00）。
+  - `src/types.ts`：`UpdateSchedulerConfig` 改为 `mode/hour/minute/dayOfWeek/dayOfMonth`，新增 `SchedulerStatus` / `SchedulerLastResult` / `SchedulerEngineResult`。
+  - `server/docker.ts`：新增 `checkAllImageUpdates(engine)`（遍历镜像、按 RepoDigest 与远程 registry manifest digest 比较）+ `fetchRemoteDigest(ref)`（Docker Hub 带匿名 token；其他 registry 匿名优先、遇 401 按 WWW-Authenticate 取 token 重试；网络/超时跳过）。本地构建镜像（无 RepoDigests）跳过；多 tag 同 digest 去重。
+  - `server/scheduler.ts`（新）：`startUpdateScheduler()` 每 60s 评估一次是否到检查时刻，按 `mode/hour/minute/dayOfWeek/dayOfMonth` 计算下次执行；`runSchedulerCheckNow()` 立即检查；`getSchedulerStatus()` 返回 lastCheck/nextCheck/统计；结果持久化到 `data/scheduler-status.json`。检查到更新且 `autoPull` 开启时自动拉取。
+  - `server/index.ts`：注册 `GET /api/update-scheduler/status`、`POST /api/update-scheduler/check-now`；`server.listen` 后启动调度器。
+  - `src/api.ts`：新增 `getSchedulerStatusApi()` / `runSchedulerCheckApi()`。
+  - `src/pages/Settings.tsx`：调度器区块改为「每天 / 每周 / 每月」分段 + 时:分选择 +（每周星期 / 每月几号）+ 自动拉取；新增真实「检查状态」卡片（上次检查 / 下次检查 / 已检查数 / 有更新数 / 引擎数）+「立即检查全部」按钮。
+- **版本判定**：完善既有「更新调度器」配置段（此前仅存配置无执行）→ **Patch**。
+- **校验**：前端 + 后端 `tsc --noEmit` 全绿；`npm run build:frontend` 通过；SEA 注包 ELF magic 正常。
+- **注意**
+  - 频率不使用 Cron 表达式，按选项设置（每天 / 每周 / 每月 + 时:分）。
+  - 国内网络访问 `registry-1.docker.io` 可能受限，检查失败会跳过该镜像并在「检查状态」中提示引擎错误；不影响整体。
+  - 旧用户升级后若曾手动关过调度器，`enabled` 保持 false；新安装默认开启、每天 1:00 检查。
+
+## v1.15.15 — 2026-09-10
+
+### 容器管理页面取消右键打开容器弹窗
+- **背景**：容器列表行此前绑了 `onContextMenu`，右键（并屏蔽浏览器原生菜单）直接打开容器详情弹窗；但「点击状态列」已是打开方式，右键入口冗余且易误触。
+- **改动**：`src/pages/Containers.tsx`
+  - 删除 `<tr>` 上的 `onContextMenu={(e) => handleContextMenu(e, container)}`。
+  - 删除 `handleContextMenu` 函数（不再有右键打开逻辑，`e.preventDefault()` 一并移除，右键恢复浏览器原生菜单）。
+  - 行 `className` 移除 `cursor-context-menu`（不再暗示右键可打开）。
+  - 容器详情仍可通过「点击状态列」打开，ESC / 点遮罩关闭（v1.15.14 已加 `dismissable`）不变。
+- **校验**：前端 + 后端 `tsc --noEmit` 全绿；`npm run build:frontend` 通过；SEA 注包 ELF magic 正常。
+
+## v1.15.14 — 2026-09-10
+
+### 弹窗 ESC 关闭 + 镜像清理悬空按钮移除 + 更新调度器假数据清理
+- **背景**：①容器详情弹窗（`size="xl"`）与堆栈编辑弹窗（`size="full"`）均 `dismissable=false`，ESC 与点遮罩都无法关闭，只能点 X，体验割裂；②镜像管理「清理悬空」按钮与「清理未使用」功能重叠（后者含悬空），且易误删；③系统设置「更新调度器」仅有前端配置、无后端逻辑，却显示硬编码的「上次检查: 2026-07-29 03:00:12」与假的「更新统计 12/2/3」，误导用户。
+- **改动**
+  - `src/components/Modal.tsx`（无改动，说明机制）：`dismissable` 同时控制 ESC 与遮罩关闭，默认 `false`。
+  - `src/pages/Containers.tsx`
+    - 容器详情 `<Modal>` 加 `dismissable` → ESC / 点遮罩可关闭（打开方式保持「点击状态列」，行为不变）。
+  - `src/pages/Stacks.tsx`
+    - `StackEditorModal` 的 `<Modal>` 加 `dismissable` → ESC / 点遮罩可关闭。
+  - `src/pages/Images.tsx`
+    - 移除工具栏「清理悬空 (N)」按钮；保留「清理未使用 (N)」。
+    - 移除对应的「清理悬空镜像」确认弹窗。
+    - 删除 `handlePruneDangling` 与 `confirmCleanDangling` 状态（死代码）；`danglingCount/danglingSize` 仍用于顶部统计卡片显示，保留。
+  - `src/pages/Settings.tsx`
+    - 「更新调度器」：移除硬编码的「上次检查」时间戳与无 `onClick` 的「立即检查全部」按钮。
+    - 移除「更新统计」卡片（硬编码 12/2/3 假数据）。
+    - 保留「启用全局自动更新检查 / 检查频率 (Cron) / 自动拉取镜像」三项配置（纯前端存储，后端定时逻辑尚未实现，待后续补）。
+- **校验**：前端 + 后端 `tsc --noEmit` 全绿；`npm run build:frontend` 通过；SEA 注包 ELF magic 正常。
+- **说明**：「更新调度器」目前仍是无后端执行的纯配置项；若要真正启用后台定时检查/立即检查，需补 `server` 端 cron 调度逻辑——本次未做，已在代码注释与本文说明。
+
+## v1.15.13 — 2026-09-09
+
+### 容器/堆栈管理 9 列水平居中（与「容器」列一致）
+- **背景**：容器/堆栈表格里，「容器数」「更新」这种结构化短字段早就是居中的（`text-center`）；但「图标」「状态」「标签」「端口映射」「运行时长」这几列文字/标签字段一直左对齐，看起来行列错位、单元格里贴左边一坨。
+- **改动**
+  - `src/pages/Containers.tsx`
+    - **图标列**：`<th>` 由 `text-left` 改 `text-center`（保持 `w-14`）；`<td>` 内容由直放 `<div w-8 h-8>` 改 `<div flex justify-center><div w-8 h-8>`，图标在列内居中。
+    - **状态列**：`<SortableTh label="状态">` 加 `align="center"`；`<td>` 包一层 `<div flex justify-center>`，居中包裹原有 status button（点击打开容器详情行为不变）。
+    - **标签列**：`<SortableTh label="标签">` 加 `align="center"`；`<td>` 包 `<div flex justify-center>` 居中 `TagGroup`。
+    - **端口映射列**：`<th>` 加 `text-center`；`<td>` 中 `<div flex flex-wrap>` 改 `<div flex flex-wrap justify-center gap-1>`，Tag 在列内居中显示。
+  - `src/pages/Stacks.tsx`
+    - **图标列**：`<th>` `text-left` → `text-center`；`<td>` 包 `<div flex justify-center>` 居中图标方块。
+    - **状态列**：`<SortableTh label="状态">` 加 `align="center"`；`<td>` 包 `<div flex justify-center>`。
+    - **标签列**：`<SortableTh label="标签">` 加 `align="center"`；`<td>` 包 `<div flex justify-center>`。
+    - **容器列**：`<SortableTh>` 本就是 `align="center"` 不动；`<td>` 已有 `text-center` 不动——统一居中。
+    - **运行时长列**：`<th>` `text-left` → `text-center`；`<td>` 加 `text-center`，纯文字居中。
+- **保留**：所有点击/右键行为、排序、列显隐逻辑、表头排序箭头全部不变。
+- **校验**：前后端 `tsc --noEmit` 全绿，`npm run build:frontend` 通过。
+
+## v1.15.12 — 2026-09-09
+
+### 堆栈管理「图标」「堆栈名称」拆分为两列，同步列显隐
+- **背景**：堆栈管理主表格的图标和堆栈名称原本合在同一列（一行内左侧图标 + 右侧名称 + 描述）。合在一起时，单独隐藏名称会顺带把图标也藏掉，且把图标压缩在名称侧留白过多，列宽不好调。
+- **改动**
+  - `src/pages/Stacks.tsx`：`StackColumnKey` 增加 `"icon"`；`allStackColumns` 列表首项新增 `{ key: "icon", label: "图标" }`；表头新增独立图标 `<th>`；body 行同步新增独立 `<td>`（只放图标方块，复用现有 `w-8 h-8 rounded-lg bg-slate-100` + `Layers` fallback），名称 `<td>` 不再内嵌图标。
+  - `src/pages/Settings.tsx`：系统设置「列显隐 → 堆栈管理」新增「图标」勾选项；`stackList` 默认可见列加上 `"icon"`（位置在最前）。
+  - `server/settings.ts`：服务端默认值同步加上 `"icon"`。
+- **校验**：前端 + 后端 `tsc --noEmit` 全绿，`npm run build:frontend` 通过。
+- **说明**：旧用户升级后，列显隐仍保留在 `settings.json`（只保留用户实际勾选的项目）。`defaultsVersion=2` 不变——老用户若没主动隐藏过图标，会按 `settings.columnVisibility.stackList` 的实际值显示；若 `stackList` 缺少 `"icon"`，首次进入会看到名称左侧图标消失，可在设置页「列显隐」重新勾上。
+- **表头补齐**（v1.15.12 同包内追加）：堆栈图标 `<th>` 由 `sr-only` 不可见改为显示「图标」文字，与容器管理 `<th>` 完全对齐（同样的 `text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3 w-14`）；表头宽度由 `w-12` 调整为 `w-14` 与列内容对齐。
+
+## v1.15.11 — 2026-09-09
+
+### 容器详情弹窗尺寸回退为 xl（1152px）
+- **背景**：v1.15.10 为与堆栈管理「编辑堆栈」统一，把容器详情弹窗做成了 `size="full"`（`max-w-[95vw] h-[90vh]`），实际观感过大；容器详情以信息展示为主，不需要编辑器级空间。
+- **改动**：`src/pages/Containers.tsx` `ContainerDetailModal` 尺寸由 `full` 回退为 **`size="xl"`**（`max-w-6xl` = 1152px 宽，高度随内容、上限 90vh），同时内容区回退为原有结构：整体 `max-h-[60vh] overflow-y-auto`、日志区 `max-h-[50vh]`、终端页签直接渲染（不再包一层滚动容器）。
+- **保留**：点击状态列打开容器详情、居中弹窗形式、`Modal` 的 `bodyClassName` 能力（堆栈编辑弹窗仍在用）。
+- **验证**：前端 + 后端 `tsc --noEmit` 全绿，`npm run build:frontend` 通过。
+- **说明**：堆栈管理「编辑堆栈」弹窗仍为 `size="full"`（内含 YAML 编辑器，需要足够高度），两页面仅「打开方式（居中弹窗）」统一，尺寸按内容需要各自取值。
+- **备注**：v1.15.10 仅本地打包未发布，本版取代之。
+
+## v1.15.10 — 2026-09-09
+
+### 两处弹窗改为居中弹窗，容器详情改为点击状态列打开
+- **背景**：v1.15.9 把容器详情改成了与堆栈管理「编辑堆栈」相同的底部升起抽屉（`mt-auto` + `rounded-t-xl`），实际使用中不如此前的居中弹窗直观；同时容器管理页打开容器详情只能右键，与堆栈管理「点状态列打开」的操作路径不一致。
+- **改动**
+  - `src/components/Modal.tsx`：新增可选 `bodyClassName`（默认 `flex-1 overflow-y-auto px-6 py-4`）。传 `flex-1 min-h-0 flex flex-col overflow-hidden` 时，弹窗内部可保持 flex 布局，页签各自滚动 —— 这是弹窗能替掉抽屉的前提。
+  - `src/pages/Stacks.tsx`：`StackEditorModal` 由 `createPortal` 抽屉改为 `<Modal size="full">` 居中弹窗（`max-w-[95vw] h-[90vh]`、四角圆角、`slideUp` 动画）；Header / Tabs / Content / Footer 层级不变，Footer 补 `rounded-b-xl`。移除不再使用的 `createPortal` 导入。
+  - `src/pages/Containers.tsx`：`ContainerDetailModal` 同样改为 `<Modal size="full">` 居中弹窗，内部保留 v1.15.9 的 flex 内容区（各页签自带滚动、日志区随高度自适应）。
+  - `src/pages/Containers.tsx`：**状态列改为按钮**，点击直接打开容器详情（默认落到「基本信息」页签），样式与堆栈管理状态列一致（hover 蓝框 + 提示「点击状态列查看容器详情」）；右键打开的行为保留。
+- **验证**：前端 + 后端 `tsc --noEmit` 全绿，`npm run build:frontend` 通过。
+- **说明**：两个页面现在共用同一种打开方式 —— 居中弹窗 + 内部 flex 页签；弹窗关闭方式不变（右上角 X，不响应遮罩与 ESC）。
+
 ## v1.15.9 — 2026-09-09
 
 ### 容器详情弹窗改为与堆栈管理一致的「底部升起抽屉」样式

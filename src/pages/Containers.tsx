@@ -1,5 +1,4 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
-import { createPortal } from "react-dom";
 import {
   Play,
   Square,
@@ -29,7 +28,7 @@ import {
 } from "lucide-react";
 import type { Container, LogEntry } from "../types";
 import { StatusBadge, Tag } from "../components/Badge";
-import { ConfirmDialog } from "../components/Modal";
+import { Modal, ConfirmDialog } from "../components/Modal";
 import { Toggle, ProgressBar, IconButton, EmptyState, SortableTh } from "../components/UI";
 import { TagGroup } from "../components/TagPicker";
 import { LoadingState, ErrorState } from "../components/DataState";
@@ -211,12 +210,6 @@ export function Containers({ containers, onNavigate, onRefresh, loading, error, 
     setExpandedRows(next);
   };
 
-  const handleContextMenu = (e: React.MouseEvent, container: Container) => {
-    e.preventDefault();
-    setDetailContainer(container);
-    setDetailTab("info");
-  };
-
   if (loading && containers.length === 0) return <LoadingState message="正在加载容器列表..." />;
   if (error) return <ErrorState message={error} />;
 
@@ -311,12 +304,12 @@ export function Containers({ containers, onNavigate, onRefresh, loading, error, 
                 </button>
               </th>
               <th className="w-8 px-2"></th>
-              {visibleColumns.has("icon") && <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3 w-14">图标</th>}
+              {visibleColumns.has("icon") && <th className="text-center text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3 w-14">图标</th>}
               {visibleColumns.has("name") && <SortableTh label="容器名称" sortKey={sortKey} dir={sortDir} sortId="name" onSort={toggleSort} />}
-              {visibleColumns.has("status") && <SortableTh label="状态" sortKey={sortKey} dir={sortDir} sortId="status" onSort={toggleSort} />}
-              {visibleColumns.has("tags") && <SortableTh label="标签" sortKey={sortKey} dir={sortDir} sortId="tags" onSort={toggleSort} />}
+              {visibleColumns.has("status") && <SortableTh label="状态" align="center" sortKey={sortKey} dir={sortDir} sortId="status" onSort={toggleSort} />}
+              {visibleColumns.has("tags") && <SortableTh label="标签" align="center" sortKey={sortKey} dir={sortDir} sortId="tags" onSort={toggleSort} />}
               {visibleColumns.has("image") && <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3">镜像</th>}
-              {visibleColumns.has("ports") && <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3">端口映射</th>}
+              {visibleColumns.has("ports") && <th className="text-center text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3">端口映射</th>}
               {visibleColumns.has("network") && <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3">网络模式</th>}
               {visibleColumns.has("uptime") && <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3">运行时长</th>}
               {visibleColumns.has("restartPolicy") && <SortableTh label="重启策略" align="center" sortKey={sortKey} dir={sortDir} sortId="restartPolicy" onSort={toggleSort} />}
@@ -329,8 +322,7 @@ export function Containers({ containers, onNavigate, onRefresh, loading, error, 
               return (
               <React.Fragment key={container.id}>
                 <tr
-                  className={`hover:bg-slate-50 transition-colors cursor-context-menu ${selected.has(container.id) ? "bg-blue-50/50" : ""}`}
-                  onContextMenu={(e) => handleContextMenu(e, container)}
+                  className={`hover:bg-slate-50 transition-colors ${selected.has(container.id) ? "bg-blue-50/50" : ""}`}
                 >
                   <td className="px-4 py-3" onClick={(e) => { e.stopPropagation(); toggleSelect(container.id); }}>
                     <button className="text-slate-400 hover:text-blue-500">
@@ -347,12 +339,14 @@ export function Containers({ containers, onNavigate, onRefresh, loading, error, 
                   {visibleColumns.has("icon") && (
                     <td className="px-3 py-3">
                       {/* 图标独立列：WebUI Labels 设置的图标按服务名匹配显示 */}
-                      <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center overflow-hidden flex-shrink-0">
-                        {container.icon ? (
-                          <img src={container.icon} alt="" className="w-7 h-7 rounded" />
-                        ) : (
-                          <span className="text-xs font-bold text-slate-400">{container.name.charAt(0).toUpperCase()}</span>
-                        )}
+                      <div className="flex justify-center">
+                        <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center overflow-hidden flex-shrink-0">
+                          {container.icon ? (
+                            <img src={container.icon} alt="" className="w-7 h-7 rounded" />
+                          ) : (
+                            <span className="text-xs font-bold text-slate-400">{container.name.charAt(0).toUpperCase()}</span>
+                          )}
+                        </div>
                       </div>
                     </td>
                   )}
@@ -372,40 +366,49 @@ export function Containers({ containers, onNavigate, onRefresh, loading, error, 
                   )}
                   {visibleColumns.has("status") && (
                     <td className="px-3 py-3">
-                      <span className="inline-flex items-center gap-1.5 text-sm">
-                        <span className={`w-1.5 h-1.5 rounded-full ${
-                          container.status === "running" ? "bg-green-500 animate-pulse" :
-                          container.status === "paused" ? "bg-amber-500" :
-                          container.status === "restarting" ? "bg-blue-500 animate-pulse" :
-                          "bg-slate-400"
-                        }`} />
-                        <span className={
-                          container.status === "running" ? "text-green-600 font-medium" :
-                          container.status === "paused" ? "text-amber-600 font-medium" :
-                          container.status === "restarting" ? "text-blue-600 font-medium" :
-                          "text-slate-500"
-                        }>
-                          {container.status === "running" ? "运行中" :
-                           container.status === "stopped" ? "已停止" :
-                           container.status === "paused" ? "已暂停" :
-                           container.status === "restarting" ? "重启中" : container.status}
-                        </span>
-                      </span>
+                      {/* 与堆栈管理一致：点击状态列打开详情弹窗 */}
+                      <div className="flex justify-center">
+                        <button
+                          onClick={() => { setDetailContainer(container); setDetailTab("info"); }}
+                          title="点击状态列查看容器详情"
+                          className="inline-flex items-center gap-1.5 text-sm rounded-md ring-1 ring-transparent hover:ring-blue-300 hover:bg-blue-50 px-1.5 py-0.5 transition-colors"
+                        >
+                          <span className={`w-1.5 h-1.5 rounded-full ${
+                            container.status === "running" ? "bg-green-500 animate-pulse" :
+                            container.status === "paused" ? "bg-amber-500" :
+                            container.status === "restarting" ? "bg-blue-500 animate-pulse" :
+                            "bg-slate-400"
+                          }`} />
+                          <span className={
+                            container.status === "running" ? "text-green-600 font-medium" :
+                            container.status === "paused" ? "text-amber-600 font-medium" :
+                            container.status === "restarting" ? "text-blue-600 font-medium" :
+                            "text-slate-500"
+                          }>
+                            {container.status === "running" ? "运行中" :
+                             container.status === "stopped" ? "已停止" :
+                             container.status === "paused" ? "已暂停" :
+                             container.status === "restarting" ? "重启中" : container.status}
+                          </span>
+                        </button>
+                      </div>
                     </td>
                   )}
                   {visibleColumns.has("tags") && (
                     <td className="px-3 py-3">
-                      {container.tags && container.tags.length > 0 ? (
-                        <TagGroup tags={container.tags} max={2} />
-                      ) : (
-                        <span className="text-xs text-slate-300">—</span>
-                      )}
+                      <div className="flex justify-center">
+                        {container.tags && container.tags.length > 0 ? (
+                          <TagGroup tags={container.tags} max={2} />
+                        ) : (
+                          <span className="text-xs text-slate-300">—</span>
+                        )}
+                      </div>
                     </td>
                   )}
                   {visibleColumns.has("image") && <td className="px-3 py-3"><span className="text-sm text-slate-600 font-mono">{container.image}</span></td>}
                   {visibleColumns.has("ports") && (
                     <td className="px-3 py-3">
-                      <div className="flex flex-wrap gap-1">
+                      <div className="flex flex-wrap justify-center gap-1">
                         {container.ports.map((p, i) => (
                           <Tag key={i} text={`${p.host}:${p.container}/${p.protocol}`} color="blue" />
                         ))}
@@ -640,10 +643,9 @@ function ContainerDetailModal({
 
   const filteredLogs = logLevel === "all" ? logs : logs.filter((l) => l.level === logLevel);
 
-  // 与堆栈管理「编辑堆栈」一致的弹出方式：底部升起的抽屉式弹窗（90vw × 90vh）
-  return createPortal(
-    <div className="fixed inset-0 z-[1000] bg-black/40 flex flex-col">
-      <div className="modal-content bg-white rounded-t-xl shadow-2xl w-full max-w-[90vw] h-[90vh] mx-auto mt-auto flex flex-col">
+  return (
+    <Modal open={true} onClose={onClose} size="xl" dismissable>
+      <div className="-mx-6 -my-4">
         {/* Header */}
         <div className="flex items-center gap-3 px-6 pt-4 pb-3 border-b border-slate-100">
           <div className="w-10 h-10 rounded-lg bg-slate-100 flex items-center justify-center overflow-hidden">
@@ -766,14 +768,10 @@ function ContainerDetailModal({
         </div>
 
         {/* Content */}
-        <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-          {tab === "info" && (
-            <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4">
-              <ContainerInfoTab container={container} />
-            </div>
-          )}
+        <div className="px-6 py-4 max-h-[60vh] overflow-y-auto">
+          {tab === "info" && <ContainerInfoTab container={container} />}
           {tab === "logs" && (
-            <div className="flex-1 min-h-0 flex flex-col px-6 py-4">
+            <div>
               <div className="flex items-center gap-3 mb-3">
                 <select value={logLevel} onChange={(e) => setLogLevel(e.target.value)} className="px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg bg-white">
                   <option value="all">全部级别</option>
@@ -799,7 +797,7 @@ function ContainerDetailModal({
               <div
                   ref={logsScrollRef}
                   onScroll={handleLogsScroll}
-                  className="flex-1 min-h-0 bg-slate-900 rounded-lg p-4 overflow-y-auto font-mono text-xs"
+                  className="bg-slate-900 rounded-lg p-4 max-h-[50vh] overflow-y-auto font-mono text-xs"
                 >
                 {logsLoading && (
                   <div className="flex items-center gap-2 text-slate-500 py-2">
@@ -828,7 +826,7 @@ function ContainerDetailModal({
             </div>
           )}
           {tab === "stats" && (
-            <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4">
+            <div>
               {statsLoading && (
                 <div className="flex items-center gap-2 text-slate-500 py-8 justify-center">
                   <RefreshCw size={16} className="animate-spin" />
@@ -891,18 +889,15 @@ function ContainerDetailModal({
             </div>
           )}
           {tab === "terminal" && (
-            <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4">
-              <XTermTerminal
-                engineId={engineId}
-                containerId={container.id}
-                containerName={container.name}
-              />
-            </div>
+            <XTermTerminal
+              engineId={engineId}
+              containerId={container.id}
+              containerName={container.name}
+            />
           )}
         </div>
       </div>
-    </div>,
-    document.body
+    </Modal>
   );
 }
 

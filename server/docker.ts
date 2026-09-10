@@ -2399,3 +2399,174 @@ export async function resizeContainerTerminal(
     5000
   );
 }
+
+/* ==================== 镜像版本检查（更新调度器用） ==================== */
+
+/** 单个镜像的更新检查结果 */
+export interface ImageUpdateDetail {
+  engineId: string;
+  image: string;       // repo:tag（用于自动拉取）
+  hasUpdate: boolean;
+  currentSha: string;  // 本地 RepoDigest 的 sha256
+  latestSha: string;   // 远程 registry manifest digest 的 sha256
+}
+
+export interface ImageUpdateSummary {
+  engineId: string;
+  checked: number;
+  updates: number;
+  details: ImageUpdateDetail[];
+}
+
+/**
+ * 解析镜像引用，返回 registry / repo / tag。
+ * 支持：nginx、library/nginx、user/repo:v1、registry.example.com:5000/foo/bar:tag、quay.io/foo/bar。
+ */
+function parseImageRef(ref: string): { registry: string; repo: string; tag: string } {
+  let registry = "docker.io";
+  let rest = ref;
+  const slashIdx = ref.indexOf("/");
+  if (slashIdx >= 0) {
+    const firstSeg = ref.slice(0, slashIdx);
+    // 含 '.' 或 ':' 或 localhost 视为 registry 主机
+    if (firstSeg.includes(".") || firstSeg.includes(":") || firstSeg === "localhost") {
+      registry = firstSeg;
+      rest = ref.slice(slashIdx + 1);
+    }
+  }
+  // tag：最后一个 ':'（且仅当其后不含 '/'）
+  let tag = "latest";
+  const lastColon = rest.lastIndexOf(":");
+  const lastSlash = rest.lastIndexOf("/");
+  if (lastColon > lastSlash) {
+    tag = rest.slice(lastColon + 1);
+    rest = rest.slice(0, lastColon);
+  }
+  let repo = rest;
+  // docker.io 官方镜像（单段）补全 library/
+  if (registry === "docker.io" && !repo.includes("/")) {
+    repo = `library/${repo}`;
+  }
+  return { registry, repo, tag };
+}
+
+/**
+ * 从 RepoDigests 项（如 registry/name@sha256:xxx）解析出 registry / repo（不含 tag / digest）。
+ */
+function parseDigestRef(full: string): { registry: string; repo: string } {
+  const namePart = full.split("@")[0];
+  let registry = "docker.io";
+  const slashIdx = namePart.indexOf("/");
+  if (slashIdx >= 0) {
+    const firstSeg = namePart.slice(0, slashIdx);
+    if (firstSeg.includes(".") || firstSeg.includes(":") || firstSeg === "localhost") {
+      registry = firstSeg;
+      return { registry, repo: namePart.slice(slashIdx + 1) };
+    }
+  }
+  // 无 registry 前缀：docker.io，单段补 library/
+  const repo = namePart.includes("/") ? namePart : `library/${namePart}`;
+  return { registry: "docker.io", repo };
+}
+
+/**
+ * 抓取远程镜像 manifest 的 digest（sha256）。
+ * - Docker Hub：先取匿名 token 再拉 manifest。
+ * - 其他 registry：匿名尝试，遇 401 时按 WWW-Authenticate 取 token 重试，失败则跳过。
+ * 网络不可达 / 超时 / 401 无法解决时返回 ""（调用方跳过该镜像）。
+ */
+async function fetchRemoteDigest(registry: string, repo: string, tag: string): Promise<string> {
+  const accept = "application/vnd.docker.distribution.manifest.v2+json";
+  const tryGet = async (authHeader?: string): Promise<{ status: number; digest?: string; auth?: string }> => {
+    const headers: Record<string, string> = { Accept: accept };
+    if (authHeader) headers["Authorization"] = authHeader;
+    try {
+      const res = await withTimeout(
+        fetch(`https://${registry}/v2/${repo}/manifests/${tag}`, { headers, redirect: "follow" }),
+        8000
+      );
+      const digest = res.headers.get("docker-content-digest")?.replace("sha256:", "") || "";
+      const auth = res.headers.get("www-authenticate") || undefined;
+      return { status: res.status, digest, auth };
+    } catch {
+      return { status: 0 };
+    }
+  };
+
+  if (registry === "docker.io") {
+    try {
+      const tokenRes = await withTimeout(
+        fetch(`https://auth.docker.io/token?service=registry.docker.io&scope=repository:${repo}:pull`, { redirect: "follow" }),
+        8000
+      );
+      const token = (await tokenRes.json())?.token || "";
+      const r = await tryGet(token ? `Bearer ${token}` : undefined);
+      return r.digest || "";
+    } catch {
+      return "";
+    }
+  }
+
+  // 其他 registry：匿名优先
+  const first = await tryGet();
+  if (first.digest) return first.digest;
+  if (first.status === 401 && first.auth) {
+    // 解析 WWW-Authenticate: Bearer realm="...",service="...",scope="..."
+    const m = first.auth.match(/Bearer\s+realm="([^"]+)"(?:,\s*service="([^"]*)")?(?:,\s*scope="([^"]*)")?/i);
+    if (m) {
+      const realm = m[1];
+      const q = new URLSearchParams();
+      if (m[2]) q.set("service", m[2]);
+      if (m[3]) q.set("scope", m[3]);
+      try {
+        const tokenRes = await withTimeout(fetch(`${realm}?${q.toString()}`, { redirect: "follow" }), 8000);
+        const token = (await tokenRes.json())?.token || "";
+        const r = await tryGet(token ? `Bearer ${token}` : undefined);
+        return r.digest || "";
+      } catch {
+        return "";
+      }
+    }
+  }
+  return "";
+}
+
+/**
+ * 检查某引擎全部镜像的版本更新（基于 RepoDigest 与远程 registry manifest digest 比较）。
+ * 仅检查从 registry 拉取的镜像（含 RepoDigests）；本地构建镜像跳过。
+ * 多 tag 指向同一 digest 的去重，避免重复请求。
+ */
+export async function checkAllImageUpdates(engine: DockerEngine): Promise<ImageUpdateSummary> {
+  const docker = getDocker(engine);
+  const images = await withTimeout(docker.listImages(), 10000);
+  const details: ImageUpdateDetail[] = [];
+  const seen = new Set<string>(); // 按 RepoDigests[0] 去重
+  let checked = 0;
+  let updates = 0;
+
+  for (const img of images) {
+    const repoDigests: string[] = img.RepoDigests || [];
+    const repoTags: string[] = img.RepoTags || [];
+    if (repoDigests.length === 0 || repoTags.length === 0) continue; // 本地构建，无 registry digest
+    const digestKey = repoDigests[0];
+    if (seen.has(digestKey)) continue;
+    seen.add(digestKey);
+
+    const localSha = digestKey.split("@")[1]?.replace("sha256:", "") || "";
+    const { registry, repo } = parseDigestRef(digestKey);
+    const ref = repoTags[0]; // repo:tag
+    const { tag } = parseImageRef(ref);
+
+    try {
+      const latestSha = await fetchRemoteDigest(registry, repo, tag);
+      const hasUpdate = !!latestSha && latestSha !== localSha;
+      checked++;
+      if (hasUpdate) updates++;
+      details.push({ engineId: engine.id, image: ref, hasUpdate, currentSha: localSha, latestSha });
+    } catch {
+      // 单镜像网络异常不影响整体
+    }
+  }
+
+  return { engineId: engine.id, checked, updates, details };
+}

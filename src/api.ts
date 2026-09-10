@@ -1,4 +1,4 @@
-import type { DockerEngine, EngineResourceStats, SystemSettings } from "./types";
+import type { DockerEngine, EngineResourceStats, SystemSettings, SchedulerStatus, SchedulerLastResult } from "./types";
 
 const BASE = "/api";
 
@@ -477,6 +477,16 @@ export function checkStackUpdatesApi(engineId: string, stackName?: string): Prom
     method: "POST",
     body: JSON.stringify({ stackName }),
   });
+}
+
+/** 获取更新调度器状态（上次/下次检查时间、统计） */
+export function getSchedulerStatusApi(): Promise<SchedulerStatus> {
+  return request("/update-scheduler/status");
+}
+
+/** 立即触发一次镜像更新检查 */
+export function runSchedulerCheckApi(): Promise<SchedulerLastResult> {
+  return request("/update-scheduler/check-now", { method: "POST" });
 }
 
 /** 备份堆栈 */
