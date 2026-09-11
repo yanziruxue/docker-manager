@@ -109,7 +109,8 @@ const DEFAULT_SETTINGS = {
   },
   /**
    * Compose 模板（系统设置 → Compose 管理 维护）：
-   * 编辑堆栈时一键填入。insert=service 填到 services 第一个服务内部；insert=end 追加到文本末尾。
+   * 编辑堆栈时一键填入。insert=service 填到 services 第一个服务内部；insert=end 追加到文本末尾；
+   * insert=cursor 插到编辑器光标所在行的下一行。
    * content 为可多行 compose 文本（缩进手动输入），值留空则填入后由用户补全。
    */
   compose: {
@@ -190,7 +191,11 @@ export function getSettings(): any {
             ? parsed.compose.templates.map((x: any) =>
                 typeof x === "string"
                   ? { content: x, insert: "service" }
-                  : { content: String(x?.content ?? ""), insert: x?.insert === "end" ? "end" : "service" }
+                  : {
+                      content: String(x?.content ?? ""),
+                      insert:
+                        x?.insert === "end" ? "end" : x?.insert === "cursor" ? "cursor" : "service",
+                    }
               )
             : DEFAULT_SETTINGS.compose.templates,
         },

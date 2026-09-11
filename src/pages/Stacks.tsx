@@ -1071,14 +1071,16 @@ function completeEmptyValue(line: string, svcName: string): string {
 /**
  * 将一段模板（可多行）插入到 compose 文本。
  * - insert="service"：插到 services 下第一个服务内部（缩进由模板自身决定，用户手动输入空格）；
- * - insert="end"：追加到 compose 文本的最后一行（末尾）。
+ * - insert="end"：追加到 compose 文本的最后一行（末尾）；
+ * - insert="cursor"：插到编辑器光标（鼠标指针）所在行的下一行。
  * 模板内每一行原样保留（支持多行内容）；值留空的项按 COMPOSE_VALUE_DEFAULTS 补全；
  * 服务块内已存在同名 key 时跳过（避免重复键）；未找到 services: / 服务行时（仅 service 模式）返回结构错误原因。
  */
 function insertTemplateBlock(
   compose: string,
   block: string,
-  insert: "service" | "end"
+  insert: "service" | "end" | "cursor",
+  cursorLine?: number | null
 ): { next: string; ok: boolean; reason?: string } {
   const lines = compose.split("\n");
   const blockLines = block
@@ -1092,6 +1094,43 @@ function insertTemplateBlock(
     // 去掉尾部空行后直接追加到文件末尾（保留一个换行分隔）
     while (lines.length > 0 && lines[lines.length - 1].trim() === "") lines.pop();
     lines.push(...blockLines);
+    return { next: lines.join("\n"), ok: true };
+  }
+
+  // ---- cursor 模式：插入到光标所在行的下一行 ----
+  if (insert === "cursor") {
+    if (cursorLine == null) {
+      return { next: compose, ok: false, reason: "请先在编辑器中点击，定位要填入的位置" };
+    }
+    const indentOfC = (l: string) => (l.match(/^(\s*)/) || ["", ""])[1].length;
+    // 越界钳制，保证落在有效行范围内
+    const idx = Math.min(Math.max(cursorLine, 0), Math.max(0, lines.length - 1));
+    const caretIndent = indentOfC(lines[idx] ?? "");
+    /** 向上找缩进更小的首个非空非注释行（光标行的父级） */
+    const findParent = () => {
+      for (let i = idx - 1; i >= 0; i--) {
+        const l = lines[i];
+        if (!l.trim() || /^\s*#/.test(l)) continue;
+        if (indentOfC(l) >= caretIndent) continue;
+        return { line: l, indent: indentOfC(l) };
+      }
+      return null;
+    };
+    // 推断服务名，用于 container_name 等留空值的补全
+    let svcName = "";
+    const parent = findParent();
+    if (parent) {
+      const selfKey = (lines[idx] ?? "").match(/^\s*([A-Za-z0-9_.\-]+)\s*:/);
+      if (/^\s*services\s*:/.test(parent.line) && selfKey && caretIndent > 0) {
+        svcName = selfKey[1]; // 光标正落在服务名行上
+      } else if (parent.indent > 0) {
+        // 光标在服务内部：父级缩进 > 0 的 key 行即服务名（缩进 0 的是 services 等顶层键）
+        const m = parent.line.match(/^\s*([A-Za-z0-9_.\-]+)\s*:/);
+        if (m) svcName = m[1];
+      }
+    }
+    const finalLines = block.split("\n").map((l) => completeEmptyValue(l, svcName));
+    lines.splice(idx + 1, 0, ...finalLines);
     return { next: lines.join("\n"), ok: true };
   }
 
@@ -1154,9 +1193,11 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
   const [saveSuccess, setSaveSuccess] = useState(false);
   /** 一键填入模板面板的瞬时提示（同名跳过 / 结构错误原因） */
   const [tplHint, setTplHint] = useState<string | null>(null);
+  /** 编辑器光标所在行（0-based；null = 用户尚未在编辑器中点击过） */
+  const [caretLine, setCaretLine] = useState<number | null>(null);
   /** 填入单个模板项：按模板自身 insert 模式插入，缩进由模板自身决定，同名 key 已存在则跳过并提示 */
   const applyComposeTemplate = (tpl: ComposeTemplate) => {
-    const res = insertTemplateBlock(composeContent, tpl.content, tpl.insert);
+    const res = insertTemplateBlock(composeContent, tpl.content, tpl.insert, caretLine);
     if (!res.ok) { setTplHint(res.reason || "无法填入"); return; }
     setComposeContent(res.next);
     setTplHint(null);
@@ -1164,11 +1205,17 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
   /** 一键全填入：按模板顺序逐项插入，已存在的自动跳过 */
   const applyAllComposeTemplates = () => {
     let cur = composeContent;
+    // cursor 模式连续插入多项时，位置随已插入行数递进，保证顺序与模板列表一致
+    let caret = caretLine;
     const skipped: string[] = [];
     for (const tpl of composeTemplates) {
-      const res = insertTemplateBlock(cur, tpl.content, tpl.insert);
-      if (res.ok) cur = res.next;
-      else skipped.push((tpl.content.split("\n")[0].split(":")[0] || tpl.content).trim() || "空模板");
+      const res = insertTemplateBlock(cur, tpl.content, tpl.insert, caret);
+      if (res.ok) {
+        if (tpl.insert === "cursor" && caret != null) {
+          caret += res.next.split("\n").length - cur.split("\n").length;
+        }
+        cur = res.next;
+      } else skipped.push((tpl.content.split("\n")[0].split(":")[0] || tpl.content).trim() || "空模板");
     }
     setComposeContent(cur);
     setTplHint(skipped.length ? `已跳过：${skipped.join("、")}` : null);
@@ -1424,6 +1471,7 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
                   value={composeContent}
                   onChange={(v) => { setComposeContent(v); setTplHint(null); }}
                   onValidChange={(v) => setYamlValid(v)}
+                  onCursorLineChange={(l) => setCaretLine((prev) => (prev === l ? prev : l))}
                   placeholder={"services:\n  web:\n    image: nginx:alpine\n    ports:\n      - \"8080:80\"\n    restart: unless-stopped"}
                 />
                 {/* 右：一键填入模板面板（系统设置 → Compose 管理 配置） */}
@@ -1437,11 +1485,13 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
                         <button
                           key={i}
                           onClick={() => applyComposeTemplate(tpl)}
-                          title={`填入: ${tpl.content}\n位置: ${tpl.insert === "end" ? "末尾" : "服务内"}`}
+                          title={`填入: ${tpl.content}\n位置: ${
+                            tpl.insert === "end" ? "末尾" : tpl.insert === "cursor" ? "指针处" : "服务内"
+                          }`}
                           className="w-full text-left px-2 py-1.5 rounded-md border border-slate-200 bg-white font-mono text-[11px] leading-relaxed text-slate-600 hover:border-blue-400 hover:text-blue-600 transition-colors whitespace-pre-wrap break-words"
                         >
                           <span className="inline-block mb-0.5 px-1 rounded bg-slate-100 text-[9px] text-slate-400 uppercase">
-                            {tpl.insert === "end" ? "末尾" : "服务内"}
+                            {tpl.insert === "end" ? "末尾" : tpl.insert === "cursor" ? "指针处" : "服务内"}
                           </span>
                           {"\n"}
                           {tpl.content.trim() || `（空模板 ${i + 1}）`}

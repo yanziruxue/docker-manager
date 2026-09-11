@@ -92,7 +92,7 @@ function LoginForm({
               <Input
                 value={username}
                 onChange={setUsername}
-                placeholder="用户名"
+                placeholder="请输入用户名"
                 className="pl-9"
               />
             </div>
@@ -105,7 +105,7 @@ function LoginForm({
                 value={password}
                 onChange={setPassword}
                 type="password"
-                placeholder="••••••••"
+                placeholder="请输入密码"
                 className="pl-9"
               />
             </div>
@@ -131,7 +131,7 @@ function LoginForm({
             onClick={() => onRecover(username)}
             className="w-full text-xs text-slate-500 hover:text-blue-600 transition-colors py-1"
           >
-            忘记密码？使用 {RECOVERY_LENGTH} 位找回码重置
+            重置密码
           </button>
         </form>
       </div>

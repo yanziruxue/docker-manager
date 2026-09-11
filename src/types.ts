@@ -431,8 +431,13 @@ export interface ColumnVisibility {
 export interface ComposeTemplate {
   /** 模板内容（可多行 compose 文本，缩进由用户手动输入） */
   content: string;
-  /** 填入位置：service = services 下第一个服务内部；end = 追加到 compose 文本最后一行 */
-  insert: "service" | "end";
+  /**
+   * 填入位置：
+   * - service = services 下第一个服务内部
+   * - end = 追加到 compose 文本最后一行
+   * - cursor = 插入到编辑器光标（鼠标指针）所在行的下一行
+   */
+  insert: "service" | "end" | "cursor";
 }
 
 /** Compose 模板设置（系统设置 → Compose 管理 维护） */

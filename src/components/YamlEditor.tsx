@@ -143,6 +143,8 @@ export interface YamlEditorProps {
   className?: string;
   /** 设为 false 可隐藏工具栏「格式化」按钮 */
   showFormat?: boolean;
+  /** 光标（鼠标指针）所在行变化时回调，0-based 行号 —— 供外部实现「插入到指针位置」 */
+  onCursorLineChange?: (line: number) => void;
 }
 
 export function YamlEditor({
@@ -153,6 +155,7 @@ export function YamlEditor({
   minHeight = 380,
   className,
   showFormat = true,
+  onCursorLineChange,
 }: YamlEditorProps) {
   const taRef = useRef<HTMLTextAreaElement>(null);
   const preRef = useRef<HTMLPreElement>(null);
@@ -170,6 +173,18 @@ export function YamlEditor({
   useEffect(() => {
     cbRef.current = onValidChange;
   }, [onValidChange]);
+
+  // 光标行回调同样装进 ref，避免父组件回调身份变化引发重复渲染
+  const cursorCbRef = useRef(onCursorLineChange);
+  useEffect(() => {
+    cursorCbRef.current = onCursorLineChange;
+  }, [onCursorLineChange]);
+
+  /** 上报光标所在行（0-based），父组件据此实现「插入到指针位置」 */
+  const reportCursorLine = (ta: HTMLTextAreaElement) => {
+    const line = ta.value.slice(0, ta.selectionStart).split("\n").length - 1;
+    cursorCbRef.current?.(line);
+  };
 
   // 每次 value 变更做一次实时 lint
   useEffect(() => {
@@ -298,6 +313,9 @@ export function YamlEditor({
             onChange={(e) => onChange(e.target.value)}
             onScroll={syncScroll}
             onKeyDown={handleKeyDown}
+            onSelect={(e) => reportCursorLine(e.currentTarget)}
+            onKeyUp={(e) => reportCursorLine(e.currentTarget)}
+            onClick={(e) => reportCursorLine(e.currentTarget)}
             placeholder={placeholder}
             spellCheck={false}
             style={{ tabSize: 2, WebkitTextFillColor: "transparent" }}

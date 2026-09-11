@@ -280,7 +280,6 @@ function ChangePasswordForm({ username }: { username?: string }) {
         >
           {busy && <Loader2 size={14} className="animate-spin" />} 修改密码
         </button>
-        {username && <span className="text-xs text-slate-400">当前账户：{username}</span>}
       </div>
     </div>
   );
@@ -1780,12 +1779,11 @@ docker-compose version</code>
           <div className="max-w-2xl space-y-5">
             <div>
               <h2 className="text-lg font-semibold text-slate-800 mb-1">用户</h2>
-              <p className="text-sm text-slate-500">登录账户与会话</p>
             </div>
 
             <Card title="当前账户" icon={<User size={16} />}>
               <div className="space-y-4">
-                <FormField label="用户名" hint="登录用户名由账户体系管理，不支持在此修改">
+                <FormField label="用户名" hint="用户名不支持修改">
                   <Input value={currentUser?.username || ""} onChange={() => {}} disabled />
                 </FormField>
                 <FormField label="会话超时（分钟）" hint="空闲超过该时长后需重新登录；改动在下次登录时生效">
@@ -2418,7 +2416,6 @@ docker-compose version</code>
           <div className="max-w-2xl space-y-5">
             <div>
               <h2 className="text-lg font-semibold text-slate-800 mb-1">系统更新</h2>
-              <p className="text-sm text-slate-500">一键升级到最新版本</p>
             </div>
 
             {/* 当前版本 */}
@@ -2432,20 +2429,15 @@ docker-compose version</code>
               </div>
             </Card>
 
-            {/* 更新源配置 */}
-            <Card title="更新源配置" icon={<Globe size={16} />}>
+            {/* 检查更新 */}
+            <Card title="检查更新" icon={<Globe size={16} />}>
               <div className="space-y-4">
                 <div className="flex items-center gap-2 p-3 bg-slate-50 border border-slate-200 rounded-lg">
                   <Globe size={14} className="text-slate-400 flex-shrink-0" />
-                  <div className="text-xs text-slate-600">
-                    <span className="text-slate-500">来源：</span>
-                    <span className="font-mono text-slate-700 ml-1">yanziruxue/docker-manager</span>
-                  </div>
                 </div>
                 <div className="flex items-center justify-between">
                   <div>
                     <span className="text-sm text-slate-600">自动检查更新</span>
-                    <p className="text-xs text-slate-400 mt-0.5">检查是否有新版本（触发：网页刷新 / 后端启动 / 每 6 小时）</p>
                   </div>
                   <Toggle active={data.update?.autoCheck ?? false} onChange={(val) => update("update", "autoCheck", val)} />
                 </div>
@@ -2645,11 +2637,6 @@ docker-compose version</code>
                     )}
                   </div>
                 )}
-
-                <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-500 leading-relaxed">
-                  <p className="font-medium mb-1">升级说明</p>
-                  <p>升级会下载交付包、解压并用新二进制覆盖当前安装文件，随后服务自动重启（由 systemd 拉起新版本）。整个过程无需 root 权限，升级前会自动备份旧版本。可上传本地更新包（.zip）离线升级——上传仅保存为待应用状态，需点击「更新」按钮手动应用。</p>
-                </div>
               </div>
             </Card>
           </div>
@@ -2662,7 +2649,7 @@ docker-compose version</code>
               <p className="text-sm text-slate-500">
                 维护「编辑堆栈 → Compose」页右侧的一键填入模板。每项可填一行或多行 compose 内容（如 restart: unless-stopped），
                 缩进请手动输入空格；值留空的项填入时自动补全（restart→unless-stopped、network_mode→bridge、container_name→服务名 等）。
-                每项可单独选择填入位置：<b>服务内</b>（services 下第一个服务内部）或 <b>末尾</b>（追加到 compose 文本最后一行）。
+                每项可单独选择填入位置：<b>服务内</b>（services 下第一个服务内部）、<b>指针处</b>（编辑器光标所在行的下一行）或 <b>末尾</b>（追加到 compose 文本最后一行）。
               </p>
             </div>
 
@@ -2697,7 +2684,7 @@ docker-compose version</code>
                         <span className="text-xs text-slate-400 font-mono w-8 text-right shrink-0">{i + 1}.</span>
                         {/* 填入位置切换 */}
                         <div className="flex items-center rounded-md border border-slate-200 overflow-hidden text-xs shrink-0">
-                          {(["service", "end"] as const).map((m) => (
+                          {(["service", "cursor", "end"] as const).map((m) => (
                             <button
                               key={m}
                               type="button"
@@ -2712,7 +2699,7 @@ docker-compose version</code>
                                   : "bg-white text-slate-500 hover:bg-slate-50"
                               }`}
                             >
-                              {m === "service" ? "服务内" : "末尾"}
+                              {m === "service" ? "服务内" : m === "cursor" ? "指针处" : "末尾"}
                             </button>
                           ))}
                         </div>
@@ -2743,7 +2730,7 @@ docker-compose version</code>
               )}
               <p className="text-xs text-slate-400 mt-3">
                 示例：network_mode: （留空自动补 bridge）、restart: unless-stopped、container_name: （留空自动补服务名）、labels: （多行请手动缩进）。
-                「服务内」填到第一个服务下，「末尾」追加到文件最后一行。保存后立即生效。
+                「服务内」填到第一个服务下，「指针处」填到编辑器光标所在行的下一行（需先在编辑器中点击定位），「末尾」追加到文件最后一行。保存后立即生效。
               </p>
             </Card>
           </div>
