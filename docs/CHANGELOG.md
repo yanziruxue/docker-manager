@@ -1,5 +1,99 @@
 # 版本记录
 
+> 本文件是项目的**唯一权威进度文档**：完整版本变更日志 + 当前进度 + 开发报告。
+> 原 `开发进度总结.md`（2026-08-12 历史快照）已并入此处并删除。
+
+## 维护约定（每次改代码后必做）
+
+1. 改 `package.json` 的 `version`（规则见下方「版本号规则」）。
+2. 在本文件「版本变更日志」区**顶部**新增 `## vX.Y.Z — 日期` 段落，每条改动必须写清三项：
+   - **已完成**：改了什么、为什么改、涉及文件、如何验证；
+   - **未完成 / 已知限制**：本次没做完或受环境所限的事项（没有就写「无」）；
+   - **下一步**：基于本次改动的后续计划（没有就写「无」）。
+3. 同步更新下方「开发进度总览」的**当前版本行**、模块状态、待办与下一步。
+4. 发布后补记 Release 链接与源码 commit SHA。
+
+---
+
+## 开发进度总览
+
+> 最后更新：2026-09-12
+
+### 当前状态
+
+| 项 | 值 |
+|---|---|
+| 当前版本 | **v1.15.20**（`package.json`） |
+| 最新 Release | [v1.15.19](https://github.com/yanziruxue/docker-manager/releases/tag/v1.15.19)（v1.15.20 待发布） |
+| 源码分支 | `main` @ `b95d978e`（v1.15.20 待推送） |
+| 交付包 | `build-upload/docker-manager-yanzi-linux-x64.zip`（40.9 MB / 5 文件） |
+| 架构 | REST + WS + SSE 三通道；Socket / TCP / SSH 三种引擎 |
+| 目标平台 | Linux x64（SEA 单可执行文件），Unraid / 自托管 NAS |
+
+### 模块完成状态
+
+| 模块 | 状态 | 说明 |
+|---|:---:|---|
+| 多引擎管理 | ✅ | Socket / TCP / SSH，CRUD + 连接测试 + 持久化 |
+| 仪表盘 | ✅ | 统计卡片 + 资源监控 + 活动时间线 |
+| 容器管理 | ✅ | 列表 / 详情 / 启停 / 日志 / 资源监控 / Web 终端 / CSV 导出 |
+| 堆栈管理 | ✅ | Compose 自动发现 / 创建 / 编辑 / 操作 / 更新检查 / 备份恢复 / 批量操作 |
+| 镜像管理 | ✅ | 列表 / 筛选 / 拉取 / 删除 / prune 未使用 |
+| 数据卷管理 | ✅ | 列表 / 新建 / 删除 / prune / 详情 |
+| 通知中心 | ✅ | 未读已读 + localStorage 持久化 |
+| 系统设置 | ✅ | Docker 配置 / Compose 模式 / 通知 / 备份 / 更新调度 / 列显隐 / 活跃度 |
+| Web 终端 | ✅ | xterm.js + WebSocket + 多 Shell 检测 |
+| 登录鉴权 | ✅ | 单管理员 + scrypt + httpOnly 会话（绝对过期）+ 密码找回码 |
+| 更新调度器 | ✅ | 后台定时检查镜像版本（每天 / 每周 / 每月，非 Cron） |
+| OTA 自升级 | ✅ | GitHub Release 拉取 + 自替换 + systemd 重启，gh-proxy 镜像兜底 |
+| Linux SEA 部署 | ✅ | 单可执行文件 + systemd + install/uninstall 脚本 |
+| Docker 部署 | ✅ | 多阶段 Dockerfile |
+| **操作日志系统** | 🔨 **约 60%** | `server/logger.ts` 已建好但**未接入** `docker.ts`（仍是 `console.log`）；前端仅 localStorage 版 `opLog.ts`（500 条） |
+| 中心统计服务 | ⏸ **暂缓** | 遥测上报端已完成；中心服务（`docker.yanziruxue.top`）由独立后端实现，本项目不做 |
+| 堆栈图标本地上传 | ⬜ 未开始 | 目前仅支持图标 URL |
+
+### 已完成（累计里程碑）
+
+- **v1.13.0** 登录鉴权与账户管理（单管理员）。
+- **v1.14.0** 密码找回码（18 位、忽略大小写、10 分钟限流）。
+- **v1.15.0** 用户活跃度遥测（双标识 install/active 上报）。
+- **v1.15.16** 更新调度器落地为真实后台定时检查。
+- **v1.15.17 / 1.15.18** 会话机制改造：滑动过期 → 最终定为**绝对过期**（到点即退）+ 跨重启持久化 + 前端会话心跳。
+- **v1.15.19** 一键填入模板新增「指针处」位置。
+- **v1.15.20** 一键填入模板扩展为 5 个位置（新增 environment 下 / volumes 下）+ 自动缩进；登录页 UI 微调。
+
+### 未完成 / 已知限制
+
+| 项 | 说明 |
+|---|---|
+| 操作日志未落后端 | `docker.ts` 仍用 `console.log`，未走 `createLogger("Docker")`；设置页无日志级别 UI |
+| 会话超时改设置不回退 | 修改「会话超时」只对**下次登录**生效，当前会话仍按旧值 |
+| 前端心跳延迟 | 心跳周期 60s，页面自动退出时刻 = 超时时刻 + 最多 1 分钟 |
+| 镜像拉取依赖宿主配置 | App 内 `registryMirror` 必须留空，实际走宿主机 `/etc/docker/daemon.json` 的 registry-mirrors |
+| OTA 不含 service 更新 | OTA 不更新 `.service` 文件，老部署需重跑 `install.sh` |
+
+### 下一步计划
+
+1. **操作日志收尾**：`docker.ts` 接入 `createLogger("Docker")` 替换 `console.log`；设置页加日志级别 Select（debug/info/warn/error）+ journalctl 查看说明。
+2. **堆栈图标本地上传**（可选，视需求）。
+3. 视使用情况决定中心统计服务是否自建。
+
+### 构建与发布（速查）
+
+```
+源码 → npm run build:frontend（dist/）
+     → node scripts/build-binary.mjs（deploy/linux/bundle.js）
+     → node --experimental-sea-config deploy/linux/sea-config.json（sea-prep.blob）
+     → 复制「原始 Linux node」为 deploy/linux/docker-manager-yanzi + postject 注入
+     → python deploy/linux/make-package.py（zip）→ cp 到 build-upload/
+     → node scripts/push-via-api.mjs（推源码，绕过 git 端口封锁）
+     → npm run release（创建 GitHub Release）
+```
+
+⚠️ 三个坑：① 绝不用 `bash build.sh`（会复制 Windows node.exe）；② `sea-config.json` 的 `main`/`output` 必须是 Windows 绝对路径 `D:/...`；③ `make-package.py` 产物在 `deploy/linux/`，发布用 `build-upload/` 那份，别漏 `cp`。详细流程见 `docs/发布与OTA升级指南.md`。
+
+---
+
 ## 版本号规则
 
 格式：`Major.Minor.Patch`（如 `1.1.0`）
@@ -17,6 +111,31 @@
 
 ---
 
+## v1.15.20 — 2026-09-12
+
+### 一键填入模板：新增 environment / volumes 位置 + 自动缩进
+
+- **新增两个填入位置**：系统设置 → Compose 管理 → 一键填入模板，位置选项由 3 种扩展为 5 种 —— **services 下 / environment 下 / volumes 下 / 指针处 / 末尾**。
+- **「服务内」改名为「services 下」**，语义不变（services 下第一个服务内部）。
+- **自动缩进**：填入时按目标层级自动重排缩进，无需在模板里手工敲空格 —— `services 下` 缩进 **4 空格**、`environment 下` 与 `volumes 下` 缩进 **6 空格**。实现上先去掉模板自身的最小缩进（保留块内相对层级），再统一加目标缩进；且**随文档实际缩进自适应**（如服务名缩进 4 的文档，属性自动给 6、子项给 8）。
+- **父键自动创建**：目标服务没有 `environment:` / `volumes:` 键时，自动创建该键（服务属性层级）再插入子项。
+- **行内写法保护**：`environment: {}` 这类行内写法无法追加子项，给出明确提示而非产出非法 YAML。
+- **去重**：目标块内已存在完全相同的首行内容时跳过并提示。
+- 涉及文件：`src/types.ts`（新增 `ComposeInsertPosition` 类型）、`src/lib/compose-template.ts`（**新建**：位置选项 + `normalizeInsert` + `insertPositionLabel` 共享给设置页与堆栈页）、`src/pages/Stacks.tsx`（`insertTemplateBlock` 重写 + `reindentBlock`）、`src/pages/Settings.tsx`、`server/settings.ts`（默认值 `service`→`services`，归一化迁移旧值）。
+- **验证**：前后端 `tsc --noEmit` 全绿；逻辑单测 **19/19 PASS**（抽取 `Stacks.tsx` 真实源码经 esbuild 转译执行，含 end / cursor / 旧值 `service` 兼容回归）。
+
+### 登录页 UI 调整
+
+- 移除「用户名」「密码」标签右上角的 `*` 必填标识（仍保持必填校验，只是不再显示星号）。
+- 登录卡片下方新增一行说明：`docker-manager-yanzi · 本地部署`（与找回密码页底部提示同款样式）。
+- 涉及文件：`src/components/auth/LoginPage.tsx`。
+- **验证**：`tsc --noEmit` 通过。
+
+- **未完成 / 已知限制**：无。
+- **下一步**：无。
+
+---
+
 ## v1.15.19 — 2026-09-12
 
 ### 一键填入模板新增「指针处」填入位置
@@ -27,6 +146,9 @@
 - **未定位光标时**：从未点击过编辑器就点击「指针处」模板，提示「请先在编辑器中点击，定位要填入的位置」，不会误插到首行。
 - **全部填入**：多个「指针处」模板连续填入时，插入位置随已插入行数递进，顺序与模板列表一致（不会倒序叠加）。
 - 涉及文件：`src/types.ts`、`server/settings.ts`（模板归一化须放行 `cursor`，否则保存后被降级为 service）、`src/components/YamlEditor.tsx`（新增 `onCursorLineChange` 上报光标行）、`src/pages/Stacks.tsx`、`src/pages/Settings.tsx`。
+- **验证**：前后端 `tsc --noEmit` 全绿；逻辑单测 9/9 PASS（抽取 `Stacks.tsx` 真实源码经 esbuild 转译执行，含 service / end 回归）。
+- **未完成 / 已知限制**：无。
+- **下一步**：无。
 
 ---
 

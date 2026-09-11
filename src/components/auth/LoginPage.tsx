@@ -86,7 +86,7 @@ function LoginForm({
           className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-4"
           onSubmit={(e) => { e.preventDefault(); if (!busy) submit(); }}
         >
-          <FormField label="用户名" required>
+          <FormField label="用户名">
             <div className="relative">
               <User size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <Input
@@ -98,7 +98,7 @@ function LoginForm({
             </div>
           </FormField>
 
-          <FormField label="密码" required>
+          <FormField label="密码">
             <div className="relative">
               <Lock size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <Input
@@ -134,6 +134,10 @@ function LoginForm({
             重置密码
           </button>
         </form>
+
+        <p className="text-center text-[11px] text-slate-400 mt-4">
+          docker-manager-yanzi · 本地部署
+        </p>
       </div>
     </div>
   );

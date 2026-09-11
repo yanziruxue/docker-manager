@@ -109,15 +109,19 @@ const DEFAULT_SETTINGS = {
   },
   /**
    * Compose 模板（系统设置 → Compose 管理 维护）：
-   * 编辑堆栈时一键填入。insert=service 填到 services 第一个服务内部；insert=end 追加到文本末尾；
-   * insert=cursor 插到编辑器光标所在行的下一行。
-   * content 为可多行 compose 文本（缩进手动输入），值留空则填入后由用户补全。
+   * 编辑堆栈时一键填入。
+   * - insert=services：填到 services 下第一个服务内部（自动缩进到服务属性层级，标准文档 4 空格）
+   * - insert=environment：填到第一个服务的 environment 下（缩进 6 空格）
+   * - insert=volumes：填到第一个服务的 volumes 下（缩进 6 空格）
+   * - insert=cursor：插到编辑器光标所在行的下一行
+   * - insert=end：追加到文本末尾
+   * content 为可多行 compose 文本；填入时会自动按目标层级重新缩进，无需手工对齐。
    */
   compose: {
     templates: [
-      { content: "network_mode: ", insert: "service" },
-      { content: "restart: ", insert: "service" },
-      { content: "container_name: ", insert: "service" },
+      { content: "network_mode: ", insert: "services" },
+      { content: "restart: ", insert: "services" },
+      { content: "container_name: ", insert: "services" },
     ],
   },
   /**
@@ -130,6 +134,15 @@ const DEFAULT_SETTINGS = {
     collectHwFingerprint: true,
   },
 };
+
+/**
+ * 归一化模板填入位置：旧配置的 "service" 迁移为 "services"，
+ * 其余合法值原样保留，未知值兜底为 services。
+ */
+function normalizeComposeInsert(v: any): string {
+  if (v === "end" || v === "cursor" || v === "environment" || v === "volumes") return v;
+  return "services";
+}
 
 export function getSettings(): any {
   try {
@@ -188,15 +201,14 @@ export function getSettings(): any {
         modal: { ...DEFAULT_SETTINGS.modal, ...(parsed?.modal || {}) },
         compose: {
           templates: Array.isArray(parsed?.compose?.templates)
-            ? parsed.compose.templates.map((x: any) =>
-                typeof x === "string"
-                  ? { content: x, insert: "service" }
-                  : {
-                      content: String(x?.content ?? ""),
-                      insert:
-                        x?.insert === "end" ? "end" : x?.insert === "cursor" ? "cursor" : "service",
-                    }
-              )
+              ? parsed.compose.templates.map((x: any) =>
+                  typeof x === "string"
+                    ? { content: x, insert: "services" }
+                    : {
+                        content: String(x?.content ?? ""),
+                        insert: normalizeComposeInsert(x?.insert),
+                      }
+                )
             : DEFAULT_SETTINGS.compose.templates,
         },
         columnVisibility: mergedColumns,

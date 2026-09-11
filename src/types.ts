@@ -429,16 +429,26 @@ export interface ColumnVisibility {
 
 /** Compose 一键填入模板项 */
 export interface ComposeTemplate {
-  /** 模板内容（可多行 compose 文本，缩进由用户手动输入） */
+  /** 模板内容（可多行 compose 文本；填入时会自动按目标层级重新缩进，无需手工对齐） */
   content: string;
   /**
    * 填入位置：
-   * - service = services 下第一个服务内部
-   * - end = 追加到 compose 文本最后一行
+   * - services = services 下第一个服务内部（缩进 4 空格，随文档实际缩进自适应）
+   * - environment = 第一个服务的 environment 下（缩进 6 空格）
+   * - volumes = 第一个服务的 volumes 下（缩进 6 空格）
    * - cursor = 插入到编辑器光标（鼠标指针）所在行的下一行
+   * - end = 追加到 compose 文本最后一行
    */
-  insert: "service" | "end" | "cursor";
+  insert: ComposeInsertPosition;
 }
+
+/** 一键填入模板的填入位置 */
+export type ComposeInsertPosition =
+  | "services"
+  | "environment"
+  | "volumes"
+  | "cursor"
+  | "end";
 
 /** Compose 模板设置（系统设置 → Compose 管理 维护） */
 export interface ComposeConfig {

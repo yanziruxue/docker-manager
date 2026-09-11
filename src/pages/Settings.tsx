@@ -52,6 +52,7 @@ import type { SystemSettings, BackupMode, DockerEngine, UpdateInfo, UpdateState,
 import { Card, FormField, Input, Select, Toggle, IconButton } from "../components/UI";
 import { ActivityPanel, DEFAULT_TELEMETRY } from "../components/ActivityPanel";
 import type { TelemetryConfig, SchedulerStatus } from "../types";
+import { COMPOSE_INSERT_OPTIONS, normalizeInsert } from "../lib/compose-template";
 import {
   changeMyPassword,
   getRecoveryStatus,
@@ -189,9 +190,9 @@ function getDefaultSettings(): SystemSettings {
     },
     compose: {
       templates: [
-        { content: "network_mode: ", insert: "service" },
-        { content: "restart: ", insert: "service" },
-        { content: "container_name: ", insert: "service" },
+        { content: "network_mode: ", insert: "services" },
+        { content: "restart: ", insert: "services" },
+        { content: "container_name: ", insert: "services" },
       ],
     },
     defaultsVersion: 2,
@@ -2432,9 +2433,6 @@ docker-compose version</code>
             {/* 检查更新 */}
             <Card title="检查更新" icon={<Globe size={16} />}>
               <div className="space-y-4">
-                <div className="flex items-center gap-2 p-3 bg-slate-50 border border-slate-200 rounded-lg">
-                  <Globe size={14} className="text-slate-400 flex-shrink-0" />
-                </div>
                 <div className="flex items-center justify-between">
                   <div>
                     <span className="text-sm text-slate-600">自动检查更新</span>
@@ -2648,8 +2646,9 @@ docker-compose version</code>
               <h2 className="text-lg font-semibold text-slate-800 mb-1">Compose 管理</h2>
               <p className="text-sm text-slate-500">
                 维护「编辑堆栈 → Compose」页右侧的一键填入模板。每项可填一行或多行 compose 内容（如 restart: unless-stopped），
-                缩进请手动输入空格；值留空的项填入时自动补全（restart→unless-stopped、network_mode→bridge、container_name→服务名 等）。
-                每项可单独选择填入位置：<b>服务内</b>（services 下第一个服务内部）、<b>指针处</b>（编辑器光标所在行的下一行）或 <b>末尾</b>（追加到 compose 文本最后一行）。
+                填入时会按目标层级<b>自动缩进</b>（无需手工对齐空格）；值留空的项填入时自动补全（restart→unless-stopped、network_mode→bridge、container_name→服务名 等）。
+                每项可单独选择填入位置：<b>services 下</b>（第一个服务内部，缩进 4 空格）、<b>environment 下</b> / <b>volumes 下</b>（第一个服务对应键的子项，缩进 6 空格）、
+                <b>指针处</b>（编辑器光标所在行的下一行）或 <b>末尾</b>（追加到 compose 文本最后一行）。缩进以标准 2 空格 compose 为基准，会随文档实际缩进自适应。
               </p>
             </div>
 
@@ -2661,7 +2660,7 @@ docker-compose version</code>
                   onClick={() =>
                     update("compose", "templates", [
                       ...(data.compose?.templates || []),
-                      { content: "", insert: "service" as const },
+                      { content: "", insert: "services" as const },
                     ])
                   }
                   className="flex items-center gap-1 px-3 py-1.5 text-sm text-white bg-blue-500 rounded-lg hover:bg-blue-600 transition-colors"
@@ -2683,23 +2682,24 @@ docker-compose version</code>
                       <div className="flex items-center gap-2 mb-2">
                         <span className="text-xs text-slate-400 font-mono w-8 text-right shrink-0">{i + 1}.</span>
                         {/* 填入位置切换 */}
-                        <div className="flex items-center rounded-md border border-slate-200 overflow-hidden text-xs shrink-0">
-                          {(["service", "cursor", "end"] as const).map((m) => (
+                        <div className="flex items-center flex-wrap rounded-md border border-slate-200 overflow-hidden text-xs shrink-0">
+                          {COMPOSE_INSERT_OPTIONS.map((opt) => (
                             <button
-                              key={m}
+                              key={opt.value}
                               type="button"
+                              title={opt.hint}
                               onClick={() => {
                                 const next = [...(data.compose?.templates || [])];
-                                next[i] = { ...next[i], insert: m };
+                                next[i] = { ...next[i], insert: opt.value };
                                 update("compose", "templates", next);
                               }}
-                              className={`px-2.5 py-1 transition-colors ${
-                                (tpl.insert || "service") === m
+                              className={`px-2 py-1 transition-colors ${
+                                normalizeInsert(tpl.insert) === opt.value
                                   ? "bg-blue-500 text-white"
                                   : "bg-white text-slate-500 hover:bg-slate-50"
                               }`}
                             >
-                              {m === "service" ? "服务内" : m === "cursor" ? "指针处" : "末尾"}
+                              {opt.label}
                             </button>
                           ))}
                         </div>
@@ -2729,8 +2729,9 @@ docker-compose version</code>
                 </div>
               )}
               <p className="text-xs text-slate-400 mt-3">
-                示例：network_mode: （留空自动补 bridge）、restart: unless-stopped、container_name: （留空自动补服务名）、labels: （多行请手动缩进）。
-                「服务内」填到第一个服务下，「指针处」填到编辑器光标所在行的下一行（需先在编辑器中点击定位），「末尾」追加到文件最后一行。保存后立即生效。
+                示例：network_mode: （留空自动补 bridge）、restart: unless-stopped、container_name: （留空自动补服务名）、- TZ=Asia/Shanghai（environment 下）、- /etc/localtime:/etc/localtime:ro（volumes 下）。
+                「services 下」填到第一个服务内并缩进 4 空格，「environment 下」「volumes 下」填到对应键的子项并缩进 6 空格（键不存在时自动创建），
+                「指针处」填到编辑器光标所在行的下一行（需先在编辑器中点击定位），「末尾」追加到文件最后一行。保存后立即生效。
               </p>
             </Card>
           </div>

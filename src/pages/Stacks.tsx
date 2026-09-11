@@ -38,8 +38,15 @@ import {
   ArrowLeftRight,
   Columns,
 } from "lucide-react";
-import type { Stack, StackContainer, ResourceTag, ComposeTemplate } from "../types";
+import type {
+  Stack,
+  StackContainer,
+  ResourceTag,
+  ComposeTemplate,
+  ComposeInsertPosition,
+} from "../types";
 import { convert, type ConvertResult } from "../lib/compose-convert";
+import { normalizeInsert, insertPositionLabel } from "../lib/compose-template";
 import {
   createStackApi,
   stackActionApi,
@@ -1068,37 +1075,57 @@ function completeEmptyValue(line: string, svcName: string): string {
   return line; // 未知键且无值，原样保留（无法推断默认）
 }
 
+/** 各填入位置在标准 2 空格缩进文档下的目标缩进（仅当无法从文档推断时兜底）：服务属性 4、列表子项 6 */
+const INSERT_FALLBACK_INDENT: Record<"services" | "environment" | "volumes", number> = {
+  services: 4,
+  environment: 6,
+  volumes: 6,
+};
+
+/**
+ * 把模板块整体重新缩进到目标层级：先去掉模板自身的最小缩进（保留块内相对层级），
+ * 再统一加上目标缩进。这样用户在设置里无需手工对齐空格。
+ */
+function reindentBlock(lines: string[], pad: number): string[] {
+  const nonEmpty = lines.filter((l) => l.trim() !== "");
+  const base = nonEmpty.length
+    ? Math.min(...nonEmpty.map((l) => (l.match(/^(\s*)/) || ["", ""])[1].length))
+    : 0;
+  return lines.map((l) => (l.trim() === "" ? "" : " ".repeat(pad) + l.slice(base)));
+}
+
 /**
  * 将一段模板（可多行）插入到 compose 文本。
- * - insert="service"：插到 services 下第一个服务内部（缩进由模板自身决定，用户手动输入空格）；
- * - insert="end"：追加到 compose 文本的最后一行（末尾）；
- * - insert="cursor"：插到编辑器光标（鼠标指针）所在行的下一行。
- * 模板内每一行原样保留（支持多行内容）；值留空的项按 COMPOSE_VALUE_DEFAULTS 补全；
- * 服务块内已存在同名 key 时跳过（避免重复键）；未找到 services: / 服务行时（仅 service 模式）返回结构错误原因。
+ * - insert="services"：插到 services 下第一个服务内部，自动缩进到服务属性层级（标准文档 4 空格）；
+ * - insert="environment"：插到第一个服务的 environment 下，自动缩进到列表子项层级（标准文档 6 空格）；
+ * - insert="volumes"：插到第一个服务的 volumes 下，缩进同上；
+ * - insert="end"：追加到 compose 文本的最后一行（末尾，不重排缩进）；
+ * - insert="cursor"：插到编辑器光标（鼠标指针）所在行的下一行（沿用模板自身缩进）。
+ * 值留空的项按 COMPOSE_VALUE_DEFAULTS 补全；目标块内已存在相同内容时跳过；
+ * 未找到 services: / 服务行时（非 end/cursor 模式）返回结构错误原因。
  */
 function insertTemplateBlock(
   compose: string,
   block: string,
-  insert: "service" | "end" | "cursor",
+  insert: ComposeInsertPosition,
   cursorLine?: number | null
 ): { next: string; ok: boolean; reason?: string } {
-  const lines = compose.split("\n");
-  const blockLines = block
-    .split("\n")
-    // 末尾模式无服务名可注入，传 "" 即可（container_name 等键不会补全，符合预期）
-    .map((l) => completeEmptyValue(l, ""));
-  const contentLines = blockLines.filter((l) => l.trim() !== "");
-  if (contentLines.length === 0) return { next: compose, ok: false, reason: "模板内容为空，无法填入" };
+  const pos = normalizeInsert(insert);
+  if (!block.trim()) return { next: compose, ok: false, reason: "模板内容为空，无法填入" };
 
-  if (insert === "end") {
+  if (pos === "end") {
+    const outLines = compose.split("\n");
     // 去掉尾部空行后直接追加到文件末尾（保留一个换行分隔）
-    while (lines.length > 0 && lines[lines.length - 1].trim() === "") lines.pop();
-    lines.push(...blockLines);
-    return { next: lines.join("\n"), ok: true };
+    while (outLines.length > 0 && outLines[outLines.length - 1].trim() === "") outLines.pop();
+    outLines.push(...block.split("\n"));
+    return { next: outLines.join("\n"), ok: true };
   }
 
+  const lines = compose.split("\n");
+  const indentOf = (l: string) => (l.match(/^(\s*)/) || ["", ""])[1].length;
+
   // ---- cursor 模式：插入到光标所在行的下一行 ----
-  if (insert === "cursor") {
+  if (pos === "cursor") {
     if (cursorLine == null) {
       return { next: compose, ok: false, reason: "请先在编辑器中点击，定位要填入的位置" };
     }
@@ -1134,11 +1161,10 @@ function insertTemplateBlock(
     return { next: lines.join("\n"), ok: true };
   }
 
-  // ---- service 模式：插入到第一个服务内部 ----
+  // ---- services / environment / volumes 模式：定位到第一个服务 ----
   const svcIdx = lines.findIndex((l) => /^services\s*:\s*(#.*)?$/.test(l));
   if (svcIdx < 0) return { next: compose, ok: false, reason: "未找到 services: 顶层键，无法定位填入位置" };
 
-  const indentOf = (l: string) => (l.match(/^(\s*)/) || ["", ""])[1].length;
   const baseIndent = indentOf(lines[svcIdx]);
 
   // services: 下第一个服务名行
@@ -1160,24 +1186,84 @@ function insertTemplateBlock(
   }
   if (svcLineIdx < 0) return { next: compose, ok: false, reason: "services: 下没有任何服务，无法定位填入位置" };
 
-  // 末尾模式补全用的 svcName 已失效（上面用 "" 跑了一次），此处用真实 svcName 重新补全
-  const finalBlockLines = block.split("\n").map((l) => completeEmptyValue(l, svcName));
-  const firstKey = contentLines[0].match(/^\s*([A-Za-z0-9_.\-]+)\s*:/)?.[1];
-  if (firstKey) {
-    for (let i = svcLineIdx + 1; i < lines.length; i++) {
-      const l = lines[i];
-      if (!l.trim() || /^\s*#/.test(l)) continue;
-      const ind = indentOf(l);
-      if (ind <= svcIndent) break; // 离开服务块
-      const km = l.match(/^\s*([A-Za-z0-9_.\-]+)\s*:/);
-      if (km && km[1] === firstKey) return { next: compose, ok: false, reason: `属性 ${firstKey} 已存在，已跳过` };
-    }
+  // 服务块范围：从服务名行之后，到缩进 <= 服务名缩进的行为止（开区间末尾）
+  let svcEnd = lines.length;
+  for (let i = svcLineIdx + 1; i < lines.length; i++) {
+    const l = lines[i];
+    if (!l.trim() || /^\s*#/.test(l)) continue;
+    if (indentOf(l) <= svcIndent) { svcEnd = i; break; }
   }
 
-  // 插入位置：服务名行之后，跳过空行/注释，插到服务块顶部
-  let insertAt = svcLineIdx + 1;
-  while (insertAt < lines.length && (!lines[insertAt].trim() || /^\s*#/.test(lines[insertAt]))) insertAt++;
-  lines.splice(insertAt, 0, ...finalBlockLines);
+  // 用真实服务名补全留空值（container_name 等）
+  const finalBlockLines = block.split("\n").map((l) => completeEmptyValue(l, svcName));
+
+  // ---- services 模式：插入到第一个服务内部（服务属性层级） ----
+  if (pos === "services") {
+    const pad = svcIndent >= 0 ? svcIndent + 2 : INSERT_FALLBACK_INDENT.services;
+    const firstKey = finalBlockLines.find((l) => l.trim())?.match(/^\s*([A-Za-z0-9_.\-]+)\s*:/)?.[1];
+    if (firstKey) {
+      for (let i = svcLineIdx + 1; i < svcEnd; i++) {
+        const km = lines[i].match(/^\s*([A-Za-z0-9_.\-]+)\s*:/);
+        if (km && km[1] === firstKey) return { next: compose, ok: false, reason: `属性 ${firstKey} 已存在，已跳过` };
+      }
+    }
+    // 插入位置：服务名行之后，跳过空行/注释，插到服务块顶部
+    let insertAt = svcLineIdx + 1;
+    while (insertAt < lines.length && (!lines[insertAt].trim() || /^\s*#/.test(lines[insertAt]))) insertAt++;
+    lines.splice(insertAt, 0, ...reindentBlock(finalBlockLines, pad));
+    return { next: lines.join("\n"), ok: true };
+  }
+
+  // ---- environment / volumes 模式：插入到服务内对应键的子项层级 ----
+  const targetKey = pos; // "environment" | "volumes"
+  let keyIdx = -1;
+  let keyIndent = -1;
+  for (let i = svcLineIdx + 1; i < svcEnd; i++) {
+    const l = lines[i];
+    if (!l.trim() || /^\s*#/.test(l)) continue;
+    const m = l.match(/^\s*([A-Za-z0-9_.\-]+)\s*:\s*(.*)$/);
+    if (m && m[1] === targetKey) { keyIdx = i; keyIndent = indentOf(l); break; }
+  }
+
+  // 父键不存在 → 新建父键（服务属性层级）+ 子项（再深一级）
+  if (keyIdx < 0) {
+    const keyPad = svcIndent >= 0 ? svcIndent + 2 : 4;
+    const subPad = svcIndent >= 0 ? svcIndent + 4 : INSERT_FALLBACK_INDENT[targetKey];
+    let insertAt = svcEnd;
+    // 跳过服务块末尾的空行，避免新键与块尾之间留下空行
+    while (insertAt > svcLineIdx + 1 && !lines[insertAt - 1].trim()) insertAt--;
+    lines.splice(insertAt, 0, `${" ".repeat(keyPad)}${targetKey}:`, ...reindentBlock(finalBlockLines, subPad));
+    return { next: lines.join("\n"), ok: true };
+  }
+
+  // 父键为行内写法（如 environment: {} 或 environment: [...]）无法追加子项
+  const inlineValue = lines[keyIdx].match(/^\s*[A-Za-z0-9_.\-]+\s*:\s*(.*)$/)?.[1] ?? "";
+  if (inlineValue.trim() !== "") {
+    return {
+      next: compose,
+      ok: false,
+      reason: `${targetKey} 为行内写法（${inlineValue.trim()}），无法追加，请先改为块写法`,
+    };
+  }
+
+  // 子块范围：父键行之后，缩进 > 父键缩进的连续行
+  let subEnd = keyIdx + 1;
+  for (let i = keyIdx + 1; i < svcEnd; i++) {
+    const l = lines[i];
+    if (!l.trim() || /^\s*#/.test(l)) continue;
+    if (indentOf(l) <= keyIndent) break;
+    subEnd = i + 1;
+  }
+  // 去重：子块内已存在完全相同的首行内容则跳过
+  const firstContent = finalBlockLines.find((l) => l.trim())?.trim();
+  if (firstContent) {
+    for (let i = keyIdx + 1; i < subEnd; i++) {
+      if (lines[i].trim() === firstContent) {
+        return { next: compose, ok: false, reason: `${targetKey} 下已存在该内容，已跳过` };
+      }
+    }
+  }
+  lines.splice(subEnd, 0, ...reindentBlock(finalBlockLines, keyIndent + 2));
   return { next: lines.join("\n"), ok: true };
 }
 
@@ -1485,13 +1571,11 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
                         <button
                           key={i}
                           onClick={() => applyComposeTemplate(tpl)}
-                          title={`填入: ${tpl.content}\n位置: ${
-                            tpl.insert === "end" ? "末尾" : tpl.insert === "cursor" ? "指针处" : "服务内"
-                          }`}
+                          title={`填入: ${tpl.content}\n位置: ${insertPositionLabel(tpl.insert)}`}
                           className="w-full text-left px-2 py-1.5 rounded-md border border-slate-200 bg-white font-mono text-[11px] leading-relaxed text-slate-600 hover:border-blue-400 hover:text-blue-600 transition-colors whitespace-pre-wrap break-words"
                         >
                           <span className="inline-block mb-0.5 px-1 rounded bg-slate-100 text-[9px] text-slate-400 uppercase">
-                            {tpl.insert === "end" ? "末尾" : tpl.insert === "cursor" ? "指针处" : "服务内"}
+                            {insertPositionLabel(tpl.insert)}
                           </span>
                           {"\n"}
                           {tpl.content.trim() || `（空模板 ${i + 1}）`}
