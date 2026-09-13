@@ -527,6 +527,7 @@ export default function App() {
           title={pageTitles[page].title}
           breadcrumb={pageTitles[page].breadcrumb}
           onRefresh={() => activeEngineId && loadEngineData(activeEngineId)}
+          refreshing={dataLoading}
           onNavigate={handleNavigate}
           notifications={activities}
           unreadCount={unreadCount}

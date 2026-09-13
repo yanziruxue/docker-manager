@@ -17,15 +17,15 @@
 
 ## 开发进度总览
 
-> 最后更新：2026-09-12
+> 最后更新：2026-09-13
 
 ### 当前状态
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.15.20**（`package.json`） |
-| 最新 Release | [v1.15.19](https://github.com/yanziruxue/docker-manager/releases/tag/v1.15.19)（v1.15.20 待发布） |
-| 源码分支 | `main` @ `b95d978e`（v1.15.20 待推送） |
+| 当前版本 | **v1.16.1**（`package.json`，未发布） |
+| 最新 Release | [v1.15.20](https://github.com/yanziruxue/docker-manager/releases/tag/v1.15.20) |
+| 源码分支 | `main` @ `243c89e5` |
 | 交付包 | `build-upload/docker-manager-yanzi-linux-x64.zip`（40.9 MB / 5 文件） |
 | 架构 | REST + WS + SSE 三通道；Socket / TCP / SSH 三种引擎 |
 | 目标平台 | Linux x64（SEA 单可执行文件），Unraid / 自托管 NAS |
@@ -40,6 +40,7 @@
 | 堆栈管理 | ✅ | Compose 自动发现 / 创建 / 编辑 / 操作 / 更新检查 / 备份恢复 / 批量操作 |
 | 镜像管理 | ✅ | 列表 / 筛选 / 拉取 / 删除 / prune 未使用 |
 | 数据卷管理 | ✅ | 列表 / 新建 / 删除 / prune / 详情 |
+| 备份管理 | ✅ | 手动全量 + 堆栈级备份 / 恢复 / 导出 + 自动备份调度器（周/月/年/Cron，含保留清理） |
 | 通知中心 | ✅ | 未读已读 + localStorage 持久化 |
 | 系统设置 | ✅ | Docker 配置 / Compose 模式 / 通知 / 备份 / 更新调度 / 列显隐 / 活跃度 |
 | Web 终端 | ✅ | xterm.js + WebSocket + 多 Shell 检测 |
@@ -61,6 +62,8 @@
 - **v1.15.17 / 1.15.18** 会话机制改造：滑动过期 → 最终定为**绝对过期**（到点即退）+ 跨重启持久化 + 前端会话心跳。
 - **v1.15.19** 一键填入模板新增「指针处」位置。
 - **v1.15.20** 一键填入模板扩展为 5 个位置（新增 environment 下 / volumes 下）+ 自动缩进；登录页 UI 微调。
+- **v1.16.0** 备份功能完整落地：接线「立即备份/恢复/导出」+ 新增 `server/backup.ts` 全量备份模块 + 自动备份调度器（周/月/年/Cron + 保留清理），并修好「更新调度器从未真正启动」。
+- **v1.16.1** 备份下载链路改为 fetch → Blob（带错误提示），修复 `restoreStack` 备份目录不一致与 tar 在 Windows 下的路径解析问题。
 
 ### 未完成 / 已知限制
 
@@ -71,6 +74,7 @@
 | 前端心跳延迟 | 心跳周期 60s，页面自动退出时刻 = 超时时刻 + 最多 1 分钟 |
 | 镜像拉取依赖宿主配置 | App 内 `registryMirror` 必须留空，实际走宿主机 `/etc/docker/daemon.json` 的 registry-mirrors |
 | OTA 不含 service 更新 | OTA 不更新 `.service` 文件，老部署需重跑 `install.sh` |
+| 备份文件名秒级粒度 | 同一秒内对同一 `kind+tag` 连续备份会同名覆盖（前端按钮已禁用，正常操作不触发） |
 
 ### 下一步计划
 
@@ -108,6 +112,96 @@
 - 一次发布中同时含 Minor 与 Patch 时，按**最高级别**递增，低级别归零（例：`1.0.3` + 新功能 → `1.1.0`）
 - Major 由人工决定，不自动递增
 - 同一天内的多次改动合并为一个版本，逐条记录在版本下
+
+---
+
+## v1.16.1 — 2026-09-13
+
+### 修复：备份文件无法下载（下载链路改为 Blob 取回）+ 堆栈级备份目录/tar 跨平台修正
+
+- **问题（"备份后的备份无法下载"）**：
+  - 前端「下载此备份」「导出全部配置」用的是 `<a href="/api/backups/...">` **直连顶层导航**。该写法一旦失败（401 / 500 / 反向代理拦截 / 被嵌在 iframe 沙箱中禁止下载）浏览器**不会给出任何提示**，用户体感就是"点了没反应"，且与项目其它下载（容器 CSV 导出走 fetch → Blob）实现不一致。
+  - `server/docker.ts` 的 `restoreStack` 仍硬编码 `DATA_DIR/backups`，与 `resolveBackupDir()`（尊重 `settings.backup.backupPath`）不同步 —— 配置了自定义备份目录后，**堆栈恢复会找不到刚备份出的文件**。
+  - `docker.ts` 的堆栈备份/恢复用 `run()`（内部 `shell: true`）调 tar：绝对路径会经 shell 转义被破坏；GNU tar 还会把 `-f C:\...` 的冒号误判为远程主机。
+- **已完成**：
+  - `src/api.ts`：新增 `downloadBackupApi` / `exportConfigApi`，内部走 `fetch(credentials: "include") → Blob → objectURL`，并解析 `Content-Disposition` 取真实文件名；失败时抛出带后端错误文案的 `ApiError`（401 时照旧派发 `auth:unauthorized`）。与容器 CSV 导出统一为同一套下载范式。
+  - `src/pages/Settings.tsx`：`handleDownloadBackup` / `handleExportConfig` 改为 async，**成功/失败均有 toast**（失败会显示后端原因）；备份列表下载项下载期间转圈并禁用，避免重复点击。
+  - `server/docker.ts`：`restoreStack` 改用 `backupFilePath()`（统一目录 + 防路径穿越）；`backupStack`/`restoreStack` 的 tar 调用统一改用 `backup.ts` 导出的 `runTar()`（`shell:false`）。
+  - `server/backup.ts`：tar helper 由私有 `tar` 改为导出 `runTar`，并在内部把 `C:\...` 形式的绝对路径统一转正斜杠 —— 修复 Git/mingw 的 GNU tar 把 `-C C:\a\b` 重复转义成 `C\:\\a\\b` 而报 `Cannot open` 的问题（Linux 下为 no-op）。全项目 tar 调用点收敛到一处。
+- **验证**：
+  - 前后端 `tsc --noEmit` 全绿。
+  - 用 esbuild 打包真实 `server/index.ts`（`BUILD_BINARY=false`）起独立实例 + 真实会话 Cookie 实测：登录 → 立即备份（630B）→ 下载返回 `HTTP 200` + `Content-Disposition: attachment` + 有效 gzip；`tar -tzf` 内容为 `dockercompose/<stack>/{docker-compose.yaml,name}` + `data/engines.json` + `manifest.json`；无会话下载返回 **401**；导出接口 200/599B。
+  - 堆栈级备份/恢复端到端：建备份 → 删除堆栈目录 → 恢复 → compose 与 `.env` 内容完整还原。
+  - 全量备份回归：create / list / prune（保留最新 N、其它前缀不动）/ 路径穿越拦截 / export / restore / delete 全部通过。
+- **未完成 / 已知限制**：
+  - 备份文件名时间戳为**秒级**（`tsCompact()`），同一秒内对同一 `kind+tag` 连续备份会**同名覆盖**（前端按钮已禁用，正常操作不会触发；未改文件名格式以免影响 `backupLabel` 解析）。
+  - 远端（SSH/TCP）引擎的堆栈级备份仍不支持（堆栈目录不在本机），已有明确提示。
+  - 若部署实例仍是旧版本（≤ v1.15.20 未含 `/api/backups/:name/download` 路由），需先升级才可下载。
+- **下一步**：打包 v1.16.1 并发布（v1.16.0 与 v1.16.1 均未发布，发布时合并说明）。
+
+---
+
+## v1.16.0 — 2026-09-13
+
+### 备份功能完整修复：接活死按钮 + 全量备份/恢复/导出 + 自动备份调度器
+
+- **问题（"备份不管用"根因）**：
+  1. 设置页「立即备份 / 从备份恢复 / 导出全部配置」三个按钮**没有任何 `onClick`**（`Settings.tsx`），点了完全没反应。
+  2. 自动备份**后端从未实现**：`autoBackupEnabled / weekly / monthly / yearly / simpleFrequency` 只存在于设置项；`server/scheduler.ts` 仅做镜像更新检查；`lastBackup` 全项目无写入点。
+  3. `settings.backup.backupPath` 被忽略：`backupStack` 硬编码 `DATA_DIR/backups`。
+  4. 堆栈级备份在**远程（SSH/TCP）引擎**上必失败（用本地 `fs`/`tar` 处理远程路径，报"堆栈目录不存在"）。
+  5. 顺带发现：`startUpdateScheduler()` 一直被 import 但**从未调用**，镜像更新调度器从未真正启动。
+- **改动**：
+  - 新增 `server/backup.ts`（统一备份模块）：`createFullBackup`（打包 `dockercompose` 全部堆栈 + `config/settings.json` + `data/engines.json` + `active_engine.json` + `manifest.json`）、`restoreFullBackup`、`exportConfigArchive`、`listBackupFiles`、`deleteBackupFile`、`backupFilePath`、`pruneBackups`；`resolveBackupDir()` 尊重 `backupPath`（**绝对路径**生效，否则默认 `<data>/backups`）。tar 以「相对归档名 + `cwd=归档目录`」调用，规避 GNU tar 对 `C:\` 冒号的远程主机误判。
+  - `server/index.ts`：新增 `POST /api/backups`（立即备份）、`POST /api/backups/:name/restore`（全量恢复）、`GET /api/backups/:name/download`（下载单个备份）、`GET /api/backups/export`（导出配置归档，下载后清理临时文件）、`GET /api/backup-scheduler/status`；`GET/DELETE /api/backups` 改走新模块；**`startUpdateScheduler()` + `startBackupScheduler()` 在 `listen` 回调中真正启动**。
+  - `server/scheduler.ts`：新增自动备份调度器 —— mode 1 按 `weekly/day+time`、`monthly/dayOfMonth+time`（0=月末）、`yearly/MM-DD+time` 计算下次执行；mode 2 支持五段 Cron（通配/单值/列表/区间/步长）；到期创建 `auto-<key>_<ts>.tar.gz` 并按各档 `retention` 清理同前缀历史包；状态落盘 `backup-scheduler-status.json`。
+  - `server/docker.ts`：`backupStack` / `restoreStack` 改用 `resolveBackupDir()`；远程引擎给出明确提示「远程引擎（ssh/tcp）暂不支持备份」；移除已迁移的 `listBackups` / `deleteBackup`。
+  - `src/api.ts`：新增 `createBackupApi` / `restoreBackupApi` / `backupDownloadUrl` / `exportConfigUrl`。
+  - `src/pages/Settings.tsx`：接活三个按钮（立即备份带 loading、恢复带选择弹窗与二次确认、导出下载）；新增「备份目录」输入项；备份列表支持**下载单个备份**、标签按 `手动全量备份 / 自动备份(key) / 堆栈名` 区分；「上次备份时间」改由列表最新一条推导；移除「备份目录不能为空」的过时校验（留空即默认目录）。
+- **验证**：
+  - 前后端 `tsc --noEmit` 全绿（EXIT=0）。
+  - `server/backup.ts` 端到端冒烟（真实 tar，临时 DATA_DIR）：手动/自动备份生成、`pruneBackups` 保留清理、路径穿越拦截、导出归档生成、从备份恢复、删除 —— **全部通过**。
+  - 调度器时间/cron 纯函数单测（抽取源码 + esbuild 转译 + data-URL 执行）：**13/13 PASS**（周/月/年下次时间、`0 3 * * 0` 与 `30 10 * * *` 下次时间、cron 字段通配/步长/区间/列表解析）。
+
+- **未完成 / 已知限制**：
+  - 恢复会覆盖 `dockercompose` 与 `settings.json` / `engines.json`，**引擎列表与设置的运行时生效需刷新页面 / 重启服务**（页面已提示刷新）。
+  - 备份为「Compose 堆栈 + 应用配置」级全量，**不含镜像/容器/数据卷内容**（数据卷内容需另作文件级备份）。
+  - 自动备份仅在服务运行期间按分钟评估；服务停机期间错过的时点不会补跑（只补跑一次最近到期项）。
+- **下一步**：无。
+
+---
+
+## v1.15.22 — 2026-09-12
+
+### 顶栏刷新按钮视觉反馈 + 删除页内冗余刷新按钮
+
+- **问题**：顶栏「刷新」按钮（`TopBar.tsx`）虽绑定 `loadEngineData` 真实拉取全量数据，但点击后图标静止、无 loading 态，体感像「假的」；同时数据卷管理页（`Volumes.tsx:291`）还有一个独立「刷新」按钮，调用的是同一个 `loadEngineData`，与顶栏功能完全重复（不是「只刷本页」的差异化实现）。
+- **改动**：
+  1. 删除 `src/pages/Volumes.tsx` 顶部独立的「刷新」按钮（`onClick={onRefresh}`），并移除其独占的 `RefreshCw` 引入（避免未用告警）。`onRefresh` 属性仍保留并继续供「新建数据卷」弹窗创建后刷新列表使用（属操作后回调，非冗余可见按钮）。
+  2. `src/components/TopBar.tsx` 新增 `refreshing?: boolean` 属性；刷新时图标加 `animate-spin`、按钮 `disabled` + `opacity-50` + `cursor-not-allowed`，`title` 切换为「刷新中…」。
+  3. `src/App.tsx` 向 TopBar 传入 `refreshing={dataLoading}`（`loadEngineData` 执行期间 `dataLoading` 为 true，刷新完成归 false）。
+- **范围说明**：`Containers` / `Stacks` / `Images` 页虽也接收 `onRefresh`，但仅作为弹窗/表单「操作后刷新列表」回调（新建、编辑、pull 等），并非独立可见刷新按钮，故**保留不动**；各页的「批量更新 / 检查更新 / 更新」等为独立业务按钮（pull 镜像等），亦保留。
+- **验证**：前后端 `tsc --noEmit` 全绿（EXIT=0）；Grep 确认 `Volumes.tsx` 已无可见「刷新」按钮、`TopBar` 已含 `animate-spin` + `disabled` 分支。
+
+- **未完成 / 已知限制**：未选引擎（`activeEngineId` 为空）时点击仍静默无操作（不旋转、无提示），因 `loadEngineData` 提前返回；如需空引擎提示可后续补 toast（本次未做，避免超出范围）。
+- **下一步**：无。
+
+---
+
+## v1.15.21 — 2026-09-12
+
+### 认证界面 `*` 必填标识范围界定
+
+- **最终口径（经用户确认）**：
+  - **登录主表单**（`用户名` / `密码`）—— **不显示 `*`**；
+  - **初始设置向导**（`用户名` / `密码` / `确认密码`）—— **显示 `*`**（保留）；
+  - **找回密码表单**（`用户名` / `找回码` / `新密码` / `确认新密码`）—— **显示 `*`**（保留）。
+- `FormField`（`src/components/UI.tsx:371`）在 `required` 为 true 时渲染 `<span className="text-red-500">*</span>`；本次仅对登录主表单去掉 `required`，其余两处保持 `required`。必填校验逻辑全部不变（`submit()` 内仍拦截空值/格式/长度/一致性）。
+- 涉及文件：`src/components/auth/LoginPage.tsx`（登录主表单去 `required`；找回密码表单保持）、`src/components/auth/SetupWizard.tsx`（保持）。
+- **验证**：`tsc --noEmit` 前后端全绿（EXIT=0）；Grep 确认登录主表单 2 处 `FormField` 无 `required`，找回密码表单 4 处、初始设置向导 3 处保留 `required`。
+
+- **未完成 / 已知限制**：无。
+- **下一步**：无。
 
 ---
 

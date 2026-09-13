@@ -7,8 +7,9 @@ import pathPosix from "node:path/posix";
 import { spawn, spawnSync } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import type { DockerEngine } from "./engines.js";
-import { DATA_DIR, COMPOSE_DIR } from "./paths.js";
+import { COMPOSE_DIR } from "./paths.js";
 import { getSettings } from "./settings.js";
+import { resolveBackupDir, backupFilePath, runTar } from "./backup.js";
 
 /**
  * 拼接路径：SSH 引擎用 POSIX 路径（远程 Linux），本地引擎用系统路径
@@ -1833,20 +1834,21 @@ export async function backupStack(
   stackName: string
 ): Promise<string> {
   const cwd = findStackDir(engine, stackName);
-  if (!fs.existsSync(cwd)) throw new Error(`堆栈目录不存在: ${cwd}`);
+  if (!fs.existsSync(cwd)) {
+    if (engine.connectionType === "ssh" || engine.connectionType === "tcp") {
+      throw new Error(`远程引擎（${engine.connectionType}）暂不支持备份：堆栈目录不在本机（${cwd}）`);
+    }
+    throw new Error(`堆栈目录不存在: ${cwd}`);
+  }
 
-  const backupsDir = path.join(DATA_DIR, "backups");
-  if (!fs.existsSync(backupsDir)) fs.mkdirSync(backupsDir, { recursive: true });
+  const backupsDir = resolveBackupDir();
 
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
   const backupName = `${stackName}_${timestamp}.tar.gz`;
-  const backupPath = path.join(backupsDir, backupName);
 
-  // Windows 上可能没有 tar，用 node 内置模块打包
-  // 简单方案：直接用 cp -r 到临时目录再 tar
-  run("tar", ["-czf", backupPath, "-C", path.dirname(cwd), path.basename(cwd)], {
-    timeout: 30000,
-  });
+  // 归档名用「相对名 + cwd=归档目录」传递：GNU tar 会把 -f 中的 `C:\...`
+  // 冒号误判为远程主机（Windows 报 "Cannot connect to C:"），相对名可规避。
+  runTar(["-czf", backupName, "-C", path.dirname(cwd), path.basename(cwd)], "堆栈备份", backupsDir);
 
   return backupName;
 }
@@ -1858,44 +1860,17 @@ export async function restoreStack(
   engine: DockerEngine,
   backupName: string
 ): Promise<void> {
-  const backupsDir = path.join(DATA_DIR, "backups");
-  const backupPath = path.join(backupsDir, backupName);
-  if (!fs.existsSync(backupPath)) throw new Error(`备份文件不存在: ${backupName}`);
+  // 与 backupStack 共用同一套目录解析（尊重 settings.backup.backupPath），并防路径穿越
+  const archive = backupFilePath(backupName);
 
   const stacksDir = COMPOSE_DIR;
   if (!fs.existsSync(stacksDir)) fs.mkdirSync(stacksDir, { recursive: true });
 
-  run("tar", ["-xzf", backupPath, "-C", stacksDir], { timeout: 30000 });
+  runTar(["-xzf", path.basename(archive), "-C", stacksDir], "堆栈恢复", path.dirname(archive));
 }
 
-/**
- * 列出备份文件（DATA_DIR/backups 下的 *.tar.gz，按修改时间倒序）
- */
-export function listBackups(): Array<{ name: string; size: number; mtime: string }> {
-  const backupsDir = path.join(DATA_DIR, "backups");
-  if (!fs.existsSync(backupsDir)) return [];
-  return fs
-    .readdirSync(backupsDir)
-    .filter((f) => f.endsWith(".tar.gz"))
-    .map((f) => {
-      const st = fs.statSync(path.join(backupsDir, f));
-      return { name: f, size: st.size, mtime: st.mtime.toISOString() };
-    })
-    .sort((a, b) => b.mtime.localeCompare(a.mtime));
-}
-
-/**
- * 删除备份文件（只允许删除 backups 目录内的文件，防路径穿越）
- */
-export function deleteBackup(backupName: string): void {
-  const backupsDir = path.join(DATA_DIR, "backups");
-  const target = path.resolve(backupsDir, backupName);
-  if (!target.startsWith(path.resolve(backupsDir) + path.sep)) {
-    throw new Error("非法的备份文件名");
-  }
-  if (!fs.existsSync(target)) throw new Error(`备份文件不存在: ${backupName}`);
-  fs.unlinkSync(target);
-}
+// 说明：备份文件列表 / 删除 / 全量备份 / 恢复 / 导出 已统一迁移到 server/backup.ts，
+// 此处仅保留“堆栈级”备份与恢复（依赖 findStackDir 定位堆栈目录）。
 
 // ============ 容器操作 ============
 

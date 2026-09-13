@@ -46,15 +46,14 @@ import {
   checkStackUpdates,
   backupStack,
   restoreStack,
-  listBackups,
-  deleteBackup,
   attachContainerTerminal,
   resizeContainerTerminal,
   getComposeCmd,
   detectComposeModes,
 } from "./docker.js";
+import { createFullBackup, restoreFullBackup, exportConfigArchive, listBackupFiles, deleteBackupFile, backupFilePath } from "./backup.js";
 import { getSettings, saveSettings } from "./settings.js";
-import { startUpdateScheduler, getSchedulerStatus, runSchedulerCheckNow } from "./scheduler.js";
+import { startUpdateScheduler, getSchedulerStatus, runSchedulerCheckNow, startBackupScheduler, getBackupSchedulerStatus } from "./scheduler.js";
 import { readDaemonConfigInfo, writeDaemonConfig, restartDockerService, refreshPrivileges } from "./daemon-config.js";
 import { CURRENT_VERSION, getInstallDir, checkForUpdate, performUpdate, performUpdateFromUpload, getUpdateState, getUpdateDir, markUpdateError, saveUploadPackage, getPendingUpload, getPendingUploadPath, schedulePendingExpiry, discardPendingUpload, cancelPendingExpiry } from "./updater.js";
 import { COMPOSE_DIR } from "./paths.js";
@@ -716,19 +715,74 @@ app.post("/api/engines/:id/stacks/:name/restore", async (req, res) => {
   }
 });
 
-/** 备份文件列表（本地 DATA_DIR/backups，与引擎无关） */
+/** 备份文件列表（默认 <data>/backups，或 settings.backup.backupPath 指定的绝对路径） */
 app.get("/api/backups", (_req, res) => {
   try {
-    res.json({ success: true, data: listBackups() });
+    res.json({ success: true, data: listBackupFiles() });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message || "获取备份列表失败" });
+  }
+});
+
+/** 立即备份：全量打包 compose 堆栈 + 设置 + 引擎 */
+app.post("/api/backups", (_req, res) => {
+  try {
+    const r = createFullBackup("manual");
+    res.json({ success: true, data: { backupName: r.name, size: r.size } });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || "备份失败" });
+  }
+});
+
+/** 导出全部配置（下载归档，不写入备份列表） */
+app.get("/api/backups/export", (_req, res) => {
+  let tmp: { name: string; path: string } | null = null;
+  try {
+    tmp = exportConfigArchive();
+    const file = tmp.path;
+    res.download(file, tmp.name, () => {
+      try {
+        unlinkSync(file);
+      } catch {
+        /* 忽略清理失败 */
+      }
+    });
+  } catch (err: any) {
+    if (tmp) {
+      try {
+        unlinkSync(tmp.path);
+      } catch {
+        /* 忽略 */
+      }
+    }
+    res.status(500).json({ success: false, error: err.message || "导出失败" });
+  }
+});
+
+/** 从全量备份恢复 */
+app.post("/api/backups/:name/restore", (req, res) => {
+  try {
+    const r = restoreFullBackup(req.params.name);
+    res.json({ success: true, data: { message: "配置已恢复", stacks: r.stacks } });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || "恢复失败" });
+  }
+});
+
+/** 下载指定备份文件 */
+app.get("/api/backups/:name/download", (req, res) => {
+  try {
+    const file = backupFilePath(req.params.name);
+    res.download(file, req.params.name);
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || "下载失败" });
   }
 });
 
 /** 删除备份文件 */
 app.delete("/api/backups/:name", (req, res) => {
   try {
-    deleteBackup(req.params.name);
+    deleteBackupFile(req.params.name);
     res.json({ success: true, data: "备份已删除" });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message || "删除备份失败" });
@@ -1026,6 +1080,11 @@ app.post("/api/update-scheduler/check-now", async (_req, res) => {
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message || "检查失败" });
   }
+});
+
+/** 自动备份调度器状态（下次备份时间 / 各档计划） */
+app.get("/api/backup-scheduler/status", (_req, res) => {
+  res.json({ success: true, data: getBackupSchedulerStatus() });
 });
 
 /** 检测服务器上可用的 Compose 命令 */
@@ -1383,6 +1442,14 @@ if (!embeddedDist) {
 // 启动服务
 const server = app.listen(PORT, () => {
   console.log(`🚀 Backend running on http://localhost:${PORT}`);
+
+  // 启动后台调度器：镜像更新检查 + 自动备份
+  try {
+    startUpdateScheduler();
+    startBackupScheduler();
+  } catch (e: any) {
+    console.error("调度器启动失败:", e?.message || e);
+  }
 
   // 启动后自动检测所有引擎
   testAllConnections().then(() => {

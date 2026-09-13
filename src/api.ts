@@ -516,9 +516,86 @@ export function fetchBackupsApi(): Promise<BackupFileInfo[]> {
   return request("/backups");
 }
 
+/** 立即备份（全量：compose 堆栈 + 设置 + 引擎） */
+export function createBackupApi(): Promise<{ backupName: string; size: number }> {
+  return request("/backups", { method: "POST" });
+}
+
+/** 从全量备份恢复（覆盖堆栈与设置/引擎文件） */
+export function restoreBackupApi(backupName: string): Promise<{ message: string; stacks: number }> {
+  return request(`/backups/${encodeURIComponent(backupName)}/restore`, { method: "POST" });
+}
+
 /** 删除备份文件 */
 export function deleteBackupApi(backupName: string): Promise<void> {
   return request(`/backups/${encodeURIComponent(backupName)}`, { method: "DELETE" });
+}
+
+/**
+ * 从 Content-Disposition 头解析服务端建议的文件名。
+ * 优先取 RFC 5987 的 filename*=UTF-8''（非 ASCII 名），退化到普通 filename=。
+ */
+function parseContentDispositionFilename(disposition: string | null): string {
+  if (!disposition) return "";
+  const star = /filename\*=UTF-8''([^;]+)/i.exec(disposition);
+  if (star) {
+    try {
+      return decodeURIComponent(star[1]);
+    } catch {
+      /* 解析失败则回退到普通 filename */
+    }
+  }
+  const plain = /filename="?([^";]+)"?/i.exec(disposition);
+  return plain ? plain[1].trim() : "";
+}
+
+/** 用 objectURL 触发浏览器下载（与容器 CSV 导出保持同一套写法） */
+function triggerBlobDownload(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename || "download";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // 立即 revoke 会让部分浏览器来不及读取，延迟释放
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/**
+ * 下载服务端文件为浏览器下载（fetch → Blob → objectURL）。
+ *
+ * 为何不用 `<a href="/api/...">` 直连：那会让浏览器对 API 地址发起「顶层导航」，
+ * 请求失败（401/500、反向代理拦截、iframe 沙箱禁止下载）时用户只会看到“点了没反应”，
+ * 拿不到任何错误信息。改走 fetch 后与其它接口共用同一条鉴权链路（credentials: include），
+ * 且能读取错误 JSON 抛出可展示的 ApiError。
+ */
+async function downloadAsBlob(url: string): Promise<string> {
+  const res = await fetch(`${BASE}${url}`, { credentials: "include" });
+  if (res.status === 401 && !url.startsWith("/auth/")) {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new Event("auth:unauthorized"));
+    }
+    throw new ApiError("未登录或会话已过期", undefined, 401);
+  }
+  if (!res.ok) {
+    const json = await res.json().catch(() => null);
+    throw new ApiError(json?.error || `下载失败（HTTP ${res.status}）`, json?.code, res.status);
+  }
+  const blob = await res.blob();
+  const filename = parseContentDispositionFilename(res.headers.get("content-disposition"));
+  triggerBlobDownload(blob, filename);
+  return filename;
+}
+
+/** 下载指定备份文件（返回实际文件名） */
+export function downloadBackupApi(backupName: string): Promise<string> {
+  return downloadAsBlob(`/backups/${encodeURIComponent(backupName)}/download`);
+}
+
+/** 导出全部配置（下载归档，返回实际文件名） */
+export function exportConfigApi(): Promise<string> {
+  return downloadAsBlob("/backups/export");
 }
 
 /** 批量操作堆栈（返回每个堆栈的成功/失败与命令输出） */

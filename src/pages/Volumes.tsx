@@ -4,7 +4,6 @@ import {
   Search,
   Trash2,
   Download,
-  RefreshCw,
   Plus,
   HardDrive,
   AlertTriangle,
@@ -286,12 +285,6 @@ export function Volumes({ volumes, loading, error, engineId, defaultVisibleColum
             className="flex items-center gap-1.5 px-3 py-2 text-sm text-amber-600 border border-amber-200 rounded-lg hover:bg-amber-50 transition-colors"
           >
             <AlertTriangle size={14} /> 清理未关联卷 ({unusedCount})
-          </button>
-          <button
-            onClick={onRefresh}
-            className="flex items-center gap-1.5 px-3 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50"
-          >
-            <RefreshCw size={14} /> 刷新
           </button>
           <button
             onClick={() => setShowCreate(true)}

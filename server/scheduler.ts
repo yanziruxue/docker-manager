@@ -4,6 +4,7 @@ import { getAllEngines } from "./engines.js";
 import { checkAllImageUpdates, startImagePull } from "./docker.js";
 import { createLogger } from "./logger.js";
 import { dataPath } from "./paths.js";
+import { createFullBackup, pruneBackups } from "./backup.js";
 
 const log = createLogger("Scheduler");
 
@@ -225,4 +226,299 @@ export function getSchedulerStatus(): SchedulerStatus {
 /** 立即触发一次检查（前端「立即检查全部」按钮） */
 export async function runSchedulerCheckNow(): Promise<SchedulerLastResult> {
   return runCheck();
+}
+
+// ============ 自动备份调度器 ============
+//
+// 读取 settings.backup（mode 1：weekly/monthly/yearly 三档；mode 2：simpleFrequency 五段 cron），
+// 到期后创建全量备份（server/backup.ts），并按各档 retention 清理同前缀历史包。
+// 备份包命名：auto-<key>_<timestamp>.tar.gz（key ∈ weekly/monthly/yearly/simple）。
+
+export interface BackupScheduleView {
+  key: string;
+  label: string;
+  retention: number;
+  nextRun: string | null;
+}
+
+export interface BackupSchedulerStatus {
+  enabled: boolean;
+  mode: number;
+  running: boolean;
+  lastRun: string | null;
+  nextRun: string | null;
+  schedules: BackupScheduleView[];
+}
+
+const BACKUP_STATUS_FILE = dataPath("backup-scheduler-status.json");
+
+const DOW: Record<string, number> = { Sunday: 0, Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Saturday: 6 };
+
+let backupRunning = false;
+let lastBackupRunAt = 0;
+let backupTimer: ReturnType<typeof setInterval> | null = null;
+let backupStatus: BackupSchedulerStatus = {
+  enabled: false,
+  mode: 1,
+  running: false,
+  lastRun: null,
+  nextRun: null,
+  schedules: [],
+};
+
+function parseHM(t: string): { h: number; m: number } {
+  const m = /^(\d{1,2}):(\d{1,2})$/.exec(String(t || "").trim());
+  if (!m) return { h: 23, m: 0 };
+  return { h: Math.min(23, Math.max(0, parseInt(m[1], 10))), m: Math.min(59, Math.max(0, parseInt(m[2], 10))) };
+}
+
+/** 下一次“每周 day 的 h:m” */
+function nextWeekly(nowMs: number, day: string, time: string): number {
+  const { h, m } = parseHM(time);
+  const target = DOW[day] ?? 6;
+  const d = new Date(nowMs);
+  d.setHours(h, m, 0, 0);
+  let guard = 0;
+  while (d.getDay() !== target && guard < 8) {
+    d.setDate(d.getDate() + 1);
+    guard++;
+  }
+  if (d.getTime() <= nowMs) d.setDate(d.getDate() + 7);
+  return d.getTime();
+}
+
+/** 下一次“每月 dayOfMonth 的 h:m”（dayOfMonth<=0 表示每月最后一天） */
+function nextMonthly(nowMs: number, dayOfMonth: number, time: string): number {
+  const { h, m } = parseHM(time);
+  const base = new Date(nowMs);
+  let y = base.getFullYear();
+  let mo = base.getMonth();
+  for (let i = 0; i < 14; i++) {
+    const dim = new Date(y, mo + 1, 0).getDate();
+    const dom = dayOfMonth <= 0 ? dim : Math.min(dayOfMonth, dim);
+    const cand = new Date(y, mo, dom, h, m, 0, 0);
+    if (cand.getTime() > nowMs) return cand.getTime();
+    mo++;
+    if (mo > 11) {
+      mo = 0;
+      y++;
+    }
+  }
+  return Infinity;
+}
+
+/** 下一次“每年 MM-DD 的 h:m” */
+function nextYearly(nowMs: number, date: string, time: string): number {
+  const { h, m } = parseHM(time);
+  const mm = /^(\d{1,2})-(\d{1,2})$/.exec(String(date || "").trim());
+  const month = mm ? Math.min(12, Math.max(1, parseInt(mm[1], 10))) - 1 : 11;
+  const day = mm ? Math.min(31, Math.max(1, parseInt(mm[2], 10))) : 31;
+  const base = new Date(nowMs);
+  for (let i = 0; i < 3; i++) {
+    const y = base.getFullYear() + i;
+    const dim = new Date(y, month + 1, 0).getDate();
+    const cand = new Date(y, month, Math.min(day, dim), h, m, 0, 0);
+    if (cand.getTime() > nowMs) return cand.getTime();
+  }
+  return Infinity;
+}
+
+/** 解析单段 cron 字段：支持通配、单值、列表（a,b）、区间（a-b）、步长写法（斜杠 N） */
+function parseCronField(field: string, min: number, max: number): Set<number> {
+  const out = new Set<number>();
+  for (const part of String(field ?? "").split(",")) {
+    const p = part.trim();
+    if (!p) continue;
+    let step = 1;
+    let range = p;
+    const slash = p.split("/");
+    if (slash.length === 2) {
+      range = slash[0];
+      step = Math.max(1, parseInt(slash[1], 10) || 1);
+    }
+    let start = min;
+    let end = max;
+    if (range !== "*") {
+      const dash = range.split("-");
+      if (dash.length === 2) {
+        start = parseInt(dash[0], 10);
+        end = parseInt(dash[1], 10);
+      } else {
+        const v = parseInt(range, 10);
+        if (Number.isNaN(v)) continue;
+        start = end = v;
+      }
+    }
+    if (Number.isNaN(start) || Number.isNaN(end)) continue;
+    start = Math.max(min, start);
+    end = Math.min(max, end);
+    for (let v = start; v <= end; v += step) out.add(v);
+  }
+  if (out.size === 0) for (let v = min; v <= max; v++) out.add(v);
+  return out;
+}
+
+/** 下一次满足五段 cron 的时间（分钟级扫描，最多往前找 400 天） */
+function nextCron(nowMs: number, expr: string): number {
+  const parts = String(expr || "").trim().split(/\s+/);
+  if (parts.length !== 5) return Infinity;
+  const mins = parseCronField(parts[0], 0, 59);
+  const hrs = parseCronField(parts[1], 0, 23);
+  const doms = parseCronField(parts[2], 1, 31);
+  const mons = parseCronField(parts[3], 1, 12);
+  const dows = parseCronField(parts[4], 0, 6);
+  const d = new Date(nowMs);
+  d.setSeconds(0, 0);
+  d.setMinutes(d.getMinutes() + 1);
+  const cap = nowMs + 400 * 864e5;
+  while (d.getTime() <= cap) {
+    if (mins.has(d.getMinutes()) && hrs.has(d.getHours()) && mons.has(d.getMonth() + 1) && dows.has(d.getDay()) && doms.has(d.getDate())) {
+      return d.getTime();
+    }
+    d.setMinutes(d.getMinutes() + 1);
+  }
+  return Infinity;
+}
+
+interface BackupConfigView {
+  enabled: boolean;
+  mode: number;
+  simpleFrequency: string;
+  simpleRetentionCount: number;
+  weekly: { enabled: boolean; day: string; time: string; retention: number };
+  monthly: { enabled: boolean; dayOfMonth: number; time: string; retention: number };
+  yearly: { enabled: boolean; date: string; time: string };
+}
+
+function readBackupConfig(): BackupConfigView {
+  const b = getSettings()?.backup || {};
+  const clampRetention = (v: any, dft: number) => Math.max(1, Math.min(60, parseInt(v, 10) || dft));
+  return {
+    enabled: !!b.autoBackupEnabled,
+    mode: b.mode === 2 ? 2 : 1,
+    simpleFrequency: String(b.simpleFrequency || "0 3 * * 0"),
+    simpleRetentionCount: clampRetention(b.simpleRetentionCount, 5),
+    weekly: {
+      enabled: !!b.weekly?.enabled,
+      day: b.weekly?.day || "Saturday",
+      time: b.weekly?.time || "23:00",
+      retention: clampRetention(b.weekly?.retention, 6),
+    },
+    monthly: {
+      enabled: !!b.monthly?.enabled,
+      dayOfMonth: parseInt(b.monthly?.dayOfMonth, 10) || 0,
+      time: b.monthly?.time || "23:00",
+      retention: clampRetention(b.monthly?.retention, 8),
+    },
+    yearly: {
+      enabled: !!b.yearly?.enabled,
+      date: b.yearly?.date || "12-31",
+      time: b.yearly?.time || "23:00",
+    },
+  };
+}
+
+function computeBackupSchedules(nowMs: number): Array<{ key: string; label: string; retention: number; nextAt: number }> {
+  const c = readBackupConfig();
+  const list: Array<{ key: string; label: string; retention: number; nextAt: number }> = [];
+  if (c.mode === 2) {
+    list.push({ key: "simple", label: `Cron: ${c.simpleFrequency}`, retention: c.simpleRetentionCount, nextAt: nextCron(nowMs, c.simpleFrequency) });
+  } else {
+    if (c.weekly.enabled) {
+      list.push({ key: "weekly", label: `每周 ${c.weekly.day} ${c.weekly.time}`, retention: c.weekly.retention, nextAt: nextWeekly(nowMs, c.weekly.day, c.weekly.time) });
+    }
+    if (c.monthly.enabled) {
+      list.push({
+        key: "monthly",
+        label: `每月 ${c.monthly.dayOfMonth <= 0 ? "最后一天" : c.monthly.dayOfMonth + " 日"} ${c.monthly.time}`,
+        retention: c.monthly.retention,
+        nextAt: nextMonthly(nowMs, c.monthly.dayOfMonth, c.monthly.time),
+      });
+    }
+    if (c.yearly.enabled) {
+      list.push({ key: "yearly", label: `每年 ${c.yearly.date} ${c.yearly.time}`, retention: 12, nextAt: nextYearly(nowMs, c.yearly.date, c.yearly.time) });
+    }
+  }
+  return list;
+}
+
+function loadBackupStatus(): void {
+  try {
+    if (fs.existsSync(BACKUP_STATUS_FILE)) {
+      const raw = JSON.parse(fs.readFileSync(BACKUP_STATUS_FILE, "utf-8"));
+      if (typeof raw.lastRunAt === "number") lastBackupRunAt = raw.lastRunAt;
+      if (typeof raw.lastRun === "string") backupStatus.lastRun = raw.lastRun;
+    }
+  } catch {
+    /* 损坏则忽略 */
+  }
+}
+
+function persistBackupStatus(): void {
+  try {
+    fs.writeFileSync(BACKUP_STATUS_FILE, JSON.stringify({ lastRunAt: lastBackupRunAt, lastRun: backupStatus.lastRun }, null, 2), "utf-8");
+  } catch {
+    /* 写入失败忽略 */
+  }
+}
+
+/** 刷新对外暴露的调度视图（不触发备份） */
+function refreshBackupView(): void {
+  const c = readBackupConfig();
+  const schedules = computeBackupSchedules(lastBackupRunAt || Date.now());
+  backupStatus.enabled = c.enabled;
+  backupStatus.mode = c.mode;
+  const earliest = schedules.reduce((min, s) => Math.min(min, Number.isFinite(s.nextAt) ? s.nextAt : Infinity), Infinity);
+  backupStatus.nextRun = Number.isFinite(earliest) ? new Date(earliest).toISOString() : null;
+  backupStatus.schedules = schedules.map((s) => ({
+    key: s.key,
+    label: s.label,
+    retention: s.retention,
+    nextRun: Number.isFinite(s.nextAt) ? new Date(s.nextAt).toISOString() : null,
+  }));
+}
+
+async function runBackup(key: string, retention: number): Promise<void> {
+  if (backupRunning) return;
+  backupRunning = true;
+  backupStatus.running = true;
+  try {
+    const r = createFullBackup("auto", key);
+    const removed = pruneBackups(`auto-${key}_`, retention);
+    lastBackupRunAt = Date.now();
+    backupStatus.lastRun = new Date(lastBackupRunAt).toISOString();
+    persistBackupStatus();
+    log.info(`自动备份完成（${key}）：${r.name}${removed ? `，清理旧包 ${removed} 个` : ""}`);
+  } catch (e: any) {
+    log.warn(`自动备份失败（${key}）：${e?.message || e}`);
+  } finally {
+    backupRunning = false;
+    backupStatus.running = false;
+  }
+}
+
+function tickBackup(): void {
+  refreshBackupView();
+  const c = readBackupConfig();
+  if (!c.enabled || backupRunning) return;
+  const now = Date.now();
+  const schedules = computeBackupSchedules(lastBackupRunAt || now);
+  const due = schedules.filter((s) => Number.isFinite(s.nextAt) && now >= s.nextAt).sort((a, b) => a.nextAt - b.nextAt);
+  if (due.length === 0) return;
+  void runBackup(due[0].key, due[0].retention);
+}
+
+/** 启动自动备份调度器（server listen 后调用一次） */
+export function startBackupScheduler(): void {
+  loadBackupStatus();
+  tickBackup();
+  if (backupTimer) clearInterval(backupTimer);
+  backupTimer = setInterval(tickBackup, TICK_MS);
+  log.info("自动备份调度器已启动");
+}
+
+/** 自动备份调度器状态 */
+export function getBackupSchedulerStatus(): BackupSchedulerStatus {
+  refreshBackupView();
+  return { ...backupStatus, schedules: [...backupStatus.schedules] };
 }

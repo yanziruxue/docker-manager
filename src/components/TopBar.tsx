@@ -7,6 +7,8 @@ interface TopBarProps {
   title: string;
   breadcrumb?: string[];
   onRefresh?: () => void;
+  /** 是否正在刷新（驱动图标旋转 + 禁用） */
+  refreshing?: boolean;
   onNavigate?: (page: string) => void;
   notifications?: ActivityLog[];
   unreadCount?: number;
@@ -32,7 +34,7 @@ const levelBg: Record<ActivityLog["type"], string> = {
   error: "bg-red-50",
 };
 
-export function TopBar({ title, breadcrumb, onRefresh, onNavigate, notifications = [], unreadCount = 0, onMarkAllRead, actions, user, onLogout }: TopBarProps) {
+export function TopBar({ title, breadcrumb, onRefresh, refreshing = false, onNavigate, notifications = [], unreadCount = 0, onMarkAllRead, actions, user, onLogout }: TopBarProps) {
   const [showNotifications, setShowNotifications] = useState(false);
   const recentNotifications = notifications.slice(0, 5);
 
@@ -60,10 +62,11 @@ export function TopBar({ title, breadcrumb, onRefresh, onNavigate, notifications
         {onRefresh && (
           <button
             onClick={onRefresh}
-            className="p-2 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
-            title="刷新"
+            disabled={refreshing}
+            className="p-2 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            title={refreshing ? "刷新中…" : "刷新"}
           >
-            <RefreshCw size={16} />
+            <RefreshCw size={16} className={refreshing ? "animate-spin" : ""} />
           </button>
         )}
         <div className="relative">

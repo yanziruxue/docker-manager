@@ -87,7 +87,11 @@ import {
   discardPendingUploadApi,
   fetchUpdateStatusApi,
   fetchBackupsApi,
+  createBackupApi,
+  restoreBackupApi,
   deleteBackupApi,
+  downloadBackupApi,
+  exportConfigApi,
   type BackupFileInfo,
   fetchTelemetryStatus,
   type TelemetryStatus,
@@ -547,6 +551,15 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
   const [deletingBackup, setDeletingBackup] = useState<string | null>(null);
   const [backupDeleting, setBackupDeleting] = useState(false);
   const [backupDeleteError, setBackupDeleteError] = useState<string | null>(null);
+  // 立即备份 / 导出 / 恢复 的运行态
+  const [backupCreating, setBackupCreating] = useState(false);
+  const [exportingConfig, setExportingConfig] = useState(false);
+  /** 正在下载的备份文件名（用于列表项转圈与禁用） */
+  const [downloadingBackup, setDownloadingBackup] = useState<string | null>(null);
+  /** 选中的待恢复备份文件名（null = 未打开恢复弹窗；"" = 已打开未选择） */
+  const [restoringBackup, setRestoringBackup] = useState<string | null>(null);
+  const [backupRestoring, setBackupRestoring] = useState(false);
+  const [backupRestoreError, setBackupRestoreError] = useState<string | null>(null);
 
   const loadBackups = useCallback(async () => {
     setBackupsLoading(true);
@@ -579,9 +592,15 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
     }
   };
 
-  /** 备份文件名 -> 堆栈名（去掉末尾 _YYYY-MM-DDTHH-MM-SS 与 .tar.gz） */
-  const backupStackName = (name: string) =>
-    name.replace(/\.tar\.gz$/, "").replace(/_\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}$/, "");
+  /** 备份文件名 -> 展示标签 */
+  const backupLabel = (name: string) => {
+    const base = name.replace(/\.tar\.gz$/, "");
+    if (base.startsWith("auto-")) return `自动备份（${base.split("_")[0].slice(5)}）`;
+    if (base.startsWith("all_")) return "手动全量备份";
+    if (base.startsWith("config-export")) return "配置导出";
+    // 堆栈级备份：<stackName>_<timestamp>
+    return base.replace(/_\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}$/, "");
+  };
 
   /** 字节数 -> 人类可读（备份文件粒度用 1 位小数即可） */
   const fmtBackupSize = (bytes: number) => {
@@ -590,6 +609,9 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
     if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${bytes} B`;
   };
+
+  /** 最近一次备份时间（取列表最新一条，无则“从未备份”） */
+  const lastBackupAt = backups && backups.length > 0 ? new Date(backups[0].mtime).toLocaleString() : "从未备份";
 
   // ============ 宿主机 Docker 守护进程配置（/etc/docker/daemon.json） ============
   // 「镜像加速源」的真实来源：页面加载以文件内容为准回读，保存时写回文件（两侧同步）
@@ -931,6 +953,62 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
     }
   }, [toast]);
 
+  // ============ 备份操作（立即备份 / 恢复 / 导出） ============
+
+  const handleCreateBackup = async () => {
+    setBackupCreating(true);
+    try {
+      const r = await createBackupApi();
+      setToast({ type: "success", message: `备份完成：${r.backupName}` });
+      await loadBackups();
+    } catch (e: any) {
+      setToast({ type: "error", message: e.message || "备份失败" });
+    } finally {
+      setBackupCreating(false);
+    }
+  };
+
+  const handleRestoreBackup = async () => {
+    if (!restoringBackup) return;
+    setBackupRestoring(true);
+    setBackupRestoreError(null);
+    try {
+      const r = await restoreBackupApi(restoringBackup);
+      setRestoringBackup(null);
+      setToast({ type: "success", message: `已恢复配置（堆栈 ${r.stacks} 个），刷新页面后生效` });
+      await loadBackups();
+    } catch (e: any) {
+      setBackupRestoreError(e.message || "恢复失败");
+    } finally {
+      setBackupRestoring(false);
+    }
+  };
+
+  const handleExportConfig = async () => {
+    setExportingConfig(true);
+    try {
+      const name = await exportConfigApi();
+      setToast({ type: "success", message: `已下载配置导出包${name ? `：${name}` : ""}` });
+    } catch (e: any) {
+      setToast({ type: "error", message: e?.message || "导出失败" });
+    } finally {
+      setExportingConfig(false);
+    }
+  };
+
+  const handleDownloadBackup = async (name: string) => {
+    if (downloadingBackup) return;
+    setDownloadingBackup(name);
+    try {
+      await downloadBackupApi(name);
+      setToast({ type: "success", message: `已下载备份：${name}` });
+    } catch (e: any) {
+      setToast({ type: "error", message: e?.message || "下载失败" });
+    } finally {
+      setDownloadingBackup(null);
+    }
+  };
+
   // ============ 引擎操作 ============
 
   // 刷新所有引擎状态
@@ -1057,10 +1135,7 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
       if (!data.notifications.emailUser.trim()) errors.push("通知配置：邮箱用户名不能为空");
     }
 
-    // 备份配置校验
-    if (data.backup.autoBackupEnabled && !data.backup.backupPath.trim()) {
-      errors.push("备份管理：备份存储路径不能为空");
-    }
+    // 备份配置：备份目录留空 / 相对路径表示使用默认 <data>/backups，无需校验（绝对路径才生效）
 
     // 标签库校验
     const tagNames = (Array.isArray(data.tags) ? data.tags : []).map((t) => (t.name || "").trim());
@@ -2031,10 +2106,21 @@ docker-compose version</code>
                   <span className="text-sm text-slate-600">启用定时自动备份</span>
                   <Toggle active={data.backup.autoBackupEnabled} onChange={(val) => update("backup", "autoBackupEnabled", val)} />
                 </div>
+                <FormField
+                  label="备份目录"
+                  hint="留空或相对路径使用默认 <data>/backups；填绝对路径（如 /mnt/user/backups）则存到该目录"
+                >
+                  <Input
+                    value={data.backup.backupPath}
+                    onChange={(val) => update("backup", "backupPath", val)}
+                    placeholder="默认 <data>/backups"
+                    className="font-mono"
+                  />
+                </FormField>
                 <div className="flex items-center gap-2 p-3 bg-slate-50 rounded-lg">
                   <Clock size={14} className="text-slate-400" />
                   <span className="text-xs text-slate-500">上次备份时间</span>
-                  <span className="text-xs font-medium text-slate-600 ml-auto">{data.backup.lastBackup}</span>
+                  <span className="text-xs font-medium text-slate-600 ml-auto">{lastBackupAt}</span>
                 </div>
               </div>
             </Card>
@@ -2222,9 +2308,17 @@ docker-compose version</code>
                       <p className="text-sm text-slate-700 font-medium font-mono truncate" title={b.name}>{b.name}</p>
                       <p className="text-xs text-slate-400">
                         {new Date(b.mtime).toLocaleString()} • {fmtBackupSize(b.size)} •{" "}
-                        <span className="text-blue-500">{backupStackName(b.name)}</span>
+                        <span className="text-blue-500">{backupLabel(b.name)}</span>
                       </p>
                     </div>
+                    <button
+                      onClick={() => handleDownloadBackup(b.name)}
+                      disabled={downloadingBackup !== null}
+                      className="text-slate-400 hover:text-blue-500 flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="下载此备份"
+                    >
+                      {downloadingBackup === b.name ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+                    </button>
                     <button
                       onClick={() => { setBackupDeleteError(null); setDeletingBackup(b.name); }}
                       className="text-slate-400 hover:text-red-500 flex-shrink-0"
@@ -2238,15 +2332,28 @@ docker-compose version</code>
             </Card>
 
             <Card title="手动操作" icon={<HardDrive size={16} />}>
-              <div className="flex items-center gap-3">
-                <button className="flex items-center gap-1.5 px-4 py-2 text-sm text-white bg-blue-500 rounded-lg hover:bg-blue-600">
-                  <Download size={14} /> 立即备份
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  onClick={handleCreateBackup}
+                  disabled={backupCreating}
+                  className="flex items-center gap-1.5 px-4 py-2 text-sm text-white bg-blue-500 rounded-lg hover:bg-blue-600 disabled:opacity-50"
+                >
+                  {backupCreating ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                  {backupCreating ? "备份中…" : "立即备份"}
                 </button>
-                <button className="flex items-center gap-1.5 px-4 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">
+                <button
+                  onClick={() => { setBackupRestoreError(null); setRestoringBackup(backups && backups.length > 0 ? backups[0].name : ""); }}
+                  className="flex items-center gap-1.5 px-4 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50"
+                >
                   <Upload size={14} /> 从备份恢复
                 </button>
-                <button className="flex items-center gap-1.5 px-4 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">
-                  <Package size={14} /> 导出全部配置
+                <button
+                  onClick={handleExportConfig}
+                  disabled={exportingConfig}
+                  className="flex items-center gap-1.5 px-4 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50"
+                >
+                  {exportingConfig ? <Loader2 size={14} className="animate-spin" /> : <Package size={14} />}
+                  导出全部配置
                 </button>
               </div>
             </Card>
@@ -2920,6 +3027,64 @@ docker-compose version</code>
             </div>
           </Modal>
         )}
+
+        {/* 从备份恢复：选择备份文件 */}
+        <Modal
+          open={restoringBackup !== null}
+          onClose={() => { if (!backupRestoring) { setRestoringBackup(null); setBackupRestoreError(null); } }}
+          title="从备份恢复"
+          size="md"
+        >
+          <p className="text-sm text-slate-600 mb-3">
+            选择要恢复的备份包。恢复会覆盖当前 Compose 堆栈与设置 / 引擎配置，请谨慎操作。
+          </p>
+          {backups && backups.length > 0 ? (
+            <div className="space-y-2 max-h-[50vh] overflow-y-auto">
+              {backups.map((b) => (
+                <label
+                  key={b.name}
+                  className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                    restoringBackup === b.name ? "border-blue-500 bg-blue-50" : "border-slate-200 hover:bg-slate-50"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="restore-backup"
+                    className="mt-1"
+                    checked={restoringBackup === b.name}
+                    onChange={() => setRestoringBackup(b.name)}
+                  />
+                  <span className="flex-1 min-w-0">
+                    <span className="block text-sm text-slate-700 font-medium font-mono truncate" title={b.name}>{b.name}</span>
+                    <span className="block text-xs text-slate-400">
+                      {new Date(b.mtime).toLocaleString()} • {fmtBackupSize(b.size)} • {backupLabel(b.name)}
+                    </span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-slate-400 py-2">暂无可用备份，请先执行「立即备份」。</p>
+          )}
+          {backupRestoreError && <p className="mt-3 text-sm text-red-600">{backupRestoreError}</p>}
+          <div className="flex justify-end gap-2 mt-4">
+            <button
+              onClick={() => { setRestoringBackup(null); setBackupRestoreError(null); }}
+              disabled={backupRestoring}
+              className="px-4 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50"
+            >
+              取消
+            </button>
+            <button
+              onClick={handleRestoreBackup}
+              disabled={backupRestoring || !restoringBackup}
+              className="flex items-center gap-1.5 px-4 py-2 text-sm text-white bg-red-500 rounded-lg hover:bg-red-600 disabled:opacity-50"
+            >
+              {backupRestoring && <Loader2 size={14} className="animate-spin" />}
+              确认恢复
+            </button>
+          </div>
+        </Modal>
 
         {/* 删除备份文件确认 */}
         <ConfirmDialog
