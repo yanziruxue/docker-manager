@@ -23,10 +23,10 @@
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.16.2**（`package.json`，未发布） |
-| 最新 Release | [v1.16.1](https://github.com/yanziruxue/docker-manager/releases/tag/v1.16.1)（含 v1.16.0 合并说明） |
-| 源码分支 | `main` @ `cfe79caa` |
-| 交付包 | `build-upload/docker-manager-yanzi-linux-x64.zip`（42,890,599 B / 5 文件；SHA-256 `946648a81cc638f96db9478541c650dbfc8ad2215384b66c08d29e250f1a2d7e`） |
+| 当前版本 | **v1.17.0**（已发布，`main` `6f8649ae`） |
+| 最新 Release | [v1.17.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.17.0)（蓝奏云 OTA 优先 + 系统更新角标修复） |
+| 源码分支 | `main` @ `6f8649ae` |
+| 交付包 | `build-upload/docker-manager-yanzi-linux-x64-v1.17.0.zip`（40.9 MB / 5 文件；SHA-256 `09a4981773657b4d06db9ffe2817404f517ba23a50ff3cdfa26b93457877c365`） |
 | 架构 | REST + WS + SSE 三通道；Socket / TCP / SSH 三种引擎 |
 | 目标平台 | Linux x64（SEA 单可执行文件），Unraid / 自托管 NAS |
 
