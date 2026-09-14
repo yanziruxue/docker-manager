@@ -409,3 +409,29 @@ export function fixPerms(opts: {
 
   return stats;
 }
+
+/** 当前是否为 SEA 单文件二进制（构建期注入 __APP_VERSION__，仅二进制构建存在） */
+function isSeaBinary(): boolean {
+  // 与 updater.ts 同一判据：dev/ts 直跑时该标识不存在
+  return typeof __APP_VERSION__ !== "undefined";
+}
+
+/** 需要时给路径加引号（安装路径含空格也不至于拆成两个参数） */
+function quoteIfNeeded(p: string): string {
+  return /\s/.test(p) ? `'${p.replace(/'/g, `'\\''`)}'` : p;
+}
+
+/**
+ * 展示给用户的**唯一一条命令**：检查与修复一步完成。
+ *
+ * 刻意用 `fix-perms`（不带 `--dry-run`）：它先扫描再修正，输出里同时给出「检查了多少项 / 修了哪些」，
+ * 也就是「检查并修复」。默认只改属主、不动权限位，本身已是保守策略。
+ *
+ * 二进制部署（生产）下能给出**真实绝对路径**；源码直跑时只能给占位符。
+ */
+export function fixCommandLine(): string {
+  if (isSeaBinary()) {
+    return `sudo ${quoteIfNeeded(process.execPath)} fix-perms`;
+  }
+  return "sudo <安装目录>/docker-manager-yanzi fix-perms";
+}

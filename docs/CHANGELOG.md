@@ -23,10 +23,10 @@
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.18.0**（已发布，`main` `ee1ea304`） |
+| 当前版本 | **v1.18.1**（`package.json`，未打包） |
 | 最新 Release | [v1.18.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.18.0)（权限诊断与修复：备份期自愈 + `fix-perms` CLI + 启动体检） |
-| 源码分支 | `main` @ `ee1ea304` |
-| 交付包 | `build-upload/docker-manager-yanzi-linux-x64-v1.18.0.zip`（42,904,669 B / 40.9 MB / 5 文件；SHA-256 `21897bc37cfd5fdedfcc3be153b959474c1c432cf7e33d6d88d5a8dac49c798e`） |
+| 源码分支 | `main` @ `ee1ea304`（v1.18.1 未推送） |
+| 交付包 | 打包中（v1.18.1，剪贴板兜底 + 权限面板改「一条命令」） |
 | 架构 | REST + WS + SSE 三通道；Socket / TCP / SSH 三种引擎 |
 | 目标平台 | Linux x64（SEA 单可执行文件），Unraid / 自托管 NAS |
 
@@ -41,7 +41,7 @@
 | 镜像管理 | ✅ | 列表 / 筛选 / 拉取 / 删除 / prune 未使用 |
 | 数据卷管理 | ✅ | 列表 / 新建 / 删除 / prune / 详情 |
 | 备份管理 | ✅ | 手动全量 + 堆栈级备份 / 恢复 / 导出（**zip** 格式，兼容历史 tar.gz）+ 自动备份调度器（周/月/年/Cron，含保留清理） |
-| 权限诊断与修复 | ✅ | 备份期自愈 `u+r` + 结构化诊断（属主/权限位/修复命令）+ `fix-perms` CLI + 启动体检与界面提示 |
+| 权限诊断与修复 | ✅ | 备份期自愈 `u+r` + 结构化诊断（属主/权限位/一条修复命令）+ `fix-perms` CLI + 启动体检与界面提示 |
 | 通知中心 | ✅ | 未读已读 + localStorage 持久化 |
 | 系统设置 | ✅ | Docker 配置 / Compose 模式 / 通知 / 备份 / 更新调度 / 列显隐 / 活跃度 |
 | Web 终端 | ✅ | xterm.js + WebSocket + 多 Shell 检测 |
@@ -114,6 +114,24 @@
 - 一次发布中同时含 Minor 与 Patch 时，按**最高级别**递增，低级别归零（例：`1.0.3` + 新功能 → `1.1.0`）
 - Major 由人工决定，不自动递增
 - 同一天内的多次改动合并为一个版本，逐条记录在版本下
+
+---
+
+## v1.18.1 — 2026-09-14
+
+- **已完成**
+  - **修「复制」按钮在 HTTP 部署下点了没反应**（用户反馈）。
+    根因：`navigator.clipboard` **只在安全上下文**（HTTPS 或 `localhost`/`127.0.0.1`）存在。本项目是纯 HTTP 部署（`http://<IP>:5024`，后端无任何 TLS），从局域网 IP 打开时该属性是 `undefined`；而代码一律写作 `navigator.clipboard?.writeText(...)`，**可选链把「能力缺失」当作正常情况静默跳过**——不抛异常、控制台无报错、界面无提示，表现为「点了不管用」。
+    - 新增 `src/lib/clipboard.ts`：`copyText(text)` 三级降级并**必定返回布尔值**（① `navigator.clipboard.writeText` → ② 隐藏 `<textarea>` + `document.execCommand("copy")`，HTTP 下依然可用 → ③ 返回 `false` 由调用方提示手动复制）；另提供 `selectNodeText(el)` 兜底选中文本。
+    - 全前端 **7 处**同类调用全部替换（原为 6 处 `?.` 静默 + 1 处 try/catch）：`src/pages/Settings.tsx` 4 处（权限修复命令、daemon.json 权限提示、特权提示、备份跳过面板）、`src/components/ActivityPanel.tsx`（复制 UUID）、`src/components/CmdOutputModal.tsx`（复制命令输出）、`src/pages/Stacks.tsx`（复制转换结果）。**每处都带可见反馈**（成功「已复制」/ 失败「已选中，请 Ctrl+C」或 toast 提示），不再静默。
+  - **权限面板简化为「一条命令」**（用户要求：只需要一个命令、检查并修复；不需要「复制修复命令」「复制全部命令」两个按钮）。
+    - 移除逐条的「复制修复命令」与底部的「复制全部命令」，面板只保留：跳过项列表（相对路径 + 原因）+ **一条命令** + 「重新检测」。
+    - 新增 `server/perms.ts: fixCommandLine()`：SEA 二进制下用 `process.execPath` 输出**真实绝对路径**的 `sudo <exe> fix-perms`（路径含空格自动加引号）；源码直跑时退化为占位符。刻意用不带 `--dry-run` 的 `fix-perms`——它先体检再修正，即「检查并修复一步完成」。
+    - 该命令由服务端下发，避免前端硬编码安装路径：`POST /api/backups` 与 `GET /api/system/permission-check` 新增 `fixCommand` 字段（后者原 `advice` 字段移除）；`perms-cli.ts` 的 `permission-check` 输出也改为打印这一条命令。
+    - `deploy/linux/README.md` 权限章节改写：主路径为一条命令，`--dry-run` / `--normalize-mode` / `--path` / `permission-check` 降为可选参数。
+  - **验证**：前后端 `tsc --noEmit` 全绿；`vite build` 通过；`fixCommandLine()` 单测 4/4 PASS（dev 占位符 / SEA 绝对路径 / 不含 `--dry-run` / 含空格加引号）；实测 `POST /api/backups`、`GET /api/system/permission-check` 均返回 `fixCommand` 且未授权 401；前端产物中 `execCommand` 兜底与新文案均已落包，`复制修复命令`/`复制全部命令` 文案 **0 命中**（确认已移除）。
+- **未完成 / 已知限制**：`document.execCommand("copy")` 已被标准废弃（浏览器仍支持），属兜底手段；若连它也失败，界面会选中文本并提示手动 `Ctrl+C`。真实「非安全上下文」行为无法在本地开发环境复现（本地走 `localhost` 属安全上下文），需在局域网 IP 访问下验证。
+- **下一步**：无。
 
 ---
 

@@ -547,6 +547,8 @@ export interface BackupCreateResult {
   skipped: string[];
   skippedDetails?: PermIssue[];
   fixed?: PermIssue[];
+  /** 唯一的修复入口命令（检查 + 修复一步完成），服务端给出真实绝对路径 */
+  fixCommand?: string;
 }
 
 /** 立即备份（全量：compose 堆栈 + 设置 + 引擎） */
@@ -562,7 +564,8 @@ export interface PermCheckResult {
   targetUid: number;
   targetUser: string;
   composeDir: string;
-  advice: string;
+  /** 唯一的修复入口命令（检查 + 修复一步完成），服务端给出真实绝对路径 */
+  fixCommand: string;
 }
 
 /** 权限体检（refresh=true 跳过 60s 缓存） */

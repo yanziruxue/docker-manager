@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect } from "react";
 import { Loader2, Timer } from "lucide-react";
 import { Modal } from "./Modal";
+import { copyText, selectNodeText } from "../lib/clipboard";
 
 /** 命令输出弹窗数据：title 操作名、name 目标名、output 文本、failed 是否失败、streaming 是否执行中（SSE 实时推送） */
 export interface CmdOutput {
@@ -26,6 +27,20 @@ export function CmdOutputModal({ data, onClose }: { data: CmdOutput | null; onCl
   const [remaining, setRemaining] = useState(0);
   const [countdownActive, setCountdownActive] = useState(false);
   const [dismissed, setDismissed] = useState(false);
+  /** 复制反馈：done=已复制；manual=浏览器拒绝自动复制，已选中文本待用户 Ctrl+C */
+  const [copyState, setCopyState] = useState<"idle" | "done" | "manual">("idle");
+
+  const handleCopyOutput = useCallback(async () => {
+    const text = data?.output ?? "";
+    if (!text) return;
+    if (await copyText(text)) {
+      setCopyState("done");
+    } else {
+      selectNodeText(ref.current);
+      setCopyState("manual");
+    }
+    window.setTimeout(() => setCopyState("idle"), 2500);
+  }, [data?.output]);
 
   useEffect(() => {
     if (data && ref.current) ref.current.scrollTop = ref.current.scrollHeight;
@@ -114,10 +129,10 @@ export function CmdOutputModal({ data, onClose }: { data: CmdOutput | null; onCl
         </div>
         <div className="flex justify-end gap-2">
           <button
-            onClick={() => navigator.clipboard?.writeText(data.output)}
+            onClick={handleCopyOutput}
             className="px-4 py-2 text-sm font-medium text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors"
           >
-            复制输出
+            {copyState === "done" ? "已复制" : copyState === "manual" ? "已选中，请 Ctrl+C" : "复制输出"}
           </button>
           <button
             onClick={onClose}

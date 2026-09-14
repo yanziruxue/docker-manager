@@ -85,7 +85,7 @@ import {
 } from "./users.js";
 import { createSession, getSessionUser, destroySession, requireAuth, invalidateSessionTtlCache } from "./auth.js";
 import { runFixPermsCli, runPermissionCheckCli, expectedUid } from "./perms-cli.js";
-import { scanPermIssues, formatIssue, currentUser } from "./perms.js";
+import { scanPermIssues, formatIssue, currentUser, fixCommandLine } from "./perms.js";
 
 // 尝试加载嵌入式前端数据（仅二进制构建时可用）
 // BUILD_BINARY 由 esbuild define 注入，仅二进制构建时为 true
@@ -756,6 +756,8 @@ app.post("/api/backups", (_req, res) => {
         skipped: r.skipped,
         skippedDetails: r.skippedDetails,
         fixed: r.fixed,
+        // 唯一的修复入口：界面上只展示这一条命令（检查 + 修复一步完成）
+        fixCommand: fixCommandLine(),
       },
     });
   } catch (err: any) {
@@ -784,7 +786,8 @@ app.get("/api/system/permission-check", (req, res) => {
       targetUid,
       targetUser: currentUser().name,
       composeDir: COMPOSE_DIR,
-      advice: issues.length ? "sudo <安装目录>/docker-manager-yanzi fix-perms --dry-run" : "",
+      // 唯一修复命令：真实绝对路径（二进制部署），界面原样展示 + 一键复制
+      fixCommand: fixCommandLine(),
     };
     permCheckCache = { at: Date.now(), payload };
     res.json({ success: true, data: payload });

@@ -46,6 +46,7 @@ import type {
   ComposeInsertPosition,
 } from "../types";
 import { convert, type ConvertResult } from "../lib/compose-convert";
+import { copyText, selectNodeText } from "../lib/clipboard";
 import { normalizeInsert, insertPositionLabel } from "../lib/compose-template";
 import {
   createStackApi,
@@ -2061,6 +2062,22 @@ function CreateStackModal({ onClose, engineId, onRefresh }: { onClose: () => voi
   // ===== 命令转换面板状态 =====
   const [convertInput, setConvertInput] = useState("");
   const [convertResult, setConvertResult] = useState<ConvertResult | null>(null);
+  /** 复制反馈：done=已复制；manual=浏览器拒绝自动复制，已选中文本待用户 Ctrl+C */
+  const [convertCopyState, setConvertCopyState] = useState<"idle" | "done" | "manual">("idle");
+  const convertOutputRef = useRef<HTMLPreElement>(null);
+
+  /** 复制转换结果（不静默失败：失败时选中文本并提示手动复制） */
+  const handleCopyConvertResult = async () => {
+    const text = convertResult?.output ?? "";
+    if (!text) return;
+    if (await copyText(text)) {
+      setConvertCopyState("done");
+    } else {
+      selectNodeText(convertOutputRef.current);
+      setConvertCopyState("manual");
+    }
+    window.setTimeout(() => setConvertCopyState("idle"), 2500);
+  };
 
   /** 执行转换 */
   const runConvert = () => setConvertResult(convert(convertInput));
@@ -2185,10 +2202,11 @@ function CreateStackModal({ onClose, engineId, onRefresh }: { onClose: () => voi
               </button>
               {convertResult?.ok && convertResult.output && (
                 <button
-                  onClick={() => navigator.clipboard?.writeText(convertResult.output)}
+                  onClick={handleCopyConvertResult}
                   className="flex items-center gap-1.5 px-3 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
                 >
-                  <Copy size={14} /> 复制结果
+                  <Copy size={14} />{" "}
+                  {convertCopyState === "done" ? "已复制" : convertCopyState === "manual" ? "已选中，请 Ctrl+C" : "复制结果"}
                 </button>
               )}
             </div>
@@ -2205,7 +2223,10 @@ function CreateStackModal({ onClose, engineId, onRefresh }: { onClose: () => voi
             {convertResult?.ok && (
               <div className="space-y-2">
                 <FormField label="Compose 转换结果">
-                  <pre className="w-full max-h-64 overflow-auto p-3 font-mono text-xs text-slate-200 bg-slate-900 rounded-lg whitespace-pre-wrap break-all">
+                  <pre
+                    ref={convertOutputRef}
+                    className="w-full max-h-64 overflow-auto p-3 font-mono text-xs text-slate-200 bg-slate-900 rounded-lg whitespace-pre-wrap break-all"
+                  >
                     {convertResult.output || "（无输出）"}
                   </pre>
                 </FormField>

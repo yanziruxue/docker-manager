@@ -102,6 +102,7 @@ import {
   getSchedulerStatusApi,
   runSchedulerCheckApi,
 } from "../api";
+import { copyText, selectNodeText } from "../lib/clipboard";
 
 /** 字节/秒 → 人类可读速度；0/无效值返回空串 */
 function formatSpeed(bps?: number): string {
@@ -567,15 +568,19 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
   const [restoringBackup, setRestoringBackup] = useState<string | null>(null);
   const [backupRestoring, setBackupRestoring] = useState(false);
   const [backupRestoreError, setBackupRestoreError] = useState<string | null>(null);
-  /** 上次备份的权限跳过项（结构化诊断 → 展示原因 + 一键复制修复命令） */
+  /** 上次备份的权限跳过项（结构化诊断 → 展示原因 + 提供唯一修复命令） */
   const [backupIssues, setBackupIssues] = useState<{
     skipped: string[];
     details: PermIssue[];
     fixed: PermIssue[];
+    fixCommand?: string;
   } | null>(null);
   /** 权限体检结果（只读扫描 compose 目录） */
   const [permCheck, setPermCheck] = useState<PermCheckResult | null>(null);
   const [permChecking, setPermChecking] = useState(false);
+  /** 修复命令的复制反馈（成功 → 显示「已复制」，3 秒后复原） */
+  const [copiedFixCmd, setCopiedFixCmd] = useState(false);
+  const fixCmdRef = useRef<HTMLElement | null>(null);
 
   const loadBackups = useCallback(async () => {
     setBackupsLoading(true);
@@ -599,6 +604,32 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
       setPermChecking(false);
     }
   }, []);
+
+  /**
+   * 复制「唯一的修复命令」。
+   * 不静默失败：成功给出「已复制」，失败则选中命令文本并提示手动 Ctrl+C。
+   */
+  const handleCopyFixCmd = useCallback(async () => {
+    const cmd = backupIssues?.fixCommand || permCheck?.fixCommand || "";
+    if (!cmd) return;
+    if (await copyText(cmd)) {
+      setCopiedFixCmd(true);
+      window.setTimeout(() => setCopiedFixCmd(false), 3000);
+    } else {
+      selectNodeText(fixCmdRef.current);
+      setToast({ type: "error", message: "浏览器不允许自动复制，已帮你选中命令，请按 Ctrl+C 手动复制" });
+    }
+  }, [backupIssues?.fixCommand, permCheck?.fixCommand]);
+
+  /** 复制任意文本并给出可见反馈（绝不静默失败） */
+  const handleCopyText = async (text: string) => {
+    if (!text) return;
+    if (await copyText(text)) {
+      setToast({ type: "success", message: "已复制" });
+    } else {
+      setToast({ type: "error", message: "浏览器不允许自动复制，请手动选中后按 Ctrl+C" });
+    }
+  };
 
   // 切到「备份管理」Section 时加载备份列表 + 权限体检
   useEffect(() => {
@@ -990,7 +1021,11 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
       const r = await createBackupApi();
       const details = r.skippedDetails || [];
       const fixed = r.fixed || [];
-      setBackupIssues(details.length || fixed.length ? { skipped: r.skipped || [], details, fixed } : null);
+      setBackupIssues(
+        details.length || fixed.length
+          ? { skipped: r.skipped || [], details, fixed, fixCommand: r.fixCommand }
+          : null
+      );
       if (r.skipped?.length) {
         setToast({ type: "error", message: `备份完成，但跳过 ${r.skipped.length} 项（原因见下方提示）` });
       } else if (fixed.length) {
@@ -1772,7 +1807,7 @@ docker-compose version</code>
                           </pre>
                           <button
                             type="button"
-                            onClick={() => navigator.clipboard?.writeText(daemon.hint || "")}
+                            onClick={() => handleCopyText(daemon.hint || "")}
                             className="mt-1.5 text-xs text-blue-600 hover:underline"
                           >
                             复制命令
@@ -2415,7 +2450,7 @@ docker-compose version</code>
                 const details = backupIssues?.details?.length ? backupIssues.details : permCheck?.issues || [];
                 const fixed = backupIssues?.fixed || [];
                 if (!details.length && !fixed.length) return null;
-                const allCmds = details.map((i) => i.advice).join("\n");
+                const fixCmd = backupIssues?.fixCommand || permCheck?.fixCommand || "";
                 return (
                   <div className="mt-4 border border-amber-200 bg-amber-50 rounded-lg p-3">
                     <div className="flex items-start gap-2">
@@ -2432,33 +2467,44 @@ docker-compose version</code>
                           </p>
                         )}
                         {details.length > 0 && (
-                          <div className="mt-2 space-y-2">
+                          <div className="mt-2 space-y-1.5">
                             {details.slice(0, 5).map((i) => (
                               <div key={i.relPath} className="text-xs">
                                 <p className="font-mono break-all text-amber-900">{i.relPath}</p>
                                 <p className="text-amber-700">{i.reason}</p>
-                                <button
-                                  onClick={() => navigator.clipboard?.writeText(i.advice)}
-                                  className="mt-0.5 inline-flex items-center gap-1 text-amber-800 hover:text-amber-950 underline"
-                                >
-                                  <CopyIcon size={11} /> 复制修复命令
-                                </button>
                               </div>
                             ))}
                             {details.length > 5 && (
-                              <p className="text-xs text-amber-700">…另有 {details.length - 5} 项，可用下方「复制全部命令」一次性取走</p>
+                              <p className="text-xs text-amber-700">…另有 {details.length - 5} 项，下面的命令会一并处理</p>
                             )}
                           </div>
                         )}
-                        <div className="mt-3 flex flex-wrap items-center gap-2">
-                          {details.length > 0 && (
-                            <button
-                              onClick={() => navigator.clipboard?.writeText(allCmds)}
-                              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs text-amber-800 border border-amber-300 rounded-md hover:bg-amber-100"
-                            >
-                              <CopyIcon size={11} /> 复制全部命令
-                            </button>
-                          )}
+
+                        {fixCmd && (
+                          <div className="mt-3">
+                            <p className="text-xs text-amber-800">在服务器执行这一条命令即可（先体检、再修正，一步完成）：</p>
+                            <div className="mt-1.5 flex items-start gap-2">
+                              <code
+                                ref={fixCmdRef}
+                                className="flex-1 min-w-0 px-2 py-1.5 text-xs font-mono bg-white/70 border border-amber-300 rounded-md text-amber-900 break-all select-all"
+                              >
+                                {fixCmd}
+                              </code>
+                              <button
+                                onClick={handleCopyFixCmd}
+                                className="flex-shrink-0 inline-flex items-center gap-1 px-2.5 py-1.5 text-xs text-amber-800 border border-amber-300 rounded-md hover:bg-amber-100"
+                              >
+                                {copiedFixCmd ? <Check size={11} /> : <CopyIcon size={11} />}
+                                {copiedFixCmd ? "已复制" : "复制"}
+                              </button>
+                            </div>
+                            <p className="mt-1.5 text-xs text-amber-600">
+                              默认只修正属主、不改动权限位，不会把 0600 的密钥文件放开成 0644。
+                            </p>
+                          </div>
+                        )}
+
+                        <div className="mt-3">
                           <button
                             onClick={() => loadPermCheck(true)}
                             disabled={permChecking}
@@ -2467,10 +2513,6 @@ docker-compose version</code>
                             <RefreshCw size={11} className={permChecking ? "animate-spin" : ""} /> 重新检测
                           </button>
                         </div>
-                        <p className="mt-2 text-xs text-amber-600">
-                          也可在服务器执行：{" "}
-                          <code className="font-mono">sudo &lt;安装目录&gt;/docker-manager-yanzi fix-perms --dry-run</code>
-                        </p>
                       </div>
                     </div>
                   </div>
@@ -3133,7 +3175,7 @@ docker-compose version</code>
             </pre>
             <div className="flex justify-end gap-2 mt-4">
               <button
-                onClick={() => navigator.clipboard?.writeText(privilegeHint)}
+                onClick={() => handleCopyText(privilegeHint)}
                 className="px-4 py-2 text-sm font-medium text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors"
               >
                 复制命令

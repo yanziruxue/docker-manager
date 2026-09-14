@@ -20,6 +20,7 @@ import {
   type TelemetryStatus,
   type TelemetryStats,
 } from "../api";
+import { copyText } from "../lib/clipboard";
 import { Card, FormField, Input, Toggle } from "./UI";
 import type { TelemetryConfig } from "../types";
 
@@ -153,11 +154,10 @@ export function ActivityPanel({ telemetry, onPatch, onAfterSave }: ActivityPanel
 
   const copyUuid = async () => {
     if (!status) return;
-    try {
-      await navigator.clipboard.writeText(status.uuid);
+    if (await copyText(status.uuid)) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
-    } catch {
+    } else {
       setMsg({ type: "err", text: "复制失败，请手动选择" });
     }
   };

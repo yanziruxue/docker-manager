@@ -13,7 +13,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { DATA_DIR, LOG_DIR, CONFIG_DIR, COMPOSE_DIR } from "./paths.js";
-import { currentUser, userNameOf, fixPerms, scanPermIssues, formatIssue } from "./perms.js";
+import { currentUser, userNameOf, fixPerms, scanPermIssues, formatIssue, fixCommandLine } from "./perms.js";
 
 /** 读取路径属主 uid（失败返回 null） */
 function tryUid(p: string): number | null {
@@ -162,9 +162,8 @@ export function runPermissionCheckCli(argv: string[]): number {
   for (const i of issues) {
     console.log(`  ✗ ${formatIssue(i)}`);
     console.log(`    原因：${i.reason}`);
-    console.log(`    修复：${i.advice}`);
   }
   console.log("");
-  console.log("建议执行：sudo <安装目录>/docker-manager-yanzi fix-perms --dry-run");
+  console.log(`修复（一条命令，检查并修复）：${fixCommandLine()}`);
   return 1;
 }

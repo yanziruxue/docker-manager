@@ -71,25 +71,26 @@ journalctl -u docker-manager-yanzi -f    # 实时日志
 qinglong/.stack-meta.json — 拒绝访问（EACCES）：权限 600，属主 root(uid 0)，当前进程 docker-manager-yanzi(uid 998)
 ```
 
-在「设置 → 备份」页点「复制修复命令」按提示处理，或用内置命令一键修复：
+「设置 → 备份」页会直接给出**一条命令**（已带真实安装路径），复制后在服务器执行即可——它先体检、再修正，一步完成：
 
 ```bash
-cd /opt/docker-manager-yanzi
+sudo /opt/docker-manager-yanzi/docker-manager-yanzi fix-perms
+```
 
-# 1) 体检（只读，不改动任何文件）
-sudo ./docker-manager-yanzi permission-check
+需要更细的控制时，可选参数：
 
-# 2) 试运行：只列出将修改的清单
+```bash
+# 试运行：只列出将修改的清单，不落盘
 sudo ./docker-manager-yanzi fix-perms --dry-run
-
-# 3) 实际执行（默认只改属主，不动权限位）
-sudo ./docker-manager-yanzi fix-perms
 
 # 顺带把目录/文件权限归一化为 0755/0644（默认不这么做）
 sudo ./docker-manager-yanzi fix-perms --normalize-mode
 
 # 只修指定目录
 sudo ./docker-manager-yanzi fix-perms --path /opt/docker-manager-yanzi/data/dockercompose/qinglong
+
+# 只体检、不修改（等价于界面上的「重新检测」）
+sudo ./docker-manager-yanzi permission-check
 ```
 
 要点：
