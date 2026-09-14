@@ -23,10 +23,10 @@
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.17.2**（`package.json`，未发布） |
-| 最新 Release | [v1.17.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.17.0)（蓝奏云 OTA 优先 + 系统更新角标修复） |
-| 源码分支 | `main` @ `4a42d45c` |
-| 交付包 | `build-upload/docker-manager-yanzi-linux-x64-v1.17.2.zip`（42,890,751 B / 40.9 MB / 5 文件；SHA-256 `4b53549b15544de1a5b588cd409df3840ee00b761c97dcdbaf31f9f37deca4cc`） |
+| 当前版本 | **v1.17.3**（`package.json`，未发布） |
+| 最新 Release | [v1.17.2](https://github.com/yanziruxue/docker-manager/releases/tag/v1.17.2)（移除蓝奏云 OTA，回归 GitHub Releases 单一源） |
+| 源码分支 | `main` @ `29ba234f` |
+| 交付包 | 打包中（v1.17.3，zip 备份格式） |
 | 架构 | REST + WS + SSE 三通道；Socket / TCP / SSH 三种引擎 |
 | 目标平台 | Linux x64（SEA 单可执行文件），Unraid / 自托管 NAS |
 
@@ -40,7 +40,7 @@
 | 堆栈管理 | ✅ | Compose 自动发现 / 创建 / 编辑 / 操作 / 更新检查 / 备份恢复 / 批量操作 |
 | 镜像管理 | ✅ | 列表 / 筛选 / 拉取 / 删除 / prune 未使用 |
 | 数据卷管理 | ✅ | 列表 / 新建 / 删除 / prune / 详情 |
-| 备份管理 | ✅ | 手动全量 + 堆栈级备份 / 恢复 / 导出 + 自动备份调度器（周/月/年/Cron，含保留清理） |
+| 备份管理 | ✅ | 手动全量 + 堆栈级备份 / 恢复 / 导出（**zip** 格式，兼容历史 tar.gz）+ 自动备份调度器（周/月/年/Cron，含保留清理） |
 | 通知中心 | ✅ | 未读已读 + localStorage 持久化 |
 | 系统设置 | ✅ | Docker 配置 / Compose 模式 / 通知 / 备份 / 更新调度 / 列显隐 / 活跃度 |
 | Web 终端 | ✅ | xterm.js + WebSocket + 多 Shell 检测 |
@@ -116,6 +116,27 @@
 
 ---
 
+## v1.17.3 — 2026-09-14
+
+### 变更：备份包格式改用 zip + 修复「立即备份」EACCES 报错
+
+- **背景**：生产上点「立即备份」报 `EACCES, Permission denied '/tmp/dsm-backup-XXXX/dockercompose/<stack>'`。根因二重：
+  1. `fs.cpSync` 会把**源目录的权限位原样复制**到 `/tmp` 暂存目录——某些堆栈目录是 0555（只读）时，暂存副本同样只读，随后 `finally` 里的 `fs.rmSync` 抛 EACCES；
+  2. 该清理调用**没有被 try/catch 保护**，于是一个「清理失败」把整个备份请求变成 500（实际备份包可能已经生成），且报错指向 `/tmp` 暂存路径，完全看不出真正原因。
+- **已完成**：
+  - 新增 `server/zip.ts`：**零依赖** ZIP 读写（仅用 `node:zlib`，可被 esbuild 打进 SEA 单文件）。写入端归一化权限（目录 0755 / 文件 0644 / 符号链接 0777），读取端校验 CRC 并阻断路径穿越（`..`、绝对路径）。
+  - `server/backup.ts`：全量备份 / 自动备份 / 配置导出改产 `.zip`（`all_*.zip`、`auto-<key>_*.zip`、`config-export_*.zip`）；`stageConfig()` 改为**逐个堆栈复制并隔离错误**——单个堆栈因权限/损坏失败只跳过它并记入 `skipped`，不再整体失败；新增 `chmodTree()`（递归修正暂存目录权限）与 `rmrf()`（清理失败先修权限重试、再失败仅告警，**绝不影响备份结果**）。
+  - 新增 `copyTree()` 递归复制（**替换 `fs.cpSync`**）：Node v22.22.2 在 Windows 上对**含非 ASCII 字符的源目录名**做递归 `cpSync` 会直接段错误（实测「只读栈」这类名字必崩，生产 Linux 不受影响，但本地开发/预览会整个进程挂掉）。自研实现同时做到逐文件错误隔离 + 权限归一化。
+  - `server/docker.ts`：堆栈级备份改产 `<stackName>_<ts>.zip`（归档内以堆栈名为顶层目录，与旧行为一致），恢复按扩展名分支。
+  - **兼容旧备份**：`listBackupFiles()` / `pruneBackups()` 同时识别 `.zip` 与 `.tar.gz`；`restoreFullBackup()` / `restoreStack()` 对 `.tar.gz` 仍走 tar 解包。历史备份不会失效。
+  - `server/index.ts` / `src/api.ts` / `src/pages/Settings.tsx`：`POST /api/backups` 返回 `skipped`，界面在有跳过项时提示具体堆栈名（而不是静默成功）。
+  - 顺带修复：`/api/backups/export` 下载后只删了归档**文件**，专属临时**目录**（`/tmp/dsm-export-*`）从未清理，长期在 `/tmp` 里堆积空目录；现改为整目录删除。
+- **验证**：前后端 `tsc --noEmit` 全绿；`vite build` 通过；本地 zip 端到端测试 **23/23 PASS**（全量/自动/导出产 zip、恢复往返内容一致、中文目录名、只读 0555 堆栈不报 EACCES、历史 tar.gz 可列出与恢复、路径穿越被拦截且未落盘、暂存目录无残留）。SEA 打包 + 双验证（ELF magic + 版本号）。
+- **未完成 / 已知限制**：ZIP 不支持 socket / fifo / 设备文件（这类条目跳过，Compose 场景无影响）；单个文件不可读时只跳过该文件并计入 `skipped` 提示（会在界面上列出具体路径，避免静默出残缺备份）。
+- **下一步**：无。
+
+---
+
 ## v1.17.2 — 2026-09-14
 
 ### 移除：蓝奏云 OTA 更新源（OTA 回归 GitHub 单一源）
@@ -129,6 +150,7 @@
 - **保留**：zip 交付包版本化命名（`docker-manager-yanzi-linux-x64-v<version>.zip`）及其 `.gitignore` 规则。
 - **验证**：前后端 `tsc --noEmit` 全绿；SEA 打包 + 双验证（ELF magic + 版本号）。
 - **未完成 / 已知限制**：无。蓝奏云相关环境变量（`LANZOU_UPDATE_URL` / `LANZOU_FOLDER_PWD`）随之失效。
+- **发布**：[Release v1.17.2](https://github.com/yanziruxue/docker-manager/releases/tag/v1.17.2)；源码 `main` @ `29ba234f`；asset `docker-manager-yanzi-linux-x64-v1.17.2.zip`（SHA-256 `4b53549b…a4cc`）+ `quick-install.sh`。同时清理 `build-upload/` 内含蓝奏云代码的旧包（v1.17.0 / v1.17.1）。
 - **下一步**：无。
 
 ---

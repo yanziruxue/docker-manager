@@ -232,7 +232,7 @@ export async function runSchedulerCheckNow(): Promise<SchedulerLastResult> {
 //
 // 读取 settings.backup（mode 1：weekly/monthly/yearly 三档；mode 2：simpleFrequency 五段 cron），
 // 到期后创建全量备份（server/backup.ts），并按各档 retention 清理同前缀历史包。
-// 备份包命名：auto-<key>_<timestamp>.tar.gz（key ∈ weekly/monthly/yearly/simple）。
+// 备份包命名：auto-<key>_<timestamp>.zip（key ∈ weekly/monthly/yearly/simple）。
 
 export interface BackupScheduleView {
   key: string;

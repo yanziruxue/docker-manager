@@ -10,6 +10,7 @@ import type { DockerEngine } from "./engines.js";
 import { COMPOSE_DIR } from "./paths.js";
 import { getSettings } from "./settings.js";
 import { resolveBackupDir, backupFilePath, runTar } from "./backup.js";
+import { zipDirectory, extractZip } from "./zip.js";
 
 /**
  * 拼接路径：SSH 引擎用 POSIX 路径（远程 Linux），本地引擎用系统路径
@@ -1844,11 +1845,11 @@ export async function backupStack(
   const backupsDir = resolveBackupDir();
 
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-  const backupName = `${stackName}_${timestamp}.tar.gz`;
+  const backupName = `${stackName}_${timestamp}.zip`;
 
-  // 归档名用「相对名 + cwd=归档目录」传递：GNU tar 会把 -f 中的 `C:\...`
-  // 冒号误判为远程主机（Windows 报 "Cannot connect to C:"），相对名可规避。
-  runTar(["-czf", backupName, "-C", path.dirname(cwd), path.basename(cwd)], "堆栈备份", backupsDir);
+  // 归档内以「堆栈名」为顶层目录（与旧 tar 行为的 <stackName>/... 保持一致），
+  // 恢复时解压回 COMPOSE_DIR 即得 COMPOSE_DIR/<stackName>/...
+  zipDirectory(cwd, path.join(backupsDir, backupName), stackName);
 
   return backupName;
 }
@@ -1866,7 +1867,12 @@ export async function restoreStack(
   const stacksDir = COMPOSE_DIR;
   if (!fs.existsSync(stacksDir)) fs.mkdirSync(stacksDir, { recursive: true });
 
-  runTar(["-xzf", path.basename(archive), "-C", stacksDir], "堆栈恢复", path.dirname(archive));
+  if (/\.tar\.gz$/i.test(backupName)) {
+    // 历史 tar.gz 堆栈备份：仍可恢复
+    runTar(["-xzf", path.basename(archive), "-C", stacksDir], "堆栈恢复", path.dirname(archive));
+  } else {
+    extractZip(archive, stacksDir);
+  }
 }
 
 // 说明：备份文件列表 / 删除 / 全量备份 / 恢复 / 导出 已统一迁移到 server/backup.ts，

@@ -596,7 +596,7 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
 
   /** 备份文件名 -> 展示标签 */
   const backupLabel = (name: string) => {
-    const base = name.replace(/\.tar\.gz$/, "");
+    const base = name.replace(/\.(zip|tar\.gz)$/i, "");
     if (base.startsWith("auto-")) return `自动备份（${base.split("_")[0].slice(5)}）`;
     if (base.startsWith("all_")) return "手动全量备份";
     if (base.startsWith("config-export")) return "配置导出";
@@ -959,7 +959,11 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
     setBackupCreating(true);
     try {
       const r = await createBackupApi();
-      setToast({ type: "success", message: `备份完成：${r.backupName}` });
+      if (r.skipped?.length) {
+        setToast({ type: "error", message: `备份完成，但跳过 ${r.skipped.length} 项：${r.skipped.join("、")}` });
+      } else {
+        setToast({ type: "success", message: `备份完成：${r.backupName}` });
+      }
       await loadBackups();
     } catch (e: any) {
       setToast({ type: "error", message: e.message || "备份失败" });

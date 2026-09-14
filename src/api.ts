@@ -504,7 +504,7 @@ export function restoreStackApi(engineId: string, stackName: string, backupName:
 
 // ============ 备份文件 API ============
 
-/** 备份文件信息（DATA_DIR/backups 下的 tar.gz） */
+/** 备份文件信息（DATA_DIR/backups 下的 .zip；历史 .tar.gz 仍会列出） */
 export interface BackupFileInfo {
   name: string;
   size: number; // 字节
@@ -516,8 +516,8 @@ export function fetchBackupsApi(): Promise<BackupFileInfo[]> {
   return request("/backups");
 }
 
-/** 立即备份（全量：compose 堆栈 + 设置 + 引擎） */
-export function createBackupApi(): Promise<{ backupName: string; size: number }> {
+/** 立即备份（全量：compose 堆栈 + 设置 + 引擎）；skipped 为因权限等原因跳过的条目 */
+export function createBackupApi(): Promise<{ backupName: string; size: number; skipped: string[] }> {
   return request("/backups", { method: "POST" });
 }
 

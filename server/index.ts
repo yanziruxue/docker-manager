@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
 import path from "path";
-import { existsSync, readdirSync, readFileSync, writeFileSync, unlinkSync } from "fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync, unlinkSync, rmSync } from "fs";
 import { fileURLToPath } from "url";
 import {
   getAllEngines,
@@ -728,7 +728,7 @@ app.get("/api/backups", (_req, res) => {
 app.post("/api/backups", (_req, res) => {
   try {
     const r = createFullBackup("manual");
-    res.json({ success: true, data: { backupName: r.name, size: r.size } });
+    res.json({ success: true, data: { backupName: r.name, size: r.size, skipped: r.skipped } });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message || "备份失败" });
   }
@@ -737,24 +737,20 @@ app.post("/api/backups", (_req, res) => {
 /** 导出全部配置（下载归档，不写入备份列表） */
 app.get("/api/backups/export", (_req, res) => {
   let tmp: { name: string; path: string } | null = null;
+  // 导出归档建在专属临时目录里，下载完必须连**目录**一起删，否则 /tmp 每次导出漏一个空目录
+  const cleanup = (p: string) => {
+    try {
+      rmSync(path.dirname(p), { recursive: true, force: true });
+    } catch {
+      /* 忽略清理失败 */
+    }
+  };
   try {
     tmp = exportConfigArchive();
     const file = tmp.path;
-    res.download(file, tmp.name, () => {
-      try {
-        unlinkSync(file);
-      } catch {
-        /* 忽略清理失败 */
-      }
-    });
+    res.download(file, tmp.name, () => cleanup(file));
   } catch (err: any) {
-    if (tmp) {
-      try {
-        unlinkSync(tmp.path);
-      } catch {
-        /* 忽略 */
-      }
-    }
+    if (tmp) cleanup(tmp.path);
     res.status(500).json({ success: false, error: err.message || "导出失败" });
   }
 });
