@@ -23,10 +23,10 @@
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.17.0**（已发布，`main` `6f8649ae`） |
+| 当前版本 | **v1.17.2**（`package.json`，未发布） |
 | 最新 Release | [v1.17.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.17.0)（蓝奏云 OTA 优先 + 系统更新角标修复） |
-| 源码分支 | `main` @ `6f8649ae` |
-| 交付包 | `build-upload/docker-manager-yanzi-linux-x64-v1.17.0.zip`（40.9 MB / 5 文件；SHA-256 `09a4981773657b4d06db9ffe2817404f517ba23a50ff3cdfa26b93457877c365`） |
+| 源码分支 | `main` @ `4a42d45c` |
+| 交付包 | `build-upload/docker-manager-yanzi-linux-x64-v1.17.2.zip`（42,890,751 B / 40.9 MB / 5 文件；SHA-256 `4b53549b15544de1a5b588cd409df3840ee00b761c97dcdbaf31f9f37deca4cc`） |
 | 架构 | REST + WS + SSE 三通道；Socket / TCP / SSH 三种引擎 |
 | 目标平台 | Linux x64（SEA 单可执行文件），Unraid / 自托管 NAS |
 
@@ -46,7 +46,7 @@
 | Web 终端 | ✅ | xterm.js + WebSocket + 多 Shell 检测 |
 | 登录鉴权 | ✅ | 单管理员 + scrypt + httpOnly 会话（绝对过期）+ 密码找回码 |
 | 更新调度器 | ✅ | 后台定时检查镜像版本（每天 / 每周 / 每月，非 Cron） |
-| OTA 自升级 | ✅ | 蓝奏云优先 + GitHub 兜底，Release 拉取 + 自替换 + systemd 重启，gh-proxy 镜像兜底 |
+| OTA 自升级 | ✅ | GitHub Releases 单一源，拉取 + 自替换 + systemd 重启，gh-proxy 镜像兜底 |
 | Linux SEA 部署 | ✅ | 单可执行文件 + systemd + install/uninstall 脚本 |
 | Docker 部署 | ✅ | 多阶段 Dockerfile |
 | **操作日志系统** | 🔨 **约 60%** | `server/logger.ts` 已建好但**未接入** `docker.ts`（仍是 `console.log`）；前端仅 localStorage 版 `opLog.ts`（500 条） |
@@ -113,6 +113,55 @@
 - 一次发布中同时含 Minor 与 Patch 时，按**最高级别**递增，低级别归零（例：`1.0.3` + 新功能 → `1.1.0`）
 - Major 由人工决定，不自动递增
 - 同一天内的多次改动合并为一个版本，逐条记录在版本下
+
+---
+
+## v1.17.2 — 2026-09-14
+
+### 移除：蓝奏云 OTA 更新源（OTA 回归 GitHub 单一源）
+
+- **背景**：v1.17.0 引入「蓝奏云优先」、v1.17.1 降级为「备用源」，但生产环境两次实测均未走通（文件夹页解析 / `ajaxm.php` 直链签名未取到）。且蓝奏云失败会被 `checkForUpdate` 静默吞掉、表现为「无更新」，排障成本高且误导。
+- **已完成**：
+  - 删除 `server/lanzou.ts`（文件夹页解析、`filemoreajax.php` 密码提交与 Cookie 透传、`ajaxm.php` 直链解析、流式下载）。
+  - `server/updater.ts`：移除蓝奏云 import 与 `logger`；`checkForUpdate()` 简化为直接调用 `checkGitHubUpdate()`（**GitHub 为唯一更新源**）；`performUpdate()` 删除蓝奏云下载分支，回归「直连 + gh-proxy 镜像回退」；`UpdateInfo` 去掉 `source` 字段。
+  - `src/types.ts`：`UpdateInfo` 同步去掉 `source`；`src/pages/Settings.tsx`：移除「蓝奏云 · 备用源 / GitHub · 主源」来源标签。
+  - 顺带修复：`checkGitHubUpdate()` 选取 asset 的正则 `/linux-x64\.zip$/i` 匹配不到版本化包名（`…-linux-x64-vX.Y.Z.zip`），已放宽为 `/linux-x64.*\.zip$/i`。
+- **保留**：zip 交付包版本化命名（`docker-manager-yanzi-linux-x64-v<version>.zip`）及其 `.gitignore` 规则。
+- **验证**：前后端 `tsc --noEmit` 全绿；SEA 打包 + 双验证（ELF magic + 版本号）。
+- **未完成 / 已知限制**：无。蓝奏云相关环境变量（`LANZOU_UPDATE_URL` / `LANZOU_FOLDER_PWD`）随之失效。
+- **下一步**：无。
+
+---
+
+## v1.17.1 — 2026-09-14
+
+### 调整：OTA 改为「GitHub 主源 + 蓝奏云备用源」，备用源主动参与检查
+
+- **背景**：v1.17.0 引入「蓝奏云优先」OTA，生产环境实测未生效（蓝奏云文件夹解析/直链未走通）。
+- **已完成**：`server/updater.ts` 的 `checkForUpdate()` 重构为「主源 + 备用源」：
+  - **主源 GitHub**：查到可用更新即直接采用（不再请求备用源，省时）；
+  - **备用源蓝奏云**：主源**无更新**或**不可用**时再查 —— 备用源有更新则采用，否则沿用主源结论；
+  - 两源均失败时抛 GitHub 的错误（主源，便于定位）。
+  - `performUpdate()` 仍按 `info.source` 分支下载，无需改动；更新页来源标签显示「GitHub · 主源 / 蓝奏云 · 备用源」。
+- **保留**：`server/lanzou.ts`、`UpdateInfo.source`、zip 交付包版本化命名（`…-v<version>.zip`）。
+- **验证**：前后端 `tsc --noEmit` 全绿。
+- **未完成 / 已知限制**：蓝奏云链路仍未在生产验证成功；作为备用源，主源正常但无更新时会被查询。
+- **下一步**：无。
+
+---
+
+## v1.17.0 — 2026-09-14
+
+### 新增：蓝奏云 OTA（国内备用更新源）+ zip 交付包版本化命名
+
+- **已完成**：
+  - 新增 `server/lanzou.ts`：`LANZOU_FOLDER_URL`（写死 `https://yanziruxue.lanzoum.com/b0he7aaxc`，可用 env `LANZOU_UPDATE_URL` 覆盖）与 `LANZOU_FOLDER_PWD` 密码常量（可 env 覆盖）；`resolveLanZouUpdate()` 从「文件夹分享页」列出全部 zip → 按文件名 `-vX.Y.Z` 取语义版本最高 = 最新版 → 经 `ajaxm.php` 解析真实直链；`downloadLanZou()` 流式下载。带密码文件夹会向 `filemoreajax.php` 提交 `pwd` 并全程透传鉴权 Cookie（列表页 → 文件页 → 直链）。
+  - `server/updater.ts`：`UpdateInfo` 增加 `source: "github" | "lanzou"`；`performUpdate()` 按 `source` 分支下载。
+  - `deploy/linux/make-package.py`：交付包名加 `-v<version>`；`scripts/publish-release.mjs` 同步。
+  - `src/types.ts` / `src/pages/Settings.tsx`：更新页显示「蓝奏云 / GitHub」来源标签。
+- **验证**：前后端 `tsc` 全绿；SEA 打包 + 双验证（ELF magic + 版本号）通过。
+- **未完成 / 已知限制**：蓝奏云直链解析受其页面改版影响，生产实测未走通（v1.17.1 已改回 GitHub 优先）。
+- **下一步**：见 v1.17.1。
 
 ---
 

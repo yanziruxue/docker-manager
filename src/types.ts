@@ -461,7 +461,7 @@ export interface ComposeConfig {
 /** 更新阶段 */
 export type UpdatePhase = "idle" | "downloading" | "extracting" | "replacing" | "done" | "error";
 
-/** GitHub Releases / 蓝奏云 检查返回的最新版本信息 */
+/** GitHub Releases 检查返回的最新版本信息 */
 export interface UpdateInfo {
   currentVersion: string;
   latestVersion: string;
@@ -473,8 +473,6 @@ export interface UpdateInfo {
   assetSize: number;
   downloadUrl: string;
   htmlUrl: string;
-  /** 更新来源：蓝奏云优先，失败时回退 GitHub */
-  source: "github" | "lanzou";
 }
 
 /** 更新进度（前端轮询） */

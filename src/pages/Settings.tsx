@@ -2639,15 +2639,6 @@ docker-compose version</code>
                       <div>
                         <p className="text-sm font-medium text-slate-700">
                           发现新版本 v{updateInfo.latestVersion}
-                          <span
-                            className={`ml-2 px-2 py-0.5 rounded-full text-xs font-medium ${
-                              updateInfo.source === "lanzou"
-                                ? "bg-orange-100 text-orange-700"
-                                : "bg-slate-100 text-slate-600"
-                            }`}
-                          >
-                            {updateInfo.source === "lanzou" ? "蓝奏云" : "GitHub"}
-                          </span>
                         </p>
                         <p className="text-xs text-slate-500 mt-0.5">
                           当前 v{updateInfo.currentVersion} → 最新 v{updateInfo.latestVersion}
