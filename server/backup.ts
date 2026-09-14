@@ -6,6 +6,14 @@ import { DATA_DIR, CONFIG_DIR, COMPOSE_DIR, dataPath } from "./paths.js";
 import { getSettings } from "./settings.js";
 import { createLogger } from "./logger.js";
 import { zipDirectory, extractZip } from "./zip.js";
+import {
+  diagnosePerm,
+  formatIssue,
+  isPermError,
+  tryGrantOwnerRead,
+  currentUser,
+  type PermIssue,
+} from "./perms.js";
 
 /**
  * 备份 / 恢复 / 导出 的统一实现。
@@ -136,6 +144,40 @@ function rmrf(dir: string): void {
 }
 
 /**
+ * 复制单个文件；遇到权限类失败且开启自愈时，给「属于自己的」文件补上属主读位后重试一次。
+ * 只补 `u+r`（`mode | 0o400`），不改动 group/other 位、不改动归属，
+ * 因此不会把 `0600` 的敏感文件放大成 `0644`。属主不是当前进程时**直接放弃**。
+ */
+function copyFileMaybeHeal(
+  s: string,
+  d: string,
+  autoFix: boolean,
+  onFixed?: (absPath: string, detail: string) => void
+): void {
+  try {
+    fs.copyFileSync(s, d);
+    return;
+  } catch (e: any) {
+    if (!autoFix || !isPermError(e)) throw e;
+    const r = tryGrantOwnerRead(s);
+    if (!r.ok) throw e;
+    fs.copyFileSync(s, d); // 修好后重试一次
+    log.warn(`已自动补上属主读权限并完成复制：${s}（${r.detail}）`);
+    onFixed?.(s, r.detail);
+  }
+}
+
+/** 备份期自愈开关（默认开；settings.backup.autoFixReadPerm 可关） */
+function shouldAutoFixReadPerm(): boolean {
+  try {
+    const v = getSettings()?.backup?.autoFixReadPerm;
+    return v === undefined ? true : !!v;
+  } catch {
+    return true;
+  }
+}
+
+/**
  * 递归复制目录。
  *
  * 刻意**不用 `fs.cpSync`**：Node v22.22.2 在 Windows 上对**含非 ASCII 字符的源目录名**
@@ -144,7 +186,13 @@ function rmrf(dir: string): void {
  *
  * @returns 根目录是否成功复制（子条目失败只记录，不影响整体）
  */
-function copyTree(src: string, dest: string, onError: (relPath: string, e: any) => void): boolean {
+function copyTree(
+  src: string,
+  dest: string,
+  onError: (relPath: string, e: any) => void,
+  autoFix: boolean,
+  onFixed?: (absPath: string, detail: string) => void
+): boolean {
   fs.mkdirSync(dest, { recursive: true });
   let entries: fs.Dirent[];
   try {
@@ -171,9 +219,9 @@ function copyTree(src: string, dest: string, onError: (relPath: string, e: any) 
           /* 目标已存在或平台不支持符号链接：跳过 */
         }
       } else if (entry.isDirectory()) {
-        copyTree(s, d, (rel, e) => onError(rel ? `${entry.name}/${rel}` : entry.name, e));
+        copyTree(s, d, (rel, e) => onError(rel ? `${entry.name}/${rel}` : entry.name, e), autoFix, onFixed);
       } else if (entry.isFile()) {
-        fs.copyFileSync(s, d);
+        copyFileMaybeHeal(s, d, autoFix, onFixed);
         try {
           fs.chmodSync(d, 0o644);
         } catch {
@@ -191,11 +239,41 @@ function copyTree(src: string, dest: string, onError: (relPath: string, e: any) 
 /**
  * 收集待备份内容到暂存目录（单一根）。
  * Compose 堆栈**逐个复制并隔离错误**：某个堆栈（或其中个别文件）因权限/损坏复制失败时
- * 只跳过它，其余照常备份，失败项记入 skipped 返回给界面提示，而不是整体失败。
+ * 只跳过它，其余照常备份。失败项不再只报一句 `EACCES`，而是给出完整权限诊断
+ * （权限位 / 属主 / 目标 uid / 可直接复制的修复命令），并在属主正确时先尝试自愈。
  */
-function stageConfig(staging: string): { stacks: number; files: string[]; skipped: string[] } {
+function stageConfig(staging: string): {
+  stacks: number;
+  files: string[];
+  skipped: string[];
+  skippedDetails: PermIssue[];
+  fixed: PermIssue[];
+} {
   const files: string[] = [];
   const skipped: string[] = [];
+  const skippedDetails: PermIssue[] = [];
+  const fixed: PermIssue[] = [];
+  const me = currentUser();
+  const autoFix = shouldAutoFixReadPerm();
+
+  /** 记录一次失败：结构化诊断 + 自解释文案 + 单行完整日志 */
+  const record = (absPath: string, relPath: string, e: any): void => {
+    const code = String(e?.code || e?.message || "未知错误");
+    const issue = diagnosePerm({ absPath, relPath, code, targetUid: me.uid });
+    skippedDetails.push(issue);
+    skipped.push(formatIssue(issue));
+    log.warn(
+      `备份跳过 ${relPath}｜${issue.code}｜权限 ${issue.mode}｜属主 ${issue.owner}(uid ${issue.uid})｜` +
+        `运行用户 ${issue.targetUser}(uid ${issue.targetUid})｜原因：${issue.reason}｜建议：${issue.advice}`
+    );
+  };
+
+  /** 自愈成功：记入 fixed 供界面提示「已自动修复」 */
+  const onFixed = (absPath: string, detail: string): void => {
+    const rel = path.relative(COMPOSE_DIR, absPath) || path.basename(absPath);
+    fixed.push(diagnosePerm({ absPath, relPath: rel, code: "EACCES", targetUid: me.uid, autoFixed: true }));
+    log.info(`备份自愈：${rel}（${detail}）`);
+  };
 
   // 1) Compose 堆栈目录
   const composeDest = path.join(staging, "dockercompose");
@@ -208,15 +286,13 @@ function stageConfig(staging: string): { stacks: number; files: string[]; skippe
     for (const entry of entries) {
       const src = path.join(COMPOSE_DIR, entry.name);
       const dest = path.join(composeDest, entry.name);
-      const fail = (rel: string, e: any) => {
-        skipped.push(`${rel ? `${entry.name}/${rel}` : entry.name}（${e?.code || e?.message || "未知错误"}）`);
-        log.warn(`堆栈条目复制失败，已跳过：${path.join(src, rel)} — ${e?.message || e}`);
-      };
+      const fail = (rel: string, e: any) =>
+        record(rel ? path.join(src, rel) : src, rel ? `${entry.name}/${rel}` : entry.name, e);
       if (entry.isDirectory()) {
-        if (copyTree(src, dest, fail)) stacks++;
+        if (copyTree(src, dest, fail, autoFix, onFixed)) stacks++;
       } else if (entry.isFile()) {
         try {
-          fs.copyFileSync(src, dest);
+          copyFileMaybeHeal(src, dest, autoFix, onFixed);
         } catch (e: any) {
           fail("", e);
         }
@@ -237,7 +313,7 @@ function stageConfig(staging: string): { stacks: number; files: string[]; skippe
   }
 
   chmodTree(staging);
-  return { stacks, files, skipped };
+  return { stacks, files, skipped, skippedDetails, fixed };
 }
 
 /**
@@ -248,15 +324,19 @@ function stageConfig(staging: string): { stacks: number; files: string[]; skippe
 export function createFullBackup(
   kind: BackupKind = "manual",
   tag = ""
-): { name: string; size: number; skipped: string[] } {
+): { name: string; size: number; skipped: string[]; skippedDetails: PermIssue[]; fixed: PermIssue[] } {
   const dir = resolveBackupDir();
   const name = `${kind === "manual" ? "all" : "auto"}${tag ? "-" + tag : ""}_${tsCompact()}.zip`;
   const out = path.join(dir, name);
   const staging = fs.mkdtempSync(path.join(os.tmpdir(), "dsm-backup-"));
   let skipped: string[] = [];
+  let skippedDetails: PermIssue[] = [];
+  let fixed: PermIssue[] = [];
   try {
     const info = stageConfig(staging);
     skipped = info.skipped;
+    skippedDetails = info.skippedDetails;
+    fixed = info.fixed;
     fs.writeFileSync(
       path.join(staging, "manifest.json"),
       JSON.stringify(
@@ -276,13 +356,16 @@ export function createFullBackup(
       "utf-8"
     );
     zipDirectory(staging, out);
-    if (skipped.length) log.warn(`备份已跳过 ${skipped.length} 个条目：${skipped.join("、")}`);
+    if (fixed.length) {
+      log.warn(`备份过程中自动补正了 ${fixed.length} 个文件的读权限：${fixed.map((f) => f.relPath).join("、")}`);
+    }
+    if (skipped.length) log.warn(`备份已跳过 ${skipped.length} 个条目（逐条诊断见上方日志）`);
   } finally {
     rmrf(staging);
   }
   const st = fs.statSync(out);
   log.info(`已创建${kind === "manual" ? "手动" : "自动"}全量备份：${name}（${st.size} 字节）`);
-  return { name, size: st.size, skipped };
+  return { name, size: st.size, skipped, skippedDetails, fixed };
 }
 
 /** 旧版归档判定（仅用于兼容读取历史备份，新备份一律 .zip） */
@@ -341,7 +424,8 @@ function stageStacksFrom(srcCompose: string, destRoot: string): { stacks: number
       log.warn(`堆栈恢复失败：${path.join(dest, rel)} — ${e?.message || e}`);
     };
     if (entry.isDirectory()) {
-      if (copyTree(src, dest, fail)) stacks++;
+      // 恢复方向不做自愈：写回堆栈时若失败应显式报错中止，而不是悄悄改动源文件权限
+      if (copyTree(src, dest, fail, false)) stacks++;
     } else if (entry.isFile()) {
       try {
         fs.copyFileSync(src, dest);

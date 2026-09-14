@@ -338,6 +338,8 @@ export interface BackupConfig {
   autoBackupEnabled: boolean;
   backupPath: string; // 备份存储路径
   lastBackup: string;
+  /** 备份遇 EACCES 时自动补属主读位后重试（只补 u+r，不改动其他权限位与归属） */
+  autoFixReadPerm?: boolean;
   // 模式 2：简单备份
   simpleFrequency: string; // cron 表达式
   simpleRetentionCount: number;

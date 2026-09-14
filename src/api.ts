@@ -516,9 +516,58 @@ export function fetchBackupsApi(): Promise<BackupFileInfo[]> {
   return request("/backups");
 }
 
-/** 立即备份（全量：compose 堆栈 + 设置 + 引擎）；skipped 为因权限等原因跳过的条目 */
-export function createBackupApi(): Promise<{ backupName: string; size: number; skipped: string[] }> {
+/** 单条权限问题诊断（后端 PermIssue，用于自解释提示与一键复制修复命令） */
+export interface PermIssue {
+  /** 相对展示路径，如 qinglong/.stack-meta.json */
+  relPath: string;
+  /** 绝对路径（可直接粘贴进终端） */
+  absPath: string;
+  code: string; // EACCES / EPERM
+  scope: "self" | "parent";
+  mode: string; // 八进制权限位，如 "600"
+  uid: number;
+  gid: number;
+  owner: string;
+  targetUid: number;
+  targetUser: string;
+  procUid: number;
+  procUser: string;
+  /** 人类可读的判定原因 */
+  reason: string;
+  /** 可直接复制的修复命令 */
+  advice: string;
+  /** 本次备份是否已自动修复 */
+  autoFixed: boolean;
+}
+
+/** 立即备份的返回：skipped 为人类可读摘要，skippedDetails 为结构化诊断，fixed 为备份期自动修复项 */
+export interface BackupCreateResult {
+  backupName: string;
+  size: number;
+  skipped: string[];
+  skippedDetails?: PermIssue[];
+  fixed?: PermIssue[];
+}
+
+/** 立即备份（全量：compose 堆栈 + 设置 + 引擎） */
+export function createBackupApi(): Promise<BackupCreateResult> {
   return request("/backups", { method: "POST" });
+}
+
+/** 权限体检结果（只读扫描 compose 目录） */
+export interface PermCheckResult {
+  ok: boolean;
+  checked: number;
+  issues: PermIssue[];
+  targetUid: number;
+  targetUser: string;
+  composeDir: string;
+  advice: string;
+}
+
+/** 权限体检（refresh=true 跳过 60s 缓存） */
+export function checkPermissionsApi(refresh = false): Promise<PermCheckResult> {
+  return request(`/system/permission-check${refresh ? "?refresh=1" : ""}`);
 }
 
 /** 从全量备份恢复（覆盖堆栈与设置/引擎文件） */

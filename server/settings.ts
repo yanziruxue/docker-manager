@@ -51,6 +51,8 @@ const DEFAULT_SETTINGS = {
     autoBackupEnabled: false,
     backupPath: "docker-compose-backup-manager",
     lastBackup: "",
+    /** 备份遇 EACCES 时，对「属主是自己」的文件自动补属主读位后重试（只补 u+r，不扩大暴露面） */
+    autoFixReadPerm: true,
     simpleFrequency: "0 3 * * 0",
     simpleRetentionCount: 5,
     weekly: { enabled: true, day: "Saturday", time: "23:00", retention: 6 },
@@ -196,6 +198,7 @@ export function getSettings(): any {
       return {
         ...DEFAULT_SETTINGS,
         ...parsed,
+        backup: { ...DEFAULT_SETTINGS.backup, ...(parsed?.backup || {}) },
         docker: mergedDocker,
         update: { ...DEFAULT_SETTINGS.update, ...(parsed?.update || {}) },
         modal: { ...DEFAULT_SETTINGS.modal, ...(parsed?.modal || {}) },

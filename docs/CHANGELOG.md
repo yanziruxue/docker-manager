@@ -23,10 +23,10 @@
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.17.3**（已发布，`main` `839e0e6b`） |
+| 当前版本 | **v1.18.0**（`package.json`，未发布） |
 | 最新 Release | [v1.17.3](https://github.com/yanziruxue/docker-manager/releases/tag/v1.17.3)（备份包格式改 zip + 修复「立即备份」EACCES） |
-| 源码分支 | `main` @ `839e0e6b` |
-| 交付包 | `build-upload/docker-manager-yanzi-linux-x64-v1.17.3.zip`（42,894,578 B / 40.9 MB / 5 文件；SHA-256 `0f6c343283ef8fda1e4447884a8ce268d2b39b1420d55ef977febea62571d8ee`） |
+| 源码分支 | `main` @ `e1e84531`（v1.18.0 未推送） |
+| 交付包 | 打包中（v1.18.0，权限诊断与修复） |
 | 架构 | REST + WS + SSE 三通道；Socket / TCP / SSH 三种引擎 |
 | 目标平台 | Linux x64（SEA 单可执行文件），Unraid / 自托管 NAS |
 
@@ -41,6 +41,7 @@
 | 镜像管理 | ✅ | 列表 / 筛选 / 拉取 / 删除 / prune 未使用 |
 | 数据卷管理 | ✅ | 列表 / 新建 / 删除 / prune / 详情 |
 | 备份管理 | ✅ | 手动全量 + 堆栈级备份 / 恢复 / 导出（**zip** 格式，兼容历史 tar.gz）+ 自动备份调度器（周/月/年/Cron，含保留清理） |
+| 权限诊断与修复 | ✅ | 备份期自愈 `u+r` + 结构化诊断（属主/权限位/修复命令）+ `fix-perms` CLI + 启动体检与界面提示 |
 | 通知中心 | ✅ | 未读已读 + localStorage 持久化 |
 | 系统设置 | ✅ | Docker 配置 / Compose 模式 / 通知 / 备份 / 更新调度 / 列显隐 / 活跃度 |
 | Web 终端 | ✅ | xterm.js + WebSocket + 多 Shell 检测 |
@@ -113,6 +114,28 @@
 - 一次发布中同时含 Minor 与 Patch 时，按**最高级别**递增，低级别归零（例：`1.0.3` + 新功能 → `1.1.0`）
 - Major 由人工决定，不自动递增
 - 同一天内的多次改动合并为一个版本，逐条记录在版本下
+
+---
+
+## v1.18.0 — 2026-09-14
+
+### 新增：权限诊断与修复（备份不再只报一句 EACCES）
+
+- **背景**：生产上「立即备份」跳过 `qinglong/.stack-meta.json（EACCES）`。提示只有一个错误码，看不出是**权限位**问题还是**属主**问题，也没有任何修复手段。诊断结论：备份链路里只有「读源文件」这一步需要源文件读权限——目标端 `/tmp` 暂存由本进程新建，写与清理都有 `chmodTree()` / `rmrf()` 兜底，因此 EACCES 必然来自**源文件对运行用户不可读**。
+- **已完成**：
+  - 新增 `server/perms.ts`：权限诊断（`lstatSync` 取 mode/uid，只需父目录 `x` 位）、`/etc/passwd` 解析用户名（`nologin` 专用用户也能显示名字，不依赖 `getent`）、自愈 `tryGrantOwnerRead()`、只读体检 `scanPermIssues()`、修复执行器 `fixPerms()`。
+  - 新增 `server/perms-cli.ts` + `server/index.ts` 顶部 CLI 分支：`fix-perms` / `permission-check` / `--version`。
+    - **默认只修正属主，不改动权限位**（避免把 `0600` 的密钥文件放开成 `0644`）；需要归一化时显式 `--normalize-mode`。
+    - 支持 `--dry-run` / `--path <目录>` / `--uid <数字>` / `--help`。
+  - `server/backup.ts`：**备份期自愈（L1）**——遇 EACCES 且属主是当前用户时，补 `u+r` 后重试一次（只加属主读位，group/other 位与 uid/gid 一律不动）；失败项生成结构化 `skippedDetails`（权限位 / 属主 / 目标 uid / 原因 / **可直接复制的修复命令**），并把日志升级为单行完整诊断。
+  - 接口：`POST /api/backups` 新增 `skippedDetails` 与 `fixed`；新增 `GET /api/system/permission-check`（只读体检，结果缓存 60s，`?refresh=1` 绕过）。
+  - 启动时执行一次**只读权限体检**，发现属主/权限异常即打 WARN 并给出一键修复命令（`setImmediate` 延后，不拖慢启动）。
+  - 设置项 `backup.autoFixReadPerm`（默认开，设置页可关）；`settings.ts` 归并 `backup` 子对象，旧配置无该字段时按默认值补齐。
+  - 前端：备份卡片新增**权限提示面板**（逐条展示剩余路径 / 原因 / 「复制修复命令」/「复制全部命令」/「重新检测」），并提供自愈结果提示（`已自动补正属主读权限 N 项`）。
+- **关键坑（务必保留）**：`sudo` 执行时 `process.getuid()` 是 **0**，若直接拿它当目标属主，会把整个数据目录 `chown` 给 root，服务反而彻底读不了。因此目标属主判定为：非 root 运行时取自己的 uid；root 运行时取 `DATA_DIR` / 安装目录的属主；并提供 `--uid` 显式覆盖。另：SEA 以 **CJS** 打包（`format: "cjs"`），CLI 必须全同步，不能引入顶层 await。
+- **验证**：前后端 `tsc --noEmit` 全绿；`vite build` 通过；端到端脚本覆盖「`--version` / `permission-check` / `fix-perms --dry-run` / 自愈后备份成功 / `skippedDetails` 结构 / 未授权 401」。
+- **未完成 / 已知限制**：`fix-perms` 仅适用于 Linux 部署（Windows 无 POSIX 属主模型，命令会提示并直接返回）；属主漂移到其他用户（如 root）时应用无权修正，必须由用户用 `sudo` 执行；ZIP 不支持 socket / fifo / 设备文件（既有行为，未变）。
+- **下一步**：无。
 
 ---
 

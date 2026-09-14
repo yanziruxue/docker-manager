@@ -84,6 +84,8 @@ import {
   RECOVERY_CODE_LENGTH,
 } from "./users.js";
 import { createSession, getSessionUser, destroySession, requireAuth, invalidateSessionTtlCache } from "./auth.js";
+import { runFixPermsCli, runPermissionCheckCli, expectedUid } from "./perms-cli.js";
+import { scanPermIssues, formatIssue, currentUser } from "./perms.js";
 
 // 尝试加载嵌入式前端数据（仅二进制构建时可用）
 // BUILD_BINARY 由 esbuild define 注入，仅二进制构建时为 true
@@ -101,6 +103,24 @@ if (typeof BUILD_BINARY !== "undefined" && BUILD_BINARY) {
   } catch {
     // 非二进制模式 — 使用文件系统
   }
+}
+
+// ============ CLI 子命令（命中即执行并退出，不启动 HTTP 服务） ============
+// SEA 单文件下 process.argv[0] 是 exe 自身、用户参数从 argv[1] 开始；
+// 开发模式（node server/dist/index.js fix-perms）首项是脚本路径。
+// 统一按「首项是否 .js 结尾」判断，不要写死下标。
+{
+  const args = process.argv.slice(1);
+  const first = args[0] ?? "";
+  const isScript = /\.(c|m)?js$/i.test(first);
+  const cmd = isScript ? args[1] ?? "" : first;
+  const rest = isScript ? args.slice(2) : args.slice(1);
+  if (cmd === "--version" || cmd === "-v" || cmd === "version") {
+    console.log(CURRENT_VERSION);
+    process.exit(0);
+  }
+  if (cmd === "fix-perms") process.exit(runFixPermsCli(rest));
+  if (cmd === "permission-check") process.exit(runPermissionCheckCli(rest));
 }
 
 const app = express();
@@ -728,9 +748,48 @@ app.get("/api/backups", (_req, res) => {
 app.post("/api/backups", (_req, res) => {
   try {
     const r = createFullBackup("manual");
-    res.json({ success: true, data: { backupName: r.name, size: r.size, skipped: r.skipped } });
+    res.json({
+      success: true,
+      data: {
+        backupName: r.name,
+        size: r.size,
+        skipped: r.skipped,
+        skippedDetails: r.skippedDetails,
+        fixed: r.fixed,
+      },
+    });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message || "备份失败" });
+  }
+});
+
+/**
+ * 权限体检（只读）：列出「属主与服务运行用户不一致 / 服务读不了」的条目。
+ * 结果缓存 60s，避免界面反复刷新时反复遍历磁盘。
+ */
+let permCheckCache: { at: number; payload: any } | null = null;
+app.get("/api/system/permission-check", (req, res) => {
+  try {
+    const force = String(req.query.refresh || "") === "1";
+    if (!force && permCheckCache && Date.now() - permCheckCache.at < 60_000) {
+      res.json({ success: true, data: permCheckCache.payload });
+      return;
+    }
+    const targetUid = expectedUid();
+    const { checked, issues } = scanPermIssues([COMPOSE_DIR], targetUid);
+    const payload = {
+      ok: issues.length === 0,
+      checked,
+      issues,
+      targetUid,
+      targetUser: currentUser().name,
+      composeDir: COMPOSE_DIR,
+      advice: issues.length ? "sudo <安装目录>/docker-manager-yanzi fix-perms --dry-run" : "",
+    };
+    permCheckCache = { at: Date.now(), payload };
+    res.json({ success: true, data: payload });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || "权限体检失败" });
   }
 });
 
@@ -1438,6 +1497,22 @@ if (!embeddedDist) {
 // 启动服务
 const server = app.listen(PORT, () => {
   console.log(`🚀 Backend running on http://localhost:${PORT}`);
+
+  // 启动权限体检（只读，延后执行不拖慢启动）：属主/权限异常会让备份跳过文件，提前预警
+  setImmediate(() => {
+    try {
+      const targetUid = expectedUid();
+      const { checked, issues } = scanPermIssues([COMPOSE_DIR], targetUid);
+      if (issues.length) {
+        console.warn(`⚠️  权限体检：检查 ${checked} 项，发现 ${issues.length} 项异常（备份时会被跳过）`);
+        for (const i of issues.slice(0, 10)) console.warn(`   · ${formatIssue(i)}\n     修复：${i.advice}`);
+        if (issues.length > 10) console.warn(`   · …另有 ${issues.length - 10} 项，见「设置 → 备份」页`);
+        console.warn("   一键修复：sudo <安装目录>/docker-manager-yanzi fix-perms --dry-run");
+      }
+    } catch {
+      /* 体检失败不影响启动 */
+    }
+  });
 
   // 启动后台调度器：镜像更新检查 + 自动备份
   try {

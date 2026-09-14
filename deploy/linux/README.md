@@ -63,6 +63,42 @@ systemctl restart docker-manager-yanzi   # 重启
 journalctl -u docker-manager-yanzi -f    # 实时日志
 ```
 
+## 权限修复（备份跳过文件时）
+
+备份以系统用户 `docker-manager-yanzi` 运行。若某些文件属主是 root 或其他用户（例如早期用 root 手动跑过、或用 `cp -a` 从别处搬进 `data/`），备份会跳过它们并在界面提示：
+
+```
+qinglong/.stack-meta.json — 拒绝访问（EACCES）：权限 600，属主 root(uid 0)，当前进程 uid 998(docker-manager-yanzi)
+```
+
+在「设置 → 备份」页点「复制修复命令」按提示处理，或用内置命令一键修复：
+
+```bash
+cd /opt/docker-manager-yanzi
+
+# 1) 体检（只读，不改动任何文件）
+sudo ./docker-manager-yanzi permission-check
+
+# 2) 试运行：只列出将修改的清单
+sudo ./docker-manager-yanzi fix-perms --dry-run
+
+# 3) 实际执行（默认只改属主，不动权限位）
+sudo ./docker-manager-yanzi fix-perms
+
+# 顺带把目录/文件权限归一化为 0755/0644（默认不这么做）
+sudo ./docker-manager-yanzi fix-perms --normalize-mode
+
+# 只修指定目录
+sudo ./docker-manager-yanzi fix-perms --path /opt/docker-manager-yanzi/data/dockercompose/qinglong
+```
+
+要点：
+
+- **默认只修正属主，不改权限位**——避免把 `0600` 的密钥文件放开成 `0644`。
+- 目标属主自动识别为服务运行用户；即使在 `sudo` 下也不会误把数据目录 chown 给 root（可用 `--uid` 显式指定）。
+- 备份自身带**自愈**能力：若文件属主正确、只是缺读位，备份时会自动补上属主读位后继续（只加 `u+r`，不改动 group/other 位与归属）。可在「设置 → 备份」关闭该行为。
+- `fix-perms` 仅适用于 Linux 部署。
+
 ## 更新版本
 
 ```bash
