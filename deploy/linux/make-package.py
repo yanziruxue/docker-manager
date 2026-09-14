@@ -11,14 +11,19 @@ Linux 上 unzip / bsdtar 解压后可执行位会被正确恢复。
 """
 import os
 import time
+import json
 import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(os.path.dirname(HERE))  # deploy/linux -> 仓库根 (docker-unraid/)
+# 读取 package.json 版本号，写入 zip 文件名（蓝奏云等靠文件名提取版本号识别最新版）
+with open(os.path.join(ROOT, "package.json"), encoding="utf-8") as _f:
+    VERSION = json.load(_f)["version"]
 # 本部署实例的应用名（目录 / 服务 / 用户 / 二进制名）
 APP = "docker-manager-yanzi"
 # 源二进制（交叉构建产物）
 SRC_BIN = os.path.join(HERE, APP)
-OUT = os.path.join(HERE, f"{APP}-linux-x64.zip")
+OUT = os.path.join(HERE, f"{APP}-linux-x64-v{VERSION}.zip")
 PREFIX = f"{APP}/"  # zip 内顶层文件夹
 
 FILES = [

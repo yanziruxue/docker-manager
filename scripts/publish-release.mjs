@@ -128,7 +128,7 @@ function main() {
   const TAG = "v" + version;
   const repo = args.repo || defaultRepo();
   const zip =
-    args.zip || path.join(ROOT, "build-upload", "docker-manager-yanzi-linux-x64.zip");
+    args.zip || path.join(ROOT, "build-upload", `docker-manager-yanzi-linux-x64-v${version}.zip`);
   // 一键安装脚本作为 Release 附加资源，使「curl ... | sudo bash」可直接拉取
   const scriptAsset = path.join(ROOT, "scripts", "quick-install.sh");
   const assets = [zip];

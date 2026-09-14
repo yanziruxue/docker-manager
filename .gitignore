@@ -10,7 +10,7 @@ build-upload/
 # SEA 二进制构建产物（非源码）
 deploy/linux/bundle.js
 deploy/linux/docker-manager-yanzi
-deploy/linux/docker-manager-yanzi-linux-x64.zip
+deploy/linux/docker-manager-yanzi-linux-x64*.zip
 
 # ===== 发布临时文件 =====
 .notes-*.md

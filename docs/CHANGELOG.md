@@ -17,16 +17,16 @@
 
 ## 开发进度总览
 
-> 最后更新：2026-09-13
+> 最后更新：2026-09-14
 
 ### 当前状态
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.16.1**（`package.json`，未发布） |
-| 最新 Release | [v1.15.20](https://github.com/yanziruxue/docker-manager/releases/tag/v1.15.20) |
-| 源码分支 | `main` @ `243c89e5` |
-| 交付包 | `build-upload/docker-manager-yanzi-linux-x64.zip`（40.9 MB / 5 文件） |
+| 当前版本 | **v1.16.2**（`package.json`，未发布） |
+| 最新 Release | [v1.16.1](https://github.com/yanziruxue/docker-manager/releases/tag/v1.16.1)（含 v1.16.0 合并说明） |
+| 源码分支 | `main` @ `cfe79caa` |
+| 交付包 | `build-upload/docker-manager-yanzi-linux-x64.zip`（42,890,599 B / 5 文件；SHA-256 `946648a81cc638f96db9478541c650dbfc8ad2215384b66c08d29e250f1a2d7e`） |
 | 架构 | REST + WS + SSE 三通道；Socket / TCP / SSH 三种引擎 |
 | 目标平台 | Linux x64（SEA 单可执行文件），Unraid / 自托管 NAS |
 
@@ -46,7 +46,7 @@
 | Web 终端 | ✅ | xterm.js + WebSocket + 多 Shell 检测 |
 | 登录鉴权 | ✅ | 单管理员 + scrypt + httpOnly 会话（绝对过期）+ 密码找回码 |
 | 更新调度器 | ✅ | 后台定时检查镜像版本（每天 / 每周 / 每月，非 Cron） |
-| OTA 自升级 | ✅ | GitHub Release 拉取 + 自替换 + systemd 重启，gh-proxy 镜像兜底 |
+| OTA 自升级 | ✅ | 蓝奏云优先 + GitHub 兜底，Release 拉取 + 自替换 + systemd 重启，gh-proxy 镜像兜底 |
 | Linux SEA 部署 | ✅ | 单可执行文件 + systemd + install/uninstall 脚本 |
 | Docker 部署 | ✅ | 多阶段 Dockerfile |
 | **操作日志系统** | 🔨 **约 60%** | `server/logger.ts` 已建好但**未接入** `docker.ts`（仍是 `console.log`）；前端仅 localStorage 版 `opLog.ts`（500 条） |
@@ -64,6 +64,7 @@
 - **v1.15.20** 一键填入模板扩展为 5 个位置（新增 environment 下 / volumes 下）+ 自动缩进；登录页 UI 微调。
 - **v1.16.0** 备份功能完整落地：接线「立即备份/恢复/导出」+ 新增 `server/backup.ts` 全量备份模块 + 自动备份调度器（周/月/年/Cron + 保留清理），并修好「更新调度器从未真正启动」。
 - **v1.16.1** 备份下载链路改为 fetch → Blob（带错误提示），修复 `restoreStack` 备份目录不一致与 tar 在 Windows 下的路径解析问题。
+- **v1.16.2** 修复「系统设置」角标提示有更新但「系统更新」页空白：更新信息提升为 App 单一数据源（角标与更新页同源）。
 
 ### 未完成 / 已知限制
 
@@ -115,6 +116,26 @@
 
 ---
 
+## v1.16.2 — 2026-09-13
+
+### 修复：「系统设置」角标提示有更新，但「系统更新」页空白（须手动点检查更新才显示）
+
+- **问题**：侧边栏「系统设置」显示红色角标「1」（代表检测到可用更新），但进入「系统设置 → 系统更新」页却什么都不显示，必须点一次「检查更新」才出现更新卡片。
+- **根因**：更新信息存在**两份互不相通的状态**——
+  - `App.tsx` 在登录后自动检查一次（受「自动检查更新」开关控制），用它驱动侧边栏角标（`appUpdateAvailable: boolean`）；
+  - `Settings.tsx` 自己另有一份 `updateInfo: UpdateInfo | null`，初值 `null`，**只有** `handleCheckUpdate()` 会赋值。
+  于是角标有提示、页面却空白；两份状态还会在「忽略版本 / 更新完成」时各清各的。
+- **已完成**：把更新信息提升为 **App 单一数据源**（`appUpdateInfo: UpdateInfo | null`），角标与更新页共用同一份。
+  - `src/App.tsx`：`appUpdateAvailable` 由布尔改为 `appUpdateInfo`（`appUpdateAvailable = !!appUpdateInfo?.hasUpdate` 派生，角标逻辑不变）；自动检查命中后 `setAppUpdateInfo(show ? info : null)`（被忽略的版本仍回 `null`，角标与更新页同时隐藏）；向 `Settings` 传 `updateInfo` + `onUpdateInfoChange`。
+  - `src/pages/Settings.tsx`：移除本地 `updateInfo` state，改为受控 prop（`updateInfo` / `onUpdateInfoChange`）；「检查更新」「忽略版本」「更新完成」三处改为回调父级写入；`handleCheckUpdate` 不再在开始前清空 `updateInfo`（避免侧边栏角标闪烁），改由 `checking` 态提示进行中。
+- **验证**：前后端 `tsc --noEmit` 全绿（EXIT=0）；代码链路核对 —— 侧边栏 `updateAvailable={appUpdateAvailable}` 与 `Settings updateInfo={appUpdateInfo}` 同源，均为 `App` 的 `appUpdateInfo`。
+- **未完成 / 已知限制**：
+  - 仅当「自动检查更新」开启时，进入页面才会**免点击**展示（该开关在截图中为开启状态）；关闭时仍需手动点「检查更新」——与角标行为保持一致。
+  - 既有行为（非本次引入）：「忽略版本」写入的 `ignoredVersion` 需点 APPLY 保存后才持久化，未保存时下一轮「自动检查」可能再次提示。
+- **下一步**：无。
+
+---
+
 ## v1.16.1 — 2026-09-13
 
 ### 修复：备份文件无法下载（下载链路改为 Blob 取回）+ 堆栈级备份目录/tar 跨平台修正
@@ -137,7 +158,11 @@
   - 备份文件名时间戳为**秒级**（`tsCompact()`），同一秒内对同一 `kind+tag` 连续备份会**同名覆盖**（前端按钮已禁用，正常操作不会触发；未改文件名格式以免影响 `backupLabel` 解析）。
   - 远端（SSH/TCP）引擎的堆栈级备份仍不支持（堆栈目录不在本机），已有明确提示。
   - 若部署实例仍是旧版本（≤ v1.15.20 未含 `/api/backups/:name/download` 路由），需先升级才可下载。
-- **下一步**：打包 v1.16.1 并发布（v1.16.0 与 v1.16.1 均未发布，发布时合并说明）。
+- **下一步**：无。
+- **发布记录（2026-09-13）**：
+  - Release [v1.16.1](https://github.com/yanziruxue/docker-manager/releases/tag/v1.16.1)（**合并 v1.16.0 + v1.16.1 说明**；assets：`docker-manager-yanzi-linux-x64.zip` + `quick-install.sh`）。
+  - 源码 commit：`main` @ [`cfe79caa`](https://github.com/yanziruxue/docker-manager/commit/cfe79caa1eed3a4af92060a55ff239760f2aeb7f)（基线 `243c89e5` → 本次 90 文件）。
+  - 交付包 SHA-256：`946648a81cc638f96db9478541c650dbfc8ad2215384b66c08d29e250f1a2d7e`。
 
 ---
 

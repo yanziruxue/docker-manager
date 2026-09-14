@@ -2,6 +2,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { getSettings } from "./settings.js";
+import { createLogger } from "./logger.js";
+import { resolveLanZouUpdate, downloadLanZou } from "./lanzou.js";
+
+const logger = createLogger("updater");
 
 /**
  * 应用版本号：构建期由 esbuild define 注入（数据源 package.json）。
@@ -141,6 +145,8 @@ export interface UpdateInfo {
   assetSize: number;
   downloadUrl: string;
   htmlUrl: string;
+  /** 更新来源：蓝奏云优先，失败时回退 GitHub */
+  source: "github" | "lanzou";
 }
 
 export type UpdatePhase = "idle" | "downloading" | "extracting" | "replacing" | "done" | "error";
@@ -239,7 +245,7 @@ function getDownloadCandidates(downloadUrl: string): string[] {
  * 检查 GitHub Releases 的最新版本。
  * 未认证调用有 60 次/小时的速率限制，个人使用足够。
  */
-export async function checkForUpdate(): Promise<UpdateInfo> {
+export async function checkGitHubUpdate(currentVersion: string): Promise<UpdateInfo> {
   const repo = getRepo();
   const apiUrl = `https://api.github.com/repos/${repo}/releases/latest`;
 
@@ -281,7 +287,21 @@ export async function checkForUpdate(): Promise<UpdateInfo> {
     assetSize: asset?.size || 0,
     downloadUrl: asset?.browser_download_url || "",
     htmlUrl: data.html_url || "",
+    source: "github",
   };
+}
+
+/**
+ * 检查更新：优先蓝奏云（写死链接、国内可达）；蓝奏云不可达/解析失败时回退 GitHub。
+ * 蓝奏云可达但已是最新时，直接返回其结论（不重复查 GitHub）。
+ */
+export async function checkForUpdate(): Promise<UpdateInfo> {
+  try {
+    return await resolveLanZouUpdate(CURRENT_VERSION);
+  } catch (e: any) {
+    logger.warn(`蓝奏云检查更新失败，回退 GitHub：${e?.message || e}`);
+  }
+  return await checkGitHubUpdate(CURRENT_VERSION);
 }
 
 /**
@@ -313,8 +333,32 @@ export async function performUpdate(): Promise<{ message: string; inProgress?: b
   const zipPath = path.join(updateDir, `${ASSET_APP_NAME}-${info.latestVersion}.zip`);
 
   // 1. 下载（流式读取，实时上报进度 5% → 40%；直连失败自动回退镜像）
-  setState("downloading", `正在下载 v${info.latestVersion}...`, 5);
-  const candidates = getDownloadCandidates(info.downloadUrl);
+  if (info.source === "lanzou") {
+    // 蓝奏云：checkForUpdate 刚解析出最新直链直接下载（直链有效期短，现用现取）
+    setState("downloading", `正在从蓝奏云下载 v${info.latestVersion}...`, 5);
+    try {
+      const buf = await downloadLanZou(info.downloadUrl, (received, total) => {
+        const pct = total > 0 ? Math.min(40, 5 + Math.floor((received / total) * 35)) : 35;
+        setState(
+          "downloading",
+          total > 0
+            ? `正在从蓝奏云下载 v${info.latestVersion}... ${mb(received)}/${mb(total)} MB`
+            : `正在从蓝奏云下载 v${info.latestVersion}... ${mb(received)} MB`,
+          pct,
+          undefined,
+          { bytesReceived: received, bytesTotal: total }
+        );
+      });
+      fs.writeFileSync(zipPath, buf);
+      setState("downloading", `下载完成（${mb(buf.length)} MB）`, 40);
+    } catch (e: any) {
+      setState("error", "蓝奏云下载失败", 40, e.message);
+      throw new Error(`蓝奏云下载失败：${e.message}`);
+    }
+  } else {
+    // GitHub：直连 + 镜像回退
+    setState("downloading", `正在下载 v${info.latestVersion}...`, 5);
+    const candidates = getDownloadCandidates(info.downloadUrl);
   let lastErr = "";
   let downloaded = false;
   for (let ci = 0; ci < candidates.length; ci++) {
@@ -401,9 +445,10 @@ export async function performUpdate(): Promise<{ message: string; inProgress?: b
     setState("error", "下载失败", 40, lastErr);
     throw new Error(`下载失败：${lastErr}`);
   }
+  }
 
   // 2~5. 解压 → 校验 → 替换 → 重启（与手动上传路径共用同一套逻辑）
-  await applyLocalZip(zipPath, info.latestVersion, "github");
+  await applyLocalZip(zipPath, info.latestVersion, info.source);
 
   return { message: `已更新到 v${info.latestVersion}，服务即将重启` };
 }

@@ -37,7 +37,7 @@ import {
   transformStacks,
   transformActivityLogs,
 } from "./transforms";
-import type { PageKey, Container, DockerImage, DockerVolume, DockerEngine, Stack, SystemSettings, ActivityLog, EngineResourceStats } from "./types";
+import type { PageKey, Container, DockerImage, DockerVolume, DockerEngine, Stack, SystemSettings, ActivityLog, EngineResourceStats, UpdateInfo } from "./types";
 
 export default function App() {
   const [page, setPage] = useState<PageKey>("dashboard");
@@ -58,8 +58,10 @@ export default function App() {
   const [dataLoading, setDataLoading] = useState(false);
   const [dataError, setDataError] = useState<string | null>(null);
   const [checkingUpdates, setCheckingUpdates] = useState(false);
-  // 应用自身（OTA）更新是否可用：驱动全局侧边栏「系统设置」角标
-  const [appUpdateAvailable, setAppUpdateAvailable] = useState(false);
+  // 应用自身（OTA）更新信息：**单一数据源** —— 同时驱动全局侧边栏「系统设置」角标
+  // 与「系统设置 → 系统更新」页展示（进入页面即显示已检测到的更新，无需再手动点「检查更新」）
+  const [appUpdateInfo, setAppUpdateInfo] = useState<UpdateInfo | null>(null);
+  const appUpdateAvailable = !!appUpdateInfo?.hasUpdate;
   // 最新 settings 引用：6 小时定时轮询的 doCheck 闭包需读取用户最新保存的 autoUpdate / ignoredVersion
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
@@ -224,9 +226,9 @@ export default function App() {
               .then((info) => {
                 const upd = settingsRef.current?.update;
                 const ignored = upd?.ignoredVersion || "";
-                // 被忽略的版本不提示（侧边栏角标保持隐藏）
+                // 被忽略的版本不提示（侧边栏角标与「系统更新」页均不展示）
                 const show = info.hasUpdate && info.latestVersion !== ignored;
-                setAppUpdateAvailable(show);
+                setAppUpdateInfo(show ? info : null);
                 if (show && upd?.autoUpdate) {
                   // 自动更新：触发后端下载应用（进度与重启刷新由 triggerAutoUpdate 接管）
                   triggerAutoUpdate();
@@ -625,7 +627,8 @@ export default function App() {
               onEnginesChange={handleEnginesChange}
               engines={engines}
               onSaveSettings={handleSaveSettings}
-              onUpdateAvailableChange={setAppUpdateAvailable}
+              updateInfo={appUpdateInfo}
+              onUpdateInfoChange={setAppUpdateInfo}
               currentUser={me}
             />
           )}

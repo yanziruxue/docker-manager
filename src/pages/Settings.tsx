@@ -210,8 +210,10 @@ interface SettingsProps {
   onActiveEngineChange: (engineId: string) => void;
   onEnginesChange: (engines: DockerEngine[]) => void;
   onSaveSettings?: (settings: SystemSettings) => Promise<void>;
-  /** 更新可用状态变化时回传，用于同步全局侧边栏「系统设置」角标 */
-  onUpdateAvailableChange?: (available: boolean) => void;
+  /** （OTA）更新信息：由 App 统一持有，进入本页即展示已检测到的更新（与侧边栏角标同源） */
+  updateInfo?: UpdateInfo | null;
+  /** 更新信息变化时回传（检查更新 / 忽略 / 更新完成），用于同步全局侧边栏「系统设置」角标 */
+  onUpdateInfoChange?: (info: UpdateInfo | null) => void;
   /** 当前登录用户（用于「用户」区块展示与改密） */
   currentUser?: AuthUser | null;
 }
@@ -447,7 +449,7 @@ function RecoveryCodeForm() {
   );
 }
 
-export function Settings({ settings, activeEngineId, engines, onActiveEngineChange, onEnginesChange, onSaveSettings, onUpdateAvailableChange, currentUser }: SettingsProps) {
+export function Settings({ settings, activeEngineId, engines, onActiveEngineChange, onEnginesChange, onSaveSettings, updateInfo, onUpdateInfoChange, currentUser }: SettingsProps) {
   const [activeSection, setActiveSection] = useState("docker");
   const [data, setData] = useState<SystemSettings>(settings || getDefaultSettings());
   const [settingsLoaded, setSettingsLoaded] = useState(!!settings);
@@ -723,7 +725,8 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
 
   // ============ 系统更新（OTA）状态 ============
   const [appVersion, setAppVersion] = useState<{ version: string; installDir: string } | null>(null);
-  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  // 说明：updateInfo 由父组件（App）以 prop 传入 —— 与侧边栏角标共用同一份状态，
+  // 避免出现「侧边栏提示有更新、本页却空白（须手动点检查更新）」的不一致。
   const [updateState, setUpdateState] = useState<UpdateState | null>(null);
   const [checking, setChecking] = useState(false);
   const statusTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -788,8 +791,7 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
             statusTimerRef.current = null;
             // 更新完成：清除「系统更新」可用角标（含全局侧边栏）
             if (st.phase === "done") {
-              setUpdateInfo(null);
-              onUpdateAvailableChange?.(false);
+              onUpdateInfoChange?.(null);
               // 更新已完成：后端进程即将退出并由 systemd 拉起新二进制，
               // 等待其重新上线后自动刷新页面，确保前端 bundle 同步到新版。
               waitForRestartAndReload();
@@ -850,12 +852,11 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
 
   const handleCheckUpdate = async () => {
     setChecking(true);
-    setUpdateInfo(null);
+    // 不在此处清空 updateInfo：清空会连带侧边栏角标闪一下；保留旧结果，靠 checking 态提示进行中
     setUpdateState(null);
     try {
       const info = await checkUpdateApi();
-      setUpdateInfo(info);
-      onUpdateAvailableChange?.(info.hasUpdate);
+      onUpdateInfoChange?.(info);
       if (!info.hasUpdate) setToast({ type: "success", message: "已是最新版本" });
     } catch (err: any) {
       setToast({ type: "error", message: err?.message || "检查更新失败" });
@@ -884,8 +885,7 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
   const handleIgnoreUpdate = () => {
     if (!updateInfo) return;
     update("update", "ignoredVersion", updateInfo.latestVersion);
-    setUpdateInfo(null);
-    onUpdateAvailableChange?.(false);
+    onUpdateInfoChange?.(null);
   };
 
   /** 恢复被忽略版本的更新提示：清除 ignoredVersion */
@@ -2639,6 +2639,15 @@ docker-compose version</code>
                       <div>
                         <p className="text-sm font-medium text-slate-700">
                           发现新版本 v{updateInfo.latestVersion}
+                          <span
+                            className={`ml-2 px-2 py-0.5 rounded-full text-xs font-medium ${
+                              updateInfo.source === "lanzou"
+                                ? "bg-orange-100 text-orange-700"
+                                : "bg-slate-100 text-slate-600"
+                            }`}
+                          >
+                            {updateInfo.source === "lanzou" ? "蓝奏云" : "GitHub"}
+                          </span>
                         </p>
                         <p className="text-xs text-slate-500 mt-0.5">
                           当前 v{updateInfo.currentVersion} → 最新 v{updateInfo.latestVersion}
