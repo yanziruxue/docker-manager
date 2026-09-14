@@ -23,10 +23,10 @@
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.18.0**（`package.json`，未发布） |
-| 最新 Release | [v1.17.3](https://github.com/yanziruxue/docker-manager/releases/tag/v1.17.3)（备份包格式改 zip + 修复「立即备份」EACCES） |
-| 源码分支 | `main` @ `e1e84531`（v1.18.0 未推送） |
-| 交付包 | 打包中（v1.18.0，权限诊断与修复） |
+| 当前版本 | **v1.18.0**（已发布，`main` `ee1ea304`） |
+| 最新 Release | [v1.18.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.18.0)（权限诊断与修复：备份期自愈 + `fix-perms` CLI + 启动体检） |
+| 源码分支 | `main` @ `ee1ea304` |
+| 交付包 | `build-upload/docker-manager-yanzi-linux-x64-v1.18.0.zip`（42,904,669 B / 40.9 MB / 5 文件；SHA-256 `21897bc37cfd5fdedfcc3be153b959474c1c432cf7e33d6d88d5a8dac49c798e`） |
 | 架构 | REST + WS + SSE 三通道；Socket / TCP / SSH 三种引擎 |
 | 目标平台 | Linux x64（SEA 单可执行文件），Unraid / 自托管 NAS |
 
@@ -135,6 +135,8 @@
 - **关键坑（务必保留）**：`sudo` 执行时 `process.getuid()` 是 **0**，若直接拿它当目标属主，会把整个数据目录 `chown` 给 root，服务反而彻底读不了。因此目标属主判定为：非 root 运行时取自己的 uid；root 运行时取 `DATA_DIR` / 安装目录的属主；并提供 `--uid` 显式覆盖。另：SEA 以 **CJS** 打包（`format: "cjs"`），CLI 必须全同步，不能引入顶层 await。
 - **验证**：前后端 `tsc --noEmit` 全绿；`vite build` 通过；端到端脚本覆盖「`--version` / `permission-check` / `fix-perms --dry-run` / 自愈后备份成功 / `skippedDetails` 结构 / 未授权 401」。
 - **未完成 / 已知限制**：`fix-perms` 仅适用于 Linux 部署（Windows 无 POSIX 属主模型，命令会提示并直接返回）；属主漂移到其他用户（如 root）时应用无权修正，必须由用户用 `sudo` 执行；ZIP 不支持 socket / fifo / 设备文件（既有行为，未变）。
+- **发布**：[Release v1.18.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.18.0)；源码 `main` @ `ee1ea304`（94 文件）；asset `docker-manager-yanzi-linux-x64-v1.18.0.zip`（42,904,669 B / 40.9 MB / 5 文件；SHA-256 `21897bc37cfd5fdedfcc3be153b959474c1c432cf7e33d6d88d5a8dac49c798e`）+ `quick-install.sh`。
+- **验证补充**：`server/perms.ts` 单元测试 **15/15 PASS**（`modeString` / `currentUser` / `userNameOf` / `diagnosePerm` 的 self 与 parent 两条分支 / `formatIssue` 无 `uid N(uid N)` 冗余 / `isPermError` / 非 POSIX 平台 `scanPermIssues` 静默与 `tryGrantOwnerRead` 安全拒绝 / `fixPerms` 统计结构）；CLI 实测 `--version`→`1.18.0`、`fix-perms` 在 Windows 正确提示、`permission-check` 输出结构正常；服务端实测备份返回 `skippedDetails`/`fixed`、`GET /api/system/permission-check` 通过、未授权 401。**Windows 无 POSIX 权限语义，真实 EACCES 路径只能在 Linux 复现**，本地以单元测试覆盖诊断分支（属主不一致 / 缺读位 / 父目录缺 x）。
 - **下一步**：无。
 
 ---

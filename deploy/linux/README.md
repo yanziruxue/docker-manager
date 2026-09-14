@@ -68,7 +68,7 @@ journalctl -u docker-manager-yanzi -f    # 实时日志
 备份以系统用户 `docker-manager-yanzi` 运行。若某些文件属主是 root 或其他用户（例如早期用 root 手动跑过、或用 `cp -a` 从别处搬进 `data/`），备份会跳过它们并在界面提示：
 
 ```
-qinglong/.stack-meta.json — 拒绝访问（EACCES）：权限 600，属主 root(uid 0)，当前进程 uid 998(docker-manager-yanzi)
+qinglong/.stack-meta.json — 拒绝访问（EACCES）：权限 600，属主 root(uid 0)，当前进程 docker-manager-yanzi(uid 998)
 ```
 
 在「设置 → 备份」页点「复制修复命令」按提示处理，或用内置命令一键修复：
