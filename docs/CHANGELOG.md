@@ -23,10 +23,10 @@
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.17.3**（`package.json`，未发布） |
-| 最新 Release | [v1.17.2](https://github.com/yanziruxue/docker-manager/releases/tag/v1.17.2)（移除蓝奏云 OTA，回归 GitHub Releases 单一源） |
-| 源码分支 | `main` @ `29ba234f` |
-| 交付包 | 打包中（v1.17.3，zip 备份格式） |
+| 当前版本 | **v1.17.3**（已发布，`main` `839e0e6b`） |
+| 最新 Release | [v1.17.3](https://github.com/yanziruxue/docker-manager/releases/tag/v1.17.3)（备份包格式改 zip + 修复「立即备份」EACCES） |
+| 源码分支 | `main` @ `839e0e6b` |
+| 交付包 | `build-upload/docker-manager-yanzi-linux-x64-v1.17.3.zip`（42,894,578 B / 40.9 MB / 5 文件；SHA-256 `0f6c343283ef8fda1e4447884a8ce268d2b39b1420d55ef977febea62571d8ee`） |
 | 架构 | REST + WS + SSE 三通道；Socket / TCP / SSH 三种引擎 |
 | 目标平台 | Linux x64（SEA 单可执行文件），Unraid / 自托管 NAS |
 
@@ -133,6 +133,7 @@
   - 顺带修复：`/api/backups/export` 下载后只删了归档**文件**，专属临时**目录**（`/tmp/dsm-export-*`）从未清理，长期在 `/tmp` 里堆积空目录；现改为整目录删除。
 - **验证**：前后端 `tsc --noEmit` 全绿；`vite build` 通过；本地 zip 端到端测试 **23/23 PASS**（全量/自动/导出产 zip、恢复往返内容一致、中文目录名、只读 0555 堆栈不报 EACCES、历史 tar.gz 可列出与恢复、路径穿越被拦截且未落盘、暂存目录无残留）。SEA 打包 + 双验证（ELF magic + 版本号）。
 - **未完成 / 已知限制**：ZIP 不支持 socket / fifo / 设备文件（这类条目跳过，Compose 场景无影响）；单个文件不可读时只跳过该文件并计入 `skipped` 提示（会在界面上列出具体路径，避免静默出残缺备份）。
+- **发布**：[Release v1.17.3](https://github.com/yanziruxue/docker-manager/releases/tag/v1.17.3)；源码 `main` @ `839e0e6b`（91 文件）；asset `docker-manager-yanzi-linux-x64-v1.17.3.zip`（42,894,578 B / 40.9 MB / 5 文件；SHA-256 `0f6c343283ef8fda1e4447884a8ce268d2b39b1420d55ef977febea62571d8ee`）+ `quick-install.sh`。发布前用**打包产物 bundle.js** 做过冒烟：认证 OK、「立即备份」返回 `all_*.zip` 且 `skipped: []`、列表/下载正常、未授权 401；同时清理了 `deploy/linux/` 下 v1.17.0/1.17.1/1.17.2 三个旧交付包（前两个含蓝奏云代码）。
 - **下一步**：无。
 
 ---
