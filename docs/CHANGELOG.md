@@ -23,10 +23,10 @@
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.18.1**（`package.json`，未打包） |
-| 最新 Release | [v1.18.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.18.0)（权限诊断与修复：备份期自愈 + `fix-perms` CLI + 启动体检） |
-| 源码分支 | `main` @ `ee1ea304`（v1.18.1 未推送） |
-| 交付包 | 打包中（v1.18.1，剪贴板兜底 + 权限面板改「一条命令」） |
+| 当前版本 | **v1.18.1**（已发布，`main` `4cb4d402`） |
+| 最新 Release | [v1.18.1](https://github.com/yanziruxue/docker-manager/releases/tag/v1.18.1)（复制按钮 HTTP 下静默失效修复 + 权限面板改「一条命令」） |
+| 源码分支 | `main` @ `4cb4d402` |
+| 交付包 | `build-upload/docker-manager-yanzi-linux-x64-v1.18.1.zip`（42,906,537 B / 40.9 MB / 5 文件；SHA-256 `b2bb5dec5beb713764cdb1a485bd846f7efe8476998f29d1b6f856b679d227b1`） |
 | 架构 | REST + WS + SSE 三通道；Socket / TCP / SSH 三种引擎 |
 | 目标平台 | Linux x64（SEA 单可执行文件），Unraid / 自托管 NAS |
 
@@ -130,6 +130,8 @@
     - 该命令由服务端下发，避免前端硬编码安装路径：`POST /api/backups` 与 `GET /api/system/permission-check` 新增 `fixCommand` 字段（后者原 `advice` 字段移除）；`perms-cli.ts` 的 `permission-check` 输出也改为打印这一条命令。
     - `deploy/linux/README.md` 权限章节改写：主路径为一条命令，`--dry-run` / `--normalize-mode` / `--path` / `permission-check` 降为可选参数。
   - **验证**：前后端 `tsc --noEmit` 全绿；`vite build` 通过；`fixCommandLine()` 单测 4/4 PASS（dev 占位符 / SEA 绝对路径 / 不含 `--dry-run` / 含空格加引号）；实测 `POST /api/backups`、`GET /api/system/permission-check` 均返回 `fixCommand` 且未授权 401；前端产物中 `execCommand` 兜底与新文案均已落包，`复制修复命令`/`复制全部命令` 文案 **0 命中**（确认已移除）。
+  - **发布前冒烟（跑打包产物 `bundle.js`，非源码）**：起服务 5095 → 首页引用的前端产物为 `index-RX3Jjis8.js`、内容含 `execCommand` 兜底（确认 SEA 包内嵌的是新版前端）→ 备份/体检接口返回 `fixCommand` → 未授权 401。测完停进程、清临时目录与 `smoke.cjs`/`_cookies.txt`。
+  - **发布**：源码 `main` @ `4cb4d402`（95 文件）；Release [v1.18.1](https://github.com/yanziruxue/docker-manager/releases/tag/v1.18.1)；asset = `docker-manager-yanzi-linux-x64-v1.18.1.zip` + `quick-install.sh`；交付包 42,906,537 B / SHA-256 `b2bb5dec5beb713764cdb1a485bd846f7efe8476998f29d1b6f856b679d227b1`（旧包 v1.18.0 已从 `build-upload/`、`deploy/linux/` 清除）。
 - **未完成 / 已知限制**：`document.execCommand("copy")` 已被标准废弃（浏览器仍支持），属兜底手段；若连它也失败，界面会选中文本并提示手动 `Ctrl+C`。真实「非安全上下文」行为无法在本地开发环境复现（本地走 `localhost` 属安全上下文），需在局域网 IP 访问下验证。
 - **下一步**：无。
 
