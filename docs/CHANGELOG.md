@@ -23,9 +23,9 @@
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.18.2**（已发布） |
+| 当前版本 | **v1.18.2**（已发布，`main` `db560570`） |
 | 最新 Release | [v1.18.2](https://github.com/yanziruxue/docker-manager/releases/tag/v1.18.2)（SEA 下 CLI 子命令失效修复 + 版本显示漂移修复 + 备份目录固定为 `<data>/backups` + 备份区四卡合一） |
-| 源码分支 | `main` @ 待回填 |
+| 源码分支 | `main` @ `db560570` |
 | 交付包 | `build-upload/docker-manager-yanzi-linux-x64-v1.18.2.zip`（42,907,426 B / 40.9 MB / 5 文件；SHA-256 `99a3de26ec34bf339c3e1cc7666fe5d1164a4fde74e592b0e361319c6dfaba3f`） |
 | 架构 | REST + WS + SSE 三通道；Socket / TCP / SSH 三种引擎 |
 | 目标平台 | Linux x64（SEA 单可执行文件），Unraid / 自托管 NAS |
@@ -135,6 +135,7 @@
   - **备份区 UI：周备 / 月备 / 年备 / 执行时序总览 四张卡片合并为一张**（用户要求）。
     - 合并为 `三级备份策略（周 / 月 / 年）`：每级为一段——标题行（图标 + 名称 + 「保留 N 份」或「未启用」标签 + 启用开关），展开后是原参数区（日期 / 时间 / 保留份数），三段之间用分隔线隔开，禁用时不再显示整块「已禁用」占位。
     - 卡片底部保留「执行时序总览」小节，改为**三列横排**紧凑卡片（原来三行竖排）：启用中显示具体时间与保留策略，未启用显示「未启用」并置灰；冲突规则说明保留为一行小字。信息量不变，纵向空间约为原来的 40%。
+  - **发布**：源码 `main` @ `db560570`（95 文件）；Release [v1.18.2](https://github.com/yanziruxue/docker-manager/releases/tag/v1.18.2)；asset = `docker-manager-yanzi-linux-x64-v1.18.2.zip` + `quick-install.sh`；交付包 42,907,426 B / SHA-256 `99a3de26ec34bf339c3e1cc7666fe5d1164a4fde74e592b0e361319c6dfaba3f`（旧包 v1.18.1 已从 `build-upload/`、`deploy/linux/` 清除）。
   - **验证**：前后端 `tsc --noEmit` 全绿；`vite build` 通过。CLI 解析用**真实打包产物 + 模拟 argv** 覆盖 4 种形态（`SEA 绝对路径` / `SEA ./ 相对` / `PATH basename` / `dev 脚本路径`）——均正确命中子命令并退出；对照组「无子命令」正常启动服务，证明分支判定有效。备份目录实测：`<data>/docker-compose-backup-manager` 下的历史 zip **已自动迁移**到 `<data>/backups`，旧目录清空。打包产物冒烟：`index.html` 响应头为 `no-cache, must-revalidate`、`assets` 为 `max-age=3600`、`/api/system/version` 返回 `1.18.2`、未授权 401、首页引用前端产物 `index-1IG2zrDd.js`。前端 bundle 中「备份目录」0 命中、旧卡片标题 0 命中、「三级备份策略」1 命中（确认合并与移除均已落包）。
 - **未完成 / 已知限制**：SEA 二进制的 CLI 行为无法在本机（Windows）直接执行验证——Linux ELF 二进制跑不起来，故采用「同一份源码 + 模拟 SEA argv 布局」验证，等价性由 argv 布局分析保证；真实 Linux 上执行 `sudo <exe> fix-perms` 仍建议首次加 `--dry-run` 观察输出。备份迁移只认 `.zip` / `.tar.gz` / `.tgz` 三种扩展名，手工放在历史目录里的其他格式文件不会被搬运。
 - **下一步**：无。
