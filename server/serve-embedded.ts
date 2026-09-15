@@ -41,7 +41,12 @@ export function createEmbeddedStatic(
     if (file) {
       const buffer = Buffer.from(file.data, "base64");
       res.set("Content-Type", file.mime);
-      res.set("Cache-Control", "public, max-age=3600");
+      // assets 带内容 hash，可长缓存；index.html 必须不缓存，
+      // 否则 OTA 换完二进制后浏览器仍在跑旧前端（表现为版本号停在上一版）。
+      res.set(
+        "Cache-Control",
+        filePath === "index.html" ? "no-cache, must-revalidate" : "public, max-age=3600"
+      );
       res.send(buffer);
       return;
     }
@@ -52,6 +57,7 @@ export function createEmbeddedStatic(
       if (idx) {
         const buffer = Buffer.from(idx.data, "base64");
         res.set("Content-Type", idx.mime);
+        res.set("Cache-Control", "no-cache, must-revalidate");
         res.send(buffer);
         return;
       }

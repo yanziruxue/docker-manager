@@ -32,6 +32,8 @@ interface SidebarProps {
   notificationsCount?: number;
   /** 有可用系统更新时在「系统设置」项旁显示角标 */
   updateAvailable?: boolean;
+  /** 后端返回的运行时版本（/api/system/version）；缺失时回退到构建期注入的版本号 */
+  runtimeVersion?: string;
   /** 折叠为图标窄栏 */
   collapsed?: boolean;
   /** 折叠/展开切换 */
@@ -59,6 +61,7 @@ export function Sidebar({
   updateAvailable = false,
   collapsed = false,
   onToggleCollapsed,
+  runtimeVersion = "",
 }: SidebarProps) {
   const isConnected = engineStatus === "connected";
   const statusColor = isConnected
@@ -72,8 +75,10 @@ export function Sidebar({
       ? "bg-red-500"
       : "bg-slate-500";
 
-  // 应用版本号：构建期注入（未注入时为空，不展示）
-  const appVersion = typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "";
+  // 应用版本号：优先用后端返回的运行时版本（真实运行的二进制版本），
+  // 兜底才用构建期注入的常量——否则浏览器缓存了旧前端 bundle 时会显示上一版的号（v1.18.2 修复）。
+  const appVersion =
+    runtimeVersion || (typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "");
 
   return (
     <aside

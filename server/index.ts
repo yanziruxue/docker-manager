@@ -51,7 +51,7 @@ import {
   getComposeCmd,
   detectComposeModes,
 } from "./docker.js";
-import { createFullBackup, restoreFullBackup, exportConfigArchive, listBackupFiles, deleteBackupFile, backupFilePath } from "./backup.js";
+import { createFullBackup, restoreFullBackup, exportConfigArchive, listBackupFiles, deleteBackupFile, backupFilePath, migrateLegacyBackups } from "./backup.js";
 import { getSettings, saveSettings } from "./settings.js";
 import { startUpdateScheduler, getSchedulerStatus, runSchedulerCheckNow, startBackupScheduler, getBackupSchedulerStatus } from "./scheduler.js";
 import { readDaemonConfigInfo, writeDaemonConfig, restartDockerService, refreshPrivileges } from "./daemon-config.js";
@@ -106,16 +106,38 @@ if (typeof BUILD_BINARY !== "undefined" && BUILD_BINARY) {
 }
 
 // ============ CLI 子命令（命中即执行并退出，不启动 HTTP 服务） ============
-// SEA 单文件下 process.argv[0] 是 exe 自身、用户参数从 argv[1] 开始；
-// 开发模式（node server/dist/index.js fix-perms）首项是脚本路径。
-// 统一按「首项是否 .js 结尾」判断，不要写死下标。
+// 坑：argv 布局随运行形态变化，不能按下标取。
+//   · SEA 单文件：argv = [exe, exe, ...用户参数] —— argv[1] 是 exe 自身路径
+//   · 开发模式：  argv = [node, 脚本路径, ...用户参数]
+//   · PATH 调用：argv[1] 可能只是 exe 的 basename（无斜杠）
+// 旧实现按 slice(1) 取首项，在 SEA 下拿到的是 exe 路径而非子命令，导致 CLI 分支不命中、
+// 一路走到启动 HTTP，与已运行的服务抢端口 → EADDRINUSE 崩溃（v1.18.2 修复）。
+// 改为扫描 argv、跳过路径项，取第一个已知子命令。
 {
-  const args = process.argv.slice(1);
-  const first = args[0] ?? "";
-  const isScript = /\.(c|m)?js$/i.test(first);
-  const cmd = isScript ? args[1] ?? "" : first;
-  const rest = isScript ? args.slice(2) : args.slice(1);
-  if (cmd === "--version" || cmd === "-v" || cmd === "version") {
+  const VER_FLAGS = ["--version", "-v", "version"];
+  const SUBCOMMANDS = ["fix-perms", "permission-check"];
+  const exeName = path.basename(process.execPath);
+  const isPathLike = (a: string) =>
+    a === process.execPath ||
+    a === process.argv[0] ||
+    a === exeName ||
+    a.includes("/") ||
+    a.includes("\\") ||
+    /\.(c|m)?js$/i.test(a);
+
+  let cmd = "";
+  let rest: string[] = [];
+  for (let i = 1; i < process.argv.length; i++) {
+    const a = process.argv[i];
+    if (isPathLike(a)) continue; // exe 自身 / 脚本路径，跳过
+    if (VER_FLAGS.includes(a) || SUBCOMMANDS.includes(a)) {
+      cmd = a;
+      rest = process.argv.slice(i + 1);
+    }
+    break; // 第一个非路径 token 若不认识（如 --path），说明不是 CLI 模式
+  }
+
+  if (VER_FLAGS.includes(cmd)) {
     console.log(CURRENT_VERSION);
     process.exit(0);
   }
@@ -1516,6 +1538,13 @@ const server = app.listen(PORT, () => {
       /* 体检失败不影响启动 */
     }
   });
+
+  // 备份目录已于 v1.18.2 固定在 <data>/backups：把历史目录里的备份迁进来（一次性，失败仅告警）
+  try {
+    migrateLegacyBackups();
+  } catch {
+    /* 迁移失败不影响启动 */
+  }
 
   // 启动后台调度器：镜像更新检查 + 自动备份
   try {

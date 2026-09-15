@@ -336,7 +336,8 @@ export interface YearlyBackupConfig {
 export interface BackupConfig {
   mode: BackupMode;
   autoBackupEnabled: boolean;
-  backupPath: string; // 备份存储路径
+  /** @deprecated v1.18.2 起备份目录固定为 `<data>/backups`，此项不再生效（保留仅为兼容旧配置） */
+  backupPath?: string;
   lastBackup: string;
   /** 备份遇 EACCES 时自动补属主读位后重试（只补 u+r，不改动其他权限位与归属） */
   autoFixReadPerm?: boolean;

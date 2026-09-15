@@ -169,7 +169,6 @@ function getDefaultSettings(): SystemSettings {
     backup: {
       mode: 1,
       autoBackupEnabled: false,
-      backupPath: "docker-compose-backup-manager",
       lastBackup: "",
       autoFixReadPerm: true,
       simpleFrequency: "0 3 * * 0",
@@ -2181,17 +2180,6 @@ docker-compose version</code>
                   <span className="text-sm text-slate-600">启用定时自动备份</span>
                   <Toggle active={data.backup.autoBackupEnabled} onChange={(val) => update("backup", "autoBackupEnabled", val)} />
                 </div>
-                <FormField
-                  label="备份目录"
-                  hint="留空或相对路径使用默认 <data>/backups；填绝对路径（如 /mnt/user/backups）则存到该目录"
-                >
-                  <Input
-                    value={data.backup.backupPath}
-                    onChange={(val) => update("backup", "backupPath", val)}
-                    placeholder="默认 <data>/backups"
-                    className="font-mono"
-                  />
-                </FormField>
                 <div className="flex items-center gap-2 p-3 bg-slate-50 rounded-lg">
                   <ShieldCheck size={14} className="text-slate-400" />
                   <div className="flex-1 min-w-0">
@@ -2216,12 +2204,19 @@ docker-compose version</code>
             {/* 模式 1：三级备份策略 */}
             {data.backup.mode === 1 && (
               <>
-                <Card title="每周备份（周备）" icon={<Calendar size={16} />} actions={
-                  <Toggle active={data.backup.weekly.enabled} onChange={(val) => update("backup", "weekly", { ...data.backup.weekly, enabled: val })} size="sm" />
-                }>
+                <Card title="三级备份策略（周 / 月 / 年）" icon={<Calendar size={16} />}>
+                  {/* 周备 */}
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Calendar size={14} className="text-blue-500 flex-shrink-0" />
+                      <span className="text-sm font-medium text-slate-700">每周备份</span>
+                      <Tag text={data.backup.weekly.enabled ? `保留 ${data.backup.weekly.retention} 份` : "未启用"} color="blue" />
+                    </div>
+                    <Toggle active={data.backup.weekly.enabled} onChange={(val) => update("backup", "weekly", { ...data.backup.weekly, enabled: val })} size="sm" />
+                  </div>
                   {data.backup.weekly.enabled && (
-                    <div className="space-y-4">
-                      <p className="text-xs text-slate-500 bg-blue-50 rounded-lg p-3 border border-blue-100">
+                    <div className="space-y-4 mt-3">
+                      <p className="text-xs text-slate-500">
                         每周执行 1 次全量备份，用于近期数据误删、修改回滚。保留 {data.backup.weekly.retention} 份，到期自动清理。
                       </p>
                       <div className="grid grid-cols-3 gap-4">
@@ -2254,15 +2249,20 @@ docker-compose version</code>
                       </div>
                     </div>
                   )}
-                  {!data.backup.weekly.enabled && <p className="text-sm text-slate-400 py-2">已禁用</p>}
-                </Card>
+                  <div className="my-4 border-t border-slate-100" />
 
-                <Card title="每月备份（月备）" icon={<Calendar size={16} />} actions={
-                  <Toggle active={data.backup.monthly.enabled} onChange={(val) => update("backup", "monthly", { ...data.backup.monthly, enabled: val })} size="sm" />
-                }>
+                  {/* 月备 */}
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Calendar size={14} className="text-amber-500 flex-shrink-0" />
+                      <span className="text-sm font-medium text-slate-700">每月备份</span>
+                      <Tag text={data.backup.monthly.enabled ? `保留 ${data.backup.monthly.retention} 份` : "未启用"} color="amber" />
+                    </div>
+                    <Toggle active={data.backup.monthly.enabled} onChange={(val) => update("backup", "monthly", { ...data.backup.monthly, enabled: val })} size="sm" />
+                  </div>
                   {data.backup.monthly.enabled && (
-                    <div className="space-y-4">
-                      <p className="text-xs text-slate-500 bg-amber-50 rounded-lg p-3 border border-amber-100">
+                    <div className="space-y-4 mt-3">
+                      <p className="text-xs text-slate-500">
                         每月执行 1 次全量备份，跨月份数据恢复基准。保留 {data.backup.monthly.retention} 份。
                         <span className="font-medium text-amber-600">当月执行月备当天，自动跳过当周周备。</span>
                       </p>
@@ -2289,15 +2289,20 @@ docker-compose version</code>
                       </div>
                     </div>
                   )}
-                  {!data.backup.monthly.enabled && <p className="text-sm text-slate-400 py-2">已禁用</p>}
-                </Card>
+                  <div className="my-4 border-t border-slate-100" />
 
-                <Card title="每年备份（年备）" icon={<InfinityIcon size={16} />} actions={
-                  <Toggle active={data.backup.yearly.enabled} onChange={(val) => update("backup", "yearly", { ...data.backup.yearly, enabled: val })} size="sm" />
-                }>
+                  {/* 年备 */}
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <InfinityIcon size={14} className="text-green-500 flex-shrink-0" />
+                      <span className="text-sm font-medium text-slate-700">每年备份</span>
+                      <Tag text={data.backup.yearly.enabled ? "永久保存" : "未启用"} color="green" />
+                    </div>
+                    <Toggle active={data.backup.yearly.enabled} onChange={(val) => update("backup", "yearly", { ...data.backup.yearly, enabled: val })} size="sm" />
+                  </div>
                   {data.backup.yearly.enabled && (
-                    <div className="space-y-4">
-                      <p className="text-xs text-slate-500 bg-green-50 rounded-lg p-3 border border-green-100">
+                    <div className="space-y-4 mt-3">
+                      <p className="text-xs text-slate-500">
                         每年执行 1 次全量备份，长期归档。
                         <span className="font-medium text-green-600">永久保存，不自动删除。</span>
                         <span className="text-slate-500">执行年备当天，自动跳过当月月备。</span>
@@ -2312,42 +2317,40 @@ docker-compose version</code>
                       </div>
                     </div>
                   )}
-                  {!data.backup.yearly.enabled && <p className="text-sm text-slate-400 py-2">已禁用</p>}
-                </Card>
+                  <div className="my-4 border-t border-slate-100" />
 
-                {/* 三级策略时序总览 */}
-                <Card title="执行时序总览" icon={<Clock size={16} />}>
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-3 p-3 bg-blue-50 rounded-lg">
-                      <Calendar size={16} className="text-blue-500 flex-shrink-0" />
-                      <div className="flex-1">
-                        <span className="text-sm font-medium text-slate-700">周备份</span>
-                        <span className="text-xs text-slate-500 ml-2">每周{data.backup.weekly.day === "Saturday" ? "六" : data.backup.weekly.day === "Sunday" ? "日" : data.backup.weekly.day}晚间 {data.backup.weekly.time}</span>
-                      </div>
-                      <Tag text={`保留 ${data.backup.weekly.retention} 份`} color="blue" />
+                  {/* 执行时序总览 */}
+                  <div className="flex items-center gap-1.5">
+                    <Clock size={13} className="text-slate-400" />
+                    <span className="text-xs font-medium text-slate-500">执行时序总览</span>
+                  </div>
+                  <div className="mt-2 grid grid-cols-3 gap-2">
+                    <div className={`p-2.5 rounded-lg ${data.backup.weekly.enabled ? "bg-blue-50" : "bg-slate-50"}`}>
+                      <p className={`text-xs font-medium ${data.backup.weekly.enabled ? "text-slate-700" : "text-slate-400"}`}>周备份</p>
+                      <p className="text-[11px] mt-0.5 text-slate-500 truncate">
+                        {data.backup.weekly.enabled
+                          ? `每周${data.backup.weekly.day === "Saturday" ? "六" : data.backup.weekly.day === "Sunday" ? "日" : data.backup.weekly.day} ${data.backup.weekly.time}`
+                          : "未启用"}
+                      </p>
                     </div>
-                    <div className="flex items-center gap-3 p-3 bg-amber-50 rounded-lg">
-                      <Calendar size={16} className="text-amber-500 flex-shrink-0" />
-                      <div className="flex-1">
-                        <span className="text-sm font-medium text-slate-700">月备份</span>
-                        <span className="text-xs text-slate-500 ml-2">每月{data.backup.monthly.dayOfMonth === 0 ? "最后一天" : data.backup.monthly.dayOfMonth + "日"} {data.backup.monthly.time}</span>
-                      </div>
-                      <Tag text={`保留 ${data.backup.monthly.retention} 份`} color="amber" />
+                    <div className={`p-2.5 rounded-lg ${data.backup.monthly.enabled ? "bg-amber-50" : "bg-slate-50"}`}>
+                      <p className={`text-xs font-medium ${data.backup.monthly.enabled ? "text-slate-700" : "text-slate-400"}`}>月备份</p>
+                      <p className="text-[11px] mt-0.5 text-slate-500 truncate">
+                        {data.backup.monthly.enabled
+                          ? `每月${data.backup.monthly.dayOfMonth === 0 ? "最后一天" : data.backup.monthly.dayOfMonth + "日"} ${data.backup.monthly.time}`
+                          : "未启用"}
+                      </p>
                     </div>
-                    <div className="flex items-center gap-3 p-3 bg-green-50 rounded-lg">
-                      <InfinityIcon size={16} className="text-green-500 flex-shrink-0" />
-                      <div className="flex-1">
-                        <span className="text-sm font-medium text-slate-700">年备份</span>
-                        <span className="text-xs text-slate-500 ml-2">每年 {data.backup.yearly.date} {data.backup.yearly.time}</span>
-                      </div>
-                      <Tag text="永久保存" color="green" />
+                    <div className={`p-2.5 rounded-lg ${data.backup.yearly.enabled ? "bg-green-50" : "bg-slate-50"}`}>
+                      <p className={`text-xs font-medium ${data.backup.yearly.enabled ? "text-slate-700" : "text-slate-400"}`}>年备份</p>
+                      <p className="text-[11px] mt-0.5 text-slate-500 truncate">
+                        {data.backup.yearly.enabled ? `每年 ${data.backup.yearly.date} ${data.backup.yearly.time}` : "未启用"}
+                      </p>
                     </div>
                   </div>
-                  <div className="mt-3 p-3 bg-slate-50 rounded-lg">
-                    <p className="text-xs text-slate-500">
-                      全量备份模式。当月备与周备冲突时，跳过当周周备；年备与月备冲突时，跳过当月月备，避免重复备份。
-                    </p>
-                  </div>
+                  <p className="mt-2 text-xs text-slate-500">
+                    全量备份模式。当月备与周备冲突时，跳过当周周备；年备与月备冲突时，跳过当月月备，避免重复备份。
+                  </p>
                 </Card>
               </>
             )}

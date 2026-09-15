@@ -28,8 +28,10 @@ import {
  *   data/active_engine.json —— 当前活跃引擎
  *   manifest.json         —— 元信息（createdAt / kind / 堆栈数）
  *
- * 备份目录解析：`settings.backup.backupPath` 为**绝对路径**时使用它，
- * 否则默认 `<data>/backups`（与旧行为一致，避免相对名写出意外位置）。
+ * 备份目录：**固定**为 `<data>/backups`，不再读取 `settings.backup.backupPath`。
+ * 历史原因：该字段默认值为相对名 `docker-compose-backup-manager`，而旧解析只认绝对路径，
+ * 导致「UI 提示支持相对路径、代码却静默忽略」——填任何相对值都掉回默认目录，等于写死且不可控。
+ * v1.18.2 起直接固定目录，旧配置字段保留但不再生效；已有备份由 `migrateLegacyBackups()` 自动迁入。
  */
 
 const log = createLogger("Backup");
@@ -42,17 +44,64 @@ export interface BackupFileInfo {
 
 export type BackupKind = "manual" | "auto";
 
-/** 解析备份目录（绝对路径配置优先），并确保目录存在 */
+/** 备份目录固定为 `<data>/backups`，并确保目录存在 */
 export function resolveBackupDir(): string {
-  let custom = "";
-  try {
-    custom = String(getSettings()?.backup?.backupPath ?? "").trim();
-  } catch {
-    /* 设置读取失败则用默认目录 */
-  }
-  const dir = custom && path.isAbsolute(custom) ? custom : path.join(DATA_DIR, "backups");
+  const dir = path.join(DATA_DIR, "backups");
   fs.mkdirSync(dir, { recursive: true });
   return dir;
+}
+
+/** 备份文件扩展名（迁移时只认这些，避免误搬无关文件） */
+const BACKUP_FILE_RE = /\.(zip|tar\.gz|tgz)$/i;
+
+/**
+ * 一次性迁移：把历史备份目录里的备份文件搬进固定目录 `<data>/backups`。
+ *
+ * 来源候选：旧 `settings.backup.backupPath` 解析值、`<data>/docker-compose-backup-manager`、
+ * `<安装目录>/docker-compose-backup-manager`。同名文件**不覆盖**，单份失败不影响其余。
+ * 仅在服务启动阶段调用一次；任何异常都只告警，绝不阻断服务。
+ */
+export function migrateLegacyBackups(): void {
+  const target = path.join(DATA_DIR, "backups");
+  const cands: string[] = [];
+  const push = (p?: string) => {
+    if (p && p.trim()) cands.push(path.resolve(p.trim()));
+  };
+  try {
+    push(String(getSettings()?.backup?.backupPath ?? ""));
+  } catch {
+    /* 设置读取失败则跳过该候选 */
+  }
+  push(path.join(DATA_DIR, "docker-compose-backup-manager"));
+  push(path.join(path.dirname(process.execPath), "docker-compose-backup-manager"));
+
+  const seen = new Set<string>([target]);
+  for (const dir of cands) {
+    if (seen.has(dir)) continue;
+    seen.add(dir);
+    let names: string[] = [];
+    try {
+      names = fs.readdirSync(dir);
+    } catch {
+      continue; // 目录不存在
+    }
+    let moved = 0;
+    for (const n of names) {
+      if (!BACKUP_FILE_RE.test(n)) continue;
+      const src = path.join(dir, n);
+      const dst = path.join(target, n);
+      try {
+        if (!fs.lstatSync(src).isFile()) continue;
+        if (fs.existsSync(dst)) continue; // 同名不覆盖
+        fs.mkdirSync(target, { recursive: true });
+        fs.renameSync(src, dst);
+        moved++;
+      } catch {
+        /* 单份失败不影响其余 */
+      }
+    }
+    if (moved > 0) log.info(`已迁移 ${moved} 份历史备份：${dir} → ${target}`);
+  }
 }
 
 /** 时间戳（文件名安全） */

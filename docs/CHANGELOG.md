@@ -17,16 +17,16 @@
 
 ## 开发进度总览
 
-> 最后更新：2026-09-14
+> 最后更新：2026-09-15
 
 ### 当前状态
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.18.1**（已发布，`main` `4cb4d402`） |
-| 最新 Release | [v1.18.1](https://github.com/yanziruxue/docker-manager/releases/tag/v1.18.1)（复制按钮 HTTP 下静默失效修复 + 权限面板改「一条命令」） |
-| 源码分支 | `main` @ `4cb4d402` |
-| 交付包 | `build-upload/docker-manager-yanzi-linux-x64-v1.18.1.zip`（42,906,537 B / 40.9 MB / 5 文件；SHA-256 `b2bb5dec5beb713764cdb1a485bd846f7efe8476998f29d1b6f856b679d227b1`） |
+| 当前版本 | **v1.18.2**（已发布） |
+| 最新 Release | [v1.18.2](https://github.com/yanziruxue/docker-manager/releases/tag/v1.18.2)（SEA 下 CLI 子命令失效修复 + 版本显示漂移修复 + 备份目录固定为 `<data>/backups` + 备份区四卡合一） |
+| 源码分支 | `main` @ 待回填 |
+| 交付包 | `build-upload/docker-manager-yanzi-linux-x64-v1.18.2.zip`（42,907,426 B / 40.9 MB / 5 文件；SHA-256 `99a3de26ec34bf339c3e1cc7666fe5d1164a4fde74e592b0e361319c6dfaba3f`） |
 | 架构 | REST + WS + SSE 三通道；Socket / TCP / SSH 三种引擎 |
 | 目标平台 | Linux x64（SEA 单可执行文件），Unraid / 自托管 NAS |
 
@@ -114,6 +114,30 @@
 - 一次发布中同时含 Minor 与 Patch 时，按**最高级别**递增，低级别归零（例：`1.0.3` + 新功能 → `1.1.0`）
 - Major 由人工决定，不自动递增
 - 同一天内的多次改动合并为一个版本，逐条记录在版本下
+
+---
+
+## v1.18.2 — 2026-09-15
+
+- **已完成**
+  - **修 `fix-perms` / `permission-check` 在 SEA 二进制下完全不生效**（用户反馈：执行后反而启动服务并 `EADDRINUSE` 崩溃）。
+    - 根因：`server/index.ts` 的 CLI 分支按**固定下标**取参数（`process.argv.slice(1)` 首项）。而 SEA 单文件模式下 `argv = [exe, exe, ...用户参数]`——`argv[1]` 是 exe 自身路径而非子命令，于是命令名匹配失败，代码一路走到启动 HTTP，与已在 5024 端口运行的服务抢端口 → `EADDRINUSE` 崩溃。开发模式（`node dist/index.js`）布局又不同，写死下标必然顾此失彼。
+    - 修法：**不按下标猜，改为扫描 argv**——跳过 exe 自身路径、脚本路径、任何含路径分隔符的项，取第一个已知子命令（`fix-perms` / `permission-check` / `--version` / `-v` / `version`）；第一个非路径 token 若不认识（如 `--path`）则判定为非 CLI 模式，交回服务启动流程。同时兼容 `./docker-manager-yanzi fix-perms` 与 PATH 直呼 `docker-manager-yanzi fix-perms`（后者 argv 里只有 basename、不含斜杠）。
+    - 涉及文件：`server/index.ts`（CLI 分支重写）。
+  - **修「左下角版本号停在上一版」**（用户反馈：更新页显示 v1.18.1、左下角显示 v1.18.0）。
+    - 根因一：`server/serve-embedded.ts` 给包括 `index.html` 在内的所有内嵌资源统一加了 `Cache-Control: public, max-age=3600`。OTA 换完二进制后，浏览器 1 小时内不会重新请求 `index.html`，继续跑旧前端 bundle。→ **改为**：`index.html`（含 SPA fallback）下发 `no-cache, must-revalidate`；`assets/*` 文件名带内容 hash，保留 `max-age=3600`。
+    - 根因二：左下角读的是**前端构建期注入的常量** `__APP_VERSION__`，而非真实运行的二进制版本。→ **改为**：`App.tsx` 登录后拉取 `/api/system/version` 并存 `runtimeVersion`，通过新 prop 传给 `Sidebar`，侧栏优先展示运行时版本、缺失才回退构建期常量。两者不一致的窗口被彻底消除。
+    - 涉及文件：`server/serve-embedded.ts`、`src/App.tsx`、`src/components/Sidebar.tsx`。
+  - **备份目录固定为 `<data>/backups`，移除「备份目录」设置项**（用户要求：写死，不允许自定义目录；旧备份自动迁移）。
+    - 根因：旧 `resolveBackupDir()` 只认**绝对路径**，而 `settings.backup.backupPath` 的默认值偏偏是相对名 `docker-compose-backup-manager`，UI 提示却写着「相对路径可用」——三者互相矛盾，填任何相对值都被**静默忽略**、永远掉回 `<data>/backups`，表现为「目录写死且不可控」。
+    - 修法：`resolveBackupDir()` 固定返回 `<DATA_DIR>/backups`，不再读取该设置；新增 `migrateLegacyBackups()` **在启动阶段把历史备份迁进来**（来源：旧 `backupPath` 解析值、`<data>/docker-compose-backup-manager`、`<安装目录>/docker-compose-backup-manager`；仅迁移 `.zip` / `.tar.gz` / `.tgz`，**同名不覆盖**，单份失败不影响其余，整体异常只告警不阻断启动）。设置字段标记 `@deprecated` 保留兼容，UI 输入框**彻底移除**（不再有任何可编辑入口）。
+    - 涉及文件：`server/backup.ts`、`server/index.ts`、`server/settings.ts`、`src/types.ts`、`src/pages/Settings.tsx`。
+  - **备份区 UI：周备 / 月备 / 年备 / 执行时序总览 四张卡片合并为一张**（用户要求）。
+    - 合并为 `三级备份策略（周 / 月 / 年）`：每级为一段——标题行（图标 + 名称 + 「保留 N 份」或「未启用」标签 + 启用开关），展开后是原参数区（日期 / 时间 / 保留份数），三段之间用分隔线隔开，禁用时不再显示整块「已禁用」占位。
+    - 卡片底部保留「执行时序总览」小节，改为**三列横排**紧凑卡片（原来三行竖排）：启用中显示具体时间与保留策略，未启用显示「未启用」并置灰；冲突规则说明保留为一行小字。信息量不变，纵向空间约为原来的 40%。
+  - **验证**：前后端 `tsc --noEmit` 全绿；`vite build` 通过。CLI 解析用**真实打包产物 + 模拟 argv** 覆盖 4 种形态（`SEA 绝对路径` / `SEA ./ 相对` / `PATH basename` / `dev 脚本路径`）——均正确命中子命令并退出；对照组「无子命令」正常启动服务，证明分支判定有效。备份目录实测：`<data>/docker-compose-backup-manager` 下的历史 zip **已自动迁移**到 `<data>/backups`，旧目录清空。打包产物冒烟：`index.html` 响应头为 `no-cache, must-revalidate`、`assets` 为 `max-age=3600`、`/api/system/version` 返回 `1.18.2`、未授权 401、首页引用前端产物 `index-1IG2zrDd.js`。前端 bundle 中「备份目录」0 命中、旧卡片标题 0 命中、「三级备份策略」1 命中（确认合并与移除均已落包）。
+- **未完成 / 已知限制**：SEA 二进制的 CLI 行为无法在本机（Windows）直接执行验证——Linux ELF 二进制跑不起来，故采用「同一份源码 + 模拟 SEA argv 布局」验证，等价性由 argv 布局分析保证；真实 Linux 上执行 `sudo <exe> fix-perms` 仍建议首次加 `--dry-run` 观察输出。备份迁移只认 `.zip` / `.tar.gz` / `.tgz` 三种扩展名，手工放在历史目录里的其他格式文件不会被搬运。
+- **下一步**：无。
 
 ---
 

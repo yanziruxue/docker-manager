@@ -61,6 +61,8 @@ export default function App() {
   // 应用自身（OTA）更新信息：**单一数据源** —— 同时驱动全局侧边栏「系统设置」角标
   // 与「系统设置 → 系统更新」页展示（进入页面即显示已检测到的更新，无需再手动点「检查更新」）
   const [appUpdateInfo, setAppUpdateInfo] = useState<UpdateInfo | null>(null);
+  /** 后端实际运行的版本号（侧栏展示用，避免浏览器缓存旧前端导致版本显示滞后） */
+  const [runtimeVersion, setRuntimeVersion] = useState("");
   const appUpdateAvailable = !!appUpdateInfo?.hasUpdate;
   // 最新 settings 引用：6 小时定时轮询的 doCheck 闭包需读取用户最新保存的 autoUpdate / ignoredVersion
   const settingsRef = useRef(settings);
@@ -212,12 +214,14 @@ export default function App() {
     let updateTimer: ReturnType<typeof setInterval> | null = null;
     (async () => {
       try {
-        const [list, settingsData] = await Promise.all([
+        const [list, settingsData, versionInfo] = await Promise.all([
           fetchEngines(),
           fetchSettings().catch(() => null),
+          fetchAppVersion().catch(() => null),
         ]);
         setEngines(list);
         if (settingsData) setSettings(settingsData);
+        if (versionInfo?.version) setRuntimeVersion(versionInfo.version);
         // 自动检查更新：覆盖「网页刷新 / 后端启动 / 每 6 小时」三触发条件
         // 挂载即查一次（启动/页面加载）；之后每 6 小时周期轮询（长开页面也能及时发现更新）
         if (settingsData?.update?.autoCheck) {
@@ -523,6 +527,7 @@ export default function App() {
         updateAvailable={appUpdateAvailable}
         collapsed={sidebarCollapsed}
         onToggleCollapsed={toggleSidebar}
+        runtimeVersion={runtimeVersion}
       />
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
         <TopBar

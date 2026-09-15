@@ -49,7 +49,8 @@ const DEFAULT_SETTINGS = {
   backup: {
     mode: 1,
     autoBackupEnabled: false,
-    backupPath: "docker-compose-backup-manager",
+    /** @deprecated v1.18.2 起备份目录固定为 `<data>/backups`，此项不再生效（保留仅为兼容旧 settings.json） */
+    backupPath: "",
     lastBackup: "",
     /** 备份遇 EACCES 时，对「属主是自己」的文件自动补属主读位后重试（只补 u+r，不扩大暴露面） */
     autoFixReadPerm: true,
