@@ -14,6 +14,12 @@ deploy/linux/docker-manager-yanzi-linux-x64*.zip
 
 # ===== 发布临时文件 =====
 .notes-*.md
+# 临时脚本 / 日志（push-via-api.mjs 按未跟踪文件枚举，不做过滤，必须显式忽略）
+_*.log
+_*.mjs
+_*.cjs
+_*.txt
+_*.json
 
 # ===== 依赖与运行时数据 =====
 node_modules/
