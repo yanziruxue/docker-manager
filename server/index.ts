@@ -46,16 +46,17 @@ import {
   checkStackUpdates,
   backupStack,
   restoreStack,
+  createStackFromBackup,
   attachContainerTerminal,
   resizeContainerTerminal,
   getComposeCmd,
   detectComposeModes,
 } from "./docker.js";
-import { createFullBackup, restoreFullBackup, exportConfigArchive, listBackupFiles, deleteBackupFile, backupFilePath, migrateLegacyBackups } from "./backup.js";
+import { createFullBackup, restoreFullBackup, restoreUploadedBackup, exportConfigArchive, listBackupFiles, deleteBackupFile, backupFilePath, migrateLegacyBackups } from "./backup.js";
 import { getSettings, saveSettings } from "./settings.js";
 import { startUpdateScheduler, getSchedulerStatus, runSchedulerCheckNow, startBackupScheduler, getBackupSchedulerStatus } from "./scheduler.js";
 import { readDaemonConfigInfo, writeDaemonConfig, restartDockerService, refreshPrivileges } from "./daemon-config.js";
-import { CURRENT_VERSION, getInstallDir, checkForUpdate, performUpdate, performUpdateFromUpload, getUpdateState, getUpdateDir, markUpdateError, saveUploadPackage, getPendingUpload, getPendingUploadPath, schedulePendingExpiry, discardPendingUpload, cancelPendingExpiry } from "./updater.js";
+import { CURRENT_VERSION, getInstallDir, checkForUpdate, performUpdate, performUpdateFromUpload, getUpdateState, getUpdateDir, markUpdateError, saveUploadPackage, getPendingUpload, getPendingUploadPath, schedulePendingExpiry, discardPendingUpload, cancelPendingExpiry, cancelUpdate } from "./updater.js";
 import { COMPOSE_DIR } from "./paths.js";
 import {
   getTelemetryStatus,
@@ -757,6 +758,24 @@ app.post("/api/engines/:id/stacks/:name/restore", async (req, res) => {
   }
 });
 
+/** 从上传的「堆栈备份」zip 初始化一个新堆栈（?name= 指定新堆栈名，避免与现有冲突） */
+app.post(
+  "/api/engines/:id/stacks/from-backup",
+  express.raw({ type: "*/*", limit: "300mb" }),
+  async (req, res) => {
+    const engine = getEngine(req.params.id);
+    if (!engine) { res.status(404).json({ success: false, error: "引擎不存在" }); return; }
+    const name = String(req.query.name || "");
+    try {
+      const buf = req.body as Buffer;
+      const result = await createStackFromBackup(engine, buf, name);
+      res.json({ success: true, data: result });
+    } catch (err: any) {
+      res.status(400).json({ success: false, error: err.message || "创建失败" });
+    }
+  }
+);
+
 /** 备份文件列表（默认 <data>/backups，或 settings.backup.backupPath 指定的绝对路径） */
 app.get("/api/backups", (_req, res) => {
   try {
@@ -817,6 +836,21 @@ app.get("/api/system/permission-check", (req, res) => {
     res.status(500).json({ success: false, error: err.message || "权限体检失败" });
   }
 });
+
+/** 上传备份文件并恢复（前端选择本地 .zip 备份直接恢复，无需先存入备份列表） */
+app.post(
+  "/api/backups/restore-upload",
+  express.raw({ type: "*/*", limit: "300mb" }),
+  async (req, res) => {
+    try {
+      const buf = req.body as Buffer;
+      const r = restoreUploadedBackup(buf);
+      res.json({ success: true, data: { message: "配置已恢复", stacks: r.stacks } });
+    } catch (err: any) {
+      res.status(400).json({ success: false, error: err.message || "恢复失败" });
+    }
+  }
+);
 
 /** 导出全部配置（下载归档，不写入备份列表） */
 app.get("/api/backups/export", (_req, res) => {
@@ -1331,6 +1365,12 @@ app.post("/api/system/update/apply", (_req, res) => {
 /** 更新进度（供前端轮询） */
 app.get("/api/system/update/status", (_req, res) => {
   res.json({ success: true, data: getUpdateState() });
+});
+
+/** 取消正在进行的系统升级（下载 / 解压 / 替换阶段均可；取消后状态回到 idle，可重新发起） */
+app.post("/api/system/update/cancel", (_req, res) => {
+  cancelUpdate();
+  res.json({ success: true, data: { message: "已请求取消升级" } });
 });
 
 /** 手动上传 zip 更新包（仅保存，不立即执行；执行需用户在页面手动点击「更新」） */

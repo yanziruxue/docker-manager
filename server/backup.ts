@@ -235,7 +235,7 @@ function shouldAutoFixReadPerm(): boolean {
  *
  * @returns 根目录是否成功复制（子条目失败只记录，不影响整体）
  */
-function copyTree(
+export function copyTree(
   src: string,
   dest: string,
   onError: (relPath: string, e: any) => void,
@@ -422,6 +422,31 @@ function isTarGz(name: string): boolean {
   return /\.tar\.gz$/i.test(name);
 }
 
+/**
+ * 从已解包到临时目录的备份归档恢复（覆盖 Compose 堆栈与设置/引擎文件）。
+ * 由 restoreFullBackup 与 restoreUploadedBackup 共用，避免两套解包/恢复逻辑分叉。
+ * @param staging 已解包（含 dockercompose/、config/、data/、manifest.json）的临时目录
+ * @param label 日志里展示的来源标签
+ */
+function applyRestoreFromStaging(staging: string, label: string): { stacks: number } {
+  const srcCompose = path.join(staging, "dockercompose");
+  let stacks = 0;
+  if (fs.existsSync(srcCompose)) {
+    fs.mkdirSync(COMPOSE_DIR, { recursive: true });
+    const loaded = stageStacksFrom(srcCompose, COMPOSE_DIR);
+    stacks = loaded.stacks;
+    if (loaded.skipped.length) {
+      throw new Error(`恢复中止，以下堆栈写入失败：${loaded.skipped.join("、")}`);
+    }
+  }
+  copyIfExists(path.join(staging, "config", "settings.json"), path.join(CONFIG_DIR, "settings.json"));
+  copyIfExists(path.join(staging, "data", "engines.json"), dataPath("engines.json"));
+  copyIfExists(path.join(staging, "data", "active_engine.json"), dataPath("active_engine.json"));
+
+  log.info(`已从 ${label} 恢复（堆栈 ${stacks} 个）`);
+  return { stacks };
+}
+
 /** 从全量备份包恢复（覆盖 Compose 堆栈与设置/引擎文件） */
 export function restoreFullBackup(backupName: string): { stacks: number } {
   const dir = resolveBackupDir();
@@ -436,25 +461,54 @@ export function restoreFullBackup(backupName: string): { stacks: number } {
     } else {
       extractZip(archive, staging);
     }
-
-    const srcCompose = path.join(staging, "dockercompose");
-    let stacks = 0;
-    if (fs.existsSync(srcCompose)) {
-      fs.mkdirSync(COMPOSE_DIR, { recursive: true });
-      const loaded = stageStacksFrom(srcCompose, COMPOSE_DIR);
-      stacks = loaded.stacks;
-      if (loaded.skipped.length) {
-        throw new Error(`恢复中止，以下堆栈写入失败：${loaded.skipped.join("、")}`);
-      }
-    }
-    copyIfExists(path.join(staging, "config", "settings.json"), path.join(CONFIG_DIR, "settings.json"));
-    copyIfExists(path.join(staging, "data", "engines.json"), dataPath("engines.json"));
-    copyIfExists(path.join(staging, "data", "active_engine.json"), dataPath("active_engine.json"));
-
-    log.info(`已从 ${backupName} 恢复（堆栈 ${stacks} 个）`);
-    return { stacks };
+    return applyRestoreFromStaging(staging, backupName);
   } finally {
     rmrf(staging);
+  }
+}
+
+/**
+ * 从用户上传的备份文件缓冲恢复（前端上传 → 后端落盘临时文件 → 校验 → 恢复）。
+ * 校验：zip 魔数、manifest.json 存在且 app 字段为 docker-stack-manager，避免误恢复非本应用归档。
+ * @returns 恢复出的堆栈数
+ */
+export function restoreUploadedBackup(buf: Buffer): { stacks: number } {
+  if (!Buffer.isBuffer(buf) || buf.length < 1024) {
+    throw new Error("未收到有效的备份文件");
+  }
+  if (buf[0] !== 0x50 || buf[1] !== 0x4b) {
+    throw new Error("文件不是 zip 压缩包（应以 PK 开头）");
+  }
+  const tmpZip = path.join(
+    fs.mkdtempSync(path.join(os.tmpdir(), "dsm-upload-")),
+    `upload-${Date.now()}.zip`
+  );
+  fs.writeFileSync(tmpZip, buf);
+  const staging = fs.mkdtempSync(path.join(os.tmpdir(), "dsm-restore-"));
+  try {
+    extractZip(tmpZip, staging);
+    // 校验 manifest：确认是本应用的备份包，避免把无关 zip 解出来污染配置
+    const manifestPath = path.join(staging, "manifest.json");
+    if (!fs.existsSync(manifestPath)) {
+      throw new Error("不是有效的备份包（缺少 manifest.json）");
+    }
+    let manifest: any = {};
+    try {
+      manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
+    } catch {
+      throw new Error("备份包 manifest.json 解析失败");
+    }
+    if (manifest.app !== "docker-stack-manager") {
+      throw new Error("不是本应用的备份包，已拒绝恢复");
+    }
+    return applyRestoreFromStaging(staging, `上传备份(${buf.length} 字节)`);
+  } finally {
+    rmrf(staging);
+    try {
+      fs.rmSync(path.dirname(tmpZip), { recursive: true, force: true });
+    } catch {
+      /* 忽略清理失败 */
+    }
   }
 }
 

@@ -23,10 +23,10 @@
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.18.3**（已发布，`main` `c0bf26e4`） |
+| 当前版本 | **v1.19.0**（开发中，未发布） |
 | 最新 Release | [v1.18.3](https://github.com/yanziruxue/docker-manager/releases/tag/v1.18.3)（菜单默认中文 + 推荐加速源新增 1Panel + 容器批量操作修复） |
-| 源码分支 | `main` @ `c0bf26e4b86a1f6db11cad7e1c12316a30935f21` |
-| 交付包 | `build-upload/docker-manager-yanzi-linux-x64-v1.18.3.zip`（42,908,910 B / 40.9 MB / 5 文件；SHA-256 `21b1f5c10c9bbf7eecbc328eadc3a657341506d705bcb5d51b0b6321e7c50585`） |
+| 源码分支 | `main`（v1.19.0 改动尚未提交） |
+| 交付包 | 待打包：v1.19.0 Linux SEA zip |
 | 架构 | REST + WS + SSE 三通道；Socket / TCP / SSH 三种引擎 |
 | 目标平台 | Linux x64（SEA 单可执行文件），Unraid / 自托管 NAS |
 
@@ -37,21 +37,21 @@
 | 多引擎管理 | ✅ | Socket / TCP / SSH，CRUD + 连接测试 + 持久化 |
 | 仪表盘 | ✅ | 统计卡片 + 资源监控 + 活动时间线 |
 | 容器管理 | ✅ | 列表 / 详情 / 启停 / 日志 / 资源监控 / Web 终端 / CSV 导出 |
-| 堆栈管理 | ✅ | Compose 自动发现 / 创建 / 编辑 / 操作 / 更新检查 / 备份恢复 / 批量操作 |
+| 堆栈管理 | ✅ | Compose 自动发现 / 创建（含**上传堆栈备份初始化**）/ 编辑 / 操作 / 更新检查 / 备份恢复 / 批量操作 |
 | 镜像管理 | ✅ | 列表 / 筛选 / 拉取 / 删除 / prune 未使用 |
 | 数据卷管理 | ✅ | 列表 / 新建 / 删除 / prune / 详情 |
-| 备份管理 | ✅ | 手动全量 + 堆栈级备份 / 恢复 / 导出（**zip** 格式，兼容历史 tar.gz）+ 自动备份调度器（周/月/年/Cron，含保留清理） |
+| 备份管理 | ✅ | 手动全量 + 堆栈级备份 / 恢复（含**上传备份文件直接恢复**）/ 导出（**zip** 格式，兼容历史 tar.gz）+ 自动备份调度器（周/月/年/Cron，含保留清理） |
 | 权限诊断与修复 | ✅ | 备份期自愈 `u+r` + 结构化诊断（属主/权限位/一条修复命令）+ `fix-perms` CLI + 启动体检与界面提示 |
 | 通知中心 | ✅ | 未读已读 + localStorage 持久化 |
-| 系统设置 | ✅ | Docker 配置 / Compose 模式 / 通知 / 备份 / 更新调度 / 列显隐 / 活跃度 |
+| 系统设置 | ✅ | Docker 配置 / Compose 模式 / 通知 / 备份 / 更新调度 / 列显隐 / 本机设备（7 维硬件指纹，只读） |
 | Web 终端 | ✅ | xterm.js + WebSocket + 多 Shell 检测 |
 | 登录鉴权 | ✅ | 单管理员 + scrypt + httpOnly 会话（绝对过期）+ 密码找回码 |
 | 更新调度器 | ✅ | 后台定时检查镜像版本（每天 / 每周 / 每月，非 Cron） |
-| OTA 自升级 | ✅ | GitHub Releases 单一源，拉取 + 自替换 + systemd 重启，gh-proxy 镜像兜底 |
+| OTA 自升级 | ✅ | GitHub Releases 单一源，拉取 + 自替换 + systemd 重启，gh-proxy 镜像兜底，**支持中途取消** |
 | Linux SEA 部署 | ✅ | 单可执行文件 + systemd + install/uninstall 脚本 |
 | Docker 部署 | ✅ | 多阶段 Dockerfile |
 | **操作日志系统** | 🔨 **约 60%** | `server/logger.ts` 已建好但**未接入** `docker.ts`（仍是 `console.log`）；前端仅 localStorage 版 `opLog.ts`（500 条） |
-| 中心统计服务 | ⏸ **暂缓** | 遥测上报端已完成；中心服务（`docker.yanziruxue.top`）由独立后端实现，本项目不做 |
+| 中心统计服务 | ⏸ **暂缓** | 遥测上报端已完成（端点 `docker-yanzi.ziruxue.top`）；中心服务由独立后端实现，本项目不做 |
 | 堆栈图标本地上传 | ⬜ 未开始 | 目前仅支持图标 URL |
 
 ### 已完成（累计里程碑）
@@ -114,6 +114,40 @@
 - 一次发布中同时含 Minor 与 Patch 时，按**最高级别**递增，低级别归零（例：`1.0.3` + 新功能 → `1.1.0`）
 - Major 由人工决定，不自动递增
 - 同一天内的多次改动合并为一个版本，逐条记录在版本下
+
+---
+
+## v1.19.0 — 2026-09-16
+
+- **已完成**
+  - **活跃度上报端点改为 `https://docker-yanzi.ziruxue.top`（连字符域名）**（用户要求）。
+    - 后端 `server/telemetry.ts` 的 `TELEMETRY_ENDPOINT` 常量更新；同步移除 `server/settings.ts` 中 `DEFAULT_SETTINGS.telemetry` 块、`src/types.ts` 的 `TelemetryConfig` 类型与 `SystemSettings.telemetry` 字段。注意与旧 `docker.yanziruxue.top`（点域名）的差异——曾因点/连字符混淆导致一次替换失配。
+    - 涉及文件：`server/telemetry.ts`、`server/settings.ts`、`src/types.ts`。
+  - **遥测配置写入代码、页面不再暴露**（用户要求：不在页面修改、不显示「遥测设置」「上报状态」）。
+    - `readConfig()` 改为硬编码 `{ enabled: true, endpoint: TELEMETRY_ENDPOINT, collectHwFingerprint: true }`，不再读 `getSettings()`；上报随活跃事件静默触发，不依赖本地配置开关。
+    - 前端移除「概览（安装/活跃统计）」「上报状态」「遥测设置」三张卡片；`src/components/ActivityPanel.tsx` 重写为只读「本机设备标识」卡片，去掉 `telemetry/onPatch/onAfterSave` 三个 prop；`src/pages/Settings.tsx` 移除 `telemetry` 本地 state、初始化块与校验（含 URL 校验），标签「活跃度」→「本机设备」。
+    - 涉及文件：`server/telemetry.ts`、`src/api.ts`、`src/types.ts`、`src/components/ActivityPanel.tsx`、`src/pages/Settings.tsx`。
+  - **本机设备标识升级为 7 维硬件指纹，≥3 项匹配即认定硬件环境未变**（用户要求）。
+    - `server/telemetry.ts` 新增 `DeviceHardware`（系统 / CPU / GPU / 内存容量+序列号 / 硬盘 UID / 主板序列号 / 设备 UID）、`collectHardwareAttrs()`、`countMatches()`、`isEnvUnchanged()`。设备 UUID 仍为统计主键，但其稳定性改由硬件环境连续性决定：无历史 → 新 UUID；有历史且 7 维中 ≥3 匹配 → 沿用旧 UUID；否则（<3 匹配）视为换机 → 重新生成。
+    - GPU 采集 `lspci -nn`（VGA/3D/Display）→ `nvidia-smi` 兜底；内存容量取 `os.totalmem()` + `dmidecode` 序列号；全 0 序列号归零。`TelemetryStatus` 重构为 `{ uuid, virtualized, createdAt, appVersion, osVersion, arch, deviceFile, envUnchanged, matchCount, hardware }`。
+    - `src/api.ts` 同步 `DeviceHardware` 与 `TelemetryStatus`；`ActivityPanel` 只读展示 7 维 + 「硬件环境：未变化/已变化（N/7 项匹配）」。
+    - 涉及文件：`server/telemetry.ts`、`src/api.ts`、`src/components/ActivityPanel.tsx`。
+  - **系统升级支持中途取消**（用户要求）。
+    - `server/updater.ts` 新增 `cancelRequested` 标志 + `cancelUpdate()` + 内部 `resetCancel()/finalizeCancel()`；`performUpdate` / `performUpdateFromUpload` 开头复位；下载循环逐 chunk 轮询取消（命中即 `reader.cancel()` 停止读取并丢弃分片），`applyLocalZip` 在解压前 / 解压后 / 替换前三个安全点再次校验，命中即清理临时目录、状态回 `idle`、**不替换二进制、不重启进程**，可重新发起更新。新增 `POST /api/system/update/cancel` 路由；`src/api.ts` 新增 `cancelUpdateApi`；更新页进度卡在 downloading/extracting/replacing 阶段显示「取消升级」按钮。
+    - 涉及文件：`server/updater.ts`、`server/index.ts`、`src/api.ts`、`src/pages/Settings.tsx`。
+  - **从备份恢复支持直接上传备份文件**（用户要求）。
+    - `server/backup.ts` 新增 `restoreUploadedBackup(buf)`：校验 zip 魔数/长度 → 落盘临时文件 → 解包 → 校验 `manifest.json` 的 `app === "docker-stack-manager"`（拒绝非本应用归档）→ 复用新抽出的 `applyRestoreFromStaging()` 恢复 → 清理临时文件。新增 `POST /api/backups/restore-upload`（`express.raw`，上限 300MB）；`src/api.ts` 新增 `restoreUploadedBackupApi`；备份管理页新增「上传备份并恢复」按钮（带覆盖确认）。
+    - 顺带把 `copyTree` 从 `backup.ts` 导出（供 `docker.ts` 复用递归复制）。
+    - 涉及文件：`server/backup.ts`、`server/index.ts`、`src/api.ts`、`src/pages/Settings.tsx`。
+  - **新建堆栈支持上传堆栈备份初始化**（用户要求）。
+    - `server/docker.ts` 新增 `createStackFromBackup(engine, buf, targetName)`：校验 zip → 解包 → 定位内部堆栈目录（唯一子目录优先 / 多目录按名匹配 / 兼容扁平备份）→ 读取 compose → 按目标名校验（复用命名规则 + 重复检测）→ `copyTree` 整体复制（含 env、图标、name/description）到 `COMPOSE_DIR/<name>/`。新增 `POST /api/engines/:id/stacks/from-backup`（`express.raw` + `?name=`，注册在通配堆栈操作路由之前）；`src/api.ts` 新增 `createStackFromBackupApi`；`CreateStackModal` 新增「堆栈备份」方法页（选名称 + 选 .zip），方法网格 `grid-cols-3` → `grid-cols-2 sm:grid-cols-4`。
+    - 涉及文件：`server/docker.ts`、`server/index.ts`、`src/api.ts`、`src/pages/Stacks.tsx`。
+  - **验证**：前后端 `tsc --noEmit` 全绿；`vite build` 通过（1604 模块）。
+- **未完成 / 已知限制**
+  - 遥测新端点 `docker-yanzi.ziruxue.top` 在开发沙箱内不可达（HTTP 000），未能实机联调；上报为 fire-and-forget，若端点路径不符会静默 404，部署后可在后端日志/统计端确认。
+  - 旧 `settings.json` 中残留的 `telemetry` 键不再被读写，属惰性字段（未做迁移剥离）。
+  - 升级取消主要覆盖下载阶段；解压（`spawnSync` 同步）与替换为瞬时窗口，命中率有限但已保证「取消即不替换、不退出」。
+- **下一步**：打包 Linux SEA 交付包并按需发布 v1.19.0。
 
 ---
 

@@ -9,7 +9,7 @@ import type { ChildProcess } from "node:child_process";
 import type { DockerEngine } from "./engines.js";
 import { COMPOSE_DIR } from "./paths.js";
 import { getSettings } from "./settings.js";
-import { resolveBackupDir, backupFilePath, runTar } from "./backup.js";
+import { resolveBackupDir, backupFilePath, runTar, copyTree } from "./backup.js";
 import { zipDirectory, extractZip } from "./zip.js";
 
 /**
@@ -1872,6 +1872,105 @@ export async function restoreStack(
     runTar(["-xzf", path.basename(archive), "-C", stacksDir], "堆栈恢复", path.dirname(archive));
   } else {
     extractZip(archive, stacksDir);
+  }
+}
+
+/**
+ * 从上传的「堆栈备份」zip 初始化一个新堆栈。
+ * 堆栈备份包以 `<stackName>/` 为顶层目录（与 backupStack 结构一致）；
+ * 解包后把内部堆栈目录整体复制到 COMPOSE_DIR/<targetName>/（含 env、图标、name/description 等），
+ * 默认用上传方内部目录名作为堆栈名，调用方可指定新名称（避免与现有堆栈冲突）。
+ */
+export async function createStackFromBackup(
+  _engine: DockerEngine,
+  buf: Buffer,
+  targetName: string
+): Promise<{ name: string; path: string }> {
+  if (!Buffer.isBuffer(buf) || buf.length < 1024) {
+    throw new Error("未收到有效的堆栈备份文件");
+  }
+  if (buf[0] !== 0x50 || buf[1] !== 0x4b) {
+    throw new Error("文件不是 zip 压缩包（应以 PK 开头）");
+  }
+  const name = (targetName || "").trim();
+  if (!name) {
+    throw new Error("请填写新堆栈名称");
+  }
+  if (!/^[a-zA-Z0-9_-]+$/.test(name)) {
+    throw new Error("堆栈名称只能包含字母、数字、横线和下划线");
+  }
+
+  const tmpZip = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "dsm-stackup-")), `stack-${Date.now()}.zip`);
+  fs.writeFileSync(tmpZip, buf);
+  const staging = fs.mkdtempSync(path.join(os.tmpdir(), "dsm-stackup-stage-"));
+  try {
+    extractZip(tmpZip, staging);
+
+    // 定位内部堆栈目录：优先唯一子目录；多目录时匹配目标名；再退化为扁平备份（compose 在根）
+    const entries = fs.readdirSync(staging, { withFileTypes: true });
+    const dirs = entries.filter((e) => e.isDirectory());
+    const composeNames = ["docker-compose.yaml", "compose.yaml", "docker-compose.yml", "compose.yml"];
+    let innerDir: string | null = null;
+    if (dirs.length === 1) {
+      innerDir = path.join(staging, dirs[0].name);
+    } else if (dirs.length > 1) {
+      const hit = dirs.find((d) => d.name === name);
+      if (hit) innerDir = path.join(staging, hit.name);
+    }
+    if (!innerDir) {
+      const flatCompose = composeNames.map((f) => path.join(staging, f)).find((p) => fs.existsSync(p));
+      if (flatCompose) innerDir = staging;
+    }
+    if (!innerDir) {
+      throw new Error(
+        dirs.length === 0
+          ? "备份包内未找到堆栈目录"
+          : "备份包含多个堆栈目录，无法确定目标，请用与目标名称一致的条目"
+      );
+    }
+
+    // 读取 compose 内容
+    const composeFile = composeNames.map((f) => path.join(innerDir as string, f)).find((p) => fs.existsSync(p));
+    if (!composeFile) {
+      throw new Error("备份包内未找到 compose 文件");
+    }
+    const composeContent = fs.readFileSync(composeFile, "utf-8");
+
+    // 目标目录重复检查（与 createStack 一致：仅当已存在 compose 文件才视为重复）
+    const stackDir = path.join(COMPOSE_DIR, name);
+    if (fs.existsSync(stackDir)) {
+      for (const fname of composeNames) {
+        if (fs.existsSync(path.join(stackDir, fname))) {
+          throw new Error(`堆栈 "${name}" 已存在`);
+        }
+      }
+    }
+
+    // 复制整个内部堆栈目录（含 env、图标、name/description 等）到目标目录
+    fs.mkdirSync(stackDir, { recursive: true });
+    copyTree(innerDir, stackDir, () => {}, false);
+
+    // 兜底：确保核心文件存在（copyTree 已覆盖，这里仅保险）
+    fs.writeFileSync(path.join(stackDir, "docker-compose.yaml"), composeContent, "utf-8");
+    if (!fs.existsSync(path.join(stackDir, "name"))) {
+      fs.writeFileSync(path.join(stackDir, "name"), name, "utf-8");
+    }
+    if (!fs.existsSync(path.join(stackDir, "description"))) {
+      fs.writeFileSync(path.join(stackDir, "description"), "", "utf-8");
+    }
+
+    return { name, path: path.join(stackDir, "docker-compose.yaml") };
+  } finally {
+    try {
+      fs.rmSync(path.dirname(tmpZip), { recursive: true, force: true });
+    } catch {
+      /* 忽略清理失败 */
+    }
+    try {
+      fs.rmSync(staging, { recursive: true, force: true });
+    } catch {
+      /* 忽略清理失败 */
+    }
   }
 }
 

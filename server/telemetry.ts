@@ -15,10 +15,27 @@ import os from "node:os";
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { CONFIG_DIR } from "./paths.js";
-import { getSettings } from "./settings.js";
 
 /** 遥测事件类型 */
 export type TelemetryEvent = "install" | "active";
+
+/** 本机设备标识的 7 维硬件属性（统计主键由 ≥3 匹配决定，不依赖随机 UUID） */
+export interface DeviceHardware {
+  /** 系统（OS + 版本） */
+  system: string;
+  /** CPU 标识 */
+  cpu: string;
+  /** GPU 标识 */
+  gpu: string;
+  /** 内存标识（容量 + 序列号） */
+  memory: string;
+  /** 硬盘序列号 */
+  diskUid: string;
+  /** 主板序列号 */
+  boardSerial: string;
+  /** 设备 UUID（统计主键候选，≥3 硬件匹配时沿用） */
+  deviceUid: string;
+}
 
 /** 设备标识文件（不放在程序安装目录，普通卸载不清除） */
 const DEVICE_FILE_GLOBAL = "/etc/docker-manager-yanzi/device.info";
@@ -32,7 +49,7 @@ const FIRST_REPORT_DELAY_MS = 30 * 1000;
 const REQUEST_TIMEOUT_MS = 10 * 1000;
 
 export interface DeviceInfo {
-  /** 主标识：持久化 UUID4 */
+  /** 主标识：持久化 UUID4（环境未变时稳定沿用，环境已变则重新生成） */
   uuid: string;
   /** 首次生成时间（≈ 首次安装时间） */
   createdAt: string;
@@ -40,6 +57,8 @@ export interface DeviceInfo {
   hwFingerprint: string;
   /** 是否虚拟化环境 */
   virtualized: boolean;
+  /** 本机设备标识 7 维（系统/CPU/GPU/内存/硬盘UID/主板序列号/设备UID） */
+  hardware: DeviceHardware;
   /** install 事件是否已成功上报 */
   installReported: boolean;
   /** 最近一次成功上报 active 的自然日（YYYY-MM-DD），用于日粒度去重 */
@@ -94,35 +113,56 @@ function writeDeviceInfo(info: DeviceInfo): void {
   }
 }
 
-/** 获取（必要时创建）设备信息 */
+/**
+ * 获取（必要时创建）设备信息。
+ * 设备身份判定：7 维硬件属性中 ≥3 匹配即视为「硬件环境未变」，沿用原 UUID（统计主键稳定）；
+ * 否则视为新设备，重新生成 UUID（代替原来盲持久化随机 UUID 作为主键）。
+ */
 export function getDeviceInfo(): DeviceInfo {
+  const current = collectHardwareAttrs();
   const existing = readDeviceInfo();
-  if (existing) {
-    // 补齐历史文件缺失字段
-    let dirty = false;
-    if (!existing.hwFingerprint) {
-      const hw = collectHardwareFingerprint();
-      existing.hwFingerprint = hw.fingerprint;
-      existing.virtualized = hw.virtualized;
-      dirty = true;
-    }
-    if (existing.installReported === undefined) {
-      existing.installReported = false;
-      dirty = true;
-    }
-    if (dirty) writeDeviceInfo(existing);
+
+  // 无历史记录：全新设备
+  if (!existing) {
+    const hw = collectHardwareFingerprint();
+    const info: DeviceInfo = {
+      uuid: crypto.randomUUID(),
+      createdAt: new Date().toISOString(),
+      hwFingerprint: hw.fingerprint,
+      virtualized: hw.virtualized,
+      hardware: { ...current, deviceUid: "" },
+      installReported: false,
+      lastActiveDate: "",
+    };
+    info.hardware.deviceUid = info.uuid;
+    writeDeviceInfo(info);
+    return info;
+  }
+
+  // 候选 UUID：环境未变则沿用原 UUID
+  current.deviceUid = existing.uuid;
+  const storedHw: DeviceHardware = existing.hardware || {
+    system: "", cpu: "", gpu: "", memory: "", diskUid: "", boardSerial: "", deviceUid: existing.uuid,
+  };
+
+  if (isEnvUnchanged(storedHw, current)) {
+    existing.hardware = current;
+    writeDeviceInfo(existing);
     return existing;
   }
 
+  // 环境已变（<3 匹配）：视为新设备
   const hw = collectHardwareFingerprint();
   const info: DeviceInfo = {
     uuid: crypto.randomUUID(),
     createdAt: new Date().toISOString(),
     hwFingerprint: hw.fingerprint,
     virtualized: hw.virtualized,
+    hardware: { ...current, deviceUid: "" },
     installReported: false,
     lastActiveDate: "",
   };
+  info.hardware.deviceUid = info.uuid;
   writeDeviceInfo(info);
   return info;
 }
@@ -215,6 +255,61 @@ export function collectHardwareFingerprint(): { fingerprint: string; virtualized
   return { fingerprint, virtualized };
 }
 
+// ---------- 设备标识 7 维采集（≥3 匹配决定硬件环境是否变化） ----------
+
+/** 采集 GPU 标识：lspci 优先，nvidia-smi 兜底，失败返回空串 */
+function collectGpu(): string {
+  const lspci = tryExec("lspci", ["-nn"]);
+  const gpuLine = lspci.split("\n").find((l) => /VGA|3D|Display|Graphics/i.test(l));
+  if (gpuLine) return gpuLine.replace(/^\S+\s/, "").trim().slice(0, 120);
+  const nvidia = tryExec("nvidia-smi", ["--query-gpu=name", "--format=csv,noheader"]);
+  if (nvidia) return nvidia.trim().slice(0, 120);
+  return "";
+}
+
+/** 采集内存标识：总容量（GB）为主，dmidecode 内存序列号兜底（全 0 归零） */
+function collectMemory(): string {
+  try {
+    const gb = (os.totalmem() / 1024 / 1024 / 1024).toFixed(1);
+    const serial = tryExec("dmidecode", ["-t", "memory"]).match(/Serial Number:\s*(\S+)/i)?.[1] || "";
+    const s = /^0{4,}$/i.test(serial) ? "" : serial;
+    return s ? `${gb}GB|${s}` : `${gb}GB`;
+  } catch {
+    return "";
+  }
+}
+
+/** 采集 7 维设备标识（deviceUid 先留空，由 getDeviceInfo 填入候选 UUID） */
+export function collectHardwareAttrs(): DeviceHardware {
+  return {
+    system: collectOsVersion(),
+    cpu: collectCpuId(),
+    gpu: collectGpu(),
+    memory: collectMemory(),
+    diskUid: collectDiskId(),
+    boardSerial: collectBoardId(),
+    deviceUid: "",
+  };
+}
+
+/** 统计 7 维中相等的非空属性数量（用于环境变化判定） */
+export function countMatches(a: DeviceHardware, b: DeviceHardware): number {
+  const keys: (keyof DeviceHardware)[] = ["system", "cpu", "gpu", "memory", "diskUid", "boardSerial", "deviceUid"];
+  let n = 0;
+  for (const k of keys) {
+    const va = (a[k] || "").trim();
+    const vb = (b[k] || "").trim();
+    if (va && va === vb) n++;
+  }
+  return n;
+}
+
+/** 硬件环境是否未变化：7 维中 ≥3 匹配即视为同一设备 */
+export function isEnvUnchanged(stored: DeviceHardware | null, current: DeviceHardware): boolean {
+  if (!stored) return true; // 首次，无历史可比对
+  return countMatches(stored, current) >= 3;
+}
+
 // ---------- 环境信息 ----------
 
 function collectOsVersion(): string {
@@ -236,14 +331,9 @@ interface TelemetryConfigLike {
 }
 
 /** 读取遥测配置（未配置时走默认值：启用 + 官方端点） */
+const TELEMETRY_ENDPOINT = "https://docker-yanzi.ziruxue.top";
 function readConfig(): Required<TelemetryConfigLike> {
-  const s = getSettings() as { telemetry?: TelemetryConfigLike } | null;
-  const t = s?.telemetry || {};
-  return {
-    enabled: t.enabled !== false,
-    endpoint: (t.endpoint || "https://docker.yanziruxue.top").replace(/\/+$/, ""),
-    collectHwFingerprint: t.collectHwFingerprint !== false,
-  };
+  return { enabled: true, endpoint: TELEMETRY_ENDPOINT, collectHwFingerprint: true };
 }
 
 /** 构造上报载荷 */
@@ -261,6 +351,8 @@ function buildPayload(event: TelemetryEvent, info: DeviceInfo, collectHw: boolea
     arch: process.arch,
     channel: "sea-linux-x64",
     virtualized: info.virtualized,
+    // 7 维设备标识：统计服务端据此做 ≥3 硬件匹配去重（代替盲 device_uuid 为主键）
+    hardware: collectHw ? info.hardware : null,
   };
 }
 
@@ -342,43 +434,38 @@ export function startTelemetryHeartbeat(): void {
 // ---------- 状态与统计 ----------
 
 export interface TelemetryStatus {
-  enabled: boolean;
-  endpoint: string;
-  collectHwFingerprint: boolean;
+  /** 设备 UUID（环境未变时稳定沿用；环境已变则重新生成） */
   uuid: string;
-  /** 指纹前 12 位，页面展示用（不回显完整值） */
-  hwFingerprintShort: string;
   virtualized: boolean;
   createdAt: string;
-  installReported: boolean;
-  lastActiveDate: string;
-  lastReportAt?: string;
-  lastError?: string;
-  deviceFile: string;
   appVersion: string;
   osVersion: string;
   arch: string;
+  deviceFile: string;
+  /** 硬件环境是否未变化（7 维中 ≥3 匹配） */
+  envUnchanged: boolean;
+  /** 7 维中匹配的数量 */
+  matchCount: number;
+  /** 本机设备标识 7 维 */
+  hardware: DeviceHardware;
 }
 
 export function getTelemetryStatus(): TelemetryStatus {
-  const cfg = readConfig();
   const info = getDeviceInfo();
+  const stored = readDeviceInfo();
+  const current = collectHardwareAttrs();
+  const storedHw = stored?.hardware || null;
   return {
-    enabled: cfg.enabled,
-    endpoint: cfg.endpoint,
-    collectHwFingerprint: cfg.collectHwFingerprint,
     uuid: info.uuid,
-    hwFingerprintShort: info.hwFingerprint.slice(0, 12),
     virtualized: info.virtualized,
     createdAt: info.createdAt,
-    installReported: info.installReported,
-    lastActiveDate: info.lastActiveDate,
-    lastReportAt: info.lastReportAt,
-    lastError: info.lastError,
-    deviceFile: resolveDeviceFile(),
     appVersion: currentAppVersion(),
     osVersion: collectOsVersion(),
     arch: process.arch,
+    deviceFile: resolveDeviceFile(),
+    envUnchanged: isEnvUnchanged(storedHw, current),
+    matchCount: storedHw ? countMatches(storedHw, current) : 7,
+    hardware: info.hardware,
   };
 }
 

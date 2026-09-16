@@ -127,15 +127,6 @@ const DEFAULT_SETTINGS = {
       { content: "container_name: ", insert: "services" },
     ],
   },
-  /**
-   * 安装量与活跃度遥测（系统设置 → 活跃度）：
-   * 仅上报 install / active 事件到统计服务端，不含聚合统计能力。
-   */
-  telemetry: {
-    enabled: true,
-    endpoint: "https://docker.yanziruxue.top",
-    collectHwFingerprint: true,
-  },
 };
 
 /**

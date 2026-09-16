@@ -162,6 +162,35 @@ export interface UpdateState {
 
 let updateState: UpdateState = { phase: "idle", message: "", percent: 0 };
 
+/**
+ * 取消标志：用户点击「取消升级」后置位。更新流程在下载 / 解压 / 替换各安全点轮询，
+ * 命中即优雅中止（不替换二进制、不退出进程、状态回 idle），让用户可以重新发起更新。
+ */
+let cancelRequested = false;
+
+/** 请求取消正在进行的系统升级（下载 / 解压 / 替换阶段均可） */
+export function cancelUpdate(): void {
+  cancelRequested = true;
+}
+
+/** 复位取消标志（新一轮更新开始时调用） */
+function resetCancel(): void {
+  cancelRequested = false;
+}
+
+/** 在取消时把状态收尾为 idle，并清理已落盘的临时下载包（失败时仅告警） */
+function finalizeCancel(zipPath?: string): void {
+  cancelRequested = false;
+  if (zipPath && fs.existsSync(zipPath)) {
+    try {
+      fs.rmSync(zipPath, { force: true });
+    } catch {
+      /* 清理失败不影响取消结果 */
+    }
+  }
+  setState("idle", "更新已取消", 0);
+}
+
 function setState(
   phase: UpdatePhase,
   message: string,
@@ -307,6 +336,7 @@ export async function performUpdate(): Promise<{ message: string; inProgress?: b
 
   // 同步置为“进行中”：apply 接口已改为后台执行并立即返回，必须让状态端点在此刻就反映更新已开始，
   // 否则前端点完按钮、轮询首次取状态时仍是 idle，进度条要等下一次轮询才出现（表现为“点了没反应”）。
+  resetCancel();
   setState("downloading", "正在准备更新...", 0);
 
   const info = await checkForUpdate();
@@ -385,6 +415,15 @@ export async function performUpdate(): Promise<{ message: string; inProgress?: b
               );
             }
           }
+          // 取消检查：用户中途点击「取消升级」即中止下载（停止读取、丢弃已下载分片）
+          if (cancelRequested) {
+            try {
+              await reader.cancel();
+            } catch {
+              /* 忽略取消失败 */
+            }
+            break;
+          }
         }
       } else {
         const ab = Buffer.from(await res.arrayBuffer());
@@ -399,6 +438,7 @@ export async function performUpdate(): Promise<{ message: string; inProgress?: b
       break;
     } catch (e: any) {
       lastErr = e.message;
+      if (cancelRequested) break; // 取消优先，不再尝试其它镜像
       if (ci < candidates.length - 1) {
         setState("downloading", `直连失败（${e.message}），尝试镜像...`, 5);
         continue;
@@ -435,6 +475,16 @@ async function applyLocalZip(zipPath: string, label: string, source: string): Pr
     setState("error", "解压失败", 55, e.message);
     throw new Error(`解压失败：${e.message}`);
   }
+  // 解压完成后再次确认是否取消（解压期间可能已请求取消）
+  if (cancelRequested) {
+    try {
+      fs.rmSync(extractDir, { recursive: true, force: true });
+    } catch {
+      /* 忽略清理失败 */
+    }
+    setState("idle", "更新已取消", 0);
+    return;
+  }
 
   // 定位并校验新二进制
   const newBinary = path.join(extractDir, BINARY_IN_ZIP);
@@ -448,6 +498,17 @@ async function applyLocalZip(zipPath: string, label: string, source: string): Pr
     const msg = `新二进制体积异常（${(newSize / 1024 / 1024).toFixed(1)} MB），已中止`;
     setState("error", msg, 60, msg);
     throw new Error(msg);
+  }
+
+  // 替换前再次确认（二进制校验期间可能已取消）
+  if (cancelRequested) {
+    try {
+      fs.rmSync(extractDir, { recursive: true, force: true });
+    } catch {
+      /* 忽略清理失败 */
+    }
+    setState("idle", "更新已取消", 0);
+    return;
   }
 
   // 替换（mv 不触发 ETXTBSY）+ 备份旧版本
@@ -494,6 +555,7 @@ export async function performUpdateFromUpload(zipPath: string): Promise<{ messag
     return { message: "更新正在进行中", inProgress: true };
   }
   // 立即置为「进行中」，避免前端上传后首次轮询仍是 idle（同 apply，否则进度条迟滞）
+  resetCancel();
   setState("extracting", "正在应用本地更新包...", 50);
   await applyLocalZip(zipPath, "本地更新包", "local");
   return { message: "已应用本地更新包，服务即将重启" };

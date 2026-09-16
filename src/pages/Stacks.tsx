@@ -50,6 +50,7 @@ import { copyText, selectNodeText } from "../lib/clipboard";
 import { normalizeInsert, insertPositionLabel } from "../lib/compose-template";
 import {
   createStackApi,
+  createStackFromBackupApi,
   stackActionApi,
   streamStackActions,
   removeStackApi,
@@ -2052,11 +2053,15 @@ function CreateStackModal({ onClose, engineId, onRefresh }: { onClose: () => voi
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [yamlValid, setYamlValid] = useState(true);
+  // 从堆栈备份初始化：选中的堆栈备份 zip + 隐藏 file input
+  const [backupFile, setBackupFile] = useState<File | null>(null);
+  const backupInputRef = useRef<HTMLInputElement>(null);
 
   const methods = [
     { key: "editor", label: "Web 编辑器", icon: <Edit3 size={20} />, desc: "从零编写 compose 文件" },
     { key: "upload", label: "上传文件", icon: <Upload size={20} />, desc: "上传本地 compose + env 文件" },
     { key: "convert", label: "命令转换", icon: <ArrowLeftRight size={20} />, desc: "docker run → Compose" },
+    { key: "fromBackup", label: "堆栈备份", icon: <Package size={20} />, desc: "上传堆栈备份直接还原" },
   ];
 
   // ===== 命令转换面板状态 =====
@@ -2111,10 +2116,28 @@ function CreateStackModal({ onClose, engineId, onRefresh }: { onClose: () => voi
     }
   };
 
+  /** 从上传的堆栈备份 zip 初始化新堆栈（名称用于避免与现有堆栈冲突） */
+  const handleCreateFromBackup = async () => {
+    if (!stackName.trim()) { setCreateError("请输入堆栈名称"); return; }
+    if (!backupFile) { setCreateError("请选择堆栈备份文件（.zip）"); return; }
+    if (!engineId) { setCreateError("未选择 Docker 引擎"); return; }
+    setCreating(true);
+    setCreateError(null);
+    try {
+      await createStackFromBackupApi(engineId, stackName.trim(), backupFile);
+      onRefresh?.();
+      onClose();
+    } catch (e: any) {
+      setCreateError(e.message || "创建失败");
+    } finally {
+      setCreating(false);
+    }
+  };
+
   return (
     <Modal open={true} onClose={onClose} title="创建新堆栈" size="lg" dismissable={false}>
       <div className="space-y-4">
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {methods.map((m) => (
             <button
               key={m.key}
@@ -2174,6 +2197,43 @@ function CreateStackModal({ onClose, engineId, onRefresh }: { onClose: () => voi
               <p className="text-sm text-slate-600">点击或拖拽上传 compose 文件</p>
               <p className="text-xs text-slate-400 mt-1">支持 .yml, .yaml 格式</p>
             </div>
+          </div>
+        )}
+
+        {method === "fromBackup" && (
+          <div className="space-y-3">
+            <FormField label="新堆栈名称" required>
+              <Input value={stackName} onChange={setStackName} placeholder="如: my-restored-stack" disabled={creating} />
+            </FormField>
+            <FormField
+              label="堆栈备份文件"
+              hint="上传由「备份堆栈」生成的 .zip；将按上述名称还原为新堆栈（含 compose、env、图标等）"
+            >
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => backupInputRef.current?.click()}
+                  disabled={creating}
+                  className="flex items-center gap-1.5 px-3 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
+                >
+                  <Upload size={14} /> 选择备份文件
+                </button>
+                <span className="text-xs text-slate-500 truncate" title={backupFile?.name}>
+                  {backupFile ? `${backupFile.name}（${(backupFile.size / 1024 / 1024).toFixed(1)} MB）` : "未选择文件"}
+                </span>
+                <input
+                  ref={backupInputRef}
+                  type="file"
+                  accept=".zip,application/zip"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] || null;
+                    setBackupFile(f);
+                    setCreateError(null);
+                    e.target.value = "";
+                  }}
+                />
+              </div>
+            </FormField>
           </div>
         )}
 
@@ -2275,8 +2335,8 @@ function CreateStackModal({ onClose, engineId, onRefresh }: { onClose: () => voi
         {/* 命令转换模式只有输入/输出，没有堆栈名称，创建按钮无意义 → 隐藏 */}
         {method !== "convert" && (
           <button
-            onClick={handleCreate}
-            disabled={creating || !stackName.trim() || !composeContent.trim()}
+            onClick={method === "fromBackup" ? handleCreateFromBackup : handleCreate}
+            disabled={creating || !stackName.trim() || (method === "fromBackup" ? !backupFile : !composeContent.trim())}
             className="px-4 py-2 text-sm text-white bg-blue-500 rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
           >
             {creating ? (

@@ -83,22 +83,39 @@ export function getMe(): Promise<AuthUser> {
 
 // ---------- 遥测（安装量与活跃度，仅上报端） ----------
 
+/** 本机设备标识的 7 维硬件属性（与后端 telemetry.ts 同构） */
+export interface DeviceHardware {
+  /** 系统（OS + 版本） */
+  system: string;
+  /** CPU 标识 */
+  cpu: string;
+  /** GPU 标识 */
+  gpu: string;
+  /** 内存标识（容量 + 序列号） */
+  memory: string;
+  /** 硬盘序列号 */
+  diskUid: string;
+  /** 主板序列号 */
+  boardSerial: string;
+  /** 设备 UUID（统计主键候选，≥3 硬件匹配时沿用） */
+  deviceUid: string;
+}
+
 export interface TelemetryStatus {
-  enabled: boolean;
-  endpoint: string;
-  collectHwFingerprint: boolean;
+  /** 设备 UUID（环境未变时稳定沿用；环境已变则重新生成） */
   uuid: string;
-  hwFingerprintShort: string;
   virtualized: boolean;
   createdAt: string;
-  installReported: boolean;
-  lastActiveDate: string;
-  lastReportAt?: string;
-  lastError?: string;
-  deviceFile: string;
   appVersion: string;
   osVersion: string;
   arch: string;
+  deviceFile: string;
+  /** 硬件环境是否未变化（7 维中 ≥3 匹配） */
+  envUnchanged: boolean;
+  /** 7 维中匹配的数量 */
+  matchCount: number;
+  /** 本机设备标识 7 维 */
+  hardware: DeviceHardware;
 }
 
 /** 远端统计服务端聚合数据（服务端未就绪时为 null） */
@@ -372,6 +389,24 @@ export function createStackApi(engineId: string, name: string, description: stri
   });
 }
 
+/** 从上传的「堆栈备份」zip 初始化一个新堆栈（name 为新堆栈名，避免与现有冲突） */
+export async function createStackFromBackupApi(
+  engineId: string,
+  name: string,
+  file: File
+): Promise<{ name: string; path: string }> {
+  const res = await fetch(`${BASE}/engines/${engineId}/stacks/from-backup?name=${encodeURIComponent(name)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/zip" },
+    body: file,
+  });
+  const json = await res.json().catch(() => ({} as any));
+  if (!res.ok || !json.success) {
+    throw new Error(json.error || "创建失败");
+  }
+  return json.data;
+}
+
 // ============ 堆栈操作 API ============
 
 /** 堆栈操作（up/down/pull/restart/build） */
@@ -578,6 +613,20 @@ export function restoreBackupApi(backupName: string): Promise<{ message: string;
   return request(`/backups/${encodeURIComponent(backupName)}/restore`, { method: "POST" });
 }
 
+/** 上传本地备份文件并直接恢复（无需先存入备份列表；后端校验 zip 与 manifest） */
+export async function restoreUploadedBackupApi(file: File): Promise<{ message: string; stacks: number }> {
+  const res = await fetch(`${BASE}/backups/restore-upload`, {
+    method: "POST",
+    headers: { "Content-Type": "application/zip" },
+    body: file,
+  });
+  const json = await res.json().catch(() => ({} as any));
+  if (!res.ok || !json.success) {
+    throw new Error(json.error || "恢复失败");
+  }
+  return json.data;
+}
+
 /** 删除备份文件 */
 export function deleteBackupApi(backupName: string): Promise<void> {
   return request(`/backups/${encodeURIComponent(backupName)}`, { method: "DELETE" });
@@ -774,6 +823,11 @@ export function checkUpdateApi(): Promise<import("./types").UpdateInfo> {
 /** 下载并应用更新（替换二进制后进程退出，由 systemd 拉起新版本） */
 export function applyUpdateApi(): Promise<{ message: string }> {
   return request<{ message: string }>("/system/update/apply", { method: "POST" });
+}
+
+/** 取消正在进行的系统升级（下载 / 解压 / 替换阶段均可；取消后状态回 idle） */
+export function cancelUpdateApi(): Promise<{ message: string }> {
+  return request<{ message: string }>("/system/update/cancel", { method: "POST" });
 }
 
 /** 获取更新进度（前端轮询） */

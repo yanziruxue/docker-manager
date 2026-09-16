@@ -51,8 +51,8 @@ import {
 } from "lucide-react";
 import type { SystemSettings, BackupMode, DockerEngine, UpdateInfo, UpdateState, ResourceTag, ComposeTemplate } from "../types";
 import { Card, FormField, Input, Select, Toggle, IconButton } from "../components/UI";
-import { ActivityPanel, DEFAULT_TELEMETRY } from "../components/ActivityPanel";
-import type { TelemetryConfig, SchedulerStatus } from "../types";
+import { ActivityPanel } from "../components/ActivityPanel";
+import type { SchedulerStatus } from "../types";
 import { COMPOSE_INSERT_OPTIONS, normalizeInsert } from "../lib/compose-template";
 import {
   changeMyPassword,
@@ -82,6 +82,7 @@ import {
   fetchAppVersion,
   checkUpdateApi,
   applyUpdateApi,
+  cancelUpdateApi,
   uploadUpdateZipApi,
   fetchPendingUploadApi,
   applyLocalUpdateApi,
@@ -90,6 +91,7 @@ import {
   fetchBackupsApi,
   createBackupApi,
   restoreBackupApi,
+  restoreUploadedBackupApi,
   deleteBackupApi,
   downloadBackupApi,
   exportConfigApi,
@@ -180,11 +182,6 @@ function getDefaultSettings(): SystemSettings {
     pathFavorites: [],
     updateScheduler: { enabled: true, mode: "daily", hour: 1, minute: 0, dayOfWeek: 1, dayOfMonth: 1, autoPull: false },
     user: { sessionTimeout: 30 },
-    telemetry: {
-      enabled: true,
-      endpoint: "https://docker.yanziruxue.top/api/telemetry/ingest",
-      collectHwFingerprint: true,
-    },
     update: { autoCheck: false, autoUpdate: false, ignoredVersion: "" },
     columnVisibility: {
       containers: ["icon","name","status","tags","ports","actions"],
@@ -567,6 +564,9 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
   const [restoringBackup, setRestoringBackup] = useState<string | null>(null);
   const [backupRestoring, setBackupRestoring] = useState(false);
   const [backupRestoreError, setBackupRestoreError] = useState<string | null>(null);
+  /** 上传本地备份文件并直接恢复：隐藏 file input + 上传中态 */
+  const backupUploadInputRef = useRef<HTMLInputElement>(null);
+  const [backupUploading, setBackupUploading] = useState(false);
   /** 上次备份的权限跳过项（结构化诊断 → 展示原因 + 提供唯一修复命令） */
   const [backupIssues, setBackupIssues] = useState<{
     skipped: string[];
@@ -940,6 +940,16 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
     }
   };
 
+  /** 取消正在进行的升级：请求后端置取消标志，轮询会随之把状态收尾为 idle */
+  const handleCancelUpdate = async () => {
+    try {
+      await cancelUpdateApi();
+      setToast({ type: "success", message: "已请求取消升级，正在中止…" });
+    } catch (err: any) {
+      setToast({ type: "error", message: err?.message || "取消失败" });
+    }
+  };
+
   /** 忽略当前检测到的版本：写入 ignoredVersion，角标与提示立即消失 */
   const handleIgnoreUpdate = () => {
     if (!updateInfo) return;
@@ -1055,6 +1065,26 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
       setBackupRestoreError(e.message || "恢复失败");
     } finally {
       setBackupRestoring(false);
+    }
+  };
+
+  /** 上传本地备份文件并直接恢复（无需先存入备份列表）。带确认，避免误覆盖当前配置 */
+  const handleRestoreFromUpload = async (file: File) => {
+    if (backupUploading || backupRestoring) return;
+    if (!window.confirm(`确定用备份「${file.name}」恢复吗？\n将覆盖当前 Compose 堆栈与设置/引擎配置。`)) {
+      return;
+    }
+    setBackupUploading(true);
+    setBackupRestoreError(null);
+    try {
+      const r = await restoreUploadedBackupApi(file);
+      setToast({ type: "success", message: `已从上传备份恢复（堆栈 ${r.stacks} 个），刷新页面后生效` });
+      await loadBackups();
+      loadPermCheck(true);
+    } catch (e: any) {
+      setToast({ type: "error", message: e.message || "恢复失败" });
+    } finally {
+      setBackupUploading(false);
     }
   };
 
@@ -1183,21 +1213,6 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
     // 用户配置校验（用户名由登录账户管理，此处仅校验会话超时）
     if (!(Number(data.user.sessionTimeout) > 0)) {
       errors.push("用户：会话超时必须大于 0 分钟");
-    }
-
-    // 活跃度配置校验
-    if (data.telemetry?.enabled && !data.telemetry.endpoint?.trim()) {
-      errors.push("活跃度：开启时上报地址不能为空");
-    }
-    if (data.telemetry?.endpoint?.trim()) {
-      try {
-        const u = new URL(data.telemetry.endpoint.trim());
-        if (u.protocol !== "http:" && u.protocol !== "https:") {
-          errors.push("活跃度：上报地址必须是 http(s):// 开头");
-        }
-      } catch {
-        errors.push("活跃度：上报地址格式不合法");
-      }
     }
 
     // 通知配置校验
@@ -2441,6 +2456,26 @@ docker-compose version</code>
                   <Upload size={14} /> 从备份恢复
                 </button>
                 <button
+                  onClick={() => backupUploadInputRef.current?.click()}
+                  disabled={backupUploading || backupRestoring}
+                  title="选择本地 .zip 备份文件直接恢复（无需先存入备份列表）"
+                  className="flex items-center gap-1.5 px-4 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {backupUploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                  {backupUploading ? "恢复中…" : "上传备份并恢复"}
+                </button>
+                <input
+                  ref={backupUploadInputRef}
+                  type="file"
+                  accept=".zip,application/zip"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleRestoreFromUpload(file);
+                    e.target.value = "";
+                  }}
+                />
+                <button
                   onClick={handleExportConfig}
                   disabled={exportingConfig}
                   className="flex items-center gap-1.5 px-4 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50"
@@ -2672,18 +2707,7 @@ docker-compose version</code>
 
         {activeSection === "activity" && (
           <div className="max-w-2xl space-y-5">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-800 mb-1">活跃度</h2>
-              <p className="text-sm text-slate-500">设备标识、硬件指纹与上报配置（停用即不再发送任何数据）</p>
-            </div>
-
-            <ActivityPanel
-              telemetry={data.telemetry}
-              onPatch={async (patch) => { setData({ ...data, telemetry: { ...data.telemetry, ...patch } }); return true; }}
-              onAfterSave={async () => {
-                await handleSave();
-              }}
-            />
+            <ActivityPanel />
           </div>
         )}
 
@@ -2878,7 +2902,17 @@ docker-compose version</code>
                           {updateState.message}
                         </span>
                       </div>
-                      <span className="text-sm font-mono font-semibold text-slate-600">{updateState.percent}%</span>
+                      <div className="flex items-center gap-3">
+                        {updateInProgress && (
+                          <button
+                            onClick={handleCancelUpdate}
+                            className="flex items-center gap-1 px-3 py-1.5 text-xs text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-100 transition-colors"
+                          >
+                            <X size={13} /> 取消升级
+                          </button>
+                        )}
+                        <span className="text-sm font-mono font-semibold text-slate-600">{updateState.percent}%</span>
+                      </div>
                     </div>
                     <div className="w-full h-2.5 bg-slate-200 rounded-full overflow-hidden">
                       <div
