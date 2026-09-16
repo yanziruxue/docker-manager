@@ -23,10 +23,10 @@
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.19.0**（开发中，未发布） |
-| 最新 Release | [v1.18.3](https://github.com/yanziruxue/docker-manager/releases/tag/v1.18.3)（菜单默认中文 + 推荐加速源新增 1Panel + 容器批量操作修复） |
-| 源码分支 | `main`（v1.19.0 改动尚未提交） |
-| 交付包 | 待打包：v1.19.0 Linux SEA zip |
+| 当前版本 | **v1.19.0**（已发布，`main` `8fd33d5a`） |
+| 最新 Release | [v1.19.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.19.0)（遥测硬编码 + 7 维硬件指纹 + OTA 可取消 + 备份上传恢复 + 堆栈备份建栈） |
+| 源码分支 | `main` @ `8fd33d5a4699b6cb0a6383fe4b9cc0b04f6f0b99` |
+| 交付包 | `build-upload/docker-manager-yanzi-linux-x64-v1.19.0.zip`（42,909,800 B / 40.9 MB / 5 文件；SHA-256 `a7641c8eb9b1d91b6a78550ba4d7bc97d8cc58d9a9dde8aaf41ca978acf30f2f`） |
 | 架构 | REST + WS + SSE 三通道；Socket / TCP / SSH 三种引擎 |
 | 目标平台 | Linux x64（SEA 单可执行文件），Unraid / 自托管 NAS |
 
@@ -147,7 +147,12 @@
   - 遥测新端点 `docker-yanzi.ziruxue.top` 在开发沙箱内不可达（HTTP 000），未能实机联调；上报为 fire-and-forget，若端点路径不符会静默 404，部署后可在后端日志/统计端确认。
   - 旧 `settings.json` 中残留的 `telemetry` 键不再被读写，属惰性字段（未做迁移剥离）。
   - 升级取消主要覆盖下载阶段；解压（`spawnSync` 同步）与替换为瞬时窗口，命中率有限但已保证「取消即不替换、不退出」。
-- **下一步**：打包 Linux SEA 交付包并按需发布 v1.19.0。
+- **下一步**：观察生产端遥测上报是否命中新端点（后端日志 / 统计服务端）；如需支持「换机后沿用旧 UUID」的人工绑定，再评估。
+- **发布记录**（2026-09-16）
+  - Release：[v1.19.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.19.0)
+  - 源码 commit：`8fd33d5a4699b6cb0a6383fe4b9cc0b04f6f0b99`（`main`）
+  - 交付包：`docker-manager-yanzi-linux-x64-v1.19.0.zip`（42,909,800 B；SHA-256 `a7641c8eb9b1d91b6a78550ba4d7bc97d8cc58d9a9dde8aaf41ca978acf30f2f`）
+  - 发布前验证：前后端 `tsc --noEmit` 全绿；`vite build`（1604 模块）；ELF magic `7f 45 4c 46`；bundle 内含 `1.19.0` / 新端点 / `system/update/cancel` / `restore-upload` / `from-backup`；内嵌前端为新构建资产 `index-BV7tYWfk.js`（含「本机设备标识 / 硬件环境」，无「遥测设置 / 上报状态」）；bundle 实跑冒烟：`/api/system/version`=1.19.0、`/api/telemetry/status` 返回 7 维 `hardware` + `envUnchanged/matchCount`、`POST /api/system/update/cancel` 返回「已请求取消升级」、两个上传接口对非 zip 数据正确拒绝（HTTP 400）。
 
 ---
 
