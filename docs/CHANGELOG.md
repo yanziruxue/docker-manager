@@ -23,10 +23,10 @@
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.18.3**（待发布，源码 `main` @ 发版后回填） |
+| 当前版本 | **v1.18.3**（已发布，`main` `c0bf26e4`） |
 | 最新 Release | [v1.18.3](https://github.com/yanziruxue/docker-manager/releases/tag/v1.18.3)（菜单默认中文 + 推荐加速源新增 1Panel + 容器批量操作修复） |
-| 源码分支 | `main` @ 发版后回填 |
-| 交付包 | `build-upload/docker-manager-yanzi-linux-x64-v1.18.3.zip`（大小 / SHA-256 发版后回填） |
+| 源码分支 | `main` @ `c0bf26e4b86a1f6db11cad7e1c12316a30935f21` |
+| 交付包 | `build-upload/docker-manager-yanzi-linux-x64-v1.18.3.zip`（42,908,910 B / 40.9 MB / 5 文件；SHA-256 `21b1f5c10c9bbf7eecbc328eadc3a657341506d705bcb5d51b0b6321e7c50585`） |
 | 架构 | REST + WS + SSE 三通道；Socket / TCP / SSH 三种引擎 |
 | 目标平台 | Linux x64（SEA 单可执行文件），Unraid / 自托管 NAS |
 
@@ -131,7 +131,7 @@
     - 修法：新增 `batchAction(action)`（遍历 `selected` 调 `containerActionApi` 做 start/stop/restart，汇总成功/失败写操作日志 + 刷新）与 `batchDelete()`（遍历 `selected` 调 `removeContainerApi(id, true)` 强制删除含运行中的容器，执行后清空选择 + 刷新）；给「批量启动 / 停止 / 重启 / 删除」接上 `onClick`，**移除无 API 的「批量更新」死按钮**；新增「批量删除」`ConfirmDialog` 二次确认弹窗（防误删）。`selected` 存 `container.id`，与 `toggleSelect(container.id)` 一致。
     - 涉及文件：`src/pages/Containers.tsx`。
     - 附注：堆栈管理的批量按钮（`src/pages/Stacks.tsx` 782-786 行）在源码里 `onClick` 已接好、后端 `/api/engines/:id/stacks/batch/:action` 完整可用；若部署实例上也不生效，是 v1.18.2 二进制落后于源码，本次重建一并修正。
-  - **发布**：源码 `main` @ `<TBD>`；Release [v1.18.3](https://github.com/yanziruxue/docker-manager/releases/tag/v1.18.3)；asset = 版本化 `docker-manager-yanzi-linux-x64-v1.18.3.zip` + latest 别名 `docker-manager-yanzi-linux-x64.zip` + `quick-install.sh`；交付包大小与 SHA-256 待发版后回填。
+  - **发布**：源码 `main` @ `c0bf26e4b86a1f6db11cad7e1c12316a30935f21`；Release [v1.18.3](https://github.com/yanziruxue/docker-manager/releases/tag/v1.18.3)；asset = 版本化 `docker-manager-yanzi-linux-x64-v1.18.3.zip` + latest 别名 `docker-manager-yanzi-linux-x64.zip` + `quick-install.sh`；交付包 42,908,910 B / SHA-256 `21b1f5c10c9bbf7eecbc328eadc3a657341506d705bcb5d51b0b6321e7c50585`（旧包 v1.18.2 已从 `build-upload/` 清除）。
   - **验证**：前后端 `tsc --noEmit` 全绿；`vite build` 通过（1604 模块）。
 - **未完成 / 已知限制**：无。
 - **下一步**：无。
