@@ -61,6 +61,7 @@ export function Containers({ containers, onNavigate, onRefresh, loading, error, 
     return latest || detailContainer;
   }, [containers, detailContainer]);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [confirmBatchDelete, setConfirmBatchDelete] = useState(false);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [showColumnPicker, setShowColumnPicker] = useState(false);
   const columnPickerRef = useRef<HTMLDivElement>(null);
@@ -88,6 +89,54 @@ export function Containers({ containers, onNavigate, onRefresh, loading, error, 
     } catch (e: any) {
       addOpLog({ action: "删除容器", target, status: "failed", detail: e.message || "删除失败", engineId });
     }
+  };
+
+  // 批量操作（启动/停止/重启），逐容器执行并汇总成功/失败
+  const batchAction = async (action: "start" | "stop" | "restart") => {
+    if (!engineId || selected.size === 0) return;
+    const ids = Array.from(selected);
+    const actionNames: Record<string, string> = { start: "批量启动容器", stop: "批量停止容器", restart: "批量重启容器" };
+    let ok = 0;
+    let fail = 0;
+    for (const id of ids) {
+      const name = containers.find((c) => c.id === id)?.name || id;
+      try {
+        await containerActionApi(engineId, id, action);
+        ok++;
+      } catch (e: any) {
+        fail++;
+        addOpLog({ action: actionNames[action], target: name, status: "failed", detail: e.message || "操作失败", engineId });
+      }
+    }
+    addOpLog({
+      action: actionNames[action],
+      target: `${ids.length} 个容器（成功 ${ok} / 失败 ${fail}）`,
+      status: fail === 0 ? "success" : "failed",
+      engineId,
+    });
+    onRefresh?.();
+  };
+
+  // 批量删除（强制删除，含运行中的容器），二次确认后执行
+  const batchDelete = async () => {
+    if (!engineId || selected.size === 0) return;
+    const ids = Array.from(selected);
+    let ok = 0;
+    let fail = 0;
+    for (const id of ids) {
+      const name = containers.find((c) => c.id === id)?.name || id;
+      try {
+        await removeContainerApi(engineId, id, true);
+        ok++;
+        addOpLog({ action: "批量删除容器", target: name, status: "success", engineId });
+      } catch (e: any) {
+        fail++;
+        addOpLog({ action: "批量删除容器", target: name, status: "failed", detail: e.message || "删除失败", engineId });
+      }
+    }
+    setSelected(new Set());
+    setConfirmBatchDelete(false);
+    onRefresh?.();
   };
 
   // 列可见性状态
@@ -282,11 +331,10 @@ export function Containers({ containers, onNavigate, onRefresh, loading, error, 
         <div className="flex items-center gap-3 mb-3 px-4 py-2.5 bg-blue-50 border border-blue-100 rounded-lg animate-slide-down">
           <span className="text-sm text-blue-700 font-medium">已选中 {selected.size} 个容器</span>
           <div className="h-4 w-px bg-blue-200" />
-          <button className="flex items-center gap-1 text-sm text-slate-600 hover:text-blue-600"><Play size={14} /> 批量启动</button>
-          <button className="flex items-center gap-1 text-sm text-slate-600 hover:text-blue-600"><Square size={14} /> 批量停止</button>
-          <button className="flex items-center gap-1 text-sm text-slate-600 hover:text-blue-600"><RotateCw size={14} /> 批量重启</button>
-          <button className="flex items-center gap-1 text-sm text-slate-600 hover:text-blue-600"><RefreshCw size={14} /> 批量更新</button>
-          <button className="flex items-center gap-1 text-sm text-red-600 hover:text-red-700"><Trash2 size={14} /> 批量删除</button>
+          <button onClick={() => batchAction("start")} className="flex items-center gap-1 text-sm text-slate-600 hover:text-blue-600"><Play size={14} /> 批量启动</button>
+          <button onClick={() => batchAction("stop")} className="flex items-center gap-1 text-sm text-slate-600 hover:text-blue-600"><Square size={14} /> 批量停止</button>
+          <button onClick={() => batchAction("restart")} className="flex items-center gap-1 text-sm text-slate-600 hover:text-blue-600"><RotateCw size={14} /> 批量重启</button>
+          <button onClick={() => setConfirmBatchDelete(true)} className="flex items-center gap-1 text-sm text-red-600 hover:text-red-700"><Trash2 size={14} /> 批量删除</button>
           <button onClick={() => setSelected(new Set())} className="ml-auto text-slate-400 hover:text-slate-600">
             <X size={16} />
           </button>
@@ -494,6 +542,17 @@ export function Containers({ containers, onNavigate, onRefresh, loading, error, 
         title="删除容器"
         message="确定要删除此容器吗？此操作不可撤销，容器的数据卷不会被删除。"
         confirmText="删除"
+        danger
+      />
+
+      {/* Batch Delete Confirmation */}
+      <ConfirmDialog
+        open={confirmBatchDelete}
+        onClose={() => setConfirmBatchDelete(false)}
+        onConfirm={batchDelete}
+        title="批量删除容器"
+        message={`确定要删除选中的 ${selected.size} 个容器吗？此操作不可撤销，容器的数据卷不会被删除。`}
+        confirmText="批量删除"
         danger
       />
     </div>

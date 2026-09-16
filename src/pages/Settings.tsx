@@ -152,7 +152,7 @@ function getDefaultSettings(): SystemSettings {
       tz: "Asia/Shanghai",
       composeStoragePath: "compose-manager",
       composeMode: "auto",
-      menuLanguage: "en",
+      menuLanguage: "zh",
       logLevel: "info",
       registryMirrors: [],
       rewriteImageNames: false,
@@ -1303,6 +1303,8 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
   const RECOMMENDED_MIRRORS: { url: string; label: string }[] = [
     { url: "https://docker.xuanyuan.me", label: "轩辕镜像（公益免费，实测 ~12MB/s）" },
     { url: "https://docker.1ms.run", label: "毫秒镜像（稳定）" },
+    { url: "https://docker.1panel.live", label: "1Panel 镜像（实测可用）" },
+    { url: "https://hub.1panel.dev", label: "1Panel Hub 镜像（实测可用）" },
   ];
   const addRecommendedMirrors = () => {
     const existing = new Set(mirrors.map((m) => m.trim()).filter(Boolean));

@@ -17,16 +17,16 @@
 
 ## 开发进度总览
 
-> 最后更新：2026-09-15
+> 最后更新：2026-09-16
 
 ### 当前状态
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.18.2**（已发布，`main` `db560570`） |
-| 最新 Release | [v1.18.2](https://github.com/yanziruxue/docker-manager/releases/tag/v1.18.2)（SEA 下 CLI 子命令失效修复 + 版本显示漂移修复 + 备份目录固定为 `<data>/backups` + 备份区四卡合一） |
-| 源码分支 | `main` @ `db560570` |
-| 交付包 | `build-upload/docker-manager-yanzi-linux-x64-v1.18.2.zip`（42,907,426 B / 40.9 MB / 5 文件；SHA-256 `99a3de26ec34bf339c3e1cc7666fe5d1164a4fde74e592b0e361319c6dfaba3f`） |
+| 当前版本 | **v1.18.3**（待发布，源码 `main` @ 发版后回填） |
+| 最新 Release | [v1.18.3](https://github.com/yanziruxue/docker-manager/releases/tag/v1.18.3)（菜单默认中文 + 推荐加速源新增 1Panel + 容器批量操作修复） |
+| 源码分支 | `main` @ 发版后回填 |
+| 交付包 | `build-upload/docker-manager-yanzi-linux-x64-v1.18.3.zip`（大小 / SHA-256 发版后回填） |
 | 架构 | REST + WS + SSE 三通道；Socket / TCP / SSH 三种引擎 |
 | 目标平台 | Linux x64（SEA 单可执行文件），Unraid / 自托管 NAS |
 
@@ -114,6 +114,27 @@
 - 一次发布中同时含 Minor 与 Patch 时，按**最高级别**递增，低级别归零（例：`1.0.3` + 新功能 → `1.1.0`）
 - Major 由人工决定，不自动递增
 - 同一天内的多次改动合并为一个版本，逐条记录在版本下
+
+---
+
+## v1.18.3 — 2026-09-16
+
+- **已完成**
+  - **系统设置「菜单显示语言」默认值改为中文**（用户要求）。
+    - 改动两处默认值 `"en"` → `"zh"`：`server/settings.ts` 的 `DEFAULT_SETTINGS.docker.menuLanguage`（服务端权威默认）+ `src/pages/Settings.tsx` 设置页本地初始 `data.docker.menuLanguage`（服务端数据未到达前的初始值）。其余回退点本就是 `"zh"`（`App.tsx` 的 `|| "zh"`、Stacks 组件默认参数 `menuLanguage="zh"`），无需改。未动 `DEFAULTS_VERSION`，避免触发「列布局」一次性迁移重置。已装实例因 v1.9.2 迁移已存 `menuLanguage=zh`，不受影响。
+    - 涉及文件：`server/settings.ts`、`src/pages/Settings.tsx`。
+  - **推荐加速源新增两条 1Panel 公益镜像源**（用户要求）。
+    - `src/pages/Settings.tsx` 的 `RECOMMENDED_MIRRORS` 数组新增 `https://docker.1panel.live`（1Panel 镜像）与 `https://hub.1panel.dev`（1Panel Hub 镜像）；原 `https://docker.1ms.run` 已在列表、不重复添加。点击「推荐加速源」按钮时按 URL 去重，已存在的不会重复填入。
+    - 涉及文件：`src/pages/Settings.tsx`。
+  - **修「容器管理」多选后的批量按钮全部失效**（用户反馈：批量启动 / 停止 / 删除点了没反应）。
+    - 根因：`src/pages/Containers.tsx` 的批量操作条里「批量启动 / 停止 / 重启 / 更新 / 删除」五个 `<button>` **完全没有 `onClick`**，纯静态按钮；且「批量更新」根本无对应后端 API（死按钮）。
+    - 修法：新增 `batchAction(action)`（遍历 `selected` 调 `containerActionApi` 做 start/stop/restart，汇总成功/失败写操作日志 + 刷新）与 `batchDelete()`（遍历 `selected` 调 `removeContainerApi(id, true)` 强制删除含运行中的容器，执行后清空选择 + 刷新）；给「批量启动 / 停止 / 重启 / 删除」接上 `onClick`，**移除无 API 的「批量更新」死按钮**；新增「批量删除」`ConfirmDialog` 二次确认弹窗（防误删）。`selected` 存 `container.id`，与 `toggleSelect(container.id)` 一致。
+    - 涉及文件：`src/pages/Containers.tsx`。
+    - 附注：堆栈管理的批量按钮（`src/pages/Stacks.tsx` 782-786 行）在源码里 `onClick` 已接好、后端 `/api/engines/:id/stacks/batch/:action` 完整可用；若部署实例上也不生效，是 v1.18.2 二进制落后于源码，本次重建一并修正。
+  - **发布**：源码 `main` @ `<TBD>`；Release [v1.18.3](https://github.com/yanziruxue/docker-manager/releases/tag/v1.18.3)；asset = 版本化 `docker-manager-yanzi-linux-x64-v1.18.3.zip` + latest 别名 `docker-manager-yanzi-linux-x64.zip` + `quick-install.sh`；交付包大小与 SHA-256 待发版后回填。
+  - **验证**：前后端 `tsc --noEmit` 全绿；`vite build` 通过（1604 模块）。
+- **未完成 / 已知限制**：无。
+- **下一步**：无。
 
 ---
 

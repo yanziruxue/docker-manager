@@ -16,7 +16,7 @@ const DEFAULT_SETTINGS = {
     tz: "Asia/Shanghai",
     composeStoragePath: "compose-manager",
     composeMode: "auto",
-    menuLanguage: "en",
+    menuLanguage: "zh",
     logLevel: "info",
     /**
      * 镜像加速源（pull-through 型，如 docker.m.daocloud.io）列表。

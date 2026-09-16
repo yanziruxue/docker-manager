@@ -131,7 +131,14 @@ function main() {
     args.zip || path.join(ROOT, "build-upload", `docker-manager-yanzi-linux-x64-v${version}.zip`);
   // 一键安装脚本作为 Release 附加资源，使「curl ... | sudo bash」可直接拉取
   const scriptAsset = path.join(ROOT, "scripts", "quick-install.sh");
-  const assets = [zip];
+
+  // 同时发布一个不带版本号的「latest」别名资产，使
+  // `releases/latest/download/docker-manager-yanzi-linux-x64.zip` 稳定指向最新版本
+  // （quick-install.sh 直链、手动下载均可用）。内容与版本化包完全一致。
+  const aliasZip = path.join(ROOT, "build-upload", "docker-manager-yanzi-linux-x64.zip");
+  fs.copyFileSync(zip, aliasZip);
+
+  const assets = [zip, aliasZip];
   if (fs.existsSync(scriptAsset)) assets.push(scriptAsset);
 
   if (!fs.existsSync(zip)) {
