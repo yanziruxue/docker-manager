@@ -23,10 +23,10 @@
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.21.1**（开发中，待打包发布；导入镜像两阶段进度 + 上传更新包进度（文件大小），含未发布的 v1.20.0 镜像导出导入与 v1.19.1 编辑器叠层修复） |
-| 最新 Release | [v1.19.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.19.0)（遥测硬编码 + 7 维硬件指纹 + OTA 可取消 + 备份上传恢复 + 堆栈备份建栈） |
-| 源码分支 | `main`（v1.19.1 / v1.20.0 / v1.21.0 / v1.21.1 改动尚未提交；上一版发布点 `8fd33d5a4699b6cb0a6383fe4b9cc0b04f6f0b99`） |
-| 交付包 | 待打包 v1.21.1；上一版交付包 `v1.20.0.zip`，42,913,448 B，SHA-256 `e2940442179bf67100a5251f8b0b4b7f5c8500618ec45200498ba36f35e39099`（更早 `v1.19.0.zip`，42,909,800 B，SHA-256 `a7641c8eb9b1d91b6a78550ba4d7bc97d8cc58d9a9dde8aaf41ca978acf30f2f`） |
+| 当前版本 | **v1.21.1**（已发布；上传更新包进度（文件大小）+ 导入镜像两阶段进度，含 v1.20.0 镜像导出导入与 v1.19.1 编辑器叠层修复） |
+| 最新 Release | [v1.21.1](https://github.com/yanziruxue/docker-manager/releases/tag/v1.21.1)（导入镜像两阶段进度 + 上传更新包进度（文件大小），含 v1.20.0 镜像导出导入与 v1.19.1 编辑器叠层修复） |
+| 源码分支 | `main`（v1.21.1 发布点 `89f4bc1473764223ee4bd0afe866b48083b8d645`；上一版发布点 `8fd33d5a4699b6cb0a6383fe4b9cc0b04f6f0b99`） |
+| 交付包 | `v1.21.1.zip`，42,917,760 B，SHA-256 `9d1ddc7c16a804d13cbf52b1e54721baf03ff11aba694582eeb757f7c84bfa3f`（上一版 `v1.20.0.zip`，42,913,448 B，SHA-256 `e2940442179bf67100a5251f8b0b4b7f5c8500618ec45200498ba36f35e39099`） |
 | 架构 | REST + WS + SSE 三通道；Socket / TCP / SSH 三种引擎 |
 | 目标平台 | Linux x64（SEA 单可执行文件），Unraid / 自托管 NAS |
 
@@ -176,7 +176,8 @@
   - Windows 上本地开发时，`docker` 不存在会让 `cmd.exe` 以 **GBK** 输出错误信息，前端 tail 显示为乱码；
     这是既有现象（原先的结果弹窗同样如此），Linux 部署下 `docker` 输出为 UTF-8，不影响交付环境。
   - 导入失败后未提供「重试」（需重新选择文件）；如需可后续保留 `File` 引用实现。
-- **下一步**：打包发布 v1.21.1；生产实测镜像「下载 → 上传」闭环与更新包上传进度并确认进度行格式。
+- **发布记录**：已发布 [v1.21.1](https://github.com/yanziruxue/docker-manager/releases/tag/v1.21.1)（tag `89f4bc1473764223ee4bd0afe866b48083b8d645`）；资产 `docker-manager-yanzi-linux-x64-v1.21.1.zip`（42,917,760 B，SHA-256 `9d1ddc7c16a804d13cbf52b1e54721baf03ff11aba694582eeb757f7c84bfa3f`）+ 无版本别名 `docker-manager-yanzi-linux-x64.zip` + `quick-install.sh`。
+- **下一步**：生产实测镜像「下载 → 上传」闭环与更新包上传进度，确认进度行格式。
 
 ## v1.20.0 — 2026-09-17
 
