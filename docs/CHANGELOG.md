@@ -23,10 +23,10 @@
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.21.0**（开发中，未打包；导入镜像显示上传/解包两阶段进度 + 可取消，含未发布的 v1.20.0 镜像导出导入与 v1.19.1 编辑器叠层修复） |
+| 当前版本 | **v1.21.1**（开发中，待打包发布；导入镜像两阶段进度 + 上传更新包进度（文件大小），含未发布的 v1.20.0 镜像导出导入与 v1.19.1 编辑器叠层修复） |
 | 最新 Release | [v1.19.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.19.0)（遥测硬编码 + 7 维硬件指纹 + OTA 可取消 + 备份上传恢复 + 堆栈备份建栈） |
-| 源码分支 | `main`（v1.19.1 / v1.20.0 / v1.21.0 改动尚未提交；上一版发布点 `8fd33d5a4699b6cb0a6383fe4b9cc0b04f6f0b99`） |
-| 交付包 | 待打包 v1.21.0；上一版交付包 `v1.20.0.zip`，42,913,448 B，SHA-256 `e2940442179bf67100a5251f8b0b4b7f5c8500618ec45200498ba36f35e39099`（更早 `v1.19.0.zip`，42,909,800 B，SHA-256 `a7641c8eb9b1d91b6a78550ba4d7bc97d8cc58d9a9dde8aaf41ca978acf30f2f`） |
+| 源码分支 | `main`（v1.19.1 / v1.20.0 / v1.21.0 / v1.21.1 改动尚未提交；上一版发布点 `8fd33d5a4699b6cb0a6383fe4b9cc0b04f6f0b99`） |
+| 交付包 | 待打包 v1.21.1；上一版交付包 `v1.20.0.zip`，42,913,448 B，SHA-256 `e2940442179bf67100a5251f8b0b4b7f5c8500618ec45200498ba36f35e39099`（更早 `v1.19.0.zip`，42,909,800 B，SHA-256 `a7641c8eb9b1d91b6a78550ba4d7bc97d8cc58d9a9dde8aaf41ca978acf30f2f`） |
 | 架构 | REST + WS + SSE 三通道；Socket / TCP / SSH 三种引擎 |
 | 目标平台 | Linux x64（SEA 单可执行文件），Unraid / 自托管 NAS |
 
@@ -117,7 +117,7 @@
 
 ---
 
-## v1.21.0 — 2026-09-17
+## v1.21.1 — 2026-09-17
 
 - **已完成**
   - **导入镜像显示进度**：上传 tar 导入镜像从「转圈等一个 JSON 响应」改为**两阶段实时进度 + 实时输出**。
@@ -134,6 +134,16 @@
       `docker load` 子进程（沿用既有 `input.on("close")` 逻辑）。
     - 新增 `tailwind.config.js` 的 `indeterminate` 关键帧（不确定态进度条滑动条纹）。
     - 涉及文件：`server/docker.ts`、`server/index.ts`、`src/api.ts`、`src/pages/Images.tsx`、`tailwind.config.js`。
+  - **上传更新包显示进度（系统设置 → 系统更新）**：本地更新包（.zip）上传从「转圈等一个 JSON 响应」改为**实时上传进度 + 文件大小**。
+    - **上传进度条**：`uploadUpdateZipApi`（`src/api.ts`）从 `fetch` 换成 `XMLHttpRequest`——
+      **`fetch` 观测不到请求体上传进度**（`ReadableStream` 请求体 + `duplex:"half"` 在 Safari/Firefox 不可用），
+      改用 `XMLHttpRequest.upload.onprogress` 上报「已发送字节 / 总字节」，发送完毕后 `upload.onload` 拉满到文件总字节
+      （规避个别浏览器 `lengthComputable` 缺失导致卡 99%）。
+    - **UI**：`src/pages/Settings.tsx` 新增 `uploadProgress` / `uploadFileName` 状态；上传期间在「上传更新包」按钮下方
+      显示蓝色进度条 + `文件名 · 已发送 MB / 总 MB · 百分比%`，完成后清空；401 仍派发 `auth:unauthorized` 并 reject。
+    - **后端无需改动**：`POST /api/system/update/upload` 仍是 `express.raw` 缓冲整包，客户端 XHR 的 `upload.onprogress`
+      直接测网络发送字节，与服务端接收解耦，与镜像导入上传同源模式。
+    - 涉及文件：`src/api.ts`、`src/pages/Settings.tsx`。
   - **接口契约变更（`POST /api/engines/:id/images/load`）**：响应由「单个 JSON」改为**逐行 NDJSON**
     （请求体一边上传、`docker load` 一边解包，两者并发，只有随产随发才能呈现进度）：
     - `{"type":"progress","line":"…"}` / `{"type":"done","output":"…","images":[…]}` / `{"type":"error","error":"…"}`；
@@ -166,7 +176,7 @@
   - Windows 上本地开发时，`docker` 不存在会让 `cmd.exe` 以 **GBK** 输出错误信息，前端 tail 显示为乱码；
     这是既有现象（原先的结果弹窗同样如此），Linux 部署下 `docker` 输出为 UTF-8，不影响交付环境。
   - 导入失败后未提供「重试」（需重新选择文件）；如需可后续保留 `File` 引用实现。
-- **下一步**：打包发布 v1.21.0；生产实测镜像「下载 → 上传」闭环并确认进度行格式。
+- **下一步**：打包发布 v1.21.1；生产实测镜像「下载 → 上传」闭环与更新包上传进度并确认进度行格式。
 
 ## v1.20.0 — 2026-09-17
 

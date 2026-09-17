@@ -969,17 +969,64 @@ export function fetchUpdateStatusApi(): Promise<import("./types").UpdateState> {
 }
 
 /** 上传本地 zip 更新包（仅保存，不立即执行；进度由手动「更新」按钮触发） */
-export async function uploadUpdateZipApi(file: File): Promise<{ fileName: string; size: number; uploadedAt: string }> {
-  const res = await fetch(`${BASE}/system/update/upload`, {
-    method: "POST",
-    headers: { "Content-Type": "application/zip" },
-    body: file,
+export interface UploadUpdateHandlers {
+  /** 上传进度：已发送字节 / 总字节（来自 XMLHttpRequest.upload.onprogress，fetch 观测不到请求体上传进度） */
+  onProgress?: (sent: number, total: number) => void;
+}
+
+export function uploadUpdateZipApi(
+  file: File,
+  handlers: UploadUpdateHandlers = {}
+): Promise<{ fileName: string; size: number; uploadedAt: string }> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${BASE}/system/update/upload`, true);
+    xhr.withCredentials = true;
+    xhr.setRequestHeader("Content-Type", "application/zip");
+
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      fn();
+    };
+
+    // 上传进度：XHR 可观测请求体发送字节；fetch 不行
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) handlers.onProgress?.(e.loaded, e.total);
+    };
+    xhr.upload.onload = () => {
+      // 发送完毕：拉满到文件总字节（避免个别浏览器 lengthComputable 缺失导致卡 99%）
+      handlers.onProgress?.(file.size, file.size);
+    };
+
+    xhr.onload = () => {
+      if (settled) return;
+      // 鉴权失败发生在路由之前，是普通 JSON 响应（非流）
+      if (xhr.status === 401) {
+        if (typeof window !== "undefined") window.dispatchEvent(new Event("auth:unauthorized"));
+        finish(() => reject(new ApiError("会话已失效，请重新登录", undefined, 401)));
+        return;
+      }
+      let data: any = {};
+      try {
+        data = JSON.parse(xhr.responseText || "{}");
+      } catch {
+        /* 非 JSON：走下方失败分支 */
+      }
+      if (xhr.status < 200 || xhr.status >= 300 || !data?.success) {
+        finish(() => reject(new ApiError(data?.error || `更新包上传失败（${xhr.status}）`)));
+        return;
+      }
+      finish(() => resolve(data.data as { fileName: string; size: number; uploadedAt: string }));
+    };
+    xhr.onerror = () => {
+      if (settled) return;
+      finish(() => reject(new ApiError("网络错误，更新包上传失败")));
+    };
+
+    xhr.send(file);
   });
-  const json = await res.json().catch(() => ({} as any));
-  if (!res.ok || !json.success) {
-    throw new Error(json.error || "更新包上传失败");
-  }
-  return json.data;
 }
 
 /** 查询已上传、待应用的本地更新包 */

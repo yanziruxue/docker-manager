@@ -792,6 +792,9 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
   // 上传更新包：隐藏的 file input + 应用中的禁用态
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  // 上传进度（文件大小 + 百分比）：仅在上传中展示，完成后清空
+  const [uploadFileName, setUploadFileName] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<{ sent: number; total: number } | null>(null);
   // 已上传、待应用的本地更新包（上传后仅保存，需手动点击「更新」按钮才执行）
   // expiresAt/ttlMs 来自后端，用于前端倒计时显示与到期自动丢弃
   const [pendingUpload, setPendingUpload] = useState<{ fileName: string; size: number; uploadedAt: string; ttlMs?: number; expiresAt?: string } | null>(null);
@@ -966,10 +969,15 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
   const handleUploadUpdate = async (file: File) => {
     if (updateInProgress) return;
     setUploading(true);
+    setUploadFileName(file.name);
+    setUploadProgress(null);
     // 清除旧进度显示，避免与待应用提示混淆
     setUpdateState(null);
     try {
-      await uploadUpdateZipApi(file);
+      await uploadUpdateZipApi(file, {
+        onProgress: (sent, total) => setUploadProgress({ sent, total }),
+      });
+      setUploadProgress(null);
       // 重新拉取完整 pending（含 expiresAt/ttlMs），保证倒计时起点准确
       const d = await fetchPendingUploadApi();
       if (d?.exists && d.fileName && d.size != null && d.uploadedAt) {
@@ -977,6 +985,7 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
       }
       setToast({ type: "success", message: "更新包已上传，2 分钟内点击「更新」应用，超时自动销毁" });
     } catch (err: any) {
+      setUploadProgress(null);
       const msg = String(err?.message || err || "未知错误");
       setToast({ type: "error", message: msg });
     } finally {
@@ -2787,6 +2796,31 @@ docker-compose version</code>
                     </span>
                   )}
                 </div>
+
+                {uploading && (
+                  <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg space-y-2">
+                    <div className="flex items-center justify-between gap-4">
+                      <p className="text-sm font-medium text-slate-700">正在上传更新包</p>
+                      <span className="text-xs text-slate-500 tabular-nums">
+                        {uploadFileName ? `${uploadFileName} · ` : ""}
+                        {uploadProgress
+                          ? `${(uploadProgress.sent / 1048576).toFixed(1)} / ${(uploadProgress.total / 1048576).toFixed(1)} MB · ${Math.round((uploadProgress.sent / uploadProgress.total) * 100)}%`
+                          : "准备中..."}
+                      </span>
+                    </div>
+                    <div className="w-full h-2 bg-blue-100 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-blue-500 transition-all duration-150"
+                        style={{
+                          width:
+                            uploadProgress && uploadProgress.total > 0
+                              ? `${Math.min(100, (uploadProgress.sent / uploadProgress.total) * 100)}%`
+                              : "0%",
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
 
                 {pendingUpload && (
                   <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg space-y-3">
