@@ -17,16 +17,16 @@
 
 ## 开发进度总览
 
-> 最后更新：2026-09-16
+> 最后更新：2026-09-17
 
 ### 当前状态
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.19.0**（已发布，`main` `8fd33d5a`） |
+| 当前版本 | **v1.21.0**（开发中，未打包；导入镜像显示上传/解包两阶段进度 + 可取消，含未发布的 v1.20.0 镜像导出导入与 v1.19.1 编辑器叠层修复） |
 | 最新 Release | [v1.19.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.19.0)（遥测硬编码 + 7 维硬件指纹 + OTA 可取消 + 备份上传恢复 + 堆栈备份建栈） |
-| 源码分支 | `main` @ `8fd33d5a4699b6cb0a6383fe4b9cc0b04f6f0b99` |
-| 交付包 | `build-upload/docker-manager-yanzi-linux-x64-v1.19.0.zip`（42,909,800 B / 40.9 MB / 5 文件；SHA-256 `a7641c8eb9b1d91b6a78550ba4d7bc97d8cc58d9a9dde8aaf41ca978acf30f2f`） |
+| 源码分支 | `main`（v1.19.1 / v1.20.0 / v1.21.0 改动尚未提交；上一版发布点 `8fd33d5a4699b6cb0a6383fe4b9cc0b04f6f0b99`） |
+| 交付包 | 待打包 v1.21.0；上一版交付包 `v1.20.0.zip`，42,913,448 B，SHA-256 `e2940442179bf67100a5251f8b0b4b7f5c8500618ec45200498ba36f35e39099`（更早 `v1.19.0.zip`，42,909,800 B，SHA-256 `a7641c8eb9b1d91b6a78550ba4d7bc97d8cc58d9a9dde8aaf41ca978acf30f2f`） |
 | 架构 | REST + WS + SSE 三通道；Socket / TCP / SSH 三种引擎 |
 | 目标平台 | Linux x64（SEA 单可执行文件），Unraid / 自托管 NAS |
 
@@ -38,7 +38,7 @@
 | 仪表盘 | ✅ | 统计卡片 + 资源监控 + 活动时间线 |
 | 容器管理 | ✅ | 列表 / 详情 / 启停 / 日志 / 资源监控 / Web 终端 / CSV 导出 |
 | 堆栈管理 | ✅ | Compose 自动发现 / 创建（含**上传堆栈备份初始化**）/ 编辑 / 操作 / 更新检查 / 备份恢复 / 批量操作 |
-| 镜像管理 | ✅ | 列表 / 筛选 / 拉取 / 删除 / prune 未使用 |
+| 镜像管理 | ✅ | 列表 / 筛选 / 拉取（**失败可重试**）/ 删除 / prune 未使用 / **导出下载 tar** / **上传 tar 导入** |
 | 数据卷管理 | ✅ | 列表 / 新建 / 删除 / prune / 详情 |
 | 备份管理 | ✅ | 手动全量 + 堆栈级备份 / 恢复（含**上传备份文件直接恢复**）/ 导出（**zip** 格式，兼容历史 tar.gz）+ 自动备份调度器（周/月/年/Cron，含保留清理） |
 | 权限诊断与修复 | ✅ | 备份期自愈 `u+r` + 结构化诊断（属主/权限位/一条修复命令）+ `fix-perms` CLI + 启动体检与界面提示 |
@@ -116,6 +116,117 @@
 - 同一天内的多次改动合并为一个版本，逐条记录在版本下
 
 ---
+
+## v1.21.0 — 2026-09-17
+
+- **已完成**
+  - **导入镜像显示进度**：上传 tar 导入镜像从「转圈等一个 JSON 响应」改为**两阶段实时进度 + 实时输出**。
+    - **上传 tar 阶段（精确百分比）**：进度来自 `XMLHttpRequest.upload.onprogress` 的已上传字节 / tar 总字节。
+      为此 `uploadImageApi` 从 `fetch` 换成 XHR —— **`fetch` 观测不到请求体上传进度**
+      （`ReadableStream` 请求体 + `duplex:"half"` 在 Safari/Firefox 不可用）。
+    - **导入（docker load）阶段**：服务端把 `docker load` 的输出**逐行随产随发**（NDJSON），前端在
+      `readyState=3` 阶段增量读取 `responseText` 解析，实时显示层进度行与 `Loaded image: …`；
+      能解析到字节时显示百分比（复用既有 `parsePullTailSizes`，同为 `<hash>: … MB/MB` 格式），
+      **解析不到时显示不确定态条纹而不伪造百分比**（`docker load` 不预先公布层总量）。
+    - **进度弹窗**：`ImageImportPanel`（`src/pages/Images.tsx`）——两阶段进度条 + 实时代码块输出 + 导入结果；
+      终态显示「导入成功（镜像名）/ 导入失败（原因）」。原「结果弹窗 + 工具栏转圈」被其取代。
+    - **可取消**：进行中提供「取消导入」，`AbortController` 中断上传 → 请求体中断 → 服务端随之结束
+      `docker load` 子进程（沿用既有 `input.on("close")` 逻辑）。
+    - 新增 `tailwind.config.js` 的 `indeterminate` 关键帧（不确定态进度条滑动条纹）。
+    - 涉及文件：`server/docker.ts`、`server/index.ts`、`src/api.ts`、`src/pages/Images.tsx`、`tailwind.config.js`。
+  - **接口契约变更（`POST /api/engines/:id/images/load`）**：响应由「单个 JSON」改为**逐行 NDJSON**
+    （请求体一边上传、`docker load` 一边解包，两者并发，只有随产随发才能呈现进度）：
+    - `{"type":"progress","line":"…"}` / `{"type":"done","output":"…","images":[…]}` / `{"type":"error","error":"…"}`；
+    - 响应头带 `Content-Type: application/x-ndjson`、`X-Accel-Buffering: no`（关反代缓冲，NAS 场景多为 nginx 反代）；
+    - **取舍**：响应头一旦发出就无法再用 HTTP 状态码表达失败（与 `saveImageToFile` 同一取舍），
+      因此**引擎不存在仍以 404 + JSON 在发头之前返回**，之后的一切失败走流内 `error` 事件；
+    - `loadImageFromStream` 新增 `onOutputLine` 回调，且 **stdout / stderr 都接**——不同 docker 版本
+      把 `Loading layer` 与 `Loaded image` 分别写在两个流上，只接一个会漏进度；行切分同时兼容
+      `\n`（分层完成）与 `\r`（原地刷新进度条），并丢弃连续重复行。
+  - **修复（本次实测踩到，已写入记忆）**：路由一度用 `req.on("close")` 判定「客户端断开」，
+    但 Node 里**请求体读完后 `req` 同样会触发 `close`** → 所有进度被静默丢弃、响应体恒为空、
+    请求挂到客户端超时。改为看**响应侧**状态：`res.on("close")` 中 `!res.writableFinished` 才算真断开，
+    写前再判 `res.writableEnded || res.destroyed`。
+  - **验证**：
+    - 前后端 `tsc --noEmit` ✅。
+    - 接口冒烟（esbuild 打包 `server/index.ts` 后跑真实服务）：未鉴权 → **401**；引擎不存在 →
+      **404 + `application/json`**（发头之前）；真实上传 → **200 + `application/x-ndjson` + `chunked`**，
+      流内先 `progress` 再 `error`（沙箱无 docker），**0.15s 返回**（修复前是挂满 25s 超时、响应体为空）；
+      **慢速上传中途强制断开后进程存活、接口仍 200**（无 EPIPE / 无卡死）。
+    - 前端组件级真实渲染（真实 `Images` 组件 + 项目 Tailwind CSS + Playwright/Chromium，
+      以打桩 `XMLHttpRequest` 脚本化「上传进度 → docker load 输出 → 完成」全流程）：
+      工具栏「上传镜像」✅、进度弹窗出现 ✅、两阶段进度条 ✅、上传百分比与字节 ✅、
+      `docker load` 输出 tail 实时追加 ✅、终态「导入成功 + 镜像名」✅、无 JS 异常 ✅。
+- **未完成 / 已知限制**
+  - **沙箱无 Docker 守护进程 → 导入成功路径未实机联调**：`docker load` 真实输出的行格式
+    （尤其非 TTY 下是否给出 `MB/MB` 字节）只在有 docker 的机器上才能最终确认；
+    解析不到字节时会安全降级为不确定态条纹，不会显示错误的百分比。
+  - **反代若缓冲响应体**（未透传 `X-Accel-Buffering` 的场景），进度会退化为「完成时一次性出现」；
+    已做兜底：此时用最终合并输出补全 tail，不会出现输出区空白。
+  - Windows 上本地开发时，`docker` 不存在会让 `cmd.exe` 以 **GBK** 输出错误信息，前端 tail 显示为乱码；
+    这是既有现象（原先的结果弹窗同样如此），Linux 部署下 `docker` 输出为 UTF-8，不影响交付环境。
+  - 导入失败后未提供「重试」（需重新选择文件）；如需可后续保留 `File` 引用实现。
+- **下一步**：打包发布 v1.21.0；生产实测镜像「下载 → 上传」闭环并确认进度行格式。
+
+## v1.20.0 — 2026-09-17
+
+- **已完成**
+  - **镜像导出（下载）**：镜像列表行内菜单新增「下载镜像」，把选中镜像导出为 tar（`docker save`）。
+    - 后端新增 `saveImageToFile(engine, imageRef)`（`server/docker.ts`）+ `GET /api/engines/:id/images/save?image=<ref>`（`server/index.ts`）。
+    - **先落地临时文件再 `res.download`，不直接 `docker save | res`**：直接流式下发时响应头已发出，`docker save` 失败（镜像不存在、daemon 不可达）只能表现为「下载到一半中断」，前端拿不到任何错误。落地后失败可回 JSON 错误。下载回调里清理临时文件。
+    - **统一走 stdout 重定向，不用 `docker save -o <file>`**：SSH 引擎下 `-o` 是**远程**路径，文件会写到远端机器上，本地拿不到。
+    - 前端走既有的 `downloadAsBlob()`（fetch → Blob → objectURL），与备份下载同一条鉴权链路，失败能弹出可读错误；不使用 `<a href="/api/...">` 顶层导航（失败零反馈）。
+  - **镜像导入（上传）**：工具栏新增「上传镜像」，选择 `docker save` 导出的 tar 后导入该引擎（`docker load`）。
+    - 后端新增 `loadImageFromStream(engine, input)` + `POST /api/engines/:id/images/load`。
+    - **请求体直接管道进 `docker load` 的 stdin，不用 `express.raw` 缓冲**：镜像 tar 动辄数百 MB~数 GB，全量进内存会打爆服务端（`express.json` 默认上限仅 100kb，走 `application/octet-stream` 也会被绕过/拒绝）。前端显式声明 `Content-Type: application/octet-stream` 以保证不被 `express.json` 处理。
+    - 客户端中途断开（`input` 未正常 `end`）时主动结束子进程，避免 `docker load` 一直等 stdin。
+    - 导入结果通过既有 `CmdOutputModal` 展示 `docker load` 原始输出（含 `Loaded image: …`）。
+  - **镜像拉取失败可重试**：拉取任务条与拉取结果弹窗在 `status === "error"` 时显示「重试」按钮，直接用失败任务的镜像名重新发起拉取（无需重新输入）。
+    - 前端实现，复用既有 `startImagePullApi`；`startPull()` 增加 `imageOverride` 参数供重试直接调用。
+    - 重试/拉取动作补写操作日志（成功/失败）。
+  - **三种引擎连接统一收敛**：新增 `buildEngineDockerCmd(engine, dockerArgs)`，把「在指定引擎上跑一条 docker 子命令」的三种连接方式（socket / tcp / ssh）集中到一处，供 save/load 共用（避免各写一套分支）。
+    - SSH 远程命令对**每个参数单独引号包裹**，避免镜像名中的特殊字符被远程 shell 解释；key 认证写临时私钥并追加 `BatchMode=yes`（私钥不可用时立即失败，不卡在密码提示）；password 认证用 `sshpass` 喂密码，**缺 sshpass 直接报错**（不做无声回退，避免「点了没反应」）。
+    - 涉及文件：`server/docker.ts`、`server/index.ts`、`src/api.ts`、`src/pages/Images.tsx`。
+  - **验证**：
+    - 后端 `tsc --noEmit` ✅、前端 `tsc --noEmit` ✅。
+    - 接口冒烟（esbuild 打包 `server/index.ts` 后跑真实服务）：未鉴权 `save` → **401**；缺 `image` 参数 → **400**（`镜像名不能为空`）；导出/导入在 docker 不可用时均返回**结构化 JSON 500**（含 `stderr` 原文），**不挂起**（`--max-time` 未触发）；`2MB` 流式 body 成功穿透到 `docker load`（未被 JSON 中间件拦截/413）。
+    - 前端组件级真实渲染（用 esbuild 把**真实的 `Images` 组件**打包成静态页 + 项目自身 Tailwind CSS，Playwright + Chromium 驱动，`fetch` 打桩返回「失败 + 进行中」两条拉取任务）：工具栏「上传镜像」✅、`input[type=file]` 存在 ✅、失败任务条「重试」✅、进行中任务「取消」✅、行内下拉「下载镜像」✅（且保留「拉取 / 检查更新」）✅、无 JS 异常 ✅。
+- **未完成 / 已知限制**
+  - **本沙箱无 Docker 守护进程（`docker` CLI 亦不可用），save/load 的成功路径未实机联调**：仅验证了接线、鉴权、参数校验与失败路径。生产部署后需实测「下载 → 上传」闭环（建议用一个中小镜像，如 `hello-world`）。
+  - SSH **password 认证**引擎依赖远端/本机 `sshpass`：缺失时导入/导出会明确报错（拉取路径此前已有同样的回退策略）。**SSH 引擎的 save/load 未实测**。
+  - 上传接口未设体积上限（管理员专用接口 + 流式，不占内存）；如部署在受限反代后，需注意反代的请求体上限配置。
+  - 导入未做「tar 是否为 docker 镜像」的事前校验，交由 `docker load` 判定（错误信息已提示「请确认上传的是 docker save 导出的 tar」）。
+- **打包记录（2026-09-17，未发布）**
+  - 交付包：`build-upload/docker-manager-yanzi-linux-x64-v1.20.0.zip`
+    - 体积 **42,913,448 B**（40.9 MB），SHA-256 `e2940442179bf67100a5251f8b0b4b7f5c8500618ec45200498ba36f35e39099`
+    - 同时输出无版本别名 `docker-manager-yanzi-linux-x64.zip`（兼容旧脚本）
+  - 包内 5 个文件（权限位已归一）：`docker-manager-yanzi`(0o755) / `install.sh`(0o755) / `uninstall.sh`(0o755) / `docker-manager-yanzi.service`(0o644) / `README.md`(0o644)
+  - 构建链：`vite build`（`index-DwNqWGHK.js` / `index-DOHv4ZsK.css`）→ `build-binary.mjs`（bundle.js 4,789,927 B）→ SEA blob → postject 注入（ELF magic `7f 45 4c 46` ✅）
+  - 验证：前后端 `tsc --noEmit` ✅；前端新文案「上传镜像 / 下载镜像 / 重试」在 `dist/assets/index-DwNqWGHK.js` 命中；后端标识符 `images/save`、`images/load`、`saveImageToFile`、`loadImageFromStream`、`buildEngineDockerCmd`、版本号 `1.20.0` 在 bundle.js 命中；bundle.js 对 `index-DwNqWGHK.js` / `index-DOHv4ZsK.css` 各引用 1 次（确认打进的是本次新构建的前端，非旧 dist）。
+  - ⚠️ 上一版的 `docker-manager-yanzi-linux-x64-v1.19.1.zip` 已被本包取代，若确认不再需要可删除（`deploy/linux/` 与 `build-upload/` 各一份，二者均已在 `.gitignore` 中）。
+- **下一步**：发布 v1.20.0（推源码 + GitHub Release），发布后补 Release 链接、`main` commit SHA 与包 SHA-256；生产实测镜像「下载 → 上传」闭环。
+
+## v1.19.1 — 2026-09-16（未发布，已并入 v1.20.0 一起打包）
+
+- **已完成**
+  - **修复 YAML / ENV 编辑器「高亮层与文字/选区错位」**（用户提供界面截图反馈：编辑器内出现白色方块切断选区、文字重影、长行行尾部错位）。
+    - **根因一：两层排版参数不一致 —— `tab-size`。** `<textarea>` 显式设了 `tabSize: 2`，而 `<pre>` 高亮层从未设置，沿用浏览器默认 **8**。两层对同一个制表符的换算宽度差 6 列，含 `\t` 的行（`command:`、粘贴的外部 compose 等）字形相对光标/选区逐 tab 累加漂移。**实测同一行 2 个 `\t`：`<pre>` 用默认值渲染 221.58px，按正确值只有 135.81px，差 85.77px。**
+    - **根因二：滚动同步依赖对方的可滚动范围。** `syncScroll()` 用 `pre.scrollTop/scrollLeft = ta.scrollTop/scrollLeft` 事后同步，而两者是**相互独立的滚动容器**：`<textarea>` 出现占位滚动条（竖向占用 `clientWidth`、横向占用 `clientHeight`）后其可滚动范围与 `<pre>`（`overflow:hidden`，不预留）不一致，赋值会被**钳位**在更小的最大值上 → 高亮文字与光标/选区横向错开约一个滚动条宽度、行号列在滚到底时整体错行。
+    - **修复**：
+      1. `<pre>` 补齐与 `<textarea>` **完全相同**的排版参数：`tabSize: 2` + `fontVariantLigatures: "none"` + `fontKerning: "none"`（后两项一并补齐，避免连字/字距微调引入亚像素差）；`<pre>` 改 `overflow-visible`（由外层 `overflow-hidden` 容器裁剪，不再依赖自身滚动范围）。
+      2. 滚动同步改为 CSS **`transform` 平移**：`<pre>` 用 `translate(-scrollLeft, -scrollTop)`，行号列新增内层容器做 `translateY(-scrollTop)`。平移量与 `<textarea>` 滚动量严格相等，**与两端可滚动范围无关，结构上不可能被钳位**。
+      3. 内容变化后（换行/删除会改变 `scrollTop`，且旧 `transform` 已过期）用 `requestAnimationFrame` 重新对齐一次。
+    - **同步修复 `EnvEditor`**（同一套「透明 textarea + `<pre>` 高亮层」方案，存在完全相同的问题）。
+    - 涉及文件：`src/components/YamlEditor.tsx`、`src/components/EnvEditor.tsx`。
+  - **验证（组件级真实浏览器实测，非静态审查）**：用 esbuild 把**真实的 `YamlEditor`**（含项目自身 Tailwind 产物 CSS）打包成静态页，Playwright + Chromium 驱动：
+    - 「复制 `<textarea>` 的 computed style 渲染同段文本 → 与 `<pre>` 逐行比对渲染宽度」：**40 行全部 0.00px 差**（含 3 行带 `\t` 的行）；`tabSize` 两层均为 2。
+    - **对照实验**：把 `<pre>` 的 `tab-size` 强行改回 8（= 修复前状态），3 个含 tab 行立刻出现 **-45.70 / -91.41 / -45.70 px** 偏差 —— 直接证明该参数就是错位来源之一。
+    - **滚动对齐**：容器收窄至 `clientWidth 490 / scrollWidth 968` 触发真实横向滚动（`scrollLeft = 478`），`<pre>` 的 `transform = translate(-478px, 0px)`，首字形坐标 **-462 与期望 -462 完全一致**（误差 0）；行号列偏移 0。
+- **未完成 / 已知限制**
+  - 未在真实弹窗（新建/编辑堆栈对话框）中做端到端手测，验证在独立组件验证台上完成（复用组件本身与项目 CSS，未修改验证对象）。
+  - 勾选/选中时 `<textarea>` 仍会用「选中前景色」把被选文字重绘一遍（浏览器既有行为），与背后的高亮层叠加 —— 两层对齐后不再产生可见重影；未额外关闭该重绘。
+  - `YamlEditor` 无固定高度（`minHeight` 仅为下限），当前布局下纵向滚动实际不触发（实测 `clientHeight == scrollHeight == 824`），行号列的 `translateY` 属纵深防御。
+- **下一步**：随下次打包发布并入交付包。
 
 ## v1.19.0 — 2026-09-16
 

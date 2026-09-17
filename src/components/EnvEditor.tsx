@@ -7,6 +7,10 @@
  * - 合法行：`KEY=VALUE`（KEY 以字母/下划线开头，仅字母数字下划线；值可为空）
  * - 允许 `export KEY=VALUE` 前缀、整行/行尾 # 注释（值内引号包裹的 # 不算注释）
  * - 语法错误在状态栏提示「ENV 格式错误」+ 行号 + 原因
+ *
+ * 滚动同步同样用 CSS transform 平移（与 YamlEditor 一致，v1.19.1）：
+ * textarea 与 <pre> 是两个独立滚动容器，可滚动范围不一致时设 scrollTop/scrollLeft
+ * 会被钳位 → 高亮文字与光标错位；平移量与 textarea 滚动量严格相等，不可能错位。
  */
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2, AlertCircle } from "lucide-react";
@@ -80,6 +84,8 @@ export function EnvEditor({ value, onChange, placeholder, minHeight = 320, class
   const taRef = useRef<HTMLTextAreaElement>(null);
   const preRef = useRef<HTMLPreElement>(null);
   const gutterRef = useRef<HTMLDivElement>(null);
+  /** 行号列内层容器：用 transform 平移，避免 scrollTop 被钳位导致行号与文字错行 */
+  const gutterInnerRef = useRef<HTMLDivElement>(null);
 
   const highlighted = useMemo(() => value.split("\n").map(highlightEnvLine).join("\n"), [value]);
   const lineCount = useMemo(() => Math.max(1, value.split("\n").length), [value]);
@@ -104,16 +110,25 @@ export function EnvEditor({ value, onChange, placeholder, minHeight = 320, class
     return null;
   }, [value]);
 
+  /**
+   * 同步 textarea 的滚动到高亮层与行号列。
+   * 用 transform 平移而非 scrollTop/scrollLeft：后者的可设置上限取决于元素自身的
+   * 可滚动范围，两层范围一旦不一致就会被钳位（见文件头说明），导致文字错位。
+   */
   const syncScroll = () => {
     const ta = taRef.current;
+    if (!ta) return;
     const pre = preRef.current;
-    const gutter = gutterRef.current;
-    if (ta && pre) {
-      pre.scrollTop = ta.scrollTop;
-      pre.scrollLeft = ta.scrollLeft;
-    }
-    if (ta && gutter) gutter.scrollTop = ta.scrollTop;
+    if (pre) pre.style.transform = `translate(${-ta.scrollLeft}px, ${-ta.scrollTop}px)`;
+    const gutterInner = gutterInnerRef.current;
+    if (gutterInner) gutterInner.style.transform = `translateY(${-ta.scrollTop}px)`;
   };
+
+  // 内容变化后重新对齐（换行/删除会改变 scrollTop）
+  useEffect(() => {
+    const id = requestAnimationFrame(syncScroll);
+    return () => cancelAnimationFrame(id);
+  }, [value]);
 
   const isEmpty = value.trim() === "";
 
@@ -130,7 +145,7 @@ export function EnvEditor({ value, onChange, placeholder, minHeight = 320, class
           aria-hidden
           className="w-11 shrink-0 overflow-hidden bg-slate-50 border-r border-slate-100 text-right font-mono text-[13px] leading-[20px] text-slate-400 select-none pointer-events-none"
         >
-          <div className="py-3 pr-2">
+          <div ref={gutterInnerRef} className="py-3 pr-2">
             {Array.from({ length: lineCount }, (_, i) => (
               <div key={i}>{i + 1}</div>
             ))}
@@ -140,7 +155,8 @@ export function EnvEditor({ value, onChange, placeholder, minHeight = 320, class
           <pre
             ref={preRef}
             aria-hidden
-            className="absolute inset-0 m-0 px-4 py-3 font-mono text-[13px] leading-[20px] whitespace-pre text-slate-700 overflow-hidden pointer-events-none select-none"
+            className="absolute inset-0 m-0 px-4 py-3 font-mono text-[13px] leading-[20px] whitespace-pre text-slate-700 overflow-visible pointer-events-none select-none"
+            style={{ tabSize: 2, fontVariantLigatures: "none", fontKerning: "none" }}
             dangerouslySetInnerHTML={{ __html: highlighted }}
           />
           <textarea
@@ -150,8 +166,13 @@ export function EnvEditor({ value, onChange, placeholder, minHeight = 320, class
             onScroll={syncScroll}
             placeholder={placeholder}
             spellCheck={false}
-            style={{ tabSize: 2, WebkitTextFillColor: "transparent" }}
-            className="absolute inset-0 w-full h-full px-4 py-3 font-mono text-[13px] leading-[20px] whitespace-pre bg-transparent caret-slate-700 border-0 focus:outline-none resize-none"
+            style={{
+              tabSize: 2,
+              WebkitTextFillColor: "transparent",
+              fontVariantLigatures: "none",
+              fontKerning: "none",
+            }}
+            className="absolute inset-0 w-full h-full px-4 py-3 font-mono text-[13px] leading-[20px] whitespace-pre bg-transparent caret-slate-700 border-0 focus:outline-none resize-none overscroll-contain"
           />
         </div>
       </div>

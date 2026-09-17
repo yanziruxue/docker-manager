@@ -1056,6 +1056,241 @@ function toPublicInfo(task: PullTaskInternal): PullTaskInfo {
   };
 }
 
+// ============ 镜像导出（save）/ 导入（load） ============
+
+/** 单引号包裹 shell 参数（用于拼远程 SSH 命令串，内部单引号转义为 '\''） */
+function shellQuote(s: string): string {
+  return `'${String(s).replace(/'/g, "'\\''")}'`;
+}
+
+/**
+ * 生成「在指定引擎上执行一条 docker 子命令」的调用方式。
+ *
+ * 三种连接方式统一收敛到这里，避免 save/load 各写一套分支：
+ * - socket：本地 docker CLI，DOCKER_HOST 指向引擎 socket
+ * - tcp：本地 docker CLI，DOCKER_HOST=tcp://…（https 时开 TLS 校验）
+ * - ssh：远程 `docker …`；key 认证写临时私钥并加 BatchMode，
+ *   password 认证用 sshpass 喂密码（缺 sshpass 直接报错，不做无声回退）
+ *
+ * 返回值 cleanup 用于清理临时私钥等资源；shell 字段决定 spawn 是否走 shell。
+ */
+function buildEngineDockerCmd(
+  engine: DockerEngine,
+  dockerArgs: string[],
+): { cmd: string; args: string[]; env: NodeJS.ProcessEnv; shell: boolean; cleanup: () => void } {
+  const env = dockerCliEnv();
+  const noop = () => { /* 无资源需清理 */ };
+
+  if (engine.connectionType === "socket") {
+    env.DOCKER_HOST = `unix://${engine.socketPath}`;
+    return { cmd: "docker", args: dockerArgs, env, shell: process.platform === "win32", cleanup: noop };
+  }
+  if (engine.connectionType === "tcp") {
+    const tls = /^https:\/\//i.test(engine.tcpAddress);
+    env.DOCKER_HOST = tls ? engine.tcpAddress : `tcp://${engine.tcpAddress}`;
+    if (tls) env.DOCKER_TLS_VERIFY = "1";
+    return { cmd: "docker", args: dockerArgs, env, shell: process.platform === "win32", cleanup: noop };
+  }
+
+  // SSH：远程命令串（每个参数单独引号包裹，避免镜像名里的特殊字符被远程 shell 解释）
+  const remoteCmd = ["docker", ...dockerArgs].map(shellQuote).join(" ");
+  const sshBase: string[] = [
+    "-p", String(engine.sshPort || 22),
+    "-o", "StrictHostKeyChecking=no",
+    "-o", "UserKnownHostsFile=/dev/null",
+    "-o", "LogLevel=ERROR",
+  ];
+
+  let tmpKeyPath: string | null = null;
+  const cleanup = () => {
+    if (tmpKeyPath) {
+      try { fs.unlinkSync(tmpKeyPath); } catch { /* 已删除或不可删 */ }
+      tmpKeyPath = null;
+    }
+  };
+
+  if (engine.sshAuthType === "key" && engine.sshKey) {
+    const kp = path.join(os.tmpdir(), `dmk_${Date.now()}_${Math.random().toString(36).slice(2)}`);
+    try {
+      fs.writeFileSync(kp, engine.sshKey, { mode: 0o600 });
+      tmpKeyPath = kp;
+      sshBase.unshift("-i", kp);
+    } catch { tmpKeyPath = null; }
+    // key 认证禁交互，避免私钥不可用时卡在密码提示
+    sshBase.push("-o", "BatchMode=yes");
+  }
+
+  const remote = `${engine.sshUsername}@${engine.sshHost}`;
+
+  if (engine.sshAuthType === "password" && engine.sshPassword) {
+    let hasSshpass = false;
+    try { hasSshpass = (spawnSync("sshpass", ["-V"], { encoding: "utf-8" }).stdout || "").length > 0; } catch { hasSshpass = false; }
+    if (!hasSshpass) {
+      cleanup();
+      throw new Error("未找到 sshpass，password 认证的 SSH 引擎暂不支持镜像导入/导出，请改用密钥认证");
+    }
+    return { cmd: "sshpass", args: ["-p", engine.sshPassword, "ssh", ...sshBase, remote, remoteCmd], env, shell: false, cleanup };
+  }
+  return { cmd: "ssh", args: [...sshBase, remote, remoteCmd], env, shell: false, cleanup };
+}
+
+/** spawn 参数：SSH 走数组直传，本地/TCP 在 Windows 下需要 shell 解析 docker.exe */
+function spawnOptsFor(engine: DockerEngine, inv: { env: NodeJS.ProcessEnv; shell: boolean }) {
+  return { env: inv.env, stdio: ["pipe", "pipe", "pipe"] as ["pipe", "pipe", "pipe"], shell: inv.shell };
+}
+
+/**
+ * 导出镜像为 tar 文件（供下载）。
+ *
+ * 为什么先落地临时文件、不直接 `docker save | res`：
+ * 直接流式下发时响应头已发出，`docker save` 失败（镜像不存在等）只能表现为
+ * 「下载到一半中断」，前端拿不到任何错误信息。落地后失败可回 JSON 错误。
+ *
+ * 统一用 stdout 重定向而不是 `docker save -o <file>`：SSH 引擎下 `-o` 是**远程**路径，
+ * 文件会写到远端机器上，本地拿不到。
+ */
+export async function saveImageToFile(
+  engine: DockerEngine,
+  imageRef: string,
+): Promise<{ path: string; size: number; cleanup: () => void }> {
+  const tmpPath = path.join(os.tmpdir(), `dm-image-save-${Date.now()}-${Math.random().toString(36).slice(2)}.tar`);
+  const cleanup = () => { try { fs.unlinkSync(tmpPath); } catch { /* 已删除或不存在 */ } };
+
+  const inv = buildEngineDockerCmd(engine, ["save", imageRef]);
+
+  const child = spawn(inv.cmd, inv.args, spawnOptsFor(engine, inv));
+  const out = fs.createWriteStream(tmpPath);
+
+  let stderr = "";
+  child.stderr?.setEncoding("utf-8");
+  child.stderr?.on("data", (c: string) => { stderr = (stderr + c).slice(-4000); });
+  child.stdout?.pipe(out);
+  // 子进程提前退出（EPIPE）时忽略写流错误，最终以退出码为准
+  child.stdin?.on("error", () => { /* ignore */ });
+
+  const exited = new Promise<number | null>((resolve, reject) => {
+    child.on("error", (e) => reject(new Error(`无法启动 docker 命令: ${e.message}`)));
+    child.on("close", (code) => resolve(code));
+  });
+  const flushed = new Promise<void>((resolve, reject) => {
+    out.on("error", (e) => reject(new Error(`写入临时文件失败: ${e.message}`)));
+    out.on("finish", () => resolve());
+    out.on("close", () => resolve());
+  });
+
+  let code: number | null = null;
+  try {
+    [code] = await Promise.all([exited, flushed]);
+  } catch (e: any) {
+    try { child.kill("SIGTERM"); } catch { /* 已退出 */ }
+    out.destroy();
+    cleanup();
+    inv.cleanup();
+    throw e;
+  }
+  inv.cleanup();
+
+  if (code !== 0) {
+    cleanup();
+    throw new Error(`docker save 失败（退出码 ${code ?? "未知"}）：${stderr.trim() || "无输出"}`);
+  }
+  const size = fs.existsSync(tmpPath) ? fs.statSync(tmpPath).size : 0;
+  if (size === 0) {
+    cleanup();
+    throw new Error("导出失败：docker save 未产出任何数据");
+  }
+  return { path: tmpPath, size, cleanup };
+}
+
+/**
+ * 把「命令输出流」切成行并逐行回调。
+ *
+ * docker load / save 的进度输出同时使用 `\n`（分层完成）与 `\r`（原地刷新进度条），
+ * 两种分隔符都要按行切开；跨 chunk 的半行留在 carry 里等下一块（否则行会被腰斩）。
+ * 连续重复行（`\r` 原地刷新会产生大量同内容行）直接丢弃，避免污染进度流。
+ */
+function createLineSplitter(onLine: (line: string) => void) {
+  let carry = "";
+  let last = "";
+  return (chunk: string) => {
+    carry += chunk;
+    const parts = carry.split(/\r\n|\r|\n/);
+    carry = parts.pop() ?? "";
+    for (const raw of parts) {
+      const line = raw.trim();
+      if (!line || line === last) continue;
+      last = line;
+      onLine(line);
+    }
+  };
+}
+
+/**
+ * 从可读流导入镜像（上传 tar → 管道进 `docker load` 的 stdin）。
+ *
+ * 不用 express.raw 缓冲请求体：镜像 tar 动辄数百 MB~数 GB，全量进内存会打爆服务端。
+ * 客户端中途断开时主动结束子进程，避免 `docker load` 一直等 stdin。
+ *
+ * onOutputLine：docker load 每产出一行输出就回调一次（供路由侧流式下发给前端做进度展示）。
+ * stdout / stderr 都接——不同 docker 版本把 `Loading layer` 进度与 `Loaded image` 结果
+ * 分别写在两个流上，只接一个会漏进度。
+ */
+export async function loadImageFromStream(
+  engine: DockerEngine,
+  input: NodeJS.ReadableStream,
+  onOutputLine?: (line: string) => void,
+): Promise<{ output: string; images: string[] }> {
+  const inv = buildEngineDockerCmd(engine, ["load"]);
+  try {
+    return await new Promise<{ output: string; images: string[] }>((resolve, reject) => {
+      const child = spawn(inv.cmd, inv.args, spawnOptsFor(engine, inv));
+      let stdout = "";
+      let stderr = "";
+      // 进度行直通前端；设上限防止极端输出把响应流淹掉（收尾结果仍以完整 stdout/stderr 为准）
+      let emitted = 0;
+      const emit = (line: string) => {
+        if (!onOutputLine || emitted >= 2000) return;
+        emitted++;
+        onOutputLine(line);
+      };
+      const splitOut = createLineSplitter(emit);
+      const splitErr = createLineSplitter(emit);
+
+      child.stdout?.setEncoding("utf-8");
+      child.stdout?.on("data", (c: string) => { stdout = (stdout + c).slice(-8000); splitOut(c); });
+      child.stderr?.setEncoding("utf-8");
+      child.stderr?.on("data", (c: string) => { stderr = (stderr + c).slice(-8000); splitErr(c); });
+
+      let inputEnded = false;
+      input.on("end", () => { inputEnded = true; });
+      input.on("close", () => {
+        // 非正常结束（客户端断开/超时）→ 结束子进程，避免其一直等 stdin
+        if (!inputEnded) { try { child.kill("SIGTERM"); } catch { /* 已退出 */ } }
+      });
+      input.on("error", (e: Error) => {
+        try { child.kill("SIGTERM"); } catch { /* 已退出 */ }
+        reject(new Error(`读取上传数据失败: ${e.message}`));
+      });
+      // 子进程提前退出会导致 stdin EPIPE，属预期，等 close 里按退出码判定
+      child.stdin?.on("error", () => { /* ignore */ });
+      input.pipe(child.stdin!);
+
+      child.on("error", (e) => reject(new Error(`无法启动 docker 命令: ${e.message}`)));
+      child.on("close", (code) => {
+        const merged = [stdout, stderr].map((s) => s.trim()).filter(Boolean).join("\n");
+        if (code === 0) {
+          const images = (stdout.match(/Loaded image[^\n]*/g) || []).map((l) => l.trim());
+          resolve({ output: merged || "导入完成", images });
+        } else {
+          reject(new Error(`docker load 失败（退出码 ${code ?? "未知"}）：${stderr.trim() || stdout.trim() || "无输出"}（请确认上传的是 docker save 导出的 tar）`));
+        }
+      });
+    });
+  } finally {
+    inv.cleanup();
+  }
+}
+
 /**
  * 获取数据卷列表
  * Docker API v1.42+ 弃用了 /volumes?size（新版直接报错），UsageData.Size 不再返回，

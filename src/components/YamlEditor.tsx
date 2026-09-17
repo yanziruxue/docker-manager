@@ -13,6 +13,12 @@
  *   能覆盖 compose YAML 的 99% 用法（缩进、键值、列表、注释、字符串/数字/布尔）。
  * - white-space: pre（不换行）：textarea 与 <pre> 字符级对齐最简单，
  *   长行靠水平滚动，避免 wrap 导致高亮层错位。
+ * - 滚动同步用 CSS transform 平移，**不用**给 <pre> 设 scrollTop/scrollLeft（v1.19.1）：
+ *   textarea 与 <pre> 是两个独立滚动容器，只要两者可滚动范围不一致（textarea 出现占位
+ *   竖向滚动条、或横向滚动条占了高度 → clientWidth/clientHeight 更小，但 <pre> 是
+ *   overflow:hidden 不预留），赋值就会被钳位在 <pre> 更小的最大值上 → 高亮文字与光标/
+ *   选区横向错开一个滚动条宽度、行号列在底部整行错位。平移量与 textarea 的滚动量严格
+ *   相等，与两端可滚动范围无关，因此结构上不可能错位。
  * - 所有 token 文本都过 escapeHtml 之后再注入 dangerouslySetInnerHTML，
  *   用户 YAML 不能注入 HTML（即使含 <script>）。
  * - lint 用 yaml.load 全量解析；compose 几 KB 文本下开销可忽略。
@@ -160,6 +166,8 @@ export function YamlEditor({
   const taRef = useRef<HTMLTextAreaElement>(null);
   const preRef = useRef<HTMLPreElement>(null);
   const gutterRef = useRef<HTMLDivElement>(null);
+  /** 行号列的内层容器：同样用 transform 平移，避免 scrollTop 被钳位导致行号与文字错行 */
+  const gutterInnerRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<YamlValidationError | null>(null);
   const [valid, setValid] = useState(true);
 
@@ -218,17 +226,26 @@ export function YamlEditor({
     }
   }, [value]);
 
-  /** 同步 textarea 滚动到高亮层与行号列（pre/gutter 用 overflow:hidden，scrollTop 仍生效） */
+  /**
+   * 同步 textarea 的滚动到高亮层与行号列。
+   * 用 transform 平移而非 scrollTop/scrollLeft：后者的可设置上限取决于元素自身的
+   * 可滚动范围，两层范围一旦不一致就会被钳位（见文件头「设计取舍」），导致文字错位；
+   * 平移量与 textarea 的滚动量严格相等，与可滚动范围无关。
+   */
   const syncScroll = () => {
     const ta = taRef.current;
+    if (!ta) return;
     const pre = preRef.current;
-    const gutter = gutterRef.current;
-    if (ta && pre) {
-      pre.scrollTop = ta.scrollTop;
-      pre.scrollLeft = ta.scrollLeft;
-    }
-    if (ta && gutter) gutter.scrollTop = ta.scrollTop;
+    if (pre) pre.style.transform = `translate(${-ta.scrollLeft}px, ${-ta.scrollTop}px)`;
+    const gutterInner = gutterInnerRef.current;
+    if (gutterInner) gutterInner.style.transform = `translateY(${-ta.scrollTop}px)`;
   };
+
+  // 内容变化后重新对齐：换行/删除会改变 scrollTop，且此前的 transform 已过期
+  useEffect(() => {
+    const id = requestAnimationFrame(syncScroll);
+    return () => cancelAnimationFrame(id);
+  }, [value]);
 
   /** Tab 键：插入 2 个空格，避免切出编辑器。Enter 维持默认（仍插入换行） */
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -294,7 +311,7 @@ export function YamlEditor({
           aria-hidden
           className="w-11 shrink-0 overflow-hidden bg-slate-50 border-r border-slate-100 text-right font-mono text-[13px] leading-[20px] text-slate-400 select-none pointer-events-none"
         >
-          <div className="py-3 pr-2">
+          <div ref={gutterInnerRef} className="py-3 pr-2">
             {Array.from({ length: lineCount }, (_, i) => (
               <div key={i}>{i + 1}</div>
             ))}
@@ -304,7 +321,8 @@ export function YamlEditor({
           <pre
             ref={preRef}
             aria-hidden
-            className="absolute inset-0 m-0 px-4 py-3 font-mono text-[13px] leading-[20px] whitespace-pre text-slate-700 overflow-hidden pointer-events-none select-none"
+            className="absolute inset-0 m-0 px-4 py-3 font-mono text-[13px] leading-[20px] whitespace-pre text-slate-700 overflow-visible pointer-events-none select-none"
+            style={{ tabSize: 2, fontVariantLigatures: "none", fontKerning: "none" }}
             dangerouslySetInnerHTML={{ __html: highlighted }}
           />
           <textarea
@@ -318,8 +336,13 @@ export function YamlEditor({
             onClick={(e) => reportCursorLine(e.currentTarget)}
             placeholder={placeholder}
             spellCheck={false}
-            style={{ tabSize: 2, WebkitTextFillColor: "transparent" }}
-            className="absolute inset-0 w-full h-full px-4 py-3 font-mono text-[13px] leading-[20px] whitespace-pre bg-transparent caret-slate-700 border-0 focus:outline-none resize-none"
+            style={{
+              tabSize: 2,
+              WebkitTextFillColor: "transparent",
+              fontVariantLigatures: "none",
+              fontKerning: "none",
+            }}
+            className="absolute inset-0 w-full h-full px-4 py-3 font-mono text-[13px] leading-[20px] whitespace-pre bg-transparent caret-slate-700 border-0 focus:outline-none resize-none overscroll-contain"
           />
         </div>
       </div>

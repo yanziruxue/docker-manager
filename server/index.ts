@@ -47,6 +47,8 @@ import {
   backupStack,
   restoreStack,
   createStackFromBackup,
+  saveImageToFile,
+  loadImageFromStream,
   attachContainerTerminal,
   resizeContainerTerminal,
   getComposeCmd,
@@ -1447,6 +1449,86 @@ app.post("/api/engines/:id/images/prune", async (req, res) => {
 });
 
 // ============ 数据卷操作 API ============
+
+// ============ 镜像导出 / 导入 API ============
+
+/** 导出镜像为 tar 并下载（失败时返回 JSON 错误，不会产生半截下载） */
+app.get("/api/engines/:id/images/save", async (req, res) => {
+  const engine = getEngine(req.params.id);
+  if (!engine) { res.status(404).json({ success: false, error: "引擎不存在" }); return; }
+  const imageRef = String(req.query.image || "").trim();
+  if (!imageRef) { res.status(400).json({ success: false, error: "镜像名不能为空" }); return; }
+  apiLog.info(`导出镜像 | 引擎=${engine.name} 镜像=${imageRef}`);
+
+  let tmp: { path: string; size: number; cleanup: () => void };
+  try {
+    tmp = await saveImageToFile(engine, imageRef);
+  } catch (err: any) {
+    apiLog.error(`导出镜像失败 | 镜像=${imageRef} 错误=${err.message}`);
+    res.status(500).json({ success: false, error: err.message || "导出失败" });
+    return;
+  }
+
+  // 文件名归一化：去掉 / : 等非法字符，避免浏览器拒绝保存
+  const safeName = imageRef.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "") || "image";
+  apiLog.info(`导出镜像完成 | 镜像=${imageRef} 字节=${tmp.size}`);
+  res.download(tmp.path, `${safeName}.tar`, (err) => {
+    tmp.cleanup();
+    if (err && !res.headersSent) {
+      res.status(500).json({ success: false, error: `下载失败：${err.message}` });
+    }
+  });
+});
+
+/**
+ * 导入镜像（上传 tar，流式管道进 docker load，不缓冲进内存）。
+ *
+ * 响应体是**逐行 NDJSON** 而不是单个 JSON：请求体（tar）一边上传、docker load 一边解包，
+ * 两者是并发的，只有把进度随产随发前端才能看到「导入进度」。
+ * - `{"type":"progress","line":"…"}`：docker load 的一行输出（层进度 / Loaded image）
+ * - `{"type":"done","output":"…","images":[…]}`：成功收尾
+ * - `{"type":"error","error":"…"}`：失败
+ *
+ * 代价：响应头一旦发出就无法再用 HTTP 状态码表达失败（同 `saveImageToFile` 的取舍），
+ * 因此**引擎不存在 / 参数错误仍在发头之前以 JSON + 4xx 返回**，之后的错误全部走流内事件。
+ */
+app.post("/api/engines/:id/images/load", async (req, res) => {
+  const engine = getEngine(req.params.id);
+  if (!engine) { res.status(404).json({ success: false, error: "引擎不存在" }); return; }
+  apiLog.info(`导入镜像 | 引擎=${engine.name} 字节=${req.headers["content-length"] || "未知"}`);
+
+  res.writeHead(200, {
+    "Content-Type": "application/x-ndjson; charset=utf-8",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive",
+    // 关闭反向代理缓冲，确保每行进度立即送达（NAS 场景多为 nginx 反代）
+    "X-Accel-Buffering": "no",
+  });
+  res.flushHeaders();
+
+  // 客户端断开（取消导入 / 关页面）后不能再写，否则 EPIPE。
+  // ⚠️ 不能用 `req.on("close")` 判定「客户端断开」：请求体读完后它**同样**会触发，
+  // 于是所有进度都被静默丢掉、响应体一直是空的、请求挂到客户端超时（v1.21.0 实测踩到）。
+  // 正确做法：看**响应侧**状态——`writableFinished` 表示正常结束，未结束时收到 close 才是真断开。
+  let clientGone = false;
+  res.on("close", () => {
+    if (!res.writableFinished) clientGone = true;
+  });
+  const send = (payload: unknown) => {
+    if (clientGone || res.writableEnded || res.destroyed) return;
+    try { res.write(JSON.stringify(payload) + "\n"); } catch { /* 连接已断，忽略 */ }
+  };
+
+  try {
+    const result = await loadImageFromStream(engine, req, (line) => send({ type: "progress", line }));
+    apiLog.info(`导入镜像完成 | 引擎=${engine.name} 镜像=${result.images.join(", ") || "未知"}`);
+    send({ type: "done", output: result.output, images: result.images });
+  } catch (err: any) {
+    apiLog.error(`导入镜像失败 | 引擎=${engine.name} 错误=${err.message}`);
+    send({ type: "error", error: err.message || "导入失败" });
+  }
+  if (!res.writableEnded && !res.destroyed) res.end();
+});
 
 // ============ 镜像拉取任务 API ============
 

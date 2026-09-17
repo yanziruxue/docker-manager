@@ -362,6 +362,139 @@ export function cancelPullTaskApi(engineId: string, taskId: string): Promise<imp
   return request<import("./types").PullTask>(`/engines/${engineId}/images/pull-tasks/${taskId}/cancel`, { method: "POST" });
 }
 
+/** 导出镜像为 tar 并触发浏览器下载（返回实际文件名） */
+export function downloadImageApi(engineId: string, imageRef: string): Promise<string> {
+  return downloadAsBlob(
+    `/engines/${encodeURIComponent(engineId)}/images/save?image=${encodeURIComponent(imageRef)}`
+  );
+}
+
+/** 导入镜像的进度回调集合 */
+export interface ImageImportHandlers {
+  /** 请求体（tar）上传进度；不可计算时 total 为 0 */
+  onUploadProgress?: (sent: number, total: number) => void;
+  /** tar 上传完毕，服务端进入 docker load 解包阶段 */
+  onUploadDone?: () => void;
+  /** docker load 新产出的输出行（一次可能多条） */
+  onLoadOutput?: (lines: string[]) => void;
+}
+
+/**
+ * 上传镜像 tar 并导入（服务端流式管道进 docker load），全程回报进度。
+ *
+ * 为什么用 XMLHttpRequest 而不是 fetch：
+ * 1) 只有 `upload.onprogress` 能拿到「已上传字节」——fetch 观测不到请求体上传进度
+ *    （`ReadableStream` 请求体 + `duplex:"half"` 在 Safari/Firefox 不可用）；
+ * 2) 响应体是服务端逐行下发的 NDJSON（见 server/index.ts），XHR 在 readyState=3
+ *    阶段即可增量读取 `responseText`，从而实时呈现 `docker load` 的解包进度。
+ *
+ * 显式声明 application/octet-stream，避免被全局 express.json 中间件按 JSON 解析/缓冲。
+ */
+export function uploadImageApi(
+  engineId: string,
+  file: File,
+  handlers: ImageImportHandlers = {},
+  signal?: AbortSignal
+): Promise<{ output: string; images: string[] }> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${BASE}/engines/${encodeURIComponent(engineId)}/images/load`, true);
+    xhr.withCredentials = true;
+    xhr.setRequestHeader("Content-Type", "application/octet-stream");
+    xhr.responseType = "text";
+
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      fn();
+    };
+
+    // NDJSON 增量解析：只处理完整行，半行留在 pending 等下一帧（否则行会被腰斩成非法 JSON）
+    let consumed = 0;
+    let pending = "";
+    const drain = () => {
+      const text = xhr.responseText || "";
+      if (text.length <= consumed) return;
+      pending += text.slice(consumed);
+      consumed = text.length;
+      const parts = pending.split("\n");
+      pending = parts.pop() ?? "";
+      const lines: string[] = [];
+      for (const raw of parts) {
+        const s = raw.trim();
+        if (!s) continue;
+        let msg: any;
+        try {
+          msg = JSON.parse(s);
+        } catch {
+          continue; // 非 JSON 行（反代注入等）忽略
+        }
+        if (msg?.type === "progress" && typeof msg.line === "string") {
+          lines.push(msg.line);
+        } else if (msg?.type === "done") {
+          finish(() =>
+            resolve({
+              output: msg.output || "导入完成",
+              images: Array.isArray(msg.images) ? msg.images : [],
+            })
+          );
+        } else if (msg?.type === "error") {
+          finish(() => reject(new ApiError(msg.error || "导入失败")));
+        }
+      }
+      if (lines.length) handlers.onLoadOutput?.(lines);
+    };
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) handlers.onUploadProgress?.(e.loaded, e.total);
+    };
+    xhr.upload.onload = () => {
+      handlers.onUploadProgress?.(file.size, file.size);
+      handlers.onUploadDone?.();
+    };
+    xhr.onprogress = drain;
+    xhr.onload = () => {
+      drain();
+      if (settled) return;
+      // 鉴权失败发生在路由之前，是普通 JSON 响应（非 NDJSON）
+      if (xhr.status === 401) {
+        if (typeof window !== "undefined") window.dispatchEvent(new Event("auth:unauthorized"));
+        finish(() => reject(new ApiError("会话已失效，请重新登录", undefined, 401)));
+        return;
+      }
+      finish(() => {
+        let parsed: any = null;
+        try {
+          parsed = JSON.parse(xhr.responseText || "");
+        } catch {
+          /* NDJSON 流整体必然不是合法 JSON，属预期 */
+        }
+        if (parsed?.error) {
+          reject(new ApiError(parsed.error, parsed.code, xhr.status));
+          return;
+        }
+        if (xhr.status >= 400) {
+          reject(new ApiError(`导入失败（HTTP ${xhr.status}）`, undefined, xhr.status));
+          return;
+        }
+        reject(new ApiError("导入中断：未收到服务端完成确认"));
+      });
+    };
+    xhr.onerror = () => finish(() => reject(new ApiError("网络错误：上传失败或连接中断")));
+    xhr.onabort = () => finish(() => reject(new ApiError("已取消导入")));
+
+    if (signal) {
+      if (signal.aborted) {
+        xhr.abort();
+        return;
+      }
+      signal.addEventListener("abort", () => xhr.abort(), { once: true });
+    }
+    xhr.send(file);
+  });
+}
+
 // ============ 数据卷操作 API ============
 
 export function removeVolumeApi(engineId: string, volumeName: string, force?: boolean): Promise<void> {

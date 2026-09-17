@@ -34,3 +34,6 @@ deploy/linux/sea-prep.blob
 
 # ===== 临时测试目录 =====
 .tmp-*/
+
+# ===== vite dev 残留 =====
+vite.config.ts.timestamp-*.mjs

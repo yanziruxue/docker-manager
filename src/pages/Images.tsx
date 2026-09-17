@@ -15,6 +15,9 @@ import {
   Loader2,
   XCircle,
   Eye,
+  Upload,
+  ImageDown,
+  RotateCcw,
 } from "lucide-react";
 import type { DockerImage, PullTask } from "../types";
 import { Tag } from "../components/Badge";
@@ -30,6 +33,8 @@ import {
   fetchPullTasksApi,
   fetchPullTaskApi,
   cancelPullTaskApi,
+  downloadImageApi,
+  uploadImageApi,
   ApiError,
 } from "../api";
 import { addOpLog } from "../opLog";
@@ -255,6 +260,184 @@ function PullOutputPanel({ task }: { task: PullTask }) {
   );
 }
 
+/** 导入镜像的进度状态（两阶段：① 上传 tar ② 服务端 docker load 解包） */
+export interface ImageImportState {
+  fileName: string;
+  fileSize: number;
+  /** 已上传字节；total 为 0 表示长度不可知（浏览器未给出 lengthComputable） */
+  sent: number;
+  total: number;
+  phase: "uploading" | "loading" | "done" | "error";
+  /** docker load 累计输出行：既用于 tail 展示，也用于解析导入阶段的字节进度 */
+  lines: string[];
+  /** 成功时导入的镜像（来自 `Loaded image: …` 行） */
+  images: string[];
+  error?: string;
+}
+
+/**
+ * 进度条。value === null 时渲染不确定态滑动条纹 —— 宁可显示「在进行、进度未知」，
+ * 也不伪造一个假的百分比。
+ */
+function ProgressBar({ value, tone }: { value: number | null; tone: "blue" | "green" | "red" }) {
+  const color = tone === "red" ? "bg-red-500" : tone === "green" ? "bg-green-500" : "bg-blue-500";
+  return (
+    <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+      {value === null ? (
+        <div className={`h-full w-1/3 rounded-full ${color} animate-indeterminate`} />
+      ) : (
+        <div
+          className={`h-full rounded-full transition-all duration-300 ${color}`}
+          style={{ width: `${Math.min(100, Math.max(0, value))}%` }}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * 导入镜像进度面板。
+ *
+ * 两个阶段的进度来源本就不同，刻意分开显示：
+ * - **上传 tar**：XHR `upload.onprogress` 给出的精确字节（大镜像耗时最长的一段就在这）；
+ * - **导入（docker load）**：只能从 CLI 输出行解析——`docker load` 不预先公布层总量，
+ *   非 TTY 下往往只输出「层完成行」，因此解析不到字节时用不确定态条纹，
+ *   而不是伪造百分比。能解析时复用 `parsePullTailSizes`（同为 `<hash>: … MB/MB` 格式）。
+ */
+function ImageImportPanel({
+  state,
+  onCancel,
+  onClose,
+}: {
+  state: ImageImportState;
+  onCancel: () => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLPreElement>(null);
+  const lineCount = state.lines.length;
+  useEffect(() => {
+    if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
+  }, [lineCount]);
+
+  const done = state.phase === "done";
+  const failed = state.phase === "error";
+  const uploading = state.phase === "uploading";
+  const uploadPct = state.total > 0 ? Math.min(100, Math.round((state.sent / state.total) * 100)) : null;
+
+  const loadBytes = parsePullTailSizes(state.lines);
+  const loadPct = done
+    ? 100
+    : loadBytes && loadBytes.total > 0
+      ? Math.min(100, Math.round((loadBytes.current / loadBytes.total) * 100))
+      : null;
+
+  return (
+    <div className="p-6 space-y-4">
+      {/* 终态结果横幅 */}
+      {(done || failed) && (
+        <div
+          className={`flex items-start gap-3 px-4 py-3 rounded-lg ${
+            done ? "bg-green-50 text-green-700" : "bg-red-50 text-red-600"
+          }`}
+        >
+          {done ? <CheckCircle2 size={20} className="mt-0.5 shrink-0" /> : <XCircle size={20} className="mt-0.5 shrink-0" />}
+          <div className="min-w-0">
+            <div className="text-sm font-semibold">{done ? "导入成功" : "导入失败"}</div>
+            <div className="text-xs mt-0.5 opacity-80 break-all">
+              {done ? (state.images.length ? state.images.join("、") : state.fileName) : state.error || "导入失败"}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 阶段一：上传 tar */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between gap-3 text-sm">
+          <div className="flex items-center gap-2 font-medium text-slate-700">
+            <Upload size={16} className={uploading ? "text-blue-500" : "text-slate-300"} />
+            <span>上传 tar</span>
+            {!uploading && <CheckCircle2 size={14} className="text-green-500" />}
+          </div>
+          <span className="text-xs font-mono text-slate-500 shrink-0">
+            {uploading && uploadPct === null ? "—" : `${uploading ? uploadPct : 100}%`}
+            {state.total > 0 && (
+              <span className="ml-1.5">
+                {fmtBytes(uploading ? state.sent : state.total)} / {fmtBytes(state.total)}
+              </span>
+            )}
+          </span>
+        </div>
+        <ProgressBar value={uploading ? uploadPct : 100} tone="blue" />
+      </div>
+
+      {/* 阶段二：服务端 docker load 解包 */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between gap-3 text-sm">
+          <div className="flex items-center gap-2 font-medium text-slate-700">
+            <HardDrive size={16} className={state.phase === "loading" ? "text-blue-500" : "text-slate-300"} />
+            <span>导入镜像（docker load）</span>
+            {done && <CheckCircle2 size={14} className="text-green-500" />}
+            {failed && <XCircle size={14} className="text-red-500" />}
+          </div>
+          <span className="text-xs font-mono text-slate-500 shrink-0">
+            {loadBytes
+              ? `${fmtBytes(loadBytes.current)} / ${fmtBytes(loadBytes.total)}`
+              : uploading
+                ? "等待上传"
+                : done
+                  ? "已完成"
+                  : "解包中"}
+          </span>
+        </div>
+        <ProgressBar value={failed ? null : loadPct} tone={failed ? "red" : done ? "green" : "blue"} />
+      </div>
+
+      {/* docker load 实时输出 */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs font-semibold text-slate-500">导入输出</span>
+          <span className="text-xs font-mono text-slate-400">{lineCount} 行</span>
+        </div>
+        <pre
+          ref={ref}
+          className="bg-slate-900 text-slate-200 rounded-lg p-3 max-h-[40vh] min-h-[140px] overflow-y-auto font-mono text-xs leading-relaxed"
+        >
+          {lineCount === 0 ? (
+            <span className="text-slate-400">
+              {uploading ? "上传中…（docker load 将在数据到达后开始输出）\n" : "等待 docker load 输出…\n"}
+            </span>
+          ) : (
+            state.lines.map((line, i) => (
+              <div key={i} className="whitespace-pre-wrap break-all">
+                {line}
+              </div>
+            ))
+          )}
+        </pre>
+      </div>
+
+      <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+        {!done && !failed && (
+          <button
+            onClick={onCancel}
+            className="flex items-center gap-1.5 px-4 py-2 text-sm text-red-600 border border-red-200 rounded-lg hover:bg-red-50"
+          >
+            <XCircle size={14} /> 取消导入
+          </button>
+        )}
+        {(done || failed) && (
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-sm text-white bg-blue-500 rounded-lg hover:bg-blue-600"
+          >
+            关闭
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function Images({ images, loading, error, engineId, onRefresh, defaultVisibleColumns, onCheckAllUpdates, checkingUpdates }: ImagesProps) {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "dangling" | "used" | "unused">("all");
@@ -293,6 +476,20 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
   const [showPullModal, setShowPullModal] = useState(false);
   const [pullPrefill, setPullPrefill] = useState("");
   const [activePullTaskId, setActivePullTaskId] = useState<string | null>(null);
+
+  // ===== 镜像导出（下载）/ 导入（上传）状态 =====
+  /** 正在导出的镜像引用（行内按钮转圈），null 表示空闲 */
+  const [downloadingImage, setDownloadingImage] = useState<string | null>(null);
+  /** 导入（上传）镜像的进度状态；null = 未在导入、弹窗关闭 */
+  const [imageImport, setImageImport] = useState<ImageImportState | null>(null);
+  /** 导入的取消句柄：abort XHR → 请求体中断 → 服务端随之结束 docker load 子进程 */
+  const importAbortRef = useRef<AbortController | null>(null);
+  const imageFileRef = useRef<HTMLInputElement>(null);
+  /** 导入弹窗是否打开（含终态，此时工具按钮保持禁用，避免并发第二个导入） */
+  const importOpen = imageImport !== null;
+  /** 导入是否仍在进行（上传中 / 解包中） */
+  const importRunning =
+    imageImport !== null && (imageImport.phase === "uploading" || imageImport.phase === "loading");
 
   // 轮询拉取任务列表：有进行中任务时高频（2.5s），否则低频（10s）
   useEffect(() => {
@@ -359,24 +556,130 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
     [pullTasks, activePullTaskId],
   );
 
-  /** 发起拉取：调 API 创建任务，成功后切换到进度视图 */
+  /**
+   * 发起拉取：调 API 创建任务，成功后切换到进度视图。
+   * imageOverride 用于「重试」——直接用失败任务的镜像名再拉一次，不依赖输入框。
+   */
   const [pullStarting, setPullStarting] = useState(false);
   const [pullError, setPullError] = useState<string | null>(null);
-  const startPull = async () => {
-    if (!engineId || !pullPrefill.trim()) return;
+  const startPull = async (imageOverride?: string) => {
+    const image = (imageOverride ?? pullPrefill).trim();
+    if (!engineId || !image) return;
     setPullStarting(true);
     setPullError(null);
+    setShowPullModal(true);
+    setActivePullTaskId(null);
     try {
-      const task = await startImagePullApi(engineId, pullPrefill.trim());
+      const task = await startImagePullApi(engineId, image);
       setActivePullTaskId(task.id);
       // 立即刷新任务列表
       const list = await fetchPullTasksApi(engineId);
       setPullTasks(list);
+      addOpLog({ action: "拉取镜像", target: image, status: "success", engineId });
     } catch (e: any) {
       setPullError(e.message || "启动拉取失败");
+      addOpLog({ action: "拉取镜像", target: image, status: "failed", detail: e.message || "启动失败", engineId });
     } finally {
       setPullStarting(false);
     }
+  };
+
+  /** 拉取失败重试：用失败任务的镜像名直接重发拉取 */
+  const retryPull = (image: string) => {
+    setPullPrefill(image);
+    void startPull(image);
+  };
+
+  /**
+   * 导出（下载）镜像为 tar。
+   * 走 fetch → Blob → objectURL（与备份下载同一套），失败能拿到错误提示，
+   * 不会像 `<a href="/api/...">` 那样点了没反应。
+   */
+  const handleDownloadImage = async (imageRef: string) => {
+    if (!engineId || downloadingImage) return;
+    setDownloadingImage(imageRef);
+    try {
+      const filename = await downloadImageApi(engineId, imageRef);
+      addOpLog({ action: "导出镜像", target: displayImageRef(imageRef), status: "success", detail: filename, engineId });
+    } catch (e: any) {
+      addOpLog({ action: "导出镜像", target: displayImageRef(imageRef), status: "failed", detail: e.message || "导出失败", engineId });
+      showOutput({ title: "导出镜像", name: displayImageRef(imageRef), output: e.message || "导出失败", failed: true });
+    } finally {
+      setDownloadingImage(null);
+    }
+  };
+
+  /**
+   * 导入（上传）镜像 tar：服务端流式管道进 docker load，全程显示两阶段进度。
+   *
+   * 进度面板取代了原先「转圈 + 结果弹窗」：上传阶段用 XHR 的精确字节，
+   * 解包阶段用服务端逐行下发的 docker load 输出，两者在同一个弹窗里连续呈现。
+   */
+  const handleUploadImage = async (file: File) => {
+    if (!engineId || importOpen) return;
+    const controller = new AbortController();
+    importAbortRef.current = controller;
+    setImageImport({
+      fileName: file.name,
+      fileSize: file.size,
+      sent: 0,
+      total: file.size,
+      phase: "uploading",
+      lines: [],
+      images: [],
+    });
+    try {
+      const result = await uploadImageApi(
+        engineId,
+        file,
+        {
+          onUploadProgress: (sent, total) =>
+            setImageImport((prev) => (prev ? { ...prev, sent, total: total > 0 ? total : prev.total } : prev)),
+          onUploadDone: () => setImageImport((prev) => (prev ? { ...prev, phase: "loading" } : prev)),
+          onLoadOutput: (lines) =>
+            setImageImport((prev) => (prev ? { ...prev, lines: [...prev.lines, ...lines] } : prev)),
+        },
+        controller.signal
+      );
+      setImageImport((prev) =>
+        prev
+          ? {
+              ...prev,
+              phase: "done",
+              images: result.images,
+              // 兜底：反代缓冲导致流式行没收到时，用最终合并输出补全，避免输出区空白
+              lines: prev.lines.length === 0 && result.output ? result.output.split(/\r?\n/).filter(Boolean) : prev.lines,
+            }
+          : prev
+      );
+      addOpLog({
+        action: "导入镜像",
+        target: file.name,
+        status: "success",
+        detail: result.images.join(", ") || "导入完成",
+        engineId,
+      });
+      onRefresh?.();
+    } catch (e: any) {
+      const msg = e?.message || "导入失败";
+      setImageImport((prev) => (prev ? { ...prev, phase: "error", error: msg } : prev));
+      addOpLog({ action: "导入镜像", target: file.name, status: "failed", detail: msg, engineId });
+    } finally {
+      importAbortRef.current = null;
+      // 允许重复选择同一个文件（否则第二次 change 不触发）
+      if (imageFileRef.current) imageFileRef.current.value = "";
+    }
+  };
+
+  /** 取消导入：中断上传，服务端随之结束 docker load */
+  const cancelImageImport = () => {
+    importAbortRef.current?.abort();
+  };
+
+  /** 关闭进度弹窗（防御性：万一仍在进行也一并取消，避免留下无 UI 的后台请求） */
+  const closeImageImport = () => {
+    importAbortRef.current?.abort();
+    setImageImport(null);
   };
 
   /** 后台拉取：关闭弹窗但保持任务运行 */
@@ -579,6 +882,25 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
           >
             <Download size={14} /> 拉取镜像
           </button>
+          <button
+            onClick={() => imageFileRef.current?.click()}
+            disabled={importOpen || !engineId}
+            title="上传 docker save 导出的 tar 文件并导入到该引擎"
+            className="flex items-center gap-1.5 px-3 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {importRunning ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+            {importRunning ? "导入中..." : "上传镜像"}
+          </button>
+          <input
+            ref={imageFileRef}
+            type="file"
+            accept=".tar,.tar.gz,.tgz,application/x-tar"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) void handleUploadImage(f);
+            }}
+          />
           <div className="relative" ref={columnPickerRef}>
             <button
               onClick={() => setShowColumnPicker(!showColumnPicker)}
@@ -672,6 +994,14 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
                     取消
                   </button>
                 )}
+                {t.status === "error" && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); retryPull(t.image); }}
+                    className="flex items-center gap-1 px-2 py-0.5 text-xs text-blue-600 border border-blue-200 rounded hover:bg-blue-50 whitespace-nowrap"
+                  >
+                    <RotateCcw size={11} /> 重试
+                  </button>
+                )}
               </div>
             );
           })}
@@ -740,6 +1070,12 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
                         <ActionDropdown
                           items={[
                             { label: "拉取", icon: <Download size={14} />, onClick: () => openPullModal(`${img.repository}:${img.tag}`) },
+                            {
+                              label: downloadingImage === buildImageRef(img) ? "导出中..." : "下载镜像",
+                              icon: <ImageDown size={14} />,
+                              disabled: !!downloadingImage,
+                              onClick: () => handleDownloadImage(buildImageRef(img)),
+                            },
                             { label: "检查更新", icon: <RefreshCw size={14} />, onClick: () => onCheckAllUpdates?.() },
                             { separator: true },
                             {
@@ -836,7 +1172,7 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
                 取消
               </button>
               <button
-                onClick={startPull}
+                onClick={() => startPull()}
                 disabled={!pullPrefill.trim() || pullStarting}
                 className="flex items-center gap-1.5 px-4 py-2 text-sm text-white bg-blue-500 rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
               >
@@ -889,6 +1225,16 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
             <PullOutputPanel task={activePullTask} />
 
             <div className="flex items-center justify-end gap-2 pt-2">
+              {activePullTask.status === "error" && (
+                <button
+                  onClick={() => retryPull(activePullTask.image)}
+                  disabled={pullStarting}
+                  className="flex items-center gap-1.5 px-4 py-2 text-sm text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {pullStarting ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
+                  {pullStarting ? "重试中..." : "重试"}
+                </button>
+              )}
               <button
                 onClick={() => { setShowPullModal(false); setActivePullTaskId(null); onRefresh?.(); }}
                 className="px-4 py-2 text-sm text-white bg-blue-500 rounded-lg hover:bg-blue-600"
@@ -897,6 +1243,19 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
               </button>
             </div>
           </div>
+        )}
+      </Modal>
+
+      {/* ===== 镜像导入（上传 tar）进度弹窗 ===== */}
+      <Modal
+        open={importOpen}
+        onClose={closeImageImport}
+        title={imageImport ? `导入镜像 — ${imageImport.fileName}` : "导入镜像"}
+        size="lg"
+        dismissable={false}
+      >
+        {imageImport && (
+          <ImageImportPanel state={imageImport} onCancel={cancelImageImport} onClose={closeImageImport} />
         )}
       </Modal>
     </div>

@@ -1273,7 +1273,7 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
     { key: "notifications", label: "通知配置", icon: <Bell size={16} /> },
     { key: "backup", label: "备份管理", icon: <Package size={16} /> },
     { key: "scheduler", label: "更新调度器", icon: <Clock size={16} /> },
-    { key: "activity", label: "活跃度", icon: <Activity size={16} /> },
+    { key: "activity", label: "本机设备", icon: <Activity size={16} /> },
     { key: "update", label: "系统更新", icon: <Download size={16} /> },
   ];
 
