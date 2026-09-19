@@ -343,6 +343,8 @@ export interface DeviceDetails {
   gpu: { model: string; memory: string };
   memory: { model: string; sizeGB: number };
   disk: { serial: string; model: string; size: string };
+  /** DMI 标识字段（只读展示，不参与指纹）：主板型号 / 产品序列号 / 系统 UUID */
+  dmi: { boardName: string; productSerial: string; productUuid: string };
 }
 
 /** 读取 /proc/cpuinfo 首个指定字段的值 */
@@ -411,6 +413,15 @@ function collectDiskDetails(): DeviceDetails["disk"] {
   return { serial, model, size };
 }
 
+/** 采集 DMI 标识字段：主板型号 / 产品序列号 / 系统 UUID（sysfs 直读，失败降级空串，普通用户可读） */
+function collectDmiIds(): DeviceDetails["dmi"] {
+  return {
+    boardName: readTextFile("/sys/class/dmi/id/board_name"),
+    productSerial: readTextFile("/sys/class/dmi/id/product_serial"),
+    productUuid: readTextFile("/sys/class/dmi/id/product_uuid"),
+  };
+}
+
 /** 采集设备标识卡片所需的富硬件详情（只读展示，不影响 6 维指纹与统计主键） */
 export function collectHardwareDetails(): DeviceDetails {
   return {
@@ -418,6 +429,7 @@ export function collectHardwareDetails(): DeviceDetails {
     gpu: collectGpuDetails(),
     memory: collectMemoryDetails(),
     disk: collectDiskDetails(),
+    dmi: collectDmiIds(),
   };
 }
 

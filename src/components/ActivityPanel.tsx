@@ -81,7 +81,7 @@ function fmtDisk(d?: DeviceDetails["disk"]): string {
  * 本机设备标识（只读）。
  * 设备标识 = 本机硬件指纹（主板+CPU+内存+硬盘+显卡+安装的系统 6 维哈希），
  * 作为安装量 / 活跃度统计的统计主键；硬件指纹不变即视为同一设备。
- * 卡片按「设备标识 / 运行环境 / 应用版本 / 架构 / 系统 / 标识文件 / 主板 / CPU / GPU / 内存 / 硬盘」展示。
+ * 卡片按「设备标识 / 运行环境 / 应用版本 / 架构 / 系统 / 标识文件 / 主板 / 主板型号 / 产品序列号 / 系统UUID / CPU / GPU / 内存 / 硬盘」展示。
  */
 export function ActivityPanel() {
   const [status, setStatus] = useState<TelemetryStatus | null>(null);
@@ -175,6 +175,19 @@ export function ActivityPanel() {
                 title={status.deviceFile}
               />
               <Row label="主板" value={hw?.boardSerial ?? ""} mono title={hw?.boardSerial} />
+              <Row label="主板型号" value={details?.dmi?.boardName ?? ""} title={details?.dmi?.boardName} />
+              <Row
+                label="产品序列号"
+                value={details?.dmi?.productSerial ?? ""}
+                mono
+                title={details?.dmi?.productSerial}
+              />
+              <Row
+                label="系统UUID"
+                value={details?.dmi?.productUuid ?? ""}
+                mono
+                title={details?.dmi?.productUuid}
+              />
               <Row label="CPU" value={fmtCpu(details?.cpu)} title={fmtCpu(details?.cpu)} />
               <Row label="GPU" value={fmtGpu(details?.gpu)} title={fmtGpu(details?.gpu)} />
               <Row label="内存" value={fmtMem(details?.memory)} title={fmtMem(details?.memory)} />

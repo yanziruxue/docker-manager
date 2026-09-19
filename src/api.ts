@@ -105,6 +105,8 @@ export interface DeviceDetails {
   gpu: { model: string; memory: string };
   memory: { model: string; sizeGB: number };
   disk: { serial: string; model: string; size: string };
+  /** DMI 标识字段（只读展示，不参与指纹）：主板型号 / 产品序列号 / 系统 UUID */
+  dmi: { boardName: string; productSerial: string; productUuid: string };
 }
 
 export interface TelemetryStatus {

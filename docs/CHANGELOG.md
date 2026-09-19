@@ -23,7 +23,7 @@
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.23.2**（**已发布**）；GPU 识别兼容性修复：本机设备标识卡片 GPU 行改 sysfs 直读（非 root systemd 服务下也能识别核显/独显型号）。上一版 **v1.23.1**（已发布）：本机设备标识卡片明细区改为每行一条 |
+| 当前版本 | **v1.23.3**（**未发布**）；本机设备标识卡片新增 3 条 DMI 标识（主板型号 / 产品序列号 / 系统UUID，纯展示不进指纹）。已发布上一版 **v1.23.2**：GPU 行改 sysfs 直读（非 root systemd 服务下也能识别核显/独显型号）；再上一版 **v1.23.1**：卡片明细区改为每行一条 |
 | 版本号规则 | Major 人工发布；Minor 新功能；Patch 修复/优化/UI。v1.22.0 因新增「镜像更新→通知中心」与「硬件指纹作主键」两项新能力归为 Minor |
 | 最新 Release | [v1.23.1](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.1)（本机设备标识卡片明细区改为每行一条；含 `quick-install.sh` asset）；上一版 [v1.23.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.0) |
 | 源码分支 | `main`（当前发布点 `4fbc23d6d424ba89338f240ca03a8f6212b6fd23`；上一版 `94bdf498c2ca2d93fe9c6bbeb8552c6a89aca636`） |
@@ -44,7 +44,7 @@
 | 备份管理 | ✅ | 手动全量 + 堆栈级备份 / 恢复（含**上传备份文件直接恢复**）/ 导出（**zip** 格式，兼容历史 tar.gz）+ 自动备份调度器（周/月/年/Cron，含保留清理） |
 | 权限诊断与修复 | ✅ | 备份期自愈 `u+r` + 结构化诊断（属主/权限位/一条修复命令）+ `fix-perms` CLI + 启动体检与界面提示 |
 | 通知中心 | ✅ | 未读已读 + localStorage 持久化 |
-| 系统设置 | ✅ | Docker 配置 / Compose 模式 / 通知 / 备份 / **镜像更新**（原「更新调度器」）/ 列显隐 / 本机设备（硬件指纹 6 维 + 完整硬件详情卡片，只读） |
+| 系统设置 | ✅ | Docker 配置 / Compose 模式 / 通知 / 备份 / **镜像更新**（原「更新调度器」）/ 列显隐 / 本机设备（硬件指纹 6 维 + 完整硬件详情卡片，含 **主板型号 / 产品序列号 / 系统UUID**，只读） |
 | Web 终端 | ✅ | xterm.js + WebSocket + 多 Shell 检测 |
 | 登录鉴权 | ✅ | 单管理员 + scrypt + httpOnly 会话（绝对过期）+ 密码找回码 |
 | 镜像更新（原更新调度器） | ✅ | 后台定时检查镜像版本（每天 / 每周 / 每月，非 Cron）+ 结果落盘缓存 + 镜像页「检查更新」共用同一份数据 |
@@ -115,6 +115,28 @@
 - 一次发布中同时含 Minor 与 Patch 时，按**最高级别**递增，低级别归零（例：`1.0.3` + 新功能 → `1.1.0`）
 - Major 由人工决定，不自动递增
 - 同一天内的多次改动合并为一个版本，逐条记录在版本下
+
+---
+
+## v1.23.3 — 2026-09-19（未发布）
+
+> 本机设备标识卡片新增 3 条 DMI 标识：**主板型号 / 产品序列号 / 系统UUID**。原卡片仅展示「主板」（序列号，本机因权限 400 恒为「—」），现补齐主板型号等可直接读取的标识字段。纯展示扩展，**不参与 6 维硬件指纹哈希，不影响统计主键**。
+
+### ✅ 已完成
+
+- **设备标识卡片新增 3 行 DMI 字段**：`server/telemetry.ts` 的 `DeviceDetails` 接口新增 `dmi: { boardName; productSerial; productUuid }`，并新增 `collectDmiIds()` 经 sysfs 直读 `/sys/class/dmi/id/{board_name,product_serial,product_uuid}`（权限 0444，普通用户可读；失败降级空串，不抛错）；`collectHardwareDetails()` 填充 `dmi`。
+  - `src/api.ts` 的 `DeviceDetails` 接口同步新增 `dmi` 字段。
+  - `src/components/ActivityPanel.tsx` 在「主板」行后新增 **主板型号 / 产品序列号 / 系统UUID** 三行（序列号与 UUID 用等宽字体，可 hover 查看完整值）。
+  - 验证：`npm run build`（vite build + `tsc -p server/tsconfig.json`）全绿，无类型错误。
+
+### ⚠️ 未完成 / 已知限制
+
+- 产品序列号若 BIOS 未烧录，可能显示占位符（如 `Default string`）；此处**按 sysfs 原值展示**，不做特殊清洗（便于用户判断 BIOS 是否烧录）。
+- 若某字段 sysfs 权限受限则显示「—」（本机 `product_uuid` 可读、`board_serial` 仍受限）。
+
+### 📌 下一步
+
+- 无（如需打包发布，走 SEA 交付流程）。
 
 ---
 
