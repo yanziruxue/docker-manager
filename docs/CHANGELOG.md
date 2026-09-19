@@ -23,10 +23,11 @@
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.23.4**（**已发布**）；修复非 root 服务读不到 `product_serial`/`product_uuid`（内核 0400）导致卡片显示「—」：systemd 启动前以 root 镜像 DMI 副本，后端优先读取。上一版 **v1.23.3**（已发布）：卡片新增主板型号/产品序列号/系统UUID 三条展示 |
+| 当前版本 | **v1.23.5**（**未发布**）；新增 **systemd 服务单元一致性自检**——OTA 不更新 `/etc/systemd/system/` 下的单元，落后时在「本机设备」卡片提示缺失指令并提供一键复制的 root 修复命令（修好 v1.23.4 的 DMI 镜像在旧部署上静默失效问题）。已发布上一版 **v1.23.4**：systemd 启动前以 root 镜像 DMI 副本，修复非 root 服务读不到 `product_serial`/`product_uuid` |
 | 版本号规则 | Major 人工发布；Minor 新功能；Patch 修复/优化/UI。v1.22.0 因新增「镜像更新→通知中心」与「硬件指纹作主键」两项新能力归为 Minor |
 | 最新 Release | [v1.23.4](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.4)（修复 DMI 产品序列号/系统UUID 在非 root 服务下不可读；含 `quick-install.sh` asset）；上一版 [v1.23.3](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.3) |
 | 源码分支 | `main`（当前发布点 `eb553f6b9a1daa2ff0d235cfdc7aa8357b4adfa8`；上一版 `d1e90c37ef5619d8854e60f829d3dbcde1eb50d0`） |
+| 部署注意 | **改过 `deploy/linux/*.service` 的版本，OTA 后必须重跑 `install.sh`**（或在「设置 → 本机设备」页复制一键修复命令）——OTA 只替换二进制，不更新单元文件 |
 | 交付包 | [v1.23.4.zip](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.4)（42,921,687 B，SHA-256 `bf6972c8aba10c7fb24ea6a3f04e7ed0346e2093a8f3b5c2931e826be60a00aa`）；上一发布版 `v1.23.3.zip` 42,921,245 B SHA-256 `1fad2f2db6471d1a383c1d6b2f3305e6a6a19f4e289cebf1af97c8db896ec74c` |
 | 架构 | REST + WS + SSE 三通道；Socket / TCP / SSH 三种引擎 |
 | 目标平台 | Linux x64（SEA 单可执行文件），Unraid / 自托管 NAS |
@@ -49,7 +50,7 @@
 | 登录鉴权 | ✅ | 单管理员 + scrypt + httpOnly 会话（绝对过期）+ 密码找回码 |
 | 镜像更新（原更新调度器） | ✅ | 后台定时检查镜像版本（每天 / 每周 / 每月，非 Cron）+ 结果落盘缓存 + 镜像页「检查更新」共用同一份数据 |
 | OTA 自升级 | ✅ | GitHub Releases 单一源，拉取 + 自替换 + systemd 重启，gh-proxy 镜像兜底，**支持中途取消** |
-| Linux SEA 部署 | ✅ | 单可执行文件 + systemd + install/uninstall 脚本 |
+| Linux SEA 部署 | ✅ | 单可执行文件 + systemd + install/uninstall 脚本；**OTA 后自动自检服务单元是否落后**（含缺失指令与一键修复命令） |
 | Docker 部署 | ✅ | 多阶段 Dockerfile |
 | **操作日志系统** | 🔨 **约 60%** | `server/logger.ts` 已建好但**未接入** `docker.ts`（仍是 `console.log`）；前端仅 localStorage 版 `opLog.ts`（500 条） |
 | 中心统计服务 | ⏸ **暂缓** | 遥测上报端已完成（端点 `docker-yanzi.ziruxue.top`）；中心服务由独立后端实现，本项目不做 |
@@ -115,6 +116,31 @@
 - 一次发布中同时含 Minor 与 Patch 时，按**最高级别**递增，低级别归零（例：`1.0.3` + 新功能 → `1.1.0`）
 - Major 由人工决定，不自动递增
 - 同一天内的多次改动合并为一个版本，逐条记录在版本下
+
+---
+
+## v1.23.5 — 2026-09-19（未发布）
+
+> 修复一个**结构性隐患**：`/etc/systemd/system/docker-manager-yanzi.service` 由 `install.sh` 安装，而**在线升级（OTA）只替换二进制、从不更新它**。于是 v1.23.4 依赖 `ExecStartPre` 的「DMI 镜像」在已升级的生产机上**静默失效**——用户只看到产品序列号/系统UUID 仍是「—」，无法判断是硬件没烧录、权限不足，还是服务单元没更新。本版把「单元是否落后」做成可见、可一键修复。
+
+### ✅ 已完成
+
+- **构建期嵌入 systemd 单元模板**：`scripts/build-binary.mjs` 新增 `virtual:embedded-service` 虚拟模块（新增 `readServiceTemplate()` + `embeddedServicePlugin()`），把 `deploy/linux/docker-manager-yanzi.service` 原文嵌进 bundle，banner 也标注嵌入字节数。SEA 二进制内没有仓库文件，不嵌入就无从比对。
+- **新增 `server/unit-status.ts`**（只读）：`checkServiceUnit()` 解析「已安装单元 + `/etc/systemd/system/<unit>.d/*.conf` drop-in」的指令集合，与嵌入模板逐一比对，输出 `missing[]`（缺失指令）、`dropIns[]`、`mirrorDir`/`mirrorFiles`（DMI 镜像目录现状）、`upToDate`，以及一条**可直接粘贴的 root 修复命令**（`sudo tee <unit> <<'EOF' … EOF` + `daemon-reload && restart`，与 `install.sh` 行为一致）。
+  - 只比对**指令集合**而非整文件哈希：运维手工加注释不应被误判落后；反斜杠续行会先合并，注释/空行/`[Section]` 段头忽略。
+  - `applicable` 判定为「Linux 且已安装单元存在」——Windows 开发机 / 容器内不适用，避免误报。
+- **后端暴露与启动自检**：`server/index.ts` 新增 `GET /api/system/service-unit`；启动体检（`setImmediate` 内）在单元落后时打印 `⚠️ 系统服务单元落后：缺少 N 条指令（RuntimeDirectory、ExecStartPre）`，并指向设置页。
+- **前端提示**：`src/api.ts` 新增 `ServiceUnitStatus` 类型与 `fetchServiceUnitStatus()`；`src/components/ActivityPanel.tsx` 在「本机设备」卡片上方渲染琥珀色提示条——写明缺少的指令、受影响功能、「该文件由安装脚本写入、在线升级不会更新它」，并提供**复制修复命令**按钮（复用 `copyText()`）。另外「产品序列号 / 系统UUID」为空时的悬停提示改为按因区分：单元落后 / 单元已新但镜像未生成（需重启）/ 已镜像仍为空（BIOS 未烧录）。
+- 验证：`npm run build` 全绿；`tsc -p server/tsconfig.json` 与前端 `tsc --noEmit` 双绿；前端产物 grep 到新文案；zip 内 `bundle.js` 含 `/run/docker-manager-yanzi/dmi-` 与单元模板标记。
+
+### ⚠️ 未完成 / 已知限制
+
+- 修复命令仍需用户手工在服务器执行（写 `/etc/systemd/system/` 需 root，应用自身没有该授权，也不应为此开 `sudoers`）。
+- 单元比对是「模板指令 ⊆ 已安装指令」的子集判定：若运维把某条指令**改错值**（如路径写歪）而键名仍一致，本检查发现不了。
+
+### 📌 下一步
+
+- 无。本次发布后需要**重跑 `install.sh`（或使用界面里的复制修复命令）**才能让 v1.23.4 的 DMI 镜像真正生效。
 
 ---
 

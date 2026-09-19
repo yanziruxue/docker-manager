@@ -90,6 +90,7 @@ import {
 import { createSession, getSessionUser, destroySession, requireAuth, invalidateSessionTtlCache } from "./auth.js";
 import { runFixPermsCli, runPermissionCheckCli, expectedUid } from "./perms-cli.js";
 import { scanPermIssues, formatIssue, currentUser, fixCommandLine } from "./perms.js";
+import { checkServiceUnit, describeServiceUnitGap } from "./unit-status.js";
 
 // 尝试加载嵌入式前端数据（仅二进制构建时可用）
 // BUILD_BINARY 由 esbuild define 注入，仅二进制构建时为 true
@@ -1403,6 +1404,16 @@ app.get("/api/system/version", (_req, res) => {
   res.json({ success: true, data: { version: CURRENT_VERSION, installDir: getInstallDir() } });
 });
 
+/**
+ * systemd 服务单元一致性（只读）。
+ *
+ * 单元文件由 install.sh 安装、**OTA 不更新**，所以依赖新单元指令的功能在旧部署上会静默失效。
+ * 返回缺失指令列表 + 一条可直接粘贴的 root 修复命令，供「本机设备」卡片提示。
+ */
+app.get("/api/system/service-unit", (_req, res) => {
+  res.json({ success: true, data: checkServiceUnit() });
+});
+
 /** 检查 GitHub Releases 是否有新版本 */
 app.get("/api/system/update/check", async (_req, res) => {
   try {
@@ -1726,6 +1737,22 @@ const server = app.listen(PORT, () => {
       }
     } catch {
       /* 体检失败不影响启动 */
+    }
+
+    // 服务单元自检：单元由 install.sh 安装、**OTA 不更新**，依赖新指令的功能（如 root 镜像 DMI
+    // 序列号）在旧部署上会静默失效 —— 启动即告警，并在设置页给出一键修复命令。
+    try {
+      const su = checkServiceUnit();
+      if (su.applicable && !su.upToDate) {
+        console.warn(
+          `⚠️  系统服务单元落后：缺少 ${su.missing.length} 条指令（${describeServiceUnitGap(su)}）`
+        );
+        console.warn(
+          `   部分功能可能静默失效（如 DMI 产品序列号/UUID 展示）；修复见「系统设置 → 本机设备」页`
+        );
+      }
+    } catch {
+      /* 自检失败不影响启动 */
     }
   });
 

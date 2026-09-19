@@ -67,7 +67,20 @@ function readDistFiles() {
   return files;
 }
 
-// ---------- 2. esbuild 虚拟模块插件 ----------
+// ---------- 2a. 读取 systemd 单元模板（供在线自检「服务单元是否落后」） ----------
+// 单元文件由 install.sh 复制到 /etc/systemd/system/，而 OTA 只换二进制、不碰它，
+// 所以必须把模板嵌进二进制，运行时才能与已安装单元比对并提示用户更新。
+const SERVICE_NAME = "docker-manager-yanzi.service";
+function readServiceTemplate() {
+  const p = path.join(DEPLOY_LINUX, SERVICE_NAME);
+  if (!fs.existsSync(p)) {
+    console.error(`❌ 未找到 ${p}`);
+    process.exit(1);
+  }
+  return fs.readFileSync(p, "utf-8");
+}
+
+// ---------- 2b. esbuild 虚拟模块插件 ----------
 function embeddedDistPlugin(embedded) {
   return {
     name: "embedded-dist",
@@ -87,10 +100,31 @@ function embeddedDistPlugin(embedded) {
   };
 }
 
+/** 把 systemd 单元模板作为 default 导出注入（virtual:embedded-service） */
+function embeddedServicePlugin(template) {
+  return {
+    name: "embedded-service",
+    setup(build) {
+      build.onResolve({ filter: /^virtual:embedded-service$/ }, () => ({
+        path: "virtual:embedded-service",
+        namespace: "embedded-service",
+      }));
+
+      build.onLoad({ filter: /.*/, namespace: "embedded-service" }, () => ({
+        contents: `export default ${JSON.stringify(template)};`,
+        loader: "js",
+        resolveDir: ROOT,
+      }));
+    },
+  };
+}
+
 // ---------- 3. 打包 ----------
 async function build() {
   const embedded = readDistFiles();
   console.log(`📦 已读取 ${Object.keys(embedded).length} 个前端文件`);
+  const serviceTemplate = readServiceTemplate();
+  console.log(`📦 已嵌入 systemd 单元模板（${SERVICE_NAME}，${serviceTemplate.length} B）`);
 
   fs.mkdirSync(DEPLOY_LINUX, { recursive: true });
 
@@ -106,12 +140,13 @@ async function build() {
     // 二进制模式支持 socket 和 TCP，SSH 需用传统部署
     external: ["cpu-features"],
     mainFields: ["module", "main"],
-    plugins: [embeddedDistPlugin(embedded)],
+    plugins: [embeddedDistPlugin(embedded), embeddedServicePlugin(serviceTemplate)],
     banner: {
       js: [
         `// Docker Stack Manager - Linux Binary Build`,
         `// Build time: ${new Date().toISOString()}`,
         `// Embedded frontend files: ${Object.keys(embedded).length}`,
+        `// Embedded systemd unit template: ${SERVICE_NAME} (${serviceTemplate.length} B)`,
         `const __SEA_URL__ = require("node:url").pathToFileURL(process.execPath).href;`,
         ``,
       ].join("\n"),

@@ -161,6 +161,34 @@ export function fetchTelemetryStats(): Promise<TelemetryStats | null> {
   return request<TelemetryStats | null>("/telemetry/stats");
 }
 
+/**
+ * systemd 服务单元一致性（部署提示用）。
+ * 单元文件由 install.sh 安装、OTA 不更新，落后时依赖新指令的功能会静默失效。
+ */
+export interface ServiceUnitStatus {
+  /** 是否适用（Linux 且已安装单元；Windows / 容器下为 false） */
+  applicable: boolean;
+  unitName: string;
+  unitPath: string;
+  exists: boolean;
+  /** 已安装单元 + drop-in 缺失的指令（空数组 = 一致） */
+  missing: string[];
+  /** 已加载的 drop-in 文件名 */
+  dropIns: string[];
+  /** DMI 镜像目录及其中的文件 */
+  mirrorDir: string;
+  mirrorFiles: string[];
+  /** 已安装单元是否覆盖模板全部指令 */
+  upToDate: boolean;
+  /** 一键修复命令（多行，含 sudo） */
+  fixCommand: string;
+}
+
+/** 查询 systemd 服务单元是否与当前二进制内置模板一致 */
+export function fetchServiceUnitStatus(): Promise<ServiceUnitStatus> {
+  return request<ServiceUnitStatus>("/system/service-unit");
+}
+
 /** 修改当前用户密码（单管理员：必须校验原密码） */
 export function changeMyPassword(oldPassword: string, newPassword: string): Promise<void> {
   return request<void>("/auth/password", {

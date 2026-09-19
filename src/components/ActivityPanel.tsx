@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Cpu, Copy, Check, Loader2, Eye, EyeOff } from "lucide-react";
+import { Cpu, Copy, Check, Loader2, Eye, EyeOff, AlertTriangle } from "lucide-react";
 import {
   fetchTelemetryStatus,
+  fetchServiceUnitStatus,
   type TelemetryStatus,
   type DeviceHardware,
   type DeviceDetails,
+  type ServiceUnitStatus,
 } from "../api";
 import { copyText } from "../lib/clipboard";
 import { Card } from "./UI";
@@ -82,23 +84,29 @@ function fmtDisk(d?: DeviceDetails["disk"]): string {
  * 设备标识 = 本机硬件指纹（主板+CPU+内存+硬盘+显卡+安装的系统 6 维哈希），
  * 作为安装量 / 活跃度统计的统计主键；硬件指纹不变即视为同一设备。
  * 卡片按「设备标识 / 运行环境 / 应用版本 / 架构 / 系统 / 标识文件 / 主板 / 主板型号 / 产品序列号 / 系统UUID / CPU / GPU / 内存 / 硬盘」展示。
+ *
+ * 另附「服务单元落后」提示：单元文件由 install.sh 安装、OTA 不更新，落后时
+ * 依赖新指令的功能（如 root 镜像 DMI 序列号）会静默失效，需提示用户重装单元。
  */
 export function ActivityPanel() {
   const [status, setStatus] = useState<TelemetryStatus | null>(null);
+  const [unit, setUnit] = useState<ServiceUnitStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [showUuid, setShowUuid] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [fixCopied, setFixCopied] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
-    try {
-      const s = await fetchTelemetryStatus();
-      setStatus(s);
-    } catch {
-      // 静默失败：保留空态，不干扰其它设置
-    } finally {
-      setLoading(false);
-    }
+    // 单元状态与遥测状态并行取；单元状态失败不影响卡片主体
+    const [s, u] = await Promise.all([
+      fetchTelemetryStatus().catch(() => null),
+      fetchServiceUnitStatus().catch(() => null),
+    ]);
+    // 静默失败：保留空态，不干扰其它设置
+    if (s) setStatus(s);
+    setUnit(u);
+    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -113,12 +121,31 @@ export function ActivityPanel() {
     }
   };
 
+  const copyFix = async () => {
+    if (!unit?.fixCommand) return;
+    if (await copyText(unit.fixCommand)) {
+      setFixCopied(true);
+      setTimeout(() => setFixCopied(false), 1500);
+    }
+  };
+
   const maskedUuid = status
     ? `${status.deviceId.slice(0, 8)}${"•".repeat(24)}${status.deviceId.slice(-4)}`
     : "—";
 
   const hw: DeviceHardware | undefined = status?.hardware;
   const details: DeviceDetails | undefined = status?.details;
+
+  const unitStale = !!unit && unit.applicable && !unit.upToDate;
+  /** DMI 两行恒为空时的悬停提示：区分「单元没更新 / 服务没重启 / BIOS 没烧录」 */
+  const dmiHint =
+    !unit || !unit.applicable
+      ? "需 root 权限读取（内核 sysfs 权限 0400）"
+      : unitStale
+        ? "系统服务单元落后：服务启动前未镜像 DMI 值，请按上方提示更新服务单元"
+        : unit.mirrorFiles.length === 0
+          ? "服务单元已是最新，但 DMI 镜像尚未生成（重启服务即可）"
+          : "镜像已生成；仍为空说明 BIOS 未烧录该字段";
 
   return (
     <div className="space-y-4">
@@ -128,6 +155,38 @@ export function ActivityPanel() {
           设备唯一标识与硬件指纹（用于安装量 / 活跃度统计，自动静默上报）
         </p>
       </div>
+
+      {/* 服务单元落后提示：单元由 install.sh 安装，OTA 不更新它 */}
+      {unitStale && unit && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800">
+          <div className="flex items-start gap-2">
+            <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
+            <div className="min-w-0 space-y-1">
+              <div className="font-medium">
+                系统服务单元落后，缺少 {unit.missing.length} 条指令
+              </div>
+              <div className="text-amber-700 leading-relaxed">
+                该文件由安装脚本写入 <span className="font-mono">{unit.unitPath}</span>
+                ，在线升级不会更新它，因此部分功能静默失效（如「产品序列号 / 系统UUID」需服务启动前以
+                root 读取 DMI）。
+              </div>
+              <div className="font-mono text-[11px] text-amber-700 break-all">
+                {unit.missing.join("  ")}
+              </div>
+              <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                <button
+                  onClick={copyFix}
+                  className="inline-flex items-center gap-1 rounded border border-amber-300 bg-white px-2 py-1 text-[11px] text-amber-800 hover:bg-amber-100"
+                >
+                  {fixCopied ? <Check size={12} className="text-green-600" /> : <Copy size={12} />}
+                  {fixCopied ? "已复制" : "复制修复命令"}
+                </button>
+                <span className="text-amber-600">在服务器上以 root 执行；会覆盖该单元并重启服务</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <Card title="本机设备标识" icon={<Cpu size={16} />}>
         {loading && !status ? (
@@ -180,13 +239,13 @@ export function ActivityPanel() {
                 label="产品序列号"
                 value={details?.dmi?.productSerial ?? ""}
                 mono
-                title={details?.dmi?.productSerial}
+                title={details?.dmi?.productSerial || dmiHint}
               />
               <Row
                 label="系统UUID"
                 value={details?.dmi?.productUuid ?? ""}
                 mono
-                title={details?.dmi?.productUuid}
+                title={details?.dmi?.productUuid || dmiHint}
               />
               <Row label="CPU" value={fmtCpu(details?.cpu)} title={fmtCpu(details?.cpu)} />
               <Row label="GPU" value={fmtGpu(details?.gpu)} title={fmtGpu(details?.gpu)} />
