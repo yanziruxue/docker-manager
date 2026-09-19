@@ -413,12 +413,22 @@ function collectDiskDetails(): DeviceDetails["disk"] {
   return { serial, model, size };
 }
 
-/** 采集 DMI 标识字段：主板型号 / 产品序列号 / 系统 UUID（sysfs 直读，失败降级空串，普通用户可读） */
+/**
+ * 采集 DMI 标识字段：主板型号 / 产品序列号 / 系统 UUID（只读展示）。
+ *
+ * 读取顺序：① systemd 以 root 镜像的世界可读副本 `/run/docker-manager-yanzi/dmi-<field>`
+ * （内核把 product_serial / product_uuid 的 sysfs 权限设为 0400，非 root 服务直读不到）；
+ * ② 回退 sysfs 直读。两者都失败则返回空串（卡片显示「—」）。
+ * 注意：本函数只服务展示，不参与 6 维硬件指纹；`collectBoardId()` 保持原样以确保指纹稳定。
+ */
 function collectDmiIds(): DeviceDetails["dmi"] {
+  const read = (field: string) =>
+    readTextFile(`/run/docker-manager-yanzi/dmi-${field}`) ||
+    readTextFile(`/sys/class/dmi/id/${field}`);
   return {
-    boardName: readTextFile("/sys/class/dmi/id/board_name"),
-    productSerial: readTextFile("/sys/class/dmi/id/product_serial"),
-    productUuid: readTextFile("/sys/class/dmi/id/product_uuid"),
+    boardName: read("board_name"),
+    productSerial: read("product_serial"),
+    productUuid: read("product_uuid"),
   };
 }
 

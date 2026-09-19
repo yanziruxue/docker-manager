@@ -23,7 +23,7 @@
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.23.3**（**已发布**）；本机设备标识卡片新增 3 条 DMI 标识（主板型号 / 产品序列号 / 系统UUID，纯展示不进指纹）。上一版 **v1.23.2**（已发布）：GPU 行改 sysfs 直读（非 root systemd 服务下也能识别核显/独显型号） |
+| 当前版本 | **v1.23.4**（**未发布**）；修复非 root 服务读不到 `product_serial`/`product_uuid`（内核 0400）导致卡片显示「—」：systemd 启动前以 root 镜像 DMI 副本，后端优先读取。已发布上一版 **v1.23.3**：卡片新增主板型号/产品序列号/系统UUID 三条展示 |
 | 版本号规则 | Major 人工发布；Minor 新功能；Patch 修复/优化/UI。v1.22.0 因新增「镜像更新→通知中心」与「硬件指纹作主键」两项新能力归为 Minor |
 | 最新 Release | [v1.23.3](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.3)（本机设备标识卡片新增主板型号/产品序列号/系统UUID；含 `quick-install.sh` asset）；上一版 [v1.23.2](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.2) |
 | 源码分支 | `main`（当前发布点 `d1e90c37ef5619d8854e60f829d3dbcde1eb50d0`；上一版 `f5b9fd0b83ec855172fa9fa83d6334d25346053a`） |
@@ -115,6 +115,28 @@
 - 一次发布中同时含 Minor 与 Patch 时，按**最高级别**递增，低级别归零（例：`1.0.3` + 新功能 → `1.1.0`）
 - Major 由人工决定，不自动递增
 - 同一天内的多次改动合并为一个版本，逐条记录在版本下
+
+---
+
+## v1.23.4 — 2026-09-19（未发布）
+
+> 修复 v1.23.3 新增的「产品序列号 / 系统UUID」在**非 root systemd 服务**下显示「—」的问题。根因：内核把 `/sys/class/dmi/id/` 下 `product_serial`、`product_uuid`、`board_serial` 的权限设为 **0400（仅 root 可读）**，服务进程以非 root 用户运行，直读必然失败；只有 `board_name` 是 0444 可读（故卡片只有「主板型号」显示正常）。修复方式：systemd 单元在启动前以 root 把这三个值镜像成世界可读副本，后端优先读副本。
+
+### ✅ 已完成
+
+- **systemd 单元增加 DMI 镜像步骤**：`deploy/linux/docker-manager-yanzi.service` 新增 `RuntimeDirectory=docker-manager-yanzi` 与一条 `ExecStartPre=+/bin/sh -c '...'`——`+` 前缀表示该命令以 root 提权执行并绕过沙箱（`PrivateTmp`/`ProtectSystem` 等不生效），把 `board_name` / `product_serial` / `product_uuid` 写入 `/run/docker-manager-yanzi/dmi-<field>`（root 创建、umask 022 即 0644，世界可读）。**刻意不写 `$VAR`**：systemd 会先做变量展开，`$f` 会被吃成空串。
+- **后端优先读镜像副本**：`server/telemetry.ts` 的 `collectDmiIds()` 改为「先读 `/run/docker-manager-yanzi/dmi-<field>` → 回退 `/sys/class/dmi/id/<field>`」，两者皆空显示「—」。`collectBoardId()`（指纹用）**保持原样**——避免 `boardSerial` 从空串变为 `Default string` 导致 6 维指纹变化、设备被判定为新设备重报 install。
+- 验证：`npm run build`（vite + tsc server）全绿；`systemd-analyze verify` 语义待 Linux 端验证（本机 Windows 无法跑）。
+
+### ⚠️ 未完成 / 已知限制
+
+- **需重跑 `install.sh`（或手动替换 `.service` + `daemon-reload` + `restart`）本机才生效**：OTA 只替换二进制、不更新 `.service`（长期限制）。
+- 镜像只在**服务启动时**刷新一次；DMI 值静态不变，正常场景无影响。
+- 若 `+` 前缀被 systemd 拒绝（极老版本 <231），`ExecStartPre` 会失败导致服务起不来；Debian 12（systemd 252）无此问题。
+
+### 📌 下一步
+
+- 无。
 
 ---
 

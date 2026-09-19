@@ -17,6 +17,14 @@ Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 # docker CLI 配置隔离：ProtectHome=yes 会屏蔽 /home 下的 ~/.docker，
 # 指向安装目录内可写目录，避免 "Error loading config file: permission denied" 干扰 compose 检测
 Environment="DOCKER_CONFIG=/opt/docker-manager-yanzi/config/docker-cli"
+
+# 内核 DMI sysfs 中 product_serial / product_uuid / board_serial 的权限是 0400（仅 root 可读），
+# 非 root 服务读不到，会让「本机设备标识」卡片这几行显示「—」。
+# 启动前以 root（"+" 前缀：提权执行且绕过沙箱）把 DMI 值镜像成世界可读的小文件到 RuntimeDirectory，
+# 供卡片展示（仅展示用途，不参与 6 维硬件指纹）。刻意不写 $VAR：systemd 会先做变量展开。
+RuntimeDirectory=docker-manager-yanzi
+ExecStartPre=+/bin/sh -c 'cat /sys/class/dmi/id/board_name > /run/docker-manager-yanzi/dmi-board_name 2>/dev/null; cat /sys/class/dmi/id/product_serial > /run/docker-manager-yanzi/dmi-product_serial 2>/dev/null; cat /sys/class/dmi/id/product_uuid > /run/docker-manager-yanzi/dmi-product_uuid 2>/dev/null; true'
+
 ExecStart=/opt/docker-manager-yanzi/docker-manager-yanzi
 Restart=always
 RestartSec=5
