@@ -23,11 +23,11 @@
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.23.1**（**待发布**）；UI 优化：本机设备标识卡片明细区改为每行一条（之前宽屏双列）。上一版 **v1.23.0**（已发布）：后台镜像更新检查完成经 SSE 实时推通知中心 + 设备标识卡片改版展示完整硬件详情 |
+| 当前版本 | **v1.23.1**（**已发布**）；UI 优化：本机设备标识卡片明细区改为每行一条（之前宽屏双列）。上一版 **v1.23.0**（已发布）：后台镜像更新检查完成经 SSE 实时推通知中心 + 设备标识卡片改版展示完整硬件详情 |
 | 版本号规则 | Major 人工发布；Minor 新功能；Patch 修复/优化/UI。v1.22.0 因新增「镜像更新→通知中心」与「硬件指纹作主键」两项新能力归为 Minor |
-| 最新 Release | [v1.23.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.0)（后台镜像更新检查完成经 SSE 实时推通知中心 + 设备标识卡片改版展示完整硬件详情；含 `quick-install.sh` asset）；上一版 [v1.22.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.22.0) |
-| 源码分支 | `main`（当前发布点 `d7b3aad9f57f910d332c5f1e100962d5bc4552a1`；回填发布记录后 `94bdf498c2ca2d93fe9c6bbeb8552c6a89aca636`；上一版 `e756d8707d678712829080e0eac82faba76b2d4d`） |
-| 交付包 | [v1.23.0.zip](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.0)（42,920,286 B，SHA-256 `6c072f280e358483623e662e46e3fb1bd1bfc5fb974319c9806e6be2cf6b7eb4`）；上一发布版 `v1.22.0.zip` 42,918,836 B SHA-256 `7634e5edf4a73d7ec7b014d13915032b55b4654bd121e9c978be7eebbe475ccf` |
+| 最新 Release | [v1.23.1](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.1)（本机设备标识卡片明细区改为每行一条；含 `quick-install.sh` asset）；上一版 [v1.23.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.0) |
+| 源码分支 | `main`（当前发布点 `4fbc23d6d424ba89338f240ca03a8f6212b6fd23`；上一版 `94bdf498c2ca2d93fe9c6bbeb8552c6a89aca636`） |
+| 交付包 | [v1.23.1.zip](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.1)（42,920,193 B，SHA-256 `e72e1980447afbc92d6a3cf54e9c20144c19bdc0b30afd2a99d178192d4b2957`）；上一发布版 `v1.23.0.zip` 42,920,286 B SHA-256 `6c072f280e358483623e662e46e3fb1bd1bfc5fb974319c9806e6be2cf6b7eb4` |
 | 架构 | REST + WS + SSE 三通道；Socket / TCP / SSH 三种引擎 |
 | 目标平台 | Linux x64（SEA 单可执行文件），Unraid / 自托管 NAS |
 
@@ -135,6 +135,12 @@
 ### 📌 下一步
 
 - 无。
+
+### 🚀 发布记录（2026-09-19）
+
+- Release：https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.1
+- 源码 commit：`4fbc23d6d424ba89338f240ca03a8f6212b6fd23`（main）
+- 交付包：`docker-manager-yanzi-linux-x64-v1.23.1.zip`（42,920,193 B，SHA-256 `e72e1980447afbc92d6a3cf54e9c20144c19bdc0b30afd2a99d178192d4b2957`）
 
 ---
 
