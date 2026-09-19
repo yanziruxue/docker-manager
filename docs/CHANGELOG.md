@@ -23,12 +23,12 @@
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.23.5**（**未发布**）；新增 **systemd 服务单元一致性自检**——OTA 不更新 `/etc/systemd/system/` 下的单元，落后时在「本机设备」卡片提示缺失指令并提供一键复制的 root 修复命令（修好 v1.23.4 的 DMI 镜像在旧部署上静默失效问题）。已发布上一版 **v1.23.4**：systemd 启动前以 root 镜像 DMI 副本，修复非 root 服务读不到 `product_serial`/`product_uuid` |
+| 当前版本 | **v1.23.5**（**已发布**）；新增 **systemd 服务单元一致性自检**——OTA 不更新 `/etc/systemd/system/` 下的单元，落后时在「本机设备」卡片提示缺失指令并提供一键复制的 root 修复命令（修好 v1.23.4 的 DMI 镜像在旧部署上静默失效问题）。上一版 **v1.23.4**（已发布）：systemd 启动前以 root 镜像 DMI 副本，修复非 root 服务读不到 `product_serial`/`product_uuid` |
 | 版本号规则 | Major 人工发布；Minor 新功能；Patch 修复/优化/UI。v1.22.0 因新增「镜像更新→通知中心」与「硬件指纹作主键」两项新能力归为 Minor |
-| 最新 Release | [v1.23.4](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.4)（修复 DMI 产品序列号/系统UUID 在非 root 服务下不可读；含 `quick-install.sh` asset）；上一版 [v1.23.3](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.3) |
-| 源码分支 | `main`（当前发布点 `eb553f6b9a1daa2ff0d235cfdc7aa8357b4adfa8`；上一版 `d1e90c37ef5619d8854e60f829d3dbcde1eb50d0`） |
+| 最新 Release | [v1.23.5](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.5)（服务单元一致性自检 + 一键修复命令；含 `quick-install.sh` asset）；上一版 [v1.23.4](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.4) |
+| 源码分支 | `main`（当前发布点 `22117a0325c6fffc5264dfa159a17155eb6d3091`；上一版 `eb553f6b9a1daa2ff0d235cfdc7aa8357b4adfa8`） |
 | 部署注意 | **改过 `deploy/linux/*.service` 的版本，OTA 后必须重跑 `install.sh`**（或在「设置 → 本机设备」页复制一键修复命令）——OTA 只替换二进制，不更新单元文件 |
-| 交付包 | [v1.23.4.zip](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.4)（42,921,687 B，SHA-256 `bf6972c8aba10c7fb24ea6a3f04e7ed0346e2093a8f3b5c2931e826be60a00aa`）；上一发布版 `v1.23.3.zip` 42,921,245 B SHA-256 `1fad2f2db6471d1a383c1d6b2f3305e6a6a19f4e289cebf1af97c8db896ec74c` |
+| 交付包 | [v1.23.5.zip](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.5)（42,925,949 B，SHA-256 `91c08943a3379e4508cfd07466a5dbb41d7af425fd5c8f7a4b56ffbc60e5599c`）；上一发布版 `v1.23.4.zip` 42,921,687 B SHA-256 `bf6972c8aba10c7fb24ea6a3f04e7ed0346e2093a8f3b5c2931e826be60a00aa` |
 | 架构 | REST + WS + SSE 三通道；Socket / TCP / SSH 三种引擎 |
 | 目标平台 | Linux x64（SEA 单可执行文件），Unraid / 自托管 NAS |
 
@@ -119,7 +119,7 @@
 
 ---
 
-## v1.23.5 — 2026-09-19（未发布）
+## v1.23.5 — 2026-09-19（已发布）
 
 > 修复一个**结构性隐患**：`/etc/systemd/system/docker-manager-yanzi.service` 由 `install.sh` 安装，而**在线升级（OTA）只替换二进制、从不更新它**。于是 v1.23.4 依赖 `ExecStartPre` 的「DMI 镜像」在已升级的生产机上**静默失效**——用户只看到产品序列号/系统UUID 仍是「—」，无法判断是硬件没烧录、权限不足，还是服务单元没更新。本版把「单元是否落后」做成可见、可一键修复。
 
@@ -141,6 +141,14 @@
 ### 📌 下一步
 
 - 无。本次发布后需要**重跑 `install.sh`（或使用界面里的复制修复命令）**才能让 v1.23.4 的 DMI 镜像真正生效。
+
+### 📦 发布记录
+
+- 日期：2026-09-19
+- Release：[v1.23.5](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.5)（assets：`docker-manager-yanzi-linux-x64-v1.23.5.zip` / 无版本名别名 / `quick-install.sh`）
+- 源码：`main @ 22117a0325c6fffc5264dfa159a17155eb6d3091`（97 个文件，含新增 `server/unit-status.ts`）
+- 交付包：42,925,949 B，SHA-256 `91c08943a3379e4508cfd07466a5dbb41d7af425fd5c8f7a4b56ffbc60e5599c`
+- 二进制：129,764,544 B，ELF magic `7f 45 4c 46`；内嵌校验通过（`1.23.5` / `/system/service-unit` / `RuntimeDirectory=docker-manager-yanzi` / `index-U24Mo9KV.js`）
 
 ---
 
