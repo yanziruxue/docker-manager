@@ -57,6 +57,7 @@ import {
 import { createFullBackup, restoreFullBackup, restoreUploadedBackup, exportConfigArchive, listBackupFiles, deleteBackupFile, backupFilePath, migrateLegacyBackups } from "./backup.js";
 import { getSettings, saveSettings } from "./settings.js";
 import { startUpdateScheduler, getSchedulerStatus, runSchedulerCheckNow, checkEngineImages, getImageUpdateCache, startBackupScheduler, getBackupSchedulerStatus } from "./scheduler.js";
+import { addPushClient, removePushClient } from "./push.js";
 import { readDaemonConfigInfo, writeDaemonConfig, restartDockerService, refreshPrivileges } from "./daemon-config.js";
 import { CURRENT_VERSION, getInstallDir, checkForUpdate, performUpdate, performUpdateFromUpload, getUpdateState, getUpdateDir, markUpdateError, saveUploadPackage, getPendingUpload, getPendingUploadPath, schedulePendingExpiry, discardPendingUpload, cancelPendingExpiry, cancelUpdate } from "./updater.js";
 import { COMPOSE_DIR } from "./paths.js";
@@ -1141,6 +1142,28 @@ app.get("/api/engines/:id/resource-stats/stream", (req, res) => {
       entry.timer = null;
       sseStreams.delete(engineId);
     }
+  });
+});
+
+// ============ 全局实时推送 SSE（跨切面事件，如镜像更新后台检查完成） ============
+
+/** 全局推送通道：登录后前端建立一条 EventSource，接收 image-update-checked 等事件即时刷新视图 */
+app.get("/api/push", (req, res) => {
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no",
+  });
+  res.flushHeaders();
+
+  addPushClient(res);
+
+  // 首帧：发送连接已建立的确认（前端可据此忽略重连抖动）
+  res.write(`event: ready\ndata: {}\n\n`);
+
+  req.on("close", () => {
+    removePushClient(res);
   });
 });
 

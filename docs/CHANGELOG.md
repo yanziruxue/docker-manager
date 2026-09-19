@@ -23,7 +23,7 @@
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.22.0**（**已发布**）；含两处：① 镜像更新结果接入通知中心；② 设备唯一标识改为硬件指纹（主板+CPU+内存+硬盘+显卡+系统 6 维哈希）作主键，取消随机设备 UUID |
+| 当前版本 | **v1.23.0**（**待发布**）；含两处：① 后台镜像更新检查完成经 SSE 实时推通知中心；② 设备标识卡片改版展示完整硬件详情（主板/CPU/GPU/内存/硬盘，新增富硬件详情采集）。上一版 **v1.22.0**（已发布）：镜像更新结果接入通知中心 + 设备唯一标识改硬件指纹 6 维作主键 |
 | 版本号规则 | Major 人工发布；Minor 新功能；Patch 修复/优化/UI。v1.22.0 因新增「镜像更新→通知中心」与「硬件指纹作主键」两项新能力归为 Minor |
 | 最新 Release | [v1.22.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.22.0)（镜像更新结果接入通知中心 + 设备唯一标识改为硬件指纹 6 维作主键；含 `quick-install.sh` asset）；上一版 [v1.21.2](https://github.com/yanziruxue/docker-manager/releases/tag/v1.21.2) |
 | 源码分支 | `main`（当前发布点 `e756d8707d678712829080e0eac82faba76b2d4d`；上一版 `7a0069c73944992dbd7c9da73150d5cab7661fbd`） |
@@ -44,7 +44,7 @@
 | 备份管理 | ✅ | 手动全量 + 堆栈级备份 / 恢复（含**上传备份文件直接恢复**）/ 导出（**zip** 格式，兼容历史 tar.gz）+ 自动备份调度器（周/月/年/Cron，含保留清理） |
 | 权限诊断与修复 | ✅ | 备份期自愈 `u+r` + 结构化诊断（属主/权限位/一条修复命令）+ `fix-perms` CLI + 启动体检与界面提示 |
 | 通知中心 | ✅ | 未读已读 + localStorage 持久化 |
-| 系统设置 | ✅ | Docker 配置 / Compose 模式 / 通知 / 备份 / **镜像更新**（原「更新调度器」）/ 列显隐 / 本机设备（7 维硬件指纹，只读） |
+| 系统设置 | ✅ | Docker 配置 / Compose 模式 / 通知 / 备份 / **镜像更新**（原「更新调度器」）/ 列显隐 / 本机设备（硬件指纹 6 维 + 完整硬件详情卡片，只读） |
 | Web 终端 | ✅ | xterm.js + WebSocket + 多 Shell 检测 |
 | 登录鉴权 | ✅ | 单管理员 + scrypt + httpOnly 会话（绝对过期）+ 密码找回码 |
 | 镜像更新（原更新调度器） | ✅ | 后台定时检查镜像版本（每天 / 每周 / 每月，非 Cron）+ 结果落盘缓存 + 镜像页「检查更新」共用同一份数据 |
@@ -115,6 +115,29 @@
 - 一次发布中同时含 Minor 与 Patch 时，按**最高级别**递增，低级别归零（例：`1.0.3` + 新功能 → `1.1.0`）
 - Major 由人工决定，不自动递增
 - 同一天内的多次改动合并为一个版本，逐条记录在版本下
+
+---
+
+## v1.23.0 — 2026-09-19（待发布）
+
+> 后台镜像更新检查（调度器）完成后通过 SSE 实时推送，前端即时刷新通知中心（此前仅手动检查/切页/刷新才拉取）；同时「本机设备标识」卡片改版为按「设备标识 / 运行环境 / 应用版本 / 架构 / 系统 / 标识文件 / 主板 / CPU / GPU / 内存 / 硬盘」展示完整硬件详情（新增富硬件详情采集，6 维指纹与统计主键不变）。
+
+### ✅ 已完成
+
+- **全局实时推送通道**：新增 `server/push.ts`——全局 SSE 广播中心（`addPushClient`/`removePushClient`/`broadcastPush`），客户端登录后只建一条 `EventSource`，不按引擎分片、不引入存储/队列。
+  - 路由：`GET /api/push`（`server/index.ts`，与 `resource-stats/stream` 同款 `text/event-stream` 头 + `X-Accel-Buffering: no` 关代理缓冲，首帧发 `ready` 事件）；刻意放在 `index.ts` 而非 `scheduler.ts`，避免 `scheduler↔index` 循环依赖。
+- **调度器完成即推送**：`scheduler.ts: runCheck()` 在落盘与写日志后，调用 `broadcastPush({ type:"image-update-checked", at, byEngine })`（含每引擎 `engineId/updates/checked`）。推送失败仅告警，不影响检查结果。
+- **前端即时刷新**：`src/App.tsx` 登录并选定引擎后建一条全局 `EventSource("/api/push")`；收到 `image-update-checked` 且 `byEngine` 含当前 `activeEngineId` 时，调用 `refreshActivities(activeEngineId)` 重写活动日志，通知中心角标与列表实时出现「有可用更新」通知；切换引擎时重建连接绑定最新 `activeEngineId`。
+- **设备标识卡片改版（完整硬件详情）**：`src/components/ActivityPanel.tsx` 的「本机设备标识」卡片按固定格式展示：设备标识（可显隐/复制）、运行环境、应用版本、架构、系统、标识文件、主板、CPU、GPU、内存、硬盘。新增后端 `collectHardwareDetails()`（`DeviceDetails`：CPU 型号/物理核数/逻辑线程数/最高频率、GPU 型号/显存、内存型号/总容量、硬盘序列号/型号/大小），数据仅本地展示、**不进入 6 维指纹哈希**（复用既有 `collectCpuId/collectGpu/collectMemory/collectDiskId/collectBoardId`），故不影响既有设备统计主键与安装量基线。卡片用 `details` 富字段渲染，主板序列号/硬盘序列号仍取自既有的 6 维 `hardware`（同作指纹维度）。
+  - 文件：`server/telemetry.ts`（新增 `DeviceDetails` 接口 + `collectHardwareDetails()`，挂到 `TelemetryStatus.details`）、`src/api.ts`（同步 `DeviceDetails` + `TelemetryStatus.details`）、`src/components/ActivityPanel.tsx`（重写卡片：移除 `HW_FIELDS` 隐私隐藏段与 `matchCount/envUnchanged/fmtDateTime` 死代码，新增 `Row` + `fmtCpu/fmtGpu/fmtMem/fmtDisk` 格式化）。
+  - 验证：`npm run build`（vite + tsc server）全绿；`npx tsc --noEmit -p tsconfig.json`（前端）无错；dist 含「运行环境/标识文件/主板/应用版本/架构」等新串，`硬件指纹（部分维度隐私隐藏）` 旧串已消失。
+
+### ⚠️ 未完成 / 已知限制
+
+- 实时推送仅覆盖「通知中心活动」；镜像管理页「更新状态」列仍依赖进入页面/切引擎时读缓存（`loadImageUpdateStatus`），后台检查完成不会自动刷新该列（如需同歩实时，可在该事件里一并调用 `loadImageUpdateStatus`）。
+- 推送为「发后即弃」：若前端当时未连接（页面关闭/断网），错过该次事件，需等下次拉取（与活动源非实时本质一致）。
+- 推送通道未做事件类型白名单，后续新增实时事件（如备份完成）复用同一 SSE 即可，前端按需扩展 `type` 分支。
+- 富硬件详情在容器/虚拟化环境可能缺失：dmidecode / lspci / nvidia-smi 在容器内通常无权限或不存在，主板序列号、内存型号、GPU 型号/显存等字段会显示「—」，仅 CPU（/proc/cpuinfo + nproc）、硬盘（lsblk）等基础信息可稳定采集。
 
 ---
 

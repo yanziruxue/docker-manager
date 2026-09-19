@@ -5,6 +5,7 @@ import { checkAllImageUpdates, startImagePull, type ImageUpdateDetail, type Imag
 import { createLogger } from "./logger.js";
 import { dataPath } from "./paths.js";
 import { createFullBackup, pruneBackups } from "./backup.js";
+import { broadcastPush } from "./push.js";
 
 const log = createLogger("Scheduler");
 
@@ -186,6 +187,14 @@ async function runCheck(): Promise<SchedulerLastResult> {
   running = false;
   persist();
   log.info(`镜像更新检查完成：检查 ${totalChecked} 个，发现 ${totalUpdates} 个有可用更新`);
+
+  // 实时推送：通知已连接的前端刷新通知中心（活动日志含「有可用更新」）
+  try {
+    broadcastPush({ type: "image-update-checked", at: result.at, byEngine: result.byEngine });
+  } catch (err: any) {
+    log.warn(`镜像更新检查完成事件推送失败（不影响检查结果）: ${err?.message || err}`);
+  }
+
   return result;
 }
 

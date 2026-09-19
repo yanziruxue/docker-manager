@@ -1,42 +1,87 @@
 import React, { useCallback, useEffect, useState } from "react";
-import {
-  Cpu,
-  Copy,
-  Check,
-  Loader2,
-  Eye,
-  EyeOff,
-} from "lucide-react";
+import { Cpu, Copy, Check, Loader2, Eye, EyeOff } from "lucide-react";
 import {
   fetchTelemetryStatus,
   type TelemetryStatus,
   type DeviceHardware,
+  type DeviceDetails,
 } from "../api";
 import { copyText } from "../lib/clipboard";
 import { Card } from "./UI";
 
-/** 本机设备标识 6 维硬件属性（展示顺序与标签） */
-const HW_FIELDS: { key: keyof DeviceHardware; label: string }[] = [
-  { key: "system", label: "系统" },
-  { key: "cpu", label: "CPU" },
-  { key: "gpu", label: "GPU" },
-  { key: "memory", label: "内存" },
-  { key: "diskUid", label: "硬盘序列号" },
-  { key: "boardSerial", label: "主板序列号" },
-];
+/** 单条「标签：值」展示行 */
+function Row({
+  label,
+  value,
+  mono,
+  span2,
+  title,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+  span2?: boolean;
+  title?: string;
+}) {
+  return (
+    <div className={`flex justify-between gap-2${span2 ? " sm:col-span-2" : ""}`}>
+      <span className="text-slate-500 flex-shrink-0">{label}</span>
+      <span
+        className={`text-slate-700 truncate text-right${mono ? " font-mono text-xs" : ""}`}
+        title={title || value}
+      >
+        {value || "—"}
+      </span>
+    </div>
+  );
+}
 
-function fmtDateTime(v?: string): string {
-  if (!v) return "—";
-  const d = new Date(v);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleString("zh-CN", { hour12: false });
+/** CPU：型号 核心数 线程数 频率 */
+function fmtCpu(c?: DeviceDetails["cpu"]): string {
+  if (!c) return "";
+  const parts: string[] = [];
+  if (c.model) parts.push(c.model);
+  const spec: string[] = [];
+  if (c.cores) spec.push(`${c.cores} 核`);
+  if (c.threads) spec.push(`${c.threads} 线程`);
+  if (c.freqGHz) spec.push(`${c.freqGHz} GHz`);
+  if (spec.length) parts.push(spec.join(" "));
+  return parts.join("  ");
+}
+
+/** GPU：型号 显存 */
+function fmtGpu(g?: DeviceDetails["gpu"]): string {
+  if (!g) return "";
+  const parts: string[] = [];
+  if (g.model) parts.push(g.model);
+  if (g.memory) parts.push(g.memory);
+  return parts.join("  ");
+}
+
+/** 内存：型号 大小 */
+function fmtMem(m?: DeviceDetails["memory"]): string {
+  if (!m) return "";
+  const parts: string[] = [];
+  if (m.model) parts.push(m.model);
+  if (m.sizeGB) parts.push(`${m.sizeGB} GB`);
+  return parts.join("  ");
+}
+
+/** 硬盘：序列号 型号 大小 */
+function fmtDisk(d?: DeviceDetails["disk"]): string {
+  if (!d) return "";
+  const parts: string[] = [];
+  if (d.serial) parts.push(d.serial);
+  if (d.model) parts.push(d.model);
+  if (d.size) parts.push(d.size);
+  return parts.join("  ");
 }
 
 /**
  * 本机设备标识（只读）。
- * 不暴露任何遥测设置或上报状态——上报为后端硬编码、随活跃事件自动静默触发。
  * 设备标识 = 本机硬件指纹（主板+CPU+内存+硬盘+显卡+安装的系统 6 维哈希），
  * 作为安装量 / 活跃度统计的统计主键；硬件指纹不变即视为同一设备。
+ * 卡片按「设备标识 / 运行环境 / 应用版本 / 架构 / 系统 / 标识文件 / 主板 / CPU / GPU / 内存 / 硬盘」展示。
  */
 export function ActivityPanel() {
   const [status, setStatus] = useState<TelemetryStatus | null>(null);
@@ -72,8 +117,8 @@ export function ActivityPanel() {
     ? `${status.deviceId.slice(0, 8)}${"•".repeat(24)}${status.deviceId.slice(-4)}`
     : "—";
 
-  const envChanged = status ? !status.envUnchanged : false;
-  const matchCount = status ? status.matchCount : 0;
+  const hw: DeviceHardware | undefined = status?.hardware;
+  const details: DeviceDetails | undefined = status?.details;
 
   return (
     <div className="space-y-4">
@@ -103,93 +148,42 @@ export function ActivityPanel() {
                 <button
                   onClick={() => setShowUuid(!showUuid)}
                   className="p-1.5 text-slate-400 hover:text-slate-600 rounded hover:bg-slate-100"
-                  title={showUuid ? "隐藏" : "显示完整 UUID"}
+                  title={showUuid ? "隐藏" : "显示完整标识"}
                 >
                   {showUuid ? <EyeOff size={14} /> : <Eye size={14} />}
                 </button>
                 <button
                   onClick={copyUuid}
                   className="p-1.5 text-slate-400 hover:text-slate-600 rounded hover:bg-slate-100"
-                  title="复制 UUID"
+                  title="复制标识"
                 >
                   {copied ? <Check size={14} className="text-green-500" /> : <Copy size={14} />}
                 </button>
               </div>
             </div>
 
-            {/* 硬件环境连续性 */}
-            <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
-              <span className="text-sm text-slate-500">硬件环境</span>
-              <span
-                className={`text-sm font-medium ${
-                  envChanged ? "text-amber-600" : "text-green-600"
-                }`}
-              >
-                {envChanged ? "已变化" : "未变化"}
-                <span className="ml-1 text-xs font-normal text-slate-400">
-                  （{matchCount}/6 维已识别）
-                </span>
-              </span>
-            </div>
-
-            {/* 基础环境信息 */}
+            {/* 明细 */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm border-t border-slate-100 pt-3">
-              <div className="flex justify-between gap-2">
-                <span className="text-slate-500">运行环境</span>
-                <span className="text-slate-700">
-                  {status.virtualized ? "虚拟化 / 容器" : "物理机"}
-                </span>
-              </div>
-              <div className="flex justify-between gap-2">
-                <span className="text-slate-500">首次安装</span>
-                <span className="text-slate-700">{fmtDateTime(status.createdAt)}</span>
-              </div>
-              <div className="flex justify-between gap-2">
-                <span className="text-slate-500">应用版本</span>
-                <span className="text-slate-700">v{status.appVersion}</span>
-              </div>
-              <div className="flex justify-between gap-2">
-                <span className="text-slate-500">系统</span>
-                <span className="text-slate-700 truncate" title={status.osVersion}>
-                  {status.osVersion}
-                </span>
-              </div>
-              <div className="flex justify-between gap-2">
-                <span className="text-slate-500">架构</span>
-                <span className="text-slate-700">{status.arch}</span>
-              </div>
-              <div className="flex justify-between gap-2 sm:col-span-2">
-                <span className="text-slate-500">标识文件</span>
-                <span
-                  className="font-mono text-xs text-slate-600 truncate"
-                  title={status.deviceFile}
-                >
-                  {status.deviceFile}
-                </span>
-              </div>
-            </div>
-
-            {/* 6 维硬件指纹 */}
-            <div className="border-t border-slate-100 pt-3">
-              <div className="text-xs text-slate-500 mb-2">硬件指纹（6 维）</div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
-                {HW_FIELDS.map(({ key, label }) => {
-                  const val = status.hardware?.[key] ?? "";
-                  return (
-                    <div key={key} className="flex justify-between gap-2">
-                      <span className="text-slate-500">{label}</span>
-                      <span
-                        className={`font-mono text-xs truncate text-right ${
-                          val ? "text-slate-600" : "text-slate-300"
-                        }`}
-                        title={val || "未采集"}
-                      >
-                        {val || "—"}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
+              <Row label="运行环境" value={status.virtualized ? "虚拟化 / 容器" : "物理机"} />
+              <Row label="应用版本" value={`v${status.appVersion}`} />
+              <Row label="架构" value={status.arch} />
+              <Row label="系统" value={status.osVersion} title={status.osVersion} />
+              <Row
+                label="标识文件"
+                value={status.deviceFile}
+                mono
+                span2
+                title={status.deviceFile}
+              />
+              <Row label="主板" value={hw?.boardSerial ?? ""} mono title={hw?.boardSerial} />
+              <Row label="CPU" value={fmtCpu(details?.cpu)} title={fmtCpu(details?.cpu)} />
+              <Row label="GPU" value={fmtGpu(details?.gpu)} title={fmtGpu(details?.gpu)} />
+              <Row label="内存" value={fmtMem(details?.memory)} title={fmtMem(details?.memory)} />
+              <Row
+                label="硬盘"
+                value={fmtDisk(details?.disk)}
+                title={fmtDisk(details?.disk)}
+              />
             </div>
           </div>
         ) : (

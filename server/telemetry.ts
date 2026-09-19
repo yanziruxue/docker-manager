@@ -276,6 +276,92 @@ export function countNonEmpty(hw: DeviceHardware): number {
   return keys.filter((k) => (hw[k] || "").trim()).length;
 }
 
+// ---------- 设备标识卡片富硬件详情（仅本地展示，不参与统计指纹） ----------
+
+/** 本机设备标识卡片展示用的富硬件详情（不参与硬件指纹哈希，改动不影响统计主键） */
+export interface DeviceDetails {
+  cpu: { model: string; cores: number; threads: number; freqGHz: number };
+  gpu: { model: string; memory: string };
+  memory: { model: string; sizeGB: number };
+  disk: { serial: string; model: string; size: string };
+}
+
+/** 读取 /proc/cpuinfo 首个指定字段的值 */
+function readProcCpuinfoField(field: string): string {
+  try {
+    const txt = fs.readFileSync("/proc/cpuinfo", "utf-8");
+    const line = txt.split("\n").find((l) => l.startsWith(field));
+    return line ? (line.split(":")[1]?.trim() || "") : "";
+  } catch {
+    return "";
+  }
+}
+
+/** 采集 CPU 富详情：型号 / 物理核数 / 逻辑线程数 / 最高频率(GHz) */
+function collectCpuDetails(): DeviceDetails["cpu"] {
+  const model = readProcCpuinfoField("model name");
+  let threads = 0;
+  const nproc = tryExec("nproc", []);
+  if (nproc) threads = parseInt(nproc, 10) || 0;
+  const lscpu = tryExec("lscpu", []);
+  const perSocket = lscpu.match(/Core\(s\) per socket:\s*(\d+)/)?.[1];
+  const sockets = lscpu.match(/Socket\(s\):\s*(\d+)/)?.[1];
+  let cores = 0;
+  if (perSocket && sockets) cores = parseInt(perSocket, 10) * parseInt(sockets, 10);
+  else {
+    const cc = readProcCpuinfoField("cpu cores");
+    if (cc) cores = parseInt(cc, 10) || 0;
+  }
+  let freqGHz = 0;
+  const maxMhz = lscpu.match(/CPU max MHz:\s*([\d.]+)/)?.[1];
+  if (maxMhz) freqGHz = parseFloat(maxMhz) / 1000;
+  else {
+    const curMhz = readProcCpuinfoField("cpu MHz");
+    if (curMhz) freqGHz = parseFloat(curMhz) / 1000;
+  }
+  if (freqGHz) freqGHz = Number(freqGHz.toFixed(2));
+  return { model, cores, threads, freqGHz };
+}
+
+/** 采集 GPU 富详情：型号 / 显存（nvidia-smi 优先） */
+function collectGpuDetails(): DeviceDetails["gpu"] {
+  const model = collectGpu();
+  let memory = "";
+  const vram = tryExec("nvidia-smi", ["--query-gpu=memory.total", "--format=csv,noheader"]);
+  if (vram) memory = vram.trim().replace(/\s+/g, " ");
+  return { model, memory };
+}
+
+/** 采集内存富详情：型号(Part Number) / 总容量(GB) */
+function collectMemoryDetails(): DeviceDetails["memory"] {
+  let model = "";
+  const dmi = tryExec("dmidecode", ["-t", "memory"]);
+  const pn = dmi.match(/Part Number:\s*(\S+)/i)?.[1];
+  if (pn && !/^(Not|Unknown|NO DIMM|None)/i.test(pn)) model = pn;
+  const sizeGB = Math.round(os.totalmem() / 1024 / 1024 / 1024);
+  return { model, sizeGB };
+}
+
+/** 采集硬盘富详情：序列号 / 型号 / 大小（取首个物理盘） */
+function collectDiskDetails(): DeviceDetails["disk"] {
+  const serial = collectDiskId();
+  const firstPhysical = (out: string) =>
+    out.split("\n").map((s) => s.trim()).find((s) => s && !/^(loop|ram|sr|zram)/i.test(s)) || "";
+  const model = firstPhysical(tryExec("lsblk", ["-d", "-n", "-o", "MODEL"]));
+  const size = firstPhysical(tryExec("lsblk", ["-d", "-n", "-o", "SIZE"]));
+  return { serial, model, size };
+}
+
+/** 采集设备标识卡片所需的富硬件详情（只读展示，不影响 6 维指纹与统计主键） */
+export function collectHardwareDetails(): DeviceDetails {
+  return {
+    cpu: collectCpuDetails(),
+    gpu: collectGpuDetails(),
+    memory: collectMemoryDetails(),
+    disk: collectDiskDetails(),
+  };
+}
+
 // ---------- 环境信息 ----------
 
 function collectOsVersion(): string {
@@ -414,8 +500,10 @@ export interface TelemetryStatus {
   envUnchanged: boolean;
   /** 已识别的硬件维度数（0-6） */
   matchCount: number;
-  /** 本机设备标识 6 维 */
+  /** 本机设备标识 6 维（统计主键维度，不对外展示敏感序列号） */
   hardware: DeviceHardware;
+  /** 设备标识卡片展示用的富硬件详情（CPU/GPU/内存/硬盘） */
+  details: DeviceDetails;
 }
 
 export function getTelemetryStatus(): TelemetryStatus {
@@ -434,6 +522,7 @@ export function getTelemetryStatus(): TelemetryStatus {
     envUnchanged: stored ? stored.deviceId === currentDeviceId : true,
     matchCount: countNonEmpty(current),
     hardware: info.hardware,
+    details: collectHardwareDetails(),
   };
 }
 

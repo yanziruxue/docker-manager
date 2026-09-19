@@ -99,6 +99,14 @@ export interface DeviceHardware {
   boardSerial: string;
 }
 
+/** 设备标识卡片展示用的富硬件详情（与后端 telemetry.ts 同构） */
+export interface DeviceDetails {
+  cpu: { model: string; cores: number; threads: number; freqGHz: number };
+  gpu: { model: string; memory: string };
+  memory: { model: string; sizeGB: number };
+  disk: { serial: string; model: string; size: string };
+}
+
 export interface TelemetryStatus {
   /** 设备标识（硬件指纹 6 维哈希，统计主键） */
   deviceId: string;
@@ -114,6 +122,8 @@ export interface TelemetryStatus {
   matchCount: number;
   /** 本机设备标识 6 维 */
   hardware: DeviceHardware;
+  /** 设备标识卡片展示用的富硬件详情 */
+  details: DeviceDetails;
 }
 
 /** 远端统计服务端聚合数据（服务端未就绪时为 null） */

@@ -517,6 +517,30 @@ export default function App() {
     [activeEngineId, applyImageUpdateStatus, refreshActivities]
   );
 
+  // 全局实时推送：登录并选定引擎后建立一条 EventSource(/api/push)，
+  // 收到 image-update-checked 事件（后台调度器检查完成）即时刷新通知中心活动日志，
+  // 使「有可用更新」通知无需等待切页/手动刷新即出现。EventSource 自带断线重连。
+  useEffect(() => {
+    if (!activeEngineId) return;
+    const es = new EventSource("/api/push");
+    es.onmessage = (ev) => {
+      try {
+        const data = JSON.parse(ev.data);
+        if (
+          data?.type === "image-update-checked" &&
+          Array.isArray(data.byEngine) &&
+          data.byEngine.some((b: any) => b.engineId === activeEngineId)
+        ) {
+          void refreshActivities(activeEngineId);
+        }
+      } catch {
+        // 忽略坏帧，等下一次推送
+      }
+    };
+    // 切换引擎时重建连接以绑定最新 activeEngineId
+    return () => es.close();
+  }, [activeEngineId, refreshActivities]);
+
   // 镜像页：切换引擎或进入页面时读取上次镜像版本检查结果（不重跑 digest 比对）
   // 必须放在 loadImageUpdateStatus 定义之后——依赖数组在渲染期求值，提前引用会触发 TDZ
   useEffect(() => {
