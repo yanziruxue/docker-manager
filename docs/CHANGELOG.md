@@ -23,10 +23,10 @@
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.23.0**（**待发布**）；含两处：① 后台镜像更新检查完成经 SSE 实时推通知中心；② 设备标识卡片改版展示完整硬件详情（主板/CPU/GPU/内存/硬盘，新增富硬件详情采集）。上一版 **v1.22.0**（已发布）：镜像更新结果接入通知中心 + 设备唯一标识改硬件指纹 6 维作主键 |
+| 当前版本 | **v1.23.0**（**已发布**）；含两处：① 后台镜像更新检查完成经 SSE 实时推通知中心；② 设备标识卡片改版展示完整硬件详情（主板/CPU/GPU/内存/硬盘，新增富硬件详情采集）。上一版 **v1.22.0**（已发布）：镜像更新结果接入通知中心 + 设备唯一标识改硬件指纹 6 维作主键 |
 | 版本号规则 | Major 人工发布；Minor 新功能；Patch 修复/优化/UI。v1.22.0 因新增「镜像更新→通知中心」与「硬件指纹作主键」两项新能力归为 Minor |
 | 最新 Release | [v1.22.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.22.0)（镜像更新结果接入通知中心 + 设备唯一标识改为硬件指纹 6 维作主键；含 `quick-install.sh` asset）；上一版 [v1.21.2](https://github.com/yanziruxue/docker-manager/releases/tag/v1.21.2) |
-| 源码分支 | `main`（当前发布点 `e756d8707d678712829080e0eac82faba76b2d4d`；上一版 `7a0069c73944992dbd7c9da73150d5cab7661fbd`） |
+| 源码分支 | `main`（当前发布点 `d7b3aad9f57f910d332c5f1e100962d5bc4552a1`；上一版 `e756d8707d678712829080e0eac82faba76b2d4d`） |
 | 交付包 | [v1.22.0.zip](https://github.com/yanziruxue/docker-manager/releases/tag/v1.22.0)（42,918,836 B，SHA-256 `7634e5edf4a73d7ec7b014d13915032b55b4654bd121e9c978be7eebbe475ccf`）；上一发布版 `v1.21.2.zip` 42,918,883 B SHA-256 `0befb453dd4f925daa7e7457e179adf7b5099caf07d56727403461fae1dd6341` |
 | 架构 | REST + WS + SSE 三通道；Socket / TCP / SSH 三种引擎 |
 | 目标平台 | Linux x64（SEA 单可执行文件），Unraid / 自托管 NAS |
@@ -138,6 +138,16 @@
 - 推送为「发后即弃」：若前端当时未连接（页面关闭/断网），错过该次事件，需等下次拉取（与活动源非实时本质一致）。
 - 推送通道未做事件类型白名单，后续新增实时事件（如备份完成）复用同一 SSE 即可，前端按需扩展 `type` 分支。
 - 富硬件详情在容器/虚拟化环境可能缺失：dmidecode / lspci / nvidia-smi 在容器内通常无权限或不存在，主板序列号、内存型号、GPU 型号/显存等字段会显示「—」，仅 CPU（/proc/cpuinfo + nproc）、硬盘（lsblk）等基础信息可稳定采集。
+
+### 📌 下一步
+
+- 无（可选：如需镜像管理页「更新状态」列也随后台检查实时刷新，可在该事件里一并调用 `loadImageUpdateStatus`）。
+
+### 🚀 发布记录（2026-09-19）
+
+- Release：https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.0
+- 源码 commit：`d7b3aad9f57f910d332c5f1e100962d5bc4552a1`（main）
+- 交付包：`docker-manager-yanzi-linux-x64-v1.23.0.zip`（42,920,286 B，SHA-256 `6c072f280e358483623e662e46e3fb1bd1bfc5fb974319c9806e6be2cf6b7eb4`）
 
 ---
 
