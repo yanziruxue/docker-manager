@@ -23,7 +23,8 @@
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.21.2**（**已发布**；累积三批：移除「在容器列表中显示」+ `quick-install.sh` 下载进度 + 镜像更新检查接通/「更新调度器」改名「镜像更新」） |
+| 当前版本 | **v1.21.2**（**已发布**）；下一版 **v1.22.0**（**待发布**，未打包）：镜像更新结果接入通知中心 |
+| 版本号规则 | Major 人工发布；Minor 新功能；Patch 修复/优化/UI。v1.22.0 因新增「镜像更新→通知中心」归为 Minor |
 | 最新 Release | [v1.21.2](https://github.com/yanziruxue/docker-manager/releases/tag/v1.21.2)（镜像更新检查接通后端 digest 比对 + `quick-install.sh` 下载进度 + 移除「在容器列表中显示」+ 更新调度器改名镜像更新；含 `quick-install.sh` asset）；上一版 [v1.21.1](https://github.com/yanziruxue/docker-manager/releases/tag/v1.21.1) |
 | 源码分支 | `main`（当前发布点 `5c208d4ea8ac4c49bdc910eae871581461601d91`；上一版 `4cc87dc02d1aa29564973b8ab412b71a72af07c8`） |
 | 交付包 | [v1.21.2.zip](https://github.com/yanziruxue/docker-manager/releases/tag/v1.21.2)（42,918,883 B，SHA-256 `0befb453dd4f925daa7e7457e179adf7b5099caf07d56727403461fae1dd6341`）；上一发布版 `v1.21.1.zip` 42,917,760 B SHA-256 `9d1ddc7c16a804d13cbf52b1e54721baf03ff11aba694582eeb757f7c84bfa3f` |
@@ -114,6 +115,41 @@
 - 一次发布中同时含 Minor 与 Patch 时，按**最高级别**递增，低级别归零（例：`1.0.3` + 新功能 → `1.1.0`）
 - Major 由人工决定，不自动递增
 - 同一天内的多次改动合并为一个版本，逐条记录在版本下
+
+---
+
+## v1.22.0 — 2026-09-19（待发布）
+
+> 两处改动：① 镜像更新结果接入通知中心（不另存事件流，复用活动日志「从引擎实时状态派生」的既有架构）；
+> ② 设备唯一标识改为**硬件指纹**（主板+CPU+内存+硬盘+显卡+安装的系统 6 维哈希）作为统计主键，**取消随机设备 UUID**。
+
+### ✅ 已完成
+
+- **镜像更新结果接入通知中心**：`/api/engines/:id/activity` 在返回活动日志时，读取本引擎的镜像更新缓存（`getImageUpdateCache`），对每个 `hasUpdate === true` 的镜像派生一条 `warning` 级活动（`镜像 <repo:tag> 有可用更新`），经统一时间倒序后取最近 20 条返回。
+  - 文件：`server/index.ts`（activity 路由）；复用 `scheduler.ts: getImageUpdateCache`，不引入 docker.ts↔scheduler 循环依赖。
+  - 设计依据：通知中心活动本身即从实时状态派生（容器运行/停止/暂停、最近拉取镜像），镜像更新通知沿用同一模型，无需新增存储或 SSE；缓存与镜像管理页「更新状态」列同源（`image-update-cache.json`），单镜像/全量检查、手动/调度器结果一致。
+- **前端手动检查后即时刷新**：镜像管理页「检查全部更新」/右键「检查更新」完成后，调用 `fetchEngineActivity` 重新拉取活动日志并写入 `activities`，使通知中心角标与列表即时反映新出现的「有可用更新」通知（此前仅切引擎/刷新页面才会拉取）。
+  - 文件：`src/App.tsx`（`refreshActivities` 回调 + 在两个 `handleCheck*` 中调用）；`src/api.ts` 复用已有 `fetchEngineActivity`。
+- **设备唯一标识改为硬件指纹，取消设备 UUID 作为统计主键**：
+  - 统计主键 = 本机硬件指纹（主板 `boardSerial` + CPU + 内存 + 硬盘 `diskUid` + 显卡 GPU + 安装的系统 `system` 共 6 维 sha256 哈希）；不再生成/持久化随机 `device_uuid` 作为标识。
+  - `getDeviceInfo()` 重写为「硬件指纹一致即同一设备、不一致即新设备（重新按当前硬件生成标识并重报 install）」，删除原「≥3 维匹配沿用 UUID」逻辑与 `isEnvUnchanged`/`countMatches` 双参函数。
+  - `collectHardwareFingerprint()` 由 3 维（cpu+board+disk）扩展为 6 维（system+cpu+gpu+memory+disk+board），虚拟环境仍统一归零。
+  - 上报载荷 `device_uuid` / `hw_fingerprint` 值改为硬件指纹；`hardware` 由 7 维精简为 6 维（移除 `deviceUid`）；`collectBoardId` 仍借 `product_uuid`（主板硬件 UUID）作「主板」维度。
+  - 前端 `ActivityPanel`「本机设备」卡片：统计主键标签由「设备 UUID」改为「设备标识（硬件指纹，统计主键）」，`/7 项匹配` 改为 `/6 维已识别」，硬件指纹列表移除「设备 UID」行；`api.ts` 的 `DeviceHardware`/`TelemetryStatus` 同步为 6 维、`uuid`→`deviceId`。
+  - 文件：`server/telemetry.ts`、`src/api.ts`、`src/components/ActivityPanel.tsx`。
+  - 验证：`tsx` 直跑 `getTelemetryStatus()` 产出 64 位 hex `deviceId`、不崩溃；`npm run build`（vite+tsc server）全绿。
+
+### ⚠️ 未完成 / 已知限制
+
+- 调度器后台定时检查产生的结果**不会实时推送**到已打开的通知中心，需在下一次活动日志拉取（切引擎、刷新页面、或手动检查触发刷新）时才出现——与现有活动源非实时推送的设计一致，本期不做 SSE 推送。
+- 通知条目随缓存刷新：镜像已拉取新版本但未再次「检查更新」前，缓存仍标记 `hasUpdate`，通知持续存在（与「更新状态」列行为一致）。
+- 硬件指纹含「安装的系统」维度：系统大版本/内核升级会改变 `deviceId`，服务端据此计为新设备（符合「标识采用安装的系统」的设计；若只想按固定发行版去重，需后续把 system 粒度收窄为发行版名）。
+- **虚拟化环境**：6 维统一归零，所有同质虚拟机指纹相同 → 安装量会被低估（与取消随机 UUID 的取舍一致，真实 NAS/Unraid 物理机主板/硬盘序列号可区分）。
+- 升级到本版后首次启动：旧 `device.info` 无 `deviceId` 字段 → 按新设备重新注册并补报一次 install（新标识基线的正常代价）。
+
+### 📌 下一步
+
+- 无（可选：若需要后台检查也实时出现在通知中心，再为 activity 增加 SSE 推送）。
 
 ---
 

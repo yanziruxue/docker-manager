@@ -471,6 +471,16 @@ export default function App() {
     [applyImageUpdateStatus]
   );
 
+  /** 重新拉取活动日志（镜像「检查更新」后用于让通知中心即时出现更新可用通知） */
+  const refreshActivities = useCallback(async (engineId: string) => {
+    try {
+      const raw = await fetchEngineActivity(engineId);
+      setActivities(transformActivityLogs(raw));
+    } catch {
+      // 活动刷新失败不打扰用户，通知中心下次进入页面时再同步
+    }
+  }, []);
+
   /** 检查全部镜像更新：真正调用后端 digest 比对（此前只重拉列表，导致「没反应」） */
   const handleCheckAllUpdates = useCallback(async () => {
     if (!activeEngineId) return;
@@ -478,13 +488,15 @@ export default function App() {
     setImageUpdateError(null);
     try {
       applyImageUpdateStatus(await checkImageUpdatesApi(activeEngineId));
+      // 检查已写入缓存，刷新活动日志让「有可用更新」镜像进入通知中心
+      void refreshActivities(activeEngineId);
     } catch (err: any) {
       console.error("检查更新失败:", err);
       setImageUpdateError(err?.message || "检查更新失败");
     } finally {
       setCheckingUpdates(false);
     }
-  }, [activeEngineId, applyImageUpdateStatus]);
+  }, [activeEngineId, applyImageUpdateStatus, refreshActivities]);
 
   /** 检查单个镜像更新（右键菜单） */
   const handleCheckImageUpdate = useCallback(
@@ -494,6 +506,7 @@ export default function App() {
       setImageUpdateError(null);
       try {
         applyImageUpdateStatus(await checkImageUpdatesApi(activeEngineId, ref));
+        void refreshActivities(activeEngineId);
       } catch (err: any) {
         console.error("检查更新失败:", err);
         setImageUpdateError(err?.message || `检查「${ref}」失败`);
@@ -501,7 +514,7 @@ export default function App() {
         setCheckingUpdates(false);
       }
     },
-    [activeEngineId, applyImageUpdateStatus]
+    [activeEngineId, applyImageUpdateStatus, refreshActivities]
   );
 
   // 镜像页：切换引擎或进入页面时读取上次镜像版本检查结果（不重跑 digest 比对）

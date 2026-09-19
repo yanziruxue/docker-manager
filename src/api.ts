@@ -83,9 +83,9 @@ export function getMe(): Promise<AuthUser> {
 
 // ---------- 遥测（安装量与活跃度，仅上报端） ----------
 
-/** 本机设备标识的 7 维硬件属性（与后端 telemetry.ts 同构） */
+/** 本机设备标识的 6 维硬件属性（与后端 telemetry.ts 同构） */
 export interface DeviceHardware {
-  /** 系统（OS + 版本） */
+  /** 系统（安装的操作系统 + 版本） */
   system: string;
   /** CPU 标识 */
   cpu: string;
@@ -97,24 +97,22 @@ export interface DeviceHardware {
   diskUid: string;
   /** 主板序列号 */
   boardSerial: string;
-  /** 设备 UUID（统计主键候选，≥3 硬件匹配时沿用） */
-  deviceUid: string;
 }
 
 export interface TelemetryStatus {
-  /** 设备 UUID（环境未变时稳定沿用；环境已变则重新生成） */
-  uuid: string;
+  /** 设备标识（硬件指纹 6 维哈希，统计主键） */
+  deviceId: string;
   virtualized: boolean;
   createdAt: string;
   appVersion: string;
   osVersion: string;
   arch: string;
   deviceFile: string;
-  /** 硬件环境是否未变化（7 维中 ≥3 匹配） */
+  /** 硬件环境是否未变化（设备指纹稳定） */
   envUnchanged: boolean;
-  /** 7 维中匹配的数量 */
+  /** 已识别的硬件维度数（0-6） */
   matchCount: number;
-  /** 本机设备标识 7 维 */
+  /** 本机设备标识 6 维 */
   hardware: DeviceHardware;
 }
 
@@ -122,7 +120,7 @@ export interface TelemetryStatus {
 export interface TelemetryStats {
   /** 安装总次数（含重装） */
   installs: number;
-  /** 新增设备数（按 device_uuid 去重） */
+  /** 新增设备数（按硬件指纹 device_uuid 去重） */
   newDevices: number;
   /** 日活 */
   dau: number;

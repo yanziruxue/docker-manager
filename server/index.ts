@@ -1153,7 +1153,27 @@ app.get("/api/engines/:id/activity", async (req, res) => {
   }
   try {
     const activities = await getActivityLogs(engine);
-    res.json({ success: true, data: activities });
+    // 镜像更新结果接入通知中心：把「有可用更新」的镜像派生为 warning 活动，
+    // 与既有活动同源（均从引擎实时状态派生），不另存事件流。
+    const updateCache = getImageUpdateCache(engine.id);
+    if (updateCache && updateCache.details?.length) {
+      const ts = updateCache.at
+        ? updateCache.at.replace("T", " ").substring(0, 19)
+        : new Date().toISOString().replace("T", " ").substring(0, 19);
+      for (const d of updateCache.details) {
+        if (!d.hasUpdate) continue;
+        const ref = d.refs?.[0] || d.image;
+        activities.push({
+          id: `img-update-${engine.id}-${ref}`,
+          timestamp: ts,
+          type: "warning",
+          message: `镜像 ${ref} 有可用更新`,
+        });
+      }
+    }
+    // 重新按时间倒序，取最近 20 条（含镜像更新通知）
+    activities.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+    res.json({ success: true, data: activities.slice(0, 20) });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message || "获取活动日志失败" });
   }

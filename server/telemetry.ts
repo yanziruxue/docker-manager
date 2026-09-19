@@ -2,8 +2,8 @@
  * 安装量与活跃度遥测（仅上报端）
  *
  * 设计依据《Linux应用安装量与活跃用户统计方案（设备唯一标识+风控校验体系）》：
- *  - 主标识：本地持久化 UUID4，作为所有统计去重的唯一依据
- *  - 辅标识：硬件多维指纹（CPU + 主板 + 硬盘），仅用于风控，不参与统计
+ *  - 主标识（统计主键）：本机硬件指纹 = 主板 + CPU + 内存 + 硬盘 + 显卡 + 安装的系统（6 维哈希）
+ *  - 取消随机设备 UUID 作为标识：环境连续性直接由硬件指纹一致性决定（硬件指纹不变 = 同一设备）
  *  - 事件：install（首次冷启动/重装）/ active（日常启动、定时心跳，日粒度去重）
  *
  * 容错原则：任何失败（无权限、离线、采集失败）都不得影响主业务。
@@ -19,9 +19,9 @@ import { CONFIG_DIR } from "./paths.js";
 /** 遥测事件类型 */
 export type TelemetryEvent = "install" | "active";
 
-/** 本机设备标识的 7 维硬件属性（统计主键由 ≥3 匹配决定，不依赖随机 UUID） */
+/** 本机设备标识的 6 维硬件属性（统计主键 = 这 6 维的哈希，不依赖随机 UUID） */
 export interface DeviceHardware {
-  /** 系统（OS + 版本） */
+  /** 系统（安装的操作系统 + 版本） */
   system: string;
   /** CPU 标识 */
   cpu: string;
@@ -33,8 +33,6 @@ export interface DeviceHardware {
   diskUid: string;
   /** 主板序列号 */
   boardSerial: string;
-  /** 设备 UUID（统计主键候选，≥3 硬件匹配时沿用） */
-  deviceUid: string;
 }
 
 /** 设备标识文件（不放在程序安装目录，普通卸载不清除） */
@@ -49,15 +47,13 @@ const FIRST_REPORT_DELAY_MS = 30 * 1000;
 const REQUEST_TIMEOUT_MS = 10 * 1000;
 
 export interface DeviceInfo {
-  /** 主标识：持久化 UUID4（环境未变时稳定沿用，环境已变则重新生成） */
-  uuid: string;
+  /** 主标识：本机硬件指纹（主板+CPU+内存+硬盘+显卡+系统 6 维哈希），统计去重唯一依据 */
+  deviceId: string;
   /** 首次生成时间（≈ 首次安装时间） */
   createdAt: string;
-  /** 硬件指纹（辅标识，虚拟环境为全 0 归一化值） */
-  hwFingerprint: string;
   /** 是否虚拟化环境 */
   virtualized: boolean;
-  /** 本机设备标识 7 维（系统/CPU/GPU/内存/硬盘UID/主板序列号/设备UID） */
+  /** 本机设备标识 6 维（系统/CPU/GPU/内存/硬盘UID/主板序列号） */
   hardware: DeviceHardware;
   /** install 事件是否已成功上报 */
   installReported: boolean;
@@ -96,7 +92,7 @@ function readDeviceInfo(): DeviceInfo | null {
   try {
     if (!fs.existsSync(file)) return null;
     const raw = JSON.parse(fs.readFileSync(file, "utf-8"));
-    if (!raw?.uuid) return null;
+    if (!raw?.deviceId) return null;
     return raw as DeviceInfo;
   } catch {
     return null;
@@ -115,56 +111,35 @@ function writeDeviceInfo(info: DeviceInfo): void {
 
 /**
  * 获取（必要时创建）设备信息。
- * 设备身份判定：7 维硬件属性中 ≥3 匹配即视为「硬件环境未变」，沿用原 UUID（统计主键稳定）；
- * 否则视为新设备，重新生成 UUID（代替原来盲持久化随机 UUID 作为主键）。
+ * 设备身份 = 本机硬件指纹（主板+CPU+内存+硬盘+显卡+系统 6 维哈希）：
+ *  - 硬件指纹与已存记录一致 → 同一设备，沿用身份（仅刷新硬件快照）；
+ *  - 无历史记录或硬件指纹变化 → 新设备，重新按当前硬件生成设备标识（install 重新上报）。
+ * 不再使用随机设备 UUID 作为统计主键。
  */
 export function getDeviceInfo(): DeviceInfo {
   const current = collectHardwareAttrs();
+  const fp = collectHardwareFingerprint();
+  const deviceId = fp.fingerprint;
   const existing = readDeviceInfo();
 
-  // 无历史记录：全新设备
-  if (!existing) {
-    const hw = collectHardwareFingerprint();
+  // 无历史记录，或硬件指纹变化（环境已变）→ 视为新设备
+  if (!existing || existing.deviceId !== deviceId) {
     const info: DeviceInfo = {
-      uuid: crypto.randomUUID(),
+      deviceId,
       createdAt: new Date().toISOString(),
-      hwFingerprint: hw.fingerprint,
-      virtualized: hw.virtualized,
-      hardware: { ...current, deviceUid: "" },
+      virtualized: fp.virtualized,
+      hardware: current,
       installReported: false,
       lastActiveDate: "",
     };
-    info.hardware.deviceUid = info.uuid;
     writeDeviceInfo(info);
     return info;
   }
 
-  // 候选 UUID：环境未变则沿用原 UUID
-  current.deviceUid = existing.uuid;
-  const storedHw: DeviceHardware = existing.hardware || {
-    system: "", cpu: "", gpu: "", memory: "", diskUid: "", boardSerial: "", deviceUid: existing.uuid,
-  };
-
-  if (isEnvUnchanged(storedHw, current)) {
-    existing.hardware = current;
-    writeDeviceInfo(existing);
-    return existing;
-  }
-
-  // 环境已变（<3 匹配）：视为新设备
-  const hw = collectHardwareFingerprint();
-  const info: DeviceInfo = {
-    uuid: crypto.randomUUID(),
-    createdAt: new Date().toISOString(),
-    hwFingerprint: hw.fingerprint,
-    virtualized: hw.virtualized,
-    hardware: { ...current, deviceUid: "" },
-    installReported: false,
-    lastActiveDate: "",
-  };
-  info.hardware.deviceUid = info.uuid;
-  writeDeviceInfo(info);
-  return info;
+  // 硬件环境未变：沿用同一设备身份，仅刷新硬件快照
+  existing.hardware = current;
+  writeDeviceInfo(existing);
+  return existing;
 }
 
 // ---------- 硬件指纹（仅风控，不参与统计） ----------
@@ -241,16 +216,20 @@ function collectDiskId(): string {
 }
 
 /**
- * 采集硬件指纹。
- * 规则：虚拟环境三项统一归零后再哈希（避免虚拟机硬件同质化导致风控误判）；
+ * 采集硬件指纹（= 统计主键）。
+ * 维度：系统 + CPU + 内存 + 硬盘 + 显卡 + 主板（6 维）。
+ * 规则：虚拟环境六项统一归零后再哈希（避免虚拟机硬件同质化导致指纹碰撞）；
  *      采集失败字段保留空占位，避免字段缺失引发碰撞。
  */
 export function collectHardwareFingerprint(): { fingerprint: string; virtualized: boolean } {
   const virtualized = detectVirtualization();
+  const system = virtualized ? "0" : collectOsVersion();
   const cpu = virtualized ? "0" : collectCpuId();
-  const board = virtualized ? "0" : collectBoardId();
+  const gpu = virtualized ? "0" : collectGpu();
+  const memory = virtualized ? "0" : collectMemory();
   const disk = virtualized ? "0" : collectDiskId();
-  const raw = [cpu, board, disk].join("|");
+  const board = virtualized ? "0" : collectBoardId();
+  const raw = [system, cpu, gpu, memory, disk, board].join("|");
   const fingerprint = crypto.createHash("sha256").update(raw).digest("hex");
   return { fingerprint, virtualized };
 }
@@ -279,7 +258,7 @@ function collectMemory(): string {
   }
 }
 
-/** 采集 7 维设备标识（deviceUid 先留空，由 getDeviceInfo 填入候选 UUID） */
+/** 采集 6 维设备标识（系统/CPU/GPU/内存/硬盘UID/主板序列号） */
 export function collectHardwareAttrs(): DeviceHardware {
   return {
     system: collectOsVersion(),
@@ -288,26 +267,13 @@ export function collectHardwareAttrs(): DeviceHardware {
     memory: collectMemory(),
     diskUid: collectDiskId(),
     boardSerial: collectBoardId(),
-    deviceUid: "",
   };
 }
 
-/** 统计 7 维中相等的非空属性数量（用于环境变化判定） */
-export function countMatches(a: DeviceHardware, b: DeviceHardware): number {
-  const keys: (keyof DeviceHardware)[] = ["system", "cpu", "gpu", "memory", "diskUid", "boardSerial", "deviceUid"];
-  let n = 0;
-  for (const k of keys) {
-    const va = (a[k] || "").trim();
-    const vb = (b[k] || "").trim();
-    if (va && va === vb) n++;
-  }
-  return n;
-}
-
-/** 硬件环境是否未变化：7 维中 ≥3 匹配即视为同一设备 */
-export function isEnvUnchanged(stored: DeviceHardware | null, current: DeviceHardware): boolean {
-  if (!stored) return true; // 首次，无历史可比对
-  return countMatches(stored, current) >= 3;
+/** 统计 6 维中非空属性数量（用于展示硬件识别度，0-6） */
+export function countNonEmpty(hw: DeviceHardware): number {
+  const keys: (keyof DeviceHardware)[] = ["system", "cpu", "gpu", "memory", "diskUid", "boardSerial"];
+  return keys.filter((k) => (hw[k] || "").trim()).length;
 }
 
 // ---------- 环境信息 ----------
@@ -339,9 +305,11 @@ function readConfig(): Required<TelemetryConfigLike> {
 /** 构造上报载荷 */
 function buildPayload(event: TelemetryEvent, info: DeviceInfo, collectHw: boolean) {
   return {
-    device_uuid: info.uuid,
-    // 用户关闭采集 / 虚拟环境时不上报真实指纹：虚拟环境指纹本就无风控价值
-    hw_fingerprint: collectHw ? info.hwFingerprint : "",
+    // 统计主键 = 本机硬件指纹（主板+CPU+内存+硬盘+显卡+系统 6 维哈希）；
+    // 不再使用随机设备 UUID 作为标识。
+    device_uuid: info.deviceId,
+    // 硬件指纹与统计主键同源（均为 6 维哈希），保留以兼容服务端风控字段
+    hw_fingerprint: collectHw ? info.deviceId : "",
     event,
     ts: new Date().toISOString(),
     app: "docker-manager-yanzi",
@@ -351,7 +319,7 @@ function buildPayload(event: TelemetryEvent, info: DeviceInfo, collectHw: boolea
     arch: process.arch,
     channel: "sea-linux-x64",
     virtualized: info.virtualized,
-    // 7 维设备标识：统计服务端据此做 ≥3 硬件匹配去重（代替盲 device_uuid 为主键）
+    // 6 维设备标识：统计服务端据此做硬件指纹一致性校验（取代旧的 device_uuid 主键）
     hardware: collectHw ? info.hardware : null,
   };
 }
@@ -434,37 +402,37 @@ export function startTelemetryHeartbeat(): void {
 // ---------- 状态与统计 ----------
 
 export interface TelemetryStatus {
-  /** 设备 UUID（环境未变时稳定沿用；环境已变则重新生成） */
-  uuid: string;
+  /** 设备标识（硬件指纹 6 维哈希，统计主键） */
+  deviceId: string;
   virtualized: boolean;
   createdAt: string;
   appVersion: string;
   osVersion: string;
   arch: string;
   deviceFile: string;
-  /** 硬件环境是否未变化（7 维中 ≥3 匹配） */
+  /** 硬件环境是否未变化（设备指纹稳定） */
   envUnchanged: boolean;
-  /** 7 维中匹配的数量 */
+  /** 已识别的硬件维度数（0-6） */
   matchCount: number;
-  /** 本机设备标识 7 维 */
+  /** 本机设备标识 6 维 */
   hardware: DeviceHardware;
 }
 
 export function getTelemetryStatus(): TelemetryStatus {
   const info = getDeviceInfo();
-  const stored = readDeviceInfo();
   const current = collectHardwareAttrs();
-  const storedHw = stored?.hardware || null;
+  const currentDeviceId = collectHardwareFingerprint().fingerprint;
+  const stored = readDeviceInfo();
   return {
-    uuid: info.uuid,
+    deviceId: info.deviceId,
     virtualized: info.virtualized,
     createdAt: info.createdAt,
     appVersion: currentAppVersion(),
     osVersion: collectOsVersion(),
     arch: process.arch,
     deviceFile: resolveDeviceFile(),
-    envUnchanged: isEnvUnchanged(storedHw, current),
-    matchCount: storedHw ? countMatches(storedHw, current) : 7,
+    envUnchanged: stored ? stored.deviceId === currentDeviceId : true,
+    matchCount: countNonEmpty(current),
     hardware: info.hardware,
   };
 }

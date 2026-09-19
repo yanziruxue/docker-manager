@@ -15,15 +15,14 @@ import {
 import { copyText } from "../lib/clipboard";
 import { Card } from "./UI";
 
-/** 本机设备标识 7 维硬件属性（展示顺序与标签） */
+/** 本机设备标识 6 维硬件属性（展示顺序与标签） */
 const HW_FIELDS: { key: keyof DeviceHardware; label: string }[] = [
   { key: "system", label: "系统" },
   { key: "cpu", label: "CPU" },
   { key: "gpu", label: "GPU" },
-  { key: "memory", label: "内存容量" },
-  { key: "diskUid", label: "硬盘 UID" },
+  { key: "memory", label: "内存" },
+  { key: "diskUid", label: "硬盘序列号" },
   { key: "boardSerial", label: "主板序列号" },
-  { key: "deviceUid", label: "设备 UID" },
 ];
 
 function fmtDateTime(v?: string): string {
@@ -36,8 +35,8 @@ function fmtDateTime(v?: string): string {
 /**
  * 本机设备标识（只读）。
  * 不暴露任何遥测设置或上报状态——上报为后端硬编码、随活跃事件自动静默触发。
- * 设备 UUID 通过 7 维硬件指纹中的 ≥3 项匹配维持稳定：环境未变则沿用旧 UUID，
- * 否则重新生成，从而把「硬件环境是否改变」作为统计主键连续性的依据。
+ * 设备标识 = 本机硬件指纹（主板+CPU+内存+硬盘+显卡+安装的系统 6 维哈希），
+ * 作为安装量 / 活跃度统计的统计主键；硬件指纹不变即视为同一设备。
  */
 export function ActivityPanel() {
   const [status, setStatus] = useState<TelemetryStatus | null>(null);
@@ -63,14 +62,14 @@ export function ActivityPanel() {
 
   const copyUuid = async () => {
     if (!status) return;
-    if (await copyText(status.uuid)) {
+    if (await copyText(status.deviceId)) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     }
   };
 
   const maskedUuid = status
-    ? `${status.uuid.slice(0, 8)}${"•".repeat(24)}${status.uuid.slice(-4)}`
+    ? `${status.deviceId.slice(0, 8)}${"•".repeat(24)}${status.deviceId.slice(-4)}`
     : "—";
 
   const envChanged = status ? !status.envUnchanged : false;
@@ -92,12 +91,12 @@ export function ActivityPanel() {
           </div>
         ) : status ? (
           <div className="space-y-3">
-            {/* 设备 UUID */}
+            {/* 设备标识（硬件指纹） */}
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <div className="text-xs text-slate-500 mb-1">设备 UUID（统计主键）</div>
+                <div className="text-xs text-slate-500 mb-1">设备标识（硬件指纹，统计主键）</div>
                 <div className="font-mono text-sm text-slate-700 break-all">
-                  {showUuid ? status.uuid : maskedUuid}
+                  {showUuid ? status.deviceId : maskedUuid}
                 </div>
               </div>
               <div className="flex items-center gap-1 flex-shrink-0">
@@ -128,7 +127,7 @@ export function ActivityPanel() {
               >
                 {envChanged ? "已变化" : "未变化"}
                 <span className="ml-1 text-xs font-normal text-slate-400">
-                  （{matchCount}/7 项匹配）
+                  （{matchCount}/6 维已识别）
                 </span>
               </span>
             </div>
@@ -170,9 +169,9 @@ export function ActivityPanel() {
               </div>
             </div>
 
-            {/* 7 维硬件指纹 */}
+            {/* 6 维硬件指纹 */}
             <div className="border-t border-slate-100 pt-3">
-              <div className="text-xs text-slate-500 mb-2">硬件指纹（7 维）</div>
+              <div className="text-xs text-slate-500 mb-2">硬件指纹（6 维）</div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
                 {HW_FIELDS.map(({ key, label }) => {
                   const val = status.hardware?.[key] ?? "";
