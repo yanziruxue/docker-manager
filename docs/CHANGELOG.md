@@ -23,10 +23,10 @@
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.21.2**（**待发布**；累积三批：移除「在容器列表中显示」+ `quick-install.sh` 下载进度 + 镜像更新检查接通/「更新调度器」改名「镜像更新」） |
-| 最新 Release | [v1.21.1](https://github.com/yanziruxue/docker-manager/releases/tag/v1.21.1)（导入镜像两阶段进度 + 上传更新包进度（文件大小），含 v1.20.0 镜像导出导入与 v1.19.1 编辑器叠层修复） |
-| 源码分支 | `main`（v1.21.2 改动**尚未提交**；上一版发布点 `89f4bc1473764223ee4bd0afe866b48083b8d645`） |
-| 交付包 | `v1.21.2.zip` **待重打包**（旧包 42,917,228 B，SHA-256 `bd1c7db6…` 已作废：09-19 前端有改动，必须重打；上一发布版 `v1.21.1.zip`，42,917,760 B，SHA-256 `9d1ddc7c16a804d13cbf52b1e54721baf03ff11aba694582eeb757f7c84bfa3f`） |
+| 当前版本 | **v1.21.2**（**已发布**；累积三批：移除「在容器列表中显示」+ `quick-install.sh` 下载进度 + 镜像更新检查接通/「更新调度器」改名「镜像更新」） |
+| 最新 Release | [v1.21.2](https://github.com/yanziruxue/docker-manager/releases/tag/v1.21.2)（镜像更新检查接通后端 digest 比对 + `quick-install.sh` 下载进度 + 移除「在容器列表中显示」+ 更新调度器改名镜像更新；含 `quick-install.sh` asset）；上一版 [v1.21.1](https://github.com/yanziruxue/docker-manager/releases/tag/v1.21.1) |
+| 源码分支 | `main`（当前发布点 `5c208d4ea8ac4c49bdc910eae871581461601d91`；上一版 `4cc87dc02d1aa29564973b8ab412b71a72af07c8`） |
+| 交付包 | [v1.21.2.zip](https://github.com/yanziruxue/docker-manager/releases/tag/v1.21.2)（42,918,883 B，SHA-256 `0befb453dd4f925daa7e7457e179adf7b5099caf07d56727403461fae1dd6341`）；上一发布版 `v1.21.1.zip` 42,917,760 B SHA-256 `9d1ddc7c16a804d13cbf52b1e54721baf03ff11aba694582eeb757f7c84bfa3f` |
 | 架构 | REST + WS + SSE 三通道；Socket / TCP / SSH 三种引擎 |
 | 目标平台 | Linux x64（SEA 单可执行文件），Unraid / 自托管 NAS |
 
@@ -210,8 +210,11 @@
   - 本机 Windows 无可用 Docker 引擎（socket 模式指向 `/var/run/docker.sock`），**真实 registry digest 拉取未在本地联网验证**，
     仅通过假 Docker API 验证到「明细/缓存/合并」链路；`hasUpdate` 的真假判定沿用 v1.15.16 起已在生产使用的同一函数。
 
-- **下一步**：v1.21.2 发布（`push-via-api.mjs` 推源码 + `publish-release.mjs` 建 GitHub Release，含 `quick-install.sh` asset）；
-  发布后回填 Release 链接 / commit SHA / 包 SHA-256。后续可考虑把镜像更新结果接到通知中心（有更新时产生一条通知）。
+- **已发布**：[v1.21.2 Release](https://github.com/yanziruxue/docker-manager/releases/tag/v1.21.2)；
+  源码 commit `5c208d4ea8ac4c49bdc910eae871581461601d91`；交付包 `docker-manager-yanzi-linux-x64-v1.21.2.zip`
+  （42,918,883 B，SHA-256 `0befb453dd4f925daa7e7457e179adf7b5099caf07d56727403461fae1dd6341`）；
+  含 asset `quick-install.sh`（经 `/releases/latest/download/quick-install.sh` 分发，不在 zip 内）。
+  后续可考虑把镜像更新结果接到通知中心（有更新时产生一条通知）。
 
 ---
 
