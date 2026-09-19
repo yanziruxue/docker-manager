@@ -23,11 +23,11 @@
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.23.3**（**未发布**）；本机设备标识卡片新增 3 条 DMI 标识（主板型号 / 产品序列号 / 系统UUID，纯展示不进指纹）。已发布上一版 **v1.23.2**：GPU 行改 sysfs 直读（非 root systemd 服务下也能识别核显/独显型号）；再上一版 **v1.23.1**：卡片明细区改为每行一条 |
+| 当前版本 | **v1.23.3**（**已发布**）；本机设备标识卡片新增 3 条 DMI 标识（主板型号 / 产品序列号 / 系统UUID，纯展示不进指纹）。上一版 **v1.23.2**（已发布）：GPU 行改 sysfs 直读（非 root systemd 服务下也能识别核显/独显型号） |
 | 版本号规则 | Major 人工发布；Minor 新功能；Patch 修复/优化/UI。v1.22.0 因新增「镜像更新→通知中心」与「硬件指纹作主键」两项新能力归为 Minor |
-| 最新 Release | [v1.23.1](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.1)（本机设备标识卡片明细区改为每行一条；含 `quick-install.sh` asset）；上一版 [v1.23.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.0) |
-| 源码分支 | `main`（当前发布点 `4fbc23d6d424ba89338f240ca03a8f6212b6fd23`；上一版 `94bdf498c2ca2d93fe9c6bbeb8552c6a89aca636`） |
-| 交付包 | [v1.23.2.zip](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.2)（42,920,815 B，SHA-256 `45da03476aead085e32425a414d087b9bce6b8c2cba58e54dedacf60fb22fbdb`）；上一发布版 `v1.23.1.zip` 42,920,193 B SHA-256 `e72e1980447afbc92d6a3cf54e9c20144c19bdc0b30afd2a99d178192d4b2957` |
+| 最新 Release | [v1.23.3](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.3)（本机设备标识卡片新增主板型号/产品序列号/系统UUID；含 `quick-install.sh` asset）；上一版 [v1.23.2](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.2) |
+| 源码分支 | `main`（当前发布点 `d1e90c37ef5619d8854e60f829d3dbcde1eb50d0`；上一版 `f5b9fd0b83ec855172fa9fa83d6334d25346053a`） |
+| 交付包 | [v1.23.3.zip](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.3)（42,921,245 B，SHA-256 `1fad2f2db6471d1a383c1d6b2f3305e6a6a19f4e289cebf1af97c8db896ec74c`）；上一发布版 `v1.23.2.zip` 42,920,815 B SHA-256 `45da03476aead085e32425a414d087b9bce6b8c2cba58e54dedacf60fb22fbdb` |
 | 架构 | REST + WS + SSE 三通道；Socket / TCP / SSH 三种引擎 |
 | 目标平台 | Linux x64（SEA 单可执行文件），Unraid / 自托管 NAS |
 
@@ -118,7 +118,7 @@
 
 ---
 
-## v1.23.3 — 2026-09-19（未发布）
+## v1.23.3 — 2026-09-19（已发布）
 
 > 本机设备标识卡片新增 3 条 DMI 标识：**主板型号 / 产品序列号 / 系统UUID**。原卡片仅展示「主板」（序列号，本机因权限 400 恒为「—」），现补齐主板型号等可直接读取的标识字段。纯展示扩展，**不参与 6 维硬件指纹哈希，不影响统计主键**。
 
@@ -136,7 +136,13 @@
 
 ### 📌 下一步
 
-- 无（如需打包发布，走 SEA 交付流程）。
+- 无。
+
+### 🚀 发布记录（2026-09-19）
+
+- Release：https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.3
+- 源码 commit：`d1e90c37ef5619d8854e60f829d3dbcde1eb50d0`（main）
+- 交付包：`docker-manager-yanzi-linux-x64-v1.23.3.zip`（42,921,245 B，SHA-256 `1fad2f2db6471d1a383c1d6b2f3305e6a6a19f4e289cebf1af97c8db896ec74c`）
 
 ---
 
