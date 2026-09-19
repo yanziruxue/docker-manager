@@ -23,11 +23,11 @@
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.23.2**（**待发布**）；GPU 识别兼容性修复：本机设备标识卡片 GPU 行改 sysfs 直读（非 root systemd 服务下也能识别核显/独显型号）。上一版 **v1.23.1**（已发布）：本机设备标识卡片明细区改为每行一条 |
+| 当前版本 | **v1.23.2**（**已发布**）；GPU 识别兼容性修复：本机设备标识卡片 GPU 行改 sysfs 直读（非 root systemd 服务下也能识别核显/独显型号）。上一版 **v1.23.1**（已发布）：本机设备标识卡片明细区改为每行一条 |
 | 版本号规则 | Major 人工发布；Minor 新功能；Patch 修复/优化/UI。v1.22.0 因新增「镜像更新→通知中心」与「硬件指纹作主键」两项新能力归为 Minor |
 | 最新 Release | [v1.23.1](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.1)（本机设备标识卡片明细区改为每行一条；含 `quick-install.sh` asset）；上一版 [v1.23.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.0) |
 | 源码分支 | `main`（当前发布点 `4fbc23d6d424ba89338f240ca03a8f6212b6fd23`；上一版 `94bdf498c2ca2d93fe9c6bbeb8552c6a89aca636`） |
-| 交付包 | [v1.23.1.zip](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.1)（42,920,193 B，SHA-256 `e72e1980447afbc92d6a3cf54e9c20144c19bdc0b30afd2a99d178192d4b2957`）；上一发布版 `v1.23.0.zip` 42,920,286 B SHA-256 `6c072f280e358483623e662e46e3fb1bd1bfc5fb974319c9806e6be2cf6b7eb4` |
+| 交付包 | [v1.23.2.zip](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.2)（42,920,815 B，SHA-256 `45da03476aead085e32425a414d087b9bce6b8c2cba58e54dedacf60fb22fbdb`）；上一发布版 `v1.23.1.zip` 42,920,193 B SHA-256 `e72e1980447afbc92d6a3cf54e9c20144c19bdc0b30afd2a99d178192d4b2957` |
 | 架构 | REST + WS + SSE 三通道；Socket / TCP / SSH 三种引擎 |
 | 目标平台 | Linux x64（SEA 单可执行文件），Unraid / 自托管 NAS |
 
@@ -118,7 +118,7 @@
 
 ---
 
-## v1.23.2 — 2026-09-19（待发布）
+## v1.23.2 — 2026-09-19（已发布）
 
 > GPU 识别兼容性修复：本机设备标识卡片的 GPU 行在裸机 systemd 服务（非 root 用户 `docker-manager-yanzi`）部署下原显示「—」。原 `collectGpu()` 依赖 `lspci`/`nvidia-smi`；现改为直接读取 `/sys/bus/pci/devices` 解析 PCI 显示控制器（class 0x03），**彻底摆脱对 `lspci` 的依赖**（`/sys/bus/pci` 权限 0444，普通用户可读），裸机非 root 服务也能稳定识别核显/独显型号。
 
@@ -136,6 +136,12 @@
 ### 📌 下一步
 
 - 无（主板如需展示可另议 sudo 提权方案，但值为假、意义有限）。
+
+### 🚀 发布记录（2026-09-19）
+
+- Release：https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.2
+- 源码 commit：`f5b9fd0b83ec855172fa9fa83d6334d25346053a`（main）
+- 交付包：`docker-manager-yanzi-linux-x64-v1.23.2.zip`（42,920,815 B，SHA-256 `45da03476aead085e32425a414d087b9bce6b8c2cba58e54dedacf60fb22fbdb`）
 
 ---
 
