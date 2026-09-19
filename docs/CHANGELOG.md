@@ -23,11 +23,11 @@
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.23.4**（**未发布**）；修复非 root 服务读不到 `product_serial`/`product_uuid`（内核 0400）导致卡片显示「—」：systemd 启动前以 root 镜像 DMI 副本，后端优先读取。已发布上一版 **v1.23.3**：卡片新增主板型号/产品序列号/系统UUID 三条展示 |
+| 当前版本 | **v1.23.4**（**已发布**）；修复非 root 服务读不到 `product_serial`/`product_uuid`（内核 0400）导致卡片显示「—」：systemd 启动前以 root 镜像 DMI 副本，后端优先读取。上一版 **v1.23.3**（已发布）：卡片新增主板型号/产品序列号/系统UUID 三条展示 |
 | 版本号规则 | Major 人工发布；Minor 新功能；Patch 修复/优化/UI。v1.22.0 因新增「镜像更新→通知中心」与「硬件指纹作主键」两项新能力归为 Minor |
-| 最新 Release | [v1.23.3](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.3)（本机设备标识卡片新增主板型号/产品序列号/系统UUID；含 `quick-install.sh` asset）；上一版 [v1.23.2](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.2) |
-| 源码分支 | `main`（当前发布点 `d1e90c37ef5619d8854e60f829d3dbcde1eb50d0`；上一版 `f5b9fd0b83ec855172fa9fa83d6334d25346053a`） |
-| 交付包 | [v1.23.3.zip](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.3)（42,921,245 B，SHA-256 `1fad2f2db6471d1a383c1d6b2f3305e6a6a19f4e289cebf1af97c8db896ec74c`）；上一发布版 `v1.23.2.zip` 42,920,815 B SHA-256 `45da03476aead085e32425a414d087b9bce6b8c2cba58e54dedacf60fb22fbdb` |
+| 最新 Release | [v1.23.4](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.4)（修复 DMI 产品序列号/系统UUID 在非 root 服务下不可读；含 `quick-install.sh` asset）；上一版 [v1.23.3](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.3) |
+| 源码分支 | `main`（当前发布点 `eb553f6b9a1daa2ff0d235cfdc7aa8357b4adfa8`；上一版 `d1e90c37ef5619d8854e60f829d3dbcde1eb50d0`） |
+| 交付包 | [v1.23.4.zip](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.4)（42,921,687 B，SHA-256 `bf6972c8aba10c7fb24ea6a3f04e7ed0346e2093a8f3b5c2931e826be60a00aa`）；上一发布版 `v1.23.3.zip` 42,921,245 B SHA-256 `1fad2f2db6471d1a383c1d6b2f3305e6a6a19f4e289cebf1af97c8db896ec74c` |
 | 架构 | REST + WS + SSE 三通道；Socket / TCP / SSH 三种引擎 |
 | 目标平台 | Linux x64（SEA 单可执行文件），Unraid / 自托管 NAS |
 
@@ -118,7 +118,7 @@
 
 ---
 
-## v1.23.4 — 2026-09-19（未发布）
+## v1.23.4 — 2026-09-19（已发布）
 
 > 修复 v1.23.3 新增的「产品序列号 / 系统UUID」在**非 root systemd 服务**下显示「—」的问题。根因：内核把 `/sys/class/dmi/id/` 下 `product_serial`、`product_uuid`、`board_serial` 的权限设为 **0400（仅 root 可读）**，服务进程以非 root 用户运行，直读必然失败；只有 `board_name` 是 0444 可读（故卡片只有「主板型号」显示正常）。修复方式：systemd 单元在启动前以 root 把这三个值镜像成世界可读副本，后端优先读副本。
 
@@ -137,6 +137,13 @@
 ### 📌 下一步
 
 - 无。
+
+### 🚀 发布记录（2026-09-19）
+
+- Release：https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.4
+- 源码 commit：`eb553f6b9a1daa2ff0d235cfdc7aa8357b4adfa8`（main）
+- 交付包：`docker-manager-yanzi-linux-x64-v1.23.4.zip`（42,921,687 B，SHA-256 `bf6972c8aba10c7fb24ea6a3f04e7ed0346e2093a8f3b5c2931e826be60a00aa`）
+- ⚠️ 本机需**重跑 `install.sh`**（或手动替换 `.service` + `daemon-reload` + `restart`）才会写入新的 systemd 单元——OTA 不含 `.service` 更新。
 
 ---
 
