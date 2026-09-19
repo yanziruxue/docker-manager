@@ -23,11 +23,11 @@
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.21.2**（**已发布**）；下一版 **v1.22.0**（**待发布**，未打包）：镜像更新结果接入通知中心 |
-| 版本号规则 | Major 人工发布；Minor 新功能；Patch 修复/优化/UI。v1.22.0 因新增「镜像更新→通知中心」归为 Minor |
-| 最新 Release | [v1.21.2](https://github.com/yanziruxue/docker-manager/releases/tag/v1.21.2)（镜像更新检查接通后端 digest 比对 + `quick-install.sh` 下载进度 + 移除「在容器列表中显示」+ 更新调度器改名镜像更新；含 `quick-install.sh` asset）；上一版 [v1.21.1](https://github.com/yanziruxue/docker-manager/releases/tag/v1.21.1) |
-| 源码分支 | `main`（当前发布点 `5c208d4ea8ac4c49bdc910eae871581461601d91`；上一版 `4cc87dc02d1aa29564973b8ab412b71a72af07c8`） |
-| 交付包 | [v1.21.2.zip](https://github.com/yanziruxue/docker-manager/releases/tag/v1.21.2)（42,918,883 B，SHA-256 `0befb453dd4f925daa7e7457e179adf7b5099caf07d56727403461fae1dd6341`）；上一发布版 `v1.21.1.zip` 42,917,760 B SHA-256 `9d1ddc7c16a804d13cbf52b1e54721baf03ff11aba694582eeb757f7c84bfa3f` |
+| 当前版本 | **v1.22.0**（**已发布**）；含两处：① 镜像更新结果接入通知中心；② 设备唯一标识改为硬件指纹（主板+CPU+内存+硬盘+显卡+系统 6 维哈希）作主键，取消随机设备 UUID |
+| 版本号规则 | Major 人工发布；Minor 新功能；Patch 修复/优化/UI。v1.22.0 因新增「镜像更新→通知中心」与「硬件指纹作主键」两项新能力归为 Minor |
+| 最新 Release | [v1.22.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.22.0)（镜像更新结果接入通知中心 + 设备唯一标识改为硬件指纹 6 维作主键；含 `quick-install.sh` asset）；上一版 [v1.21.2](https://github.com/yanziruxue/docker-manager/releases/tag/v1.21.2) |
+| 源码分支 | `main`（当前发布点 `e756d8707d678712829080e0eac82faba76b2d4d`；上一版 `7a0069c73944992dbd7c9da73150d5cab7661fbd`） |
+| 交付包 | [v1.22.0.zip](https://github.com/yanziruxue/docker-manager/releases/tag/v1.22.0)（42,918,836 B，SHA-256 `7634e5edf4a73d7ec7b014d13915032b55b4654bd121e9c978be7eebbe475ccf`）；上一发布版 `v1.21.2.zip` 42,918,883 B SHA-256 `0befb453dd4f925daa7e7457e179adf7b5099caf07d56727403461fae1dd6341` |
 | 架构 | REST + WS + SSE 三通道；Socket / TCP / SSH 三种引擎 |
 | 目标平台 | Linux x64（SEA 单可执行文件），Unraid / 自托管 NAS |
 
@@ -118,7 +118,7 @@
 
 ---
 
-## v1.22.0 — 2026-09-19（待发布）
+## v1.22.0 — 2026-09-19
 
 > 两处改动：① 镜像更新结果接入通知中心（不另存事件流，复用活动日志「从引擎实时状态派生」的既有架构）；
 > ② 设备唯一标识改为**硬件指纹**（主板+CPU+内存+硬盘+显卡+安装的系统 6 维哈希）作为统计主键，**取消随机设备 UUID**。
@@ -150,6 +150,13 @@
 ### 📌 下一步
 
 - 无（可选：若需要后台检查也实时出现在通知中心，再为 activity 增加 SSE 推送）。
+
+### 🚀 发布记录（2026-09-19）
+
+- Release：https://github.com/yanziruxue/docker-manager/releases/tag/v1.22.0
+- 源码 commit：`e756d8707d678712829080e0eac82faba76b2d4d`（main）
+- 交付包：`docker-manager-yanzi-linux-x64-v1.22.0.zip` 42,918,836 B / SHA-256 `7634e5edf4a73d7ec7b014d13915032b55b4654bd121e9c978be7eebbe475ccf`
+- 资产：版本名 zip + latest 别名 `docker-manager-yanzi-linux-x64.zip` + `quick-install.sh`
 
 ---
 
