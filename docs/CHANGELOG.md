@@ -17,16 +17,16 @@
 
 ## 开发进度总览
 
-> 最后更新：2026-09-17
+> 最后更新：2026-09-19
 
 ### 当前状态
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.21.1**（已发布；上传更新包进度（文件大小）+ 导入镜像两阶段进度，含 v1.20.0 镜像导出导入与 v1.19.1 编辑器叠层修复） |
+| 当前版本 | **v1.21.2**（**待发布**；累积三批：移除「在容器列表中显示」+ `quick-install.sh` 下载进度 + 镜像更新检查接通/「更新调度器」改名「镜像更新」） |
 | 最新 Release | [v1.21.1](https://github.com/yanziruxue/docker-manager/releases/tag/v1.21.1)（导入镜像两阶段进度 + 上传更新包进度（文件大小），含 v1.20.0 镜像导出导入与 v1.19.1 编辑器叠层修复） |
-| 源码分支 | `main`（v1.21.1 发布点 `89f4bc1473764223ee4bd0afe866b48083b8d645`；上一版发布点 `8fd33d5a4699b6cb0a6383fe4b9cc0b04f6f0b99`） |
-| 交付包 | `v1.21.1.zip`，42,917,760 B，SHA-256 `9d1ddc7c16a804d13cbf52b1e54721baf03ff11aba694582eeb757f7c84bfa3f`（上一版 `v1.20.0.zip`，42,913,448 B，SHA-256 `e2940442179bf67100a5251f8b0b4b7f5c8500618ec45200498ba36f35e39099`） |
+| 源码分支 | `main`（v1.21.2 改动**尚未提交**；上一版发布点 `89f4bc1473764223ee4bd0afe866b48083b8d645`） |
+| 交付包 | `v1.21.2.zip` **待重打包**（旧包 42,917,228 B，SHA-256 `bd1c7db6…` 已作废：09-19 前端有改动，必须重打；上一发布版 `v1.21.1.zip`，42,917,760 B，SHA-256 `9d1ddc7c16a804d13cbf52b1e54721baf03ff11aba694582eeb757f7c84bfa3f`） |
 | 架构 | REST + WS + SSE 三通道；Socket / TCP / SSH 三种引擎 |
 | 目标平台 | Linux x64（SEA 单可执行文件），Unraid / 自托管 NAS |
 
@@ -38,15 +38,15 @@
 | 仪表盘 | ✅ | 统计卡片 + 资源监控 + 活动时间线 |
 | 容器管理 | ✅ | 列表 / 详情 / 启停 / 日志 / 资源监控 / Web 终端 / CSV 导出 |
 | 堆栈管理 | ✅ | Compose 自动发现 / 创建（含**上传堆栈备份初始化**）/ 编辑 / 操作 / 更新检查 / 备份恢复 / 批量操作 |
-| 镜像管理 | ✅ | 列表 / 筛选 / 拉取（**失败可重试**）/ 删除 / prune 未使用 / **导出下载 tar** / **上传 tar 导入** |
+| 镜像管理 | ✅ | 列表 / 筛选 / 拉取（**失败可重试**）/ 删除 / prune 未使用 / **导出下载 tar** / **上传 tar 导入** / **检查更新（真实 digest 比对，含「更新状态」列与单镜像检查）** |
 | 数据卷管理 | ✅ | 列表 / 新建 / 删除 / prune / 详情 |
 | 备份管理 | ✅ | 手动全量 + 堆栈级备份 / 恢复（含**上传备份文件直接恢复**）/ 导出（**zip** 格式，兼容历史 tar.gz）+ 自动备份调度器（周/月/年/Cron，含保留清理） |
 | 权限诊断与修复 | ✅ | 备份期自愈 `u+r` + 结构化诊断（属主/权限位/一条修复命令）+ `fix-perms` CLI + 启动体检与界面提示 |
 | 通知中心 | ✅ | 未读已读 + localStorage 持久化 |
-| 系统设置 | ✅ | Docker 配置 / Compose 模式 / 通知 / 备份 / 更新调度 / 列显隐 / 本机设备（7 维硬件指纹，只读） |
+| 系统设置 | ✅ | Docker 配置 / Compose 模式 / 通知 / 备份 / **镜像更新**（原「更新调度器」）/ 列显隐 / 本机设备（7 维硬件指纹，只读） |
 | Web 终端 | ✅ | xterm.js + WebSocket + 多 Shell 检测 |
 | 登录鉴权 | ✅ | 单管理员 + scrypt + httpOnly 会话（绝对过期）+ 密码找回码 |
-| 更新调度器 | ✅ | 后台定时检查镜像版本（每天 / 每周 / 每月，非 Cron） |
+| 镜像更新（原更新调度器） | ✅ | 后台定时检查镜像版本（每天 / 每周 / 每月，非 Cron）+ 结果落盘缓存 + 镜像页「检查更新」共用同一份数据 |
 | OTA 自升级 | ✅ | GitHub Releases 单一源，拉取 + 自替换 + systemd 重启，gh-proxy 镜像兜底，**支持中途取消** |
 | Linux SEA 部署 | ✅ | 单可执行文件 + systemd + install/uninstall 脚本 |
 | Docker 部署 | ✅ | 多阶段 Dockerfile |
@@ -114,6 +114,104 @@
 - 一次发布中同时含 Minor 与 Patch 时，按**最高级别**递增，低级别归零（例：`1.0.3` + 新功能 → `1.1.0`）
 - Major 由人工决定，不自动递增
 - 同一天内的多次改动合并为一个版本，逐条记录在版本下
+
+---
+
+## v1.21.2 — 2026-09-19
+
+> 本版**累积三批改动**：① 移除「在容器列表中显示」设置（09-17 打包，未发布）；
+> ② `quick-install.sh` 下载进度（09-17，未发布）；③ 镜像更新检查接通 + 改名（09-19）。
+> 前两批从未发布，故按项目「同发取最高级/未发布批次并入」惯例统一并入本版，**v1.21.2 一次发布**。
+
+- **已完成**
+
+  - **① 移除「在容器列表中显示」设置（彻底删除该功能）**：堆栈的 `settings.visible` 开关从全部 UI 下线，并清理底层字段。
+    - **根因**：该设置**从未被实现**——后端只在 `server/docker.ts` 写入默认值 `visible: true`，
+      容器列表（`Containers.tsx`）与任何接口都**不读该字段**。卡片上「关闭后，此堆栈的容器不会出现在容器管理页面」
+      的描述与实际行为不符，属**误导性摆设**，故按「彻底删除」处理。
+    - **改动点**：
+      1. `src/pages/Stacks.tsx` — 编辑堆栈弹窗 → settings 页签内的整张设置卡片（标题 + 副标题 + `Toggle`）；
+      2. `src/pages/Stacks.tsx` — 堆栈**右键菜单**「在容器列表中显示 / 隐藏」项（连同其前置分隔符）；
+      3. `src/pages/Stacks.tsx` — 堆栈列表名称旁的 `EyeOff` 隐藏角标；
+      4. `src/pages/Stacks.tsx` — 随之成为死代码的 `Eye` / `EyeOff` 图标 import；
+      5. 字段定义与读写三处一并清除：`src/types.ts`（`StackSettings.visible`）、
+         `src/transforms.ts`（API → 前端映射行）、`server/docker.ts`（堆栈默认 settings）。
+    - **数据兼容**：旧堆栈 settings 中已落盘的 `visible` 键**惰性残留无害**（后端不校验字段白名单，
+      读取端已不再引用），**无需迁移**；弹窗内 `settings` 状态仍以 `stack.settings` 初始化并原样回传，
+      **不会导致其他设置项丢失**。
+    - **验证**：双端 `tsc --noEmit` 全绿；`grep` 全量复检 `src/` + `server/` 中 `visible` / `EyeOff` 引用归零
+      （其他页面里合法使用的 `Eye` 不受影响）；目标文案全量归零；打包后冒烟确认内嵌资产已无该文案。
+    - 涉及文件：`src/pages/Stacks.tsx`、`src/types.ts`、`src/transforms.ts`、`server/docker.ts`。
+
+  - **② 一键安装脚本展示实际下载进度（MB）**：`curl -fsSL .../quick-install.sh | sudo bash` 全程不再「静默卡住」。
+    - **根因**：原脚本第 ~106 行 `do_download "$u" "$out" 2>/dev/null` 把 curl 的 **stderr 进度输出丢掉了**，
+      无 TTY 时 curl 又不自绘进度条 → 下载 40MB 期间终端**零输出**，用户误以为挂死。
+    - **改动点（`scripts/quick-install.sh`）**：新增 `size_of()` / `fmt_mb()` / `remote_size()`(HEAD 取 Content-Length)
+      / `progress_text()` / `render_progress()`；`do_download()` 改为**后台 curl/wget `-s`/`-q` + 前台每秒轮询已下载字节**
+      （退出码写临时文件回传），彻底移除 `2>/dev/null`。
+      - TTY：单行 `\r` 原地刷新 `已下载 12.4 MB / 42.9 MB · 29% · 1.8 MB/s`；
+      - 非 TTY（管道/CI）：每 10% 打一行，避免刷屏。
+      - 开始时打印 `包大小: 42.9 MB`；结束时打印 `下载完成：42.9 MB，用时 23s，均速 1.8 MB/s`。
+    - **顺带修掉一个真 bug**：`remote_size()` 原写成 `n="$(curl -fsIL … | awk …)"`，在 `set -euo pipefail` 下
+      **HEAD 请求失败会直接中止整个安装脚本**。改为 `|| true` + case 兜底，失败时返回 `0`（进度退化为「已下载 x MB」）。
+    - **验证**：本地 HTTP 桩（`python -m http.server` 供 35MB 文件 + shell 函数覆写 `curl`/`wget` 造慢速/失败场景）
+      **35/35 PASS**，含 6 组场景与 1 组「不可达地址不得中止脚本」的回归守护。
+    - 注意：该脚本由 Release asset（`/releases/latest/download/quick-install.sh`）分发，**不在 zip 内**，改它不需重打 zip。
+
+  - **③ 镜像管理「检查更新」真正接通后端 digest 比对（原「没反应」）**
+    - **根因**：`src/App.tsx` 的 `handleCheckAllUpdates` **从未调用任何后端检查接口**——只做了
+      `fetchEngineImages()` 重新拉列表 + 重算关联容器，数据与原来完全一致。而真正的比对逻辑
+      `server/docker.ts: checkAllImageUpdates()` 当时**只被 `server/scheduler.ts` 的定时任务调用**，
+      `server/index.ts` 里**没有任何 HTTP 路由暴露它** → 点击必然「没反应」。
+    - **连带发现**：① `checkAllImageUpdates` 返回的逐镜像 `details` 被 `runCheck()` **直接丢弃**，无落盘也无回传；
+      ② 镜像列表**没有「有更新」展示位**（`DockerImage` 无 `hasUpdate`，表格无对应列）；
+      ③ 单条镜像右键「检查更新」调的是**全局** `onCheckAllUpdates`，语义错误；④ 前端无任何结果反馈，失败静默。
+    - **改动点**：
+      1. `server/docker.ts` — `checkAllImageUpdates(engine, onlyRef?)` 支持**单镜像检查**；`ImageUpdateDetail`
+         新增 `refs: string[]`（同一 digest 上的全部 `repo:tag`，解决**多 tag 镜像非首标签匹配不到**的问题）。
+      2. `server/scheduler.ts` — 新增**镜像更新结果缓存**：`ImageUpdateCacheEntry` + `image-update-cache.json`
+         （`loadImageCache` / `persistImageCache` / `saveImageCache(merge)`）；新增导出
+         `checkEngineImages(engineId, onlyRef?)` 与 `getImageUpdateCache(engineId)`；`runCheck()` 顺带写入缓存
+         （**定时调度与手动检查共用同一份数据**）。
+      3. `server/index.ts` — 新增 `POST /api/engines/:id/images/check-updates`（body `{ref?}`，未连接/引擎不存在分别 500/404）
+         与 `GET /api/engines/:id/images/update-status`（读缓存，未检查过返回 `null`）。
+      4. `src/api.ts` / `src/types.ts` — 新增 `checkImageUpdatesApi` / `getImageUpdateStatusApi` 及
+         `ImageUpdateDetail` / `ImageUpdateSummaryView` / `ImageUpdateStatusView`。
+      5. `src/App.tsx` — `handleCheckAllUpdates` 改为真正调接口；新增 `handleCheckImageUpdate(ref)`；
+         `toRefMap()` 把明细摊平成 `{repo:tag → 是否有更新}`；进入镜像页 / 切引擎时读缓存（不重跑比对）。
+      6. `src/pages/Images.tsx` — 新增**「更新状态」列**（`有更新` 琥珀 / `最新` 绿 / `未检查` 灰，列顺序在「创建时间」之后）；
+         顶部**汇总条**（有更新=琥珀、全部最新=绿、失败=红并显示原因）；右键菜单「检查更新」改为**按该镜像检查**。
+    - **设计一致性**：`checkEngineImages` 返回的**始终是该引擎的全量视图**（单镜像检查也与缓存合并），
+      前端**直接替换**、不做二次合并，避免前后端两套合并规则分叉。
+    - **系统设置页改名**：`更新调度器` → **`镜像更新`**（侧栏页签 + 页标题；副标题补充「可在镜像管理页手动检查更新」）。
+    - **顺带修掉一个真 bug**：`server/index.ts:177` 用了未加 `typeof` 保护的裸 `BUILD_BINARY`
+      （该常量由 esbuild `define` 注入，仅打包时存在）→ **`npm run dev:server` / `dev:all` 直接 `ReferenceError` 崩溃**。
+      已改为 `typeof BUILD_BINARY !== "undefined" && BUILD_BINARY`（与同文件 L98 一致；SEA 构建语义不变）。
+    - **验证**：双端 `tsc --noEmit` 全绿（前端 `tsc` 当场抓出 `useEffect` 依赖数组在 `const` 声明前求值导致的
+      TDZ 错误并已修正）；`npm run build` 通过。
+      - 后端 **27/27 PASS**：① 路由/鉴权冒烟 8/8（未登录 401、引擎不存在 404「引擎不存在」、
+        未连接 500「引擎未连接」、无缓存返回 `null`）；② 假 Docker API（本机无可用 Docker 引擎，
+        用 `tcp://` 桩实现 `/_ping` `/version` `/images/json`）跑真实链路 **19/19 PASS**——
+        本地构建镜像（无 RepoDigests）被跳过、`checked=2`、`refs` 带出全部标签、缓存落盘、
+        单镜像检查合并后不丢其它镜像、无效 ref 报「不可检查」而非静默成功。
+      - 前端**组件级浏览器验证**（真实 `Images` 组件 + 项目 Tailwind + Playwright，打桩 `fetch`）：
+        **15/15 PASS、0 pageerror**。覆盖表头「更新状态」存在与顺序、5 行徽标逐行正确
+        （含 nginx 同一 digest 两标签**均**显示有更新 = `refs` 摊平生效、悬空镜像=未检查）、
+        汇总条文案与琥珀/红色配色、失败态仍正常渲染表格。
+    - 涉及文件：`server/docker.ts`、`server/scheduler.ts`、`server/index.ts`、`src/api.ts`、`src/types.ts`、
+      `src/App.tsx`、`src/pages/Images.tsx`、`src/pages/Settings.tsx`、`scripts/quick-install.sh`。
+
+- **未完成 / 已知限制**
+  - 「隐藏堆栈容器」若后续确需，须**重新设计**并在后端容器列表接口真正落地过滤逻辑（当前为纯 UI 摆设，无任何过滤实现）。
+  - 镜像检查依赖各 registry 的**匿名 manifest 请求**：私有仓库 / 需鉴权的 registry 取不到远程 digest 时，
+    该镜像**不计入 checked 且不进 details**（前端显示「未检查」，不误报为「最新」）——这是既有的保守行为，本次未改。
+  - 远程 digest 请求固定走 `https://`，**不支持明文 HTTP 私有 registry**（既有实现，本次未改）。
+  - `quick-install.sh` 的进度条**依赖服务端返回 `Content-Length`**；缺失时退化为「已下载 x MB」无总量/百分比。
+  - 本机 Windows 无可用 Docker 引擎（socket 模式指向 `/var/run/docker.sock`），**真实 registry digest 拉取未在本地联网验证**，
+    仅通过假 Docker API 验证到「明细/缓存/合并」链路；`hasUpdate` 的真假判定沿用 v1.15.16 起已在生产使用的同一函数。
+
+- **下一步**：v1.21.2 发布（`push-via-api.mjs` 推源码 + `publish-release.mjs` 建 GitHub Release，含 `quick-install.sh` asset）；
+  发布后回填 Release 链接 / commit SHA / 包 SHA-256。后续可考虑把镜像更新结果接到通知中心（有更新时产生一条通知）。
 
 ---
 

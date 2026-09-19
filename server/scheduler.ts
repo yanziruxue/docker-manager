@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import { getSettings } from "./settings.js";
-import { getAllEngines } from "./engines.js";
-import { checkAllImageUpdates, startImagePull } from "./docker.js";
+import { getAllEngines, getEngine } from "./engines.js";
+import { checkAllImageUpdates, startImagePull, type ImageUpdateDetail, type ImageUpdateSummary } from "./docker.js";
 import { createLogger } from "./logger.js";
 import { dataPath } from "./paths.js";
 import { createFullBackup, pruneBackups } from "./backup.js";
@@ -153,6 +153,7 @@ async function runCheck(): Promise<SchedulerLastResult> {
     }
     try {
       const sum = await checkAllImageUpdates(e);
+      saveImageCache(e.id, sum);
       if (cfg.autoPull) {
         for (const d of sum.details) {
           if (d.hasUpdate) {
@@ -208,6 +209,7 @@ function tick(): void {
 /** 启动更新调度器（server listen 后调用一次） */
 export function startUpdateScheduler(): void {
   loadPersisted();
+  loadImageCache();
   tick();
   if (timer) clearInterval(timer);
   timer = setInterval(tick, TICK_MS);
@@ -226,6 +228,85 @@ export function getSchedulerStatus(): SchedulerStatus {
 /** 立即触发一次检查（前端「立即检查全部」按钮） */
 export async function runSchedulerCheckNow(): Promise<SchedulerLastResult> {
   return runCheck();
+}
+
+// ============ 镜像更新检查结果缓存 ============
+//
+// 镜像管理页需要「哪些镜像有更新」，而调度器的 lastResult 只保留计数。
+// 这里把 checkAllImageUpdates 的逐镜像明细单独落盘，供：
+//   ① 页面进入时读取上次结果（无需重跑 digest 比对）；
+//   ② 「检查更新」按钮写入新结果。
+// 定时调度与手动检查写入同一份缓存。
+
+export interface ImageUpdateCacheEntry {
+  engineId: string;
+  checked: number;
+  updates: number;
+  details: ImageUpdateDetail[];
+  at: string; // ISO
+}
+
+const IMAGE_CACHE_FILE = dataPath("image-update-cache.json");
+let imageUpdateCache: Record<string, ImageUpdateCacheEntry> = {};
+
+function loadImageCache(): void {
+  try {
+    if (fs.existsSync(IMAGE_CACHE_FILE)) {
+      const raw = JSON.parse(fs.readFileSync(IMAGE_CACHE_FILE, "utf-8"));
+      if (raw && typeof raw === "object" && !Array.isArray(raw)) imageUpdateCache = raw;
+    }
+  } catch {
+    /* 损坏则忽略 */
+  }
+}
+
+function persistImageCache(): void {
+  try {
+    fs.writeFileSync(IMAGE_CACHE_FILE, JSON.stringify(imageUpdateCache, null, 2), "utf-8");
+  } catch {
+    /* 写入失败忽略 */
+  }
+}
+
+/** 写入某引擎的检查结果；merge=true（单镜像检查）时与旧明细合并，避免覆盖其它镜像的结果 */
+function saveImageCache(engineId: string, sum: ImageUpdateSummary, merge = false): ImageUpdateCacheEntry {
+  const prev = imageUpdateCache[engineId];
+  let details = sum.details;
+  let checked = sum.checked;
+  let updates = sum.updates;
+  if (merge && prev) {
+    const map = new Map(prev.details.map((d) => [d.image, d]));
+    for (const d of sum.details) map.set(d.image, d);
+    details = [...map.values()];
+    checked = details.length;
+    updates = details.filter((d) => d.hasUpdate).length;
+  }
+  const entry: ImageUpdateCacheEntry = { engineId, checked, updates, details, at: new Date().toISOString() };
+  imageUpdateCache[engineId] = entry;
+  persistImageCache();
+  return entry;
+}
+
+/** 读取某引擎最近一次镜像更新检查结果（从未检查过则返回 null） */
+export function getImageUpdateCache(engineId: string): ImageUpdateCacheEntry | null {
+  return imageUpdateCache[engineId] || null;
+}
+
+/**
+ * 立即检查某引擎镜像的版本更新（镜像管理页「检查更新」/「检查全部更新」）。
+ * `onlyRef` 传入 repo:tag 时只检查该镜像，并把结果合并进缓存。
+ */
+export async function checkEngineImages(engineId: string, onlyRef?: string): Promise<ImageUpdateCacheEntry> {
+  const engine = getEngine(engineId);
+  if (!engine) throw new Error("引擎不存在");
+  if (engine.status !== "connected") throw new Error(`引擎「${engine.name}」未连接，无法检查更新`);
+  const sum = await checkAllImageUpdates(engine, onlyRef);
+  if (onlyRef && sum.checked === 0) throw new Error(`镜像「${onlyRef}」不可检查（本地构建镜像或标签不匹配）`);
+  const entry = saveImageCache(engineId, sum, !!onlyRef);
+  log.info(
+    `镜像更新检查完成（${engine.name}${onlyRef ? ` · ${onlyRef}` : ""}）：检查 ${sum.checked} 个，发现 ${sum.updates} 个有可用更新`
+  );
+  return entry;
 }
 
 // ============ 自动备份调度器 ============

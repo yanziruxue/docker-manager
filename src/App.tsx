@@ -26,6 +26,8 @@ import {
   getMe,
   logout,
   ApiError,
+  checkImageUpdatesApi,
+  getImageUpdateStatusApi,
   type AuthUser,
 } from "./api";
 import { SetupWizard } from "./components/auth/SetupWizard";
@@ -37,7 +39,17 @@ import {
   transformStacks,
   transformActivityLogs,
 } from "./transforms";
-import type { PageKey, Container, DockerImage, DockerVolume, DockerEngine, Stack, SystemSettings, ActivityLog, EngineResourceStats, UpdateInfo } from "./types";
+import type { PageKey, Container, DockerImage, DockerVolume, DockerEngine, Stack, SystemSettings, ActivityLog, EngineResourceStats, UpdateInfo, ImageUpdateDetail, ImageUpdateSummaryView, ImageUpdateStatusView } from "./types";
+
+/** 把后端检查明细摊平成 { repo:tag -> 是否有更新 }；多 tag 镜像的每个标签都写入，保证表格逐行能匹配 */
+function toRefMap(details: ImageUpdateDetail[]): Record<string, boolean> {
+  const out: Record<string, boolean> = {};
+  for (const d of details) {
+    const refs = d.refs && d.refs.length > 0 ? d.refs : [d.image];
+    for (const ref of refs) out[ref] = d.hasUpdate;
+  }
+  return out;
+}
 
 export default function App() {
   const [page, setPage] = useState<PageKey>("dashboard");
@@ -58,6 +70,9 @@ export default function App() {
   const [dataLoading, setDataLoading] = useState(false);
   const [dataError, setDataError] = useState<string | null>(null);
   const [checkingUpdates, setCheckingUpdates] = useState(false);
+  // 镜像版本检查结果（进页面读缓存，点「检查更新」重算）；byRef 以 repo:tag 为键匹配表格行
+  const [imageUpdateStatus, setImageUpdateStatus] = useState<ImageUpdateStatusView | null>(null);
+  const [imageUpdateError, setImageUpdateError] = useState<string | null>(null);
   // 应用自身（OTA）更新信息：**单一数据源** —— 同时驱动全局侧边栏「系统设置」角标
   // 与「系统设置 → 系统更新」页展示（进入页面即显示已检测到的更新，无需再手动点「检查更新」）
   const [appUpdateInfo, setAppUpdateInfo] = useState<UpdateInfo | null>(null);
@@ -433,30 +448,69 @@ export default function App() {
     }
   }, []);
 
+  /**
+   * 应用检查结果。
+   * 后端 `checkEngineImages` 返回的**始终是该引擎的全量视图**（单镜像检查也会与缓存合并），
+   * 因此前端直接替换即可，不做二次合并，避免两侧合并规则分叉。
+   */
+  const applyImageUpdateStatus = useCallback((r: ImageUpdateSummaryView) => {
+    setImageUpdateStatus({ at: r.at, checked: r.checked, updates: r.updates, byRef: toRefMap(r.details) });
+  }, []);
+
+  /** 读取上次检查结果（进入镜像页 / 切换引擎时调用，不触发新的 digest 比对） */
+  const loadImageUpdateStatus = useCallback(
+    async (engineId: string) => {
+      try {
+        const r = await getImageUpdateStatusApi(engineId);
+        if (r) applyImageUpdateStatus(r);
+        else setImageUpdateStatus(null);
+      } catch {
+        // 缓存读取失败不打扰用户，保持现状
+      }
+    },
+    [applyImageUpdateStatus]
+  );
+
+  /** 检查全部镜像更新：真正调用后端 digest 比对（此前只重拉列表，导致「没反应」） */
   const handleCheckAllUpdates = useCallback(async () => {
     if (!activeEngineId) return;
     setCheckingUpdates(true);
+    setImageUpdateError(null);
     try {
-      // 重新拉取镜像列表，触发关联容器重新计算
-      const rawImages = await fetchEngineImages(activeEngineId).catch(() => []);
-      const xfImages = transformImages(rawImages);
-      for (const img of xfImages) {
-        img.associatedContainers = containers
-          .filter((c) => {
-            if (c.image.includes(img.repository)) return true;
-            return false;
-          })
-          .map((c) => c.name);
-      }
-      setImages(xfImages);
-      // 同时触发一次全局刷新
-      await loadEngineData(activeEngineId);
-    } catch (err) {
+      applyImageUpdateStatus(await checkImageUpdatesApi(activeEngineId));
+    } catch (err: any) {
       console.error("检查更新失败:", err);
+      setImageUpdateError(err?.message || "检查更新失败");
     } finally {
       setCheckingUpdates(false);
     }
-  }, [activeEngineId, containers, loadEngineData]);
+  }, [activeEngineId, applyImageUpdateStatus]);
+
+  /** 检查单个镜像更新（右键菜单） */
+  const handleCheckImageUpdate = useCallback(
+    async (ref: string) => {
+      if (!activeEngineId) return;
+      setCheckingUpdates(true);
+      setImageUpdateError(null);
+      try {
+        applyImageUpdateStatus(await checkImageUpdatesApi(activeEngineId, ref));
+      } catch (err: any) {
+        console.error("检查更新失败:", err);
+        setImageUpdateError(err?.message || `检查「${ref}」失败`);
+      } finally {
+        setCheckingUpdates(false);
+      }
+    },
+    [activeEngineId, applyImageUpdateStatus]
+  );
+
+  // 镜像页：切换引擎或进入页面时读取上次镜像版本检查结果（不重跑 digest 比对）
+  // 必须放在 loadImageUpdateStatus 定义之后——依赖数组在渲染期求值，提前引用会触发 TDZ
+  useEffect(() => {
+    if (!activeEngineId || page !== "images") return;
+    setImageUpdateError(null);
+    void loadImageUpdateStatus(activeEngineId);
+  }, [activeEngineId, page, loadImageUpdateStatus]);
 
   const stats = {
     runningContainers: containers.filter((c) => c.status === "running").length,
@@ -594,7 +648,10 @@ export default function App() {
               onRefresh={() => activeEngineId && loadEngineData(activeEngineId)}
               defaultVisibleColumns={settings?.columnVisibility?.images}
               onCheckAllUpdates={handleCheckAllUpdates}
+              onCheckImageUpdate={handleCheckImageUpdate}
               checkingUpdates={checkingUpdates}
+              imageUpdateStatus={imageUpdateStatus}
+              imageUpdateError={imageUpdateError}
             />
           )}
           {page === "volumes" && (

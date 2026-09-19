@@ -220,7 +220,6 @@ export function transformStacks(raw: any[]): Stack[] {
         stopTimeout: s.settings?.stopTimeout ?? 30,
         autoUpdateEnabled: s.settings?.autoUpdateEnabled ?? false,
         autoUpdateMode: s.settings?.autoUpdateMode || "notify" as const,
-        visible: s.settings?.visible ?? true,
       },
       envContent: s.envContent || "",
       webuiLabels: s.webuiLabels || [],

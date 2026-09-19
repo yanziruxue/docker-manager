@@ -26,8 +26,6 @@ import {
   FileText,
   Settings as SettingsIcon,
   Bell,
-  Eye,
-  EyeOff,
   Wrench,
   CheckSquare,
   Square as SquareIcon,
@@ -659,9 +657,6 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
       items.push({ label: L("Open WebUI", "打开 WebUI"), icon: <Globe size={14} />, onClick: () => webuiUrl && window.open(webuiUrl, "_blank") });
     }
 
-    items.push({ separator: true });
-    items.push({ label: stack.settings.visible ? L("Hide in Containers", "在容器列表中隐藏") : L("Show in Containers", "在容器列表中显示"), icon: stack.settings.visible ? <EyeOff size={14} /> : <Eye size={14} />, onClick: async () => { if (!engineId) return; try { await saveStackSettingsApi(engineId, stack.name, { ...stack.settings, visible: !stack.settings.visible }); onRefresh?.(); } catch(e: any) { setOperationError(e.message); } } });
-
     return items;
   };
 
@@ -844,7 +839,6 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
                         {stack.isGitSource && <GitBranch size={12} className="text-slate-400" />}
                         {stack.hasBuild && <Tag text="Build" color="purple" />}
                         {stack.settings.autoUpdateEnabled && <Bell size={12} className="text-blue-400" />}
-                        {!stack.settings.visible && <EyeOff size={12} className="text-slate-400" />}
                       </div>
                       <span className="text-xs text-slate-400 truncate block">{stack.description}</span>
                     </div>
@@ -1914,16 +1908,6 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
                     />
                   </FormField>
                 )}
-              </div>
-
-              <div className="bg-slate-50 rounded-lg p-4 border border-slate-100">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <span className="text-sm font-semibold text-slate-700">在容器列表中显示</span>
-                    <p className="text-xs text-slate-400 mt-0.5">关闭后，此堆栈的容器不会出现在容器管理页面</p>
-                  </div>
-                  <Toggle active={settings.visible} onChange={(val) => setSettings({ ...settings, visible: val })} />
-                </div>
               </div>
             </div>
           )}

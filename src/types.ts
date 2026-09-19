@@ -177,7 +177,6 @@ export interface StackSettings {
   stopTimeout: number;
   autoUpdateEnabled: boolean;
   autoUpdateMode: "notify" | "auto";
-  visible: boolean; // 是否在容器列表中显示
 }
 
 export interface Stack {
@@ -217,6 +216,33 @@ export interface DockerImage {
   associatedCount: number;        // 关联容器数量
   isDangling: boolean;
   sha256: string;
+}
+
+/** 单个镜像的版本更新检查明细（后端 checkAllImageUpdates） */
+export interface ImageUpdateDetail {
+  engineId: string;
+  image: string;        // repo:tag
+  refs?: string[];      // 同一 digest 上的全部 repo:tag（多 tag 镜像逐行匹配用）
+  hasUpdate: boolean;
+  currentSha: string;   // 本地 RepoDigest 的 sha256
+  latestSha: string;    // 远程 registry manifest digest 的 sha256
+}
+
+/** 某引擎镜像更新检查结果（手动检查返回 / 缓存读取） */
+export interface ImageUpdateSummaryView {
+  engineId: string;
+  checked: number;
+  updates: number;
+  details: ImageUpdateDetail[];
+  at: string; // ISO
+}
+
+/** 镜像管理页使用的检查结果视图：按 repo:tag 摊平，便于表格逐行匹配 */
+export interface ImageUpdateStatusView {
+  at: string;
+  checked: number;
+  updates: number;
+  byRef: Record<string, boolean>;
 }
 
 // ============ 数据卷相关 ============

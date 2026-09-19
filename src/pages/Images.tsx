@@ -19,7 +19,7 @@ import {
   ImageDown,
   RotateCcw,
 } from "lucide-react";
-import type { DockerImage, PullTask } from "../types";
+import type { DockerImage, PullTask, ImageUpdateStatusView } from "../types";
 import { Tag } from "../components/Badge";
 import { ConfirmDialog, Modal } from "../components/Modal";
 import { CmdOutputModal, useCmdOutput } from "../components/CmdOutputModal";
@@ -47,8 +47,15 @@ interface ImagesProps {
   engineId?: string;
   onRefresh?: () => void;
   defaultVisibleColumns?: string[];
+  /** 检查全部镜像更新（后端 digest 比对） */
   onCheckAllUpdates?: () => void;
+  /** 检查单个镜像更新（右键菜单，传 repo:tag） */
+  onCheckImageUpdate?: (ref: string) => void;
   checkingUpdates?: boolean;
+  /** 最近一次检查结果（进页面读缓存 / 检查后写入） */
+  imageUpdateStatus?: ImageUpdateStatusView | null;
+  /** 检查失败原因（后端不可达 / 引擎未连接等） */
+  imageUpdateError?: string | null;
 }
 
 /**
@@ -438,7 +445,7 @@ function ImageImportPanel({
   );
 }
 
-export function Images({ images, loading, error, engineId, onRefresh, defaultVisibleColumns, onCheckAllUpdates, checkingUpdates }: ImagesProps) {
+export function Images({ images, loading, error, engineId, onRefresh, defaultVisibleColumns, onCheckAllUpdates, onCheckImageUpdate, checkingUpdates, imageUpdateStatus, imageUpdateError }: ImagesProps) {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "dangling" | "used" | "unused">("all");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
@@ -733,13 +740,14 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
     }
   };
 
-  type ColumnKey = "repository" | "tag" | "id" | "size" | "createdAt" | "associatedContainers" | "sha256" | "actions";
+  type ColumnKey = "repository" | "tag" | "id" | "size" | "createdAt" | "updateStatus" | "associatedContainers" | "sha256" | "actions";
   const allColumns: { key: ColumnKey; label: string }[] = [
     { key: "repository", label: "仓库名" },
     { key: "tag", label: "标签" },
     { key: "id", label: "镜像 ID" },
     { key: "size", label: "大小" },
     { key: "createdAt", label: "创建时间" },
+    { key: "updateStatus", label: "更新状态" },
     { key: "associatedContainers", label: "关联容器" },
     { key: "sha256", label: "SHA-256" },
     { key: "actions", label: "操作" },
@@ -950,6 +958,37 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
         </div>
       </div>
 
+      {/* 镜像版本检查结果：有更新数量 / 全部最新 / 失败原因 */}
+      {(imageUpdateStatus || imageUpdateError) && (
+        <div
+          className={`rounded-xl border shadow-sm p-3 flex items-start gap-2 text-sm ${
+            imageUpdateError
+              ? "bg-red-50 border-red-200 text-red-700"
+              : (imageUpdateStatus?.updates ?? 0) > 0
+              ? "bg-amber-50 border-amber-200 text-amber-700"
+              : "bg-green-50 border-green-200 text-green-700"
+          }`}
+        >
+          {imageUpdateError || (imageUpdateStatus?.updates ?? 0) > 0 ? (
+            <AlertTriangle size={15} className="mt-0.5 flex-shrink-0" />
+          ) : (
+            <CheckCircle2 size={15} className="mt-0.5 flex-shrink-0" />
+          )}
+          <div className="flex-1 min-w-0">
+            {imageUpdateError ? (
+              <span>检查更新失败：{imageUpdateError}</span>
+            ) : (
+              <span>
+                {(imageUpdateStatus?.updates ?? 0) > 0
+                  ? `${imageUpdateStatus!.updates} 个镜像有可用更新（已检查 ${imageUpdateStatus!.checked} 个）`
+                  : `全部镜像均为最新（已检查 ${imageUpdateStatus!.checked} 个）`}
+                <span className="opacity-70"> · {new Date(imageUpdateStatus!.at).toLocaleString("zh-CN")}</span>
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* 拉取任务条：进行中 + 最近完成的任务（后台拉取也在此展示） */}
       {visiblePullTasks.length > 0 && (
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 space-y-2">
@@ -1019,6 +1058,7 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
                 {visibleColumns.has("id") && <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3 whitespace-nowrap">镜像 ID</th>}
                 {visibleColumns.has("size") && <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3 whitespace-nowrap">大小</th>}
                 {visibleColumns.has("createdAt") && <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3 whitespace-nowrap">创建时间</th>}
+                {visibleColumns.has("updateStatus") && <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3 whitespace-nowrap">更新状态</th>}
                 {visibleColumns.has("associatedContainers") && <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3 whitespace-nowrap">关联容器</th>}
                 {visibleColumns.has("sha256") && <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3 whitespace-nowrap">SHA-256</th>}
                 {visibleColumns.has("actions") && <th className="text-right text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3 whitespace-nowrap">操作</th>}
@@ -1039,6 +1079,24 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
                   {visibleColumns.has("id") && <td className="px-3 py-3 whitespace-nowrap"><span className="text-xs font-mono text-slate-400">{img.id}</span></td>}
                   {visibleColumns.has("size") && <td className="px-3 py-3 whitespace-nowrap"><span className="text-sm text-slate-600">{img.size}</span></td>}
                   {visibleColumns.has("createdAt") && <td className="px-3 py-3 whitespace-nowrap"><span className="text-sm text-slate-500">{img.createdAt}</span></td>}
+                  {visibleColumns.has("updateStatus") && (() => {
+                    const st = imageUpdateStatus?.byRef[`${img.repository}:${img.tag}`];
+                    return (
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        {st === undefined ? (
+                          <span className="text-xs text-slate-300">未检查</span>
+                        ) : st ? (
+                          <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-600">
+                            <AlertTriangle size={12} /> 有更新
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-xs font-medium text-green-600">
+                            <CheckCircle2 size={12} /> 最新
+                          </span>
+                        )}
+                      </td>
+                    );
+                  })()}
                   {visibleColumns.has("associatedContainers") && (
                     <td className="px-3 py-3">
                       {img.associatedContainers.length > 0 ? (
@@ -1076,7 +1134,12 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
                               disabled: !!downloadingImage,
                               onClick: () => handleDownloadImage(buildImageRef(img)),
                             },
-                            { label: "检查更新", icon: <RefreshCw size={14} />, onClick: () => onCheckAllUpdates?.() },
+                            {
+                              label: "检查更新",
+                              icon: <RefreshCw size={14} />,
+                              disabled: !onCheckImageUpdate,
+                              onClick: () => onCheckImageUpdate?.(`${img.repository}:${img.tag}`),
+                            },
                             { separator: true },
                             {
                               label: img.associatedContainers.length > 0 ? "删除（使用中）" : "删除",

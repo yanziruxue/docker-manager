@@ -14,6 +14,8 @@
 #
 # 说明：Release 资产名带版本号（docker-manager-yanzi-linux-x64-vX.Y.Z.zip），
 #       本脚本通过 GitHub API 解析最新资产真实下载地址，不再依赖固定的非版本化文件名。
+# 说明：下载交付包时显示实时进度（已下载 MB / 总 MB · 百分比 · 均速）。
+#       终端（TTY）下单行原地刷新；输出重定向到文件/日志时改为每 10% 输出一行，避免刷屏。
 # ============================================
 set -euo pipefail
 
@@ -85,14 +87,121 @@ if [ -z "$ASSET_URL" ]; then
 fi
 log "下载地址: ${ASSET_URL}"
 
-# 单次下载
+# 总大小仅用于算百分比；拿不到也不影响下载，进度退化为只显示已下载量
+ASSET_SIZE="$(remote_size "$ASSET_URL" || echo 0)"
+if [ "${ASSET_SIZE:-0}" -gt 0 ]; then
+  log "包大小: $(fmt_mb "$ASSET_SIZE") MB"
+else
+  ASSET_SIZE=0
+  warn "未能获取包大小（HEAD 请求失败或不支持），进度将只显示已下载量"
+fi
+
+# ============================================================================
+# 下载进度基础设施（区块标记供测试脚本抽取，勿改标记名）
+# >>> download-helpers
+# ============================================================================
+
+# 本地文件字节数（不存在或读取失败返回 0）
+size_of() {
+  [ -f "$1" ] || { echo 0; return 0; }
+  wc -c < "$1" 2>/dev/null | tr -d '[:space:]' || echo 0
+}
+
+# 字节 → MB（保留 1 位小数）
+fmt_mb() { awk -v b="${1:-0}" 'BEGIN{printf "%.1f", b/1048576}'; }
+
+# 远端文件总字节数（仅 HTTP 2xx 时采用 content-length；拿不到返回 0）
+# 关键：必须吞掉下载器的失败码——本脚本跑在 set -euo pipefail 下，
+#       命令替换里的管道一旦失败会直接终止整个脚本（连降级告警都打不出来）。
+remote_size() {
+  local url="$1" raw="" code="" n=""
+  if command -v curl >/dev/null 2>&1; then
+    raw="$(curl -fsIL --connect-timeout 15 --max-time 30 -w '\n__HTTP__%{http_code}' "$url" 2>/dev/null || true)"
+  else
+    raw="$(wget --server-response --spider --timeout=30 "$url" 2>&1 || true)"
+  fi
+  # 仅在 2xx 时采信 content-length：404 等错误页也有 body 长度，会把进度算错
+  code="$(printf '%s\n' "$raw" | sed -n 's/.*__HTTP__\([0-9][0-9][0-9]\).*/\1/p' | tail -1)"
+  case "$code" in
+    '') printf '%s\n' "$raw" | grep -qE 'HTTP/[0-9.]+ 2[0-9][0-9]' || { echo 0; return 0; } ;;
+    2*) : ;;
+    *) echo 0; return 0 ;;
+  esac
+  n="$(printf '%s\n' "$raw" | awk 'BEGIN{IGNORECASE=1} /^content-length:/{gsub(/[^0-9]/,"",$2); v=$2} END{print v+0}')"
+  case "$n" in ''|*[!0-9]*) echo 0 ;; *) echo "$n" ;; esac
+}
+
+# 进度文本：有总量时「已下载 X MB / Y MB · P%」，否则只显示已下载量
+progress_text() {
+  local cur="$1" total="${2:-0}"
+  case "$total" in ''|*[!0-9]*) total=0 ;; esac
+  if [ "$total" -gt 0 ]; then
+    local pct=$(( cur * 100 / total ))
+    [ "$pct" -gt 100 ] && pct=100
+    printf '已下载 %s MB / %s MB · %s%%' "$(fmt_mb "$cur")" "$(fmt_mb "$total")" "$pct"
+  else
+    printf '已下载 %s MB' "$(fmt_mb "$cur")"
+  fi
+}
+
+# <<< download-helpers
+
+# 单次下载（后台下载 + 前台秒级轮询，自绘 MB 进度）。
+# 下载器退出码经全局 DL_RC 传出，避免 set -e 吞码。
+DL_RC=0
 do_download() {
   local url="$1" out="$2"
-  if command -v curl >/dev/null 2>&1; then
-    curl -fL --connect-timeout 15 --max-time 300 --retry 2 --retry-delay 2 "$url" -o "$out"
-  else
-    wget -qO "$out" "$url"
+  local total="${ASSET_SIZE:-0}"
+  local rcfile="$TMPD/.dlrc.$$"
+  local pid tty=0 start elapsed rc cur last_pct=0
+  case "$total" in ''|*[!0-9]*) total=0 ;; esac
+  rm -f "$out" "$rcfile"
+  [ -t 2 ] && tty=1
+
+  # 下载器放进子 shell，用「退出码文件」判断真的结束：
+  # 不用 kill -0 判活（子进程退出后成僵尸仍返回 0），
+  # 也避免 set -e 让失败的子 shell 提前退出而不写码。
+  (
+    set +e
+    if command -v curl >/dev/null 2>&1; then
+      curl -fsSL --connect-timeout 15 --max-time 300 --retry 2 --retry-delay 2 "$url" -o "$out"
+    else
+      wget -qO "$out" --timeout=300 "$url"
+    fi
+    echo $? > "$rcfile"
+  ) &
+  pid=$!
+
+  start="$(date +%s)"
+  while [ ! -f "$rcfile" ]; do
+    cur="$(size_of "$out")"
+    if [ "$tty" -eq 1 ]; then
+      printf '\r\033[K  %s' "$(progress_text "$cur" "$total")" >&2
+    else
+      local pct=0
+      [ "$total" -gt 0 ] && pct=$(( cur * 100 / total ))
+      if [ "$pct" -ge $(( last_pct + 10 )) ]; then
+        last_pct="$pct"
+        log "  $(progress_text "$cur" "$total")"
+      fi
+    fi
+    sleep 1
+  done
+
+  wait "$pid" 2>/dev/null || true
+  rc="$(cat "$rcfile" 2>/dev/null || echo 1)"
+  rm -f "$rcfile"
+  if [ "$tty" -eq 1 ]; then printf '\r\033[K' >&2; fi
+
+  cur="$(size_of "$out")"
+  elapsed=$(( $(date +%s) - start ))
+  [ "$elapsed" -lt 1 ] && elapsed=1
+  DL_RC="$rc"
+  if [ "$rc" -eq 0 ] && [ "$cur" -gt 0 ]; then
+    log "  ✅ 下载完成：$(fmt_mb "$cur") MB，用时 ${elapsed}s，均速 $(fmt_mb $(( cur / elapsed ))) MB/s"
+    return 0
   fi
+  return 1
 }
 
 # 下载（直连 → 自定义镜像 → gh-proxy 回退）
@@ -103,10 +212,10 @@ download_with_fallback() {
   tries+=("https://gh-proxy.com/${url}")
   for u in "${tries[@]}"; do
     log "尝试下载: $u"
-    if do_download "$u" "$out" 2>/dev/null && [ -s "$out" ]; then
+    if do_download "$u" "$out" && [ -s "$out" ]; then
       return 0
     fi
-    warn "下载失败，尝试下一个镜像..."
+    warn "下载失败（下载器退出码 ${DL_RC}），尝试下一个镜像..."
   done
   return 1
 }

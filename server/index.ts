@@ -56,7 +56,7 @@ import {
 } from "./docker.js";
 import { createFullBackup, restoreFullBackup, restoreUploadedBackup, exportConfigArchive, listBackupFiles, deleteBackupFile, backupFilePath, migrateLegacyBackups } from "./backup.js";
 import { getSettings, saveSettings } from "./settings.js";
-import { startUpdateScheduler, getSchedulerStatus, runSchedulerCheckNow, startBackupScheduler, getBackupSchedulerStatus } from "./scheduler.js";
+import { startUpdateScheduler, getSchedulerStatus, runSchedulerCheckNow, checkEngineImages, getImageUpdateCache, startBackupScheduler, getBackupSchedulerStatus } from "./scheduler.js";
 import { readDaemonConfigInfo, writeDaemonConfig, restartDockerService, refreshPrivileges } from "./daemon-config.js";
 import { CURRENT_VERSION, getInstallDir, checkForUpdate, performUpdate, performUpdateFromUpload, getUpdateState, getUpdateDir, markUpdateError, saveUploadPackage, getPendingUpload, getPendingUploadPath, schedulePendingExpiry, discardPendingUpload, cancelPendingExpiry, cancelUpdate } from "./updater.js";
 import { COMPOSE_DIR } from "./paths.js";
@@ -174,7 +174,8 @@ try {
 
 const apiLog = createLogger("API");
 // Node.js SEA 中 __filename/__dirname 不可用，用 process.execPath 替代
-const __filename = BUILD_BINARY ? process.execPath : fileURLToPath(import.meta.url);
+// 注意：BUILD_BINARY 仅在 esbuild 打包时由 define 注入，开发模式（tsx/vite）下不存在，必须做 typeof 保护
+const __filename = typeof BUILD_BINARY !== "undefined" && BUILD_BINARY ? process.execPath : fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 app.use(cors());
@@ -1188,7 +1189,7 @@ app.get("/api/update-scheduler/status", (_req, res) => {
   res.json({ success: true, data: getSchedulerStatus() });
 });
 
-/** 立即触发一次更新检查 */
+/** 立即触发一次更新检查（全部引擎） */
 app.post("/api/update-scheduler/check-now", async (_req, res) => {
   try {
     const result = await runSchedulerCheckNow();
@@ -1196,6 +1197,30 @@ app.post("/api/update-scheduler/check-now", async (_req, res) => {
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message || "检查失败" });
   }
+});
+
+/**
+ * 检查某引擎镜像的版本更新（镜像管理页「检查更新」）。
+ * body.ref 传 repo:tag 时只检查该镜像（结果合并进缓存），不传则检查全部镜像。
+ */
+app.post("/api/engines/:id/images/check-updates", async (req, res) => {
+  const engine = getEngine(req.params.id);
+  if (!engine) {
+    res.status(404).json({ success: false, error: "引擎不存在" });
+    return;
+  }
+  const ref = typeof req.body?.ref === "string" && req.body.ref.trim() ? req.body.ref.trim() : undefined;
+  try {
+    const result = await checkEngineImages(engine.id, ref);
+    res.json({ success: true, data: result });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || "检查更新失败" });
+  }
+});
+
+/** 读取某引擎最近一次镜像更新检查结果（进页面即显示，未检查过返回 null） */
+app.get("/api/engines/:id/images/update-status", (req, res) => {
+  res.json({ success: true, data: getImageUpdateCache(req.params.id) });
 });
 
 /** 自动备份调度器状态（下次备份时间 / 各档计划） */

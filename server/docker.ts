@@ -1569,7 +1569,6 @@ export async function getStacks(engine: DockerEngine): Promise<any[]> {
             forceRecreate: false,
             timeout: 60,
             autoUpdate: false,
-            visible: true,
             ...settings,
           },
           backupCount: 0,
@@ -2721,6 +2720,7 @@ export async function resizeContainerTerminal(
 export interface ImageUpdateDetail {
   engineId: string;
   image: string;       // repo:tag（用于自动拉取）
+  refs?: string[];     // 该 digest 上的全部 repo:tag（多 tag 镜像逐行匹配用）
   hasUpdate: boolean;
   currentSha: string;  // 本地 RepoDigest 的 sha256
   latestSha: string;   // 远程 registry manifest digest 的 sha256
@@ -2850,8 +2850,9 @@ async function fetchRemoteDigest(registry: string, repo: string, tag: string): P
  * 检查某引擎全部镜像的版本更新（基于 RepoDigest 与远程 registry manifest digest 比较）。
  * 仅检查从 registry 拉取的镜像（含 RepoDigests）；本地构建镜像跳过。
  * 多 tag 指向同一 digest 的去重，避免重复请求。
+ * `onlyRef` 传入 repo:tag 时只检查该镜像（镜像管理页单条「检查更新」）。
  */
-export async function checkAllImageUpdates(engine: DockerEngine): Promise<ImageUpdateSummary> {
+export async function checkAllImageUpdates(engine: DockerEngine, onlyRef?: string): Promise<ImageUpdateSummary> {
   const docker = getDocker(engine);
   const images = await withTimeout(docker.listImages(), 10000);
   const details: ImageUpdateDetail[] = [];
@@ -2863,6 +2864,7 @@ export async function checkAllImageUpdates(engine: DockerEngine): Promise<ImageU
     const repoDigests: string[] = img.RepoDigests || [];
     const repoTags: string[] = img.RepoTags || [];
     if (repoDigests.length === 0 || repoTags.length === 0) continue; // 本地构建，无 registry digest
+    if (onlyRef && !repoTags.includes(onlyRef)) continue; // 单镜像检查：跳过其余镜像
     const digestKey = repoDigests[0];
     if (seen.has(digestKey)) continue;
     seen.add(digestKey);
@@ -2877,7 +2879,7 @@ export async function checkAllImageUpdates(engine: DockerEngine): Promise<ImageU
       const hasUpdate = !!latestSha && latestSha !== localSha;
       checked++;
       if (hasUpdate) updates++;
-      details.push({ engineId: engine.id, image: ref, hasUpdate, currentSha: localSha, latestSha });
+      details.push({ engineId: engine.id, image: ref, refs: repoTags, hasUpdate, currentSha: localSha, latestSha });
     } catch {
       // 单镜像网络异常不影响整体
     }

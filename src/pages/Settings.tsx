@@ -464,7 +464,7 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
     }
   }, [settings]);
 
-  // 更新调度器状态（进入调度器页时轮询）
+  // 镜像更新（原「更新调度器」）状态：进入该页时轮询
   const [schedulerStatus, setSchedulerStatus] = useState<SchedulerStatus | null>(null);
   const [checkingNow, setCheckingNow] = useState(false);
   useEffect(() => {
@@ -1281,7 +1281,7 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
     { key: "modal", label: "弹窗设置", icon: <Timer size={16} /> },
     { key: "notifications", label: "通知配置", icon: <Bell size={16} /> },
     { key: "backup", label: "备份管理", icon: <Package size={16} /> },
-    { key: "scheduler", label: "更新调度器", icon: <Clock size={16} /> },
+    { key: "scheduler", label: "镜像更新", icon: <Clock size={16} /> },
     { key: "activity", label: "本机设备", icon: <Activity size={16} /> },
     { key: "update", label: "系统更新", icon: <Download size={16} /> },
   ];
@@ -2574,8 +2574,8 @@ docker-compose version</code>
         {activeSection === "scheduler" && (
           <div className="max-w-2xl space-y-5">
             <div>
-              <h2 className="text-lg font-semibold text-slate-800 mb-1">更新调度器</h2>
-              <p className="text-sm text-slate-500">全局自动更新检查（基于 SHA-256 digest 精确比较镜像版本）</p>
+              <h2 className="text-lg font-semibold text-slate-800 mb-1">镜像更新</h2>
+              <p className="text-sm text-slate-500">全局自动检查镜像版本更新（基于 SHA-256 digest 精确比较），并可在镜像管理页手动「检查更新」</p>
             </div>
 
             <Card title="自动更新检查" icon={<RefreshCw size={16} />}>

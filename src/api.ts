@@ -1,4 +1,4 @@
-import type { DockerEngine, EngineResourceStats, SystemSettings, SchedulerStatus, SchedulerLastResult } from "./types";
+import type { DockerEngine, EngineResourceStats, SystemSettings, SchedulerStatus, SchedulerLastResult, ImageUpdateSummaryView } from "./types";
 
 const BASE = "/api";
 
@@ -652,9 +652,22 @@ export function getSchedulerStatusApi(): Promise<SchedulerStatus> {
   return request("/update-scheduler/status");
 }
 
-/** 立即触发一次镜像更新检查 */
+/** 立即触发一次镜像更新检查（全部引擎） */
 export function runSchedulerCheckApi(): Promise<SchedulerLastResult> {
   return request("/update-scheduler/check-now", { method: "POST" });
+}
+
+/** 检查某引擎镜像的版本更新；ref 传 repo:tag 时只检查该镜像 */
+export function checkImageUpdatesApi(engineId: string, ref?: string): Promise<ImageUpdateSummaryView> {
+  return request(`/engines/${engineId}/images/check-updates`, {
+    method: "POST",
+    body: JSON.stringify({ ref }),
+  });
+}
+
+/** 读取某引擎最近一次镜像更新检查结果（未检查过返回 null） */
+export function getImageUpdateStatusApi(engineId: string): Promise<ImageUpdateSummaryView | null> {
+  return request(`/engines/${engineId}/images/update-status`);
 }
 
 /** 备份堆栈 */
