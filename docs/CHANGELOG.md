@@ -23,11 +23,11 @@
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.23.0**（**已发布**）；含两处：① 后台镜像更新检查完成经 SSE 实时推通知中心；② 设备标识卡片改版展示完整硬件详情（主板/CPU/GPU/内存/硬盘，新增富硬件详情采集）。上一版 **v1.22.0**（已发布）：镜像更新结果接入通知中心 + 设备唯一标识改硬件指纹 6 维作主键 |
+| 当前版本 | **v1.23.1**（**待发布**）；UI 优化：本机设备标识卡片明细区改为每行一条（之前宽屏双列）。上一版 **v1.23.0**（已发布）：后台镜像更新检查完成经 SSE 实时推通知中心 + 设备标识卡片改版展示完整硬件详情 |
 | 版本号规则 | Major 人工发布；Minor 新功能；Patch 修复/优化/UI。v1.22.0 因新增「镜像更新→通知中心」与「硬件指纹作主键」两项新能力归为 Minor |
-| 最新 Release | [v1.22.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.22.0)（镜像更新结果接入通知中心 + 设备唯一标识改为硬件指纹 6 维作主键；含 `quick-install.sh` asset）；上一版 [v1.21.2](https://github.com/yanziruxue/docker-manager/releases/tag/v1.21.2) |
-| 源码分支 | `main`（当前发布点 `d7b3aad9f57f910d332c5f1e100962d5bc4552a1`；上一版 `e756d8707d678712829080e0eac82faba76b2d4d`） |
-| 交付包 | [v1.22.0.zip](https://github.com/yanziruxue/docker-manager/releases/tag/v1.22.0)（42,918,836 B，SHA-256 `7634e5edf4a73d7ec7b014d13915032b55b4654bd121e9c978be7eebbe475ccf`）；上一发布版 `v1.21.2.zip` 42,918,883 B SHA-256 `0befb453dd4f925daa7e7457e179adf7b5099caf07d56727403461fae1dd6341` |
+| 最新 Release | [v1.23.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.0)（后台镜像更新检查完成经 SSE 实时推通知中心 + 设备标识卡片改版展示完整硬件详情；含 `quick-install.sh` asset）；上一版 [v1.22.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.22.0) |
+| 源码分支 | `main`（当前发布点 `d7b3aad9f57f910d332c5f1e100962d5bc4552a1`；回填发布记录后 `94bdf498c2ca2d93fe9c6bbeb8552c6a89aca636`；上一版 `e756d8707d678712829080e0eac82faba76b2d4d`） |
+| 交付包 | [v1.23.0.zip](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.0)（42,920,286 B，SHA-256 `6c072f280e358483623e662e46e3fb1bd1bfc5fb974319c9806e6be2cf6b7eb4`）；上一发布版 `v1.22.0.zip` 42,918,836 B SHA-256 `7634e5edf4a73d7ec7b014d13915032b55b4654bd121e9c978be7eebbe475ccf` |
 | 架构 | REST + WS + SSE 三通道；Socket / TCP / SSH 三种引擎 |
 | 目标平台 | Linux x64（SEA 单可执行文件），Unraid / 自托管 NAS |
 
@@ -118,7 +118,27 @@
 
 ---
 
-## v1.23.0 — 2026-09-19（待发布）
+## v1.23.1 — 2026-09-19（待发布）
+
+> 本机设备标识卡片明细区布局优化：从「宽屏双列」改为始终单列（每行一条），提升长哈希 / 长路径类字段的可读性。纯 UI 调整，无后端改动。
+
+### ✅ 已完成
+
+- **设备标识卡片单列布局**：`src/components/ActivityPanel.tsx` 的「本机设备标识」卡片明细区，容器由 `grid grid-cols-1 sm:grid-cols-2`（宽屏双列）改为 `grid grid-cols-1`（始终单列），并移除「标识文件」的 `span2` 跨列属性。现在运行环境 / 应用版本 / 架构 / 系统 / 标识文件 / 主板 / CPU / GPU / 内存 / 硬盘 **每条独占一行**。
+  - 文件：`src/components/ActivityPanel.tsx`（仅改明细区容器类名与一处 `span2` 属性）。
+  - 验证：`npx tsc --noEmit -p tsconfig.json`（前端）无错；`npm run build:frontend` 成功，新资产 `index-Corx5SJd.js` 含 `grid-cols-1 gap-y-2`。
+
+### ⚠️ 未完成 / 已知限制
+
+- 无（纯 UI 布局微调）。
+
+### 📌 下一步
+
+- 无。
+
+---
+
+## v1.23.0 — 2026-09-19（已发布）
 
 > 后台镜像更新检查（调度器）完成后通过 SSE 实时推送，前端即时刷新通知中心（此前仅手动检查/切页/刷新才拉取）；同时「本机设备标识」卡片改版为按「设备标识 / 运行环境 / 应用版本 / 架构 / 系统 / 标识文件 / 主板 / CPU / GPU / 内存 / 硬盘」展示完整硬件详情（新增富硬件详情采集，6 维指纹与统计主键不变）。
 

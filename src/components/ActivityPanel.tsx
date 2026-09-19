@@ -162,8 +162,8 @@ export function ActivityPanel() {
               </div>
             </div>
 
-            {/* 明细 */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm border-t border-slate-100 pt-3">
+            {/* 明细：一行一条 */}
+            <div className="grid grid-cols-1 gap-y-2 text-sm border-t border-slate-100 pt-3">
               <Row label="运行环境" value={status.virtualized ? "虚拟化 / 容器" : "物理机"} />
               <Row label="应用版本" value={`v${status.appVersion}`} />
               <Row label="架构" value={status.arch} />
@@ -172,7 +172,6 @@ export function ActivityPanel() {
                 label="标识文件"
                 value={status.deviceFile}
                 mono
-                span2
                 title={status.deviceFile}
               />
               <Row label="主板" value={hw?.boardSerial ?? ""} mono title={hw?.boardSerial} />
