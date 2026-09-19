@@ -23,12 +23,12 @@
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.23.6**（**未发布**）；UI 精简——移除「本机设备」卡片标题下的说明文字（「设备唯一标识与硬件指纹（用于安装量 / 活跃度统计，自动静默上报）」）。已发布上一版 **v1.23.5**：systemd 服务单元一致性自检 |
+| 当前版本 | **v1.23.6**（**已发布**）；UI 精简——移除「本机设备」卡片标题下的说明文字。上一版 **v1.23.5**（已发布）：systemd 服务单元一致性自检——OTA 不更新 `/etc/systemd/system/` 下的单元，落后时在卡片提示缺失指令并提供一键复制的 root 修复命令 |
 | 版本号规则 | Major 人工发布；Minor 新功能；Patch 修复/优化/UI。v1.22.0 因新增「镜像更新→通知中心」与「硬件指纹作主键」两项新能力归为 Minor |
-| 最新 Release | [v1.23.5](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.5)（服务单元一致性自检 + 一键修复命令；含 `quick-install.sh` asset）；上一版 [v1.23.4](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.4) |
-| 源码分支 | `main`（当前发布点 `22117a0325c6fffc5264dfa159a17155eb6d3091`；上一版 `eb553f6b9a1daa2ff0d235cfdc7aa8357b4adfa8`） |
+| 最新 Release | [v1.23.6](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.6)（UI 精简；含 `quick-install.sh` asset）；上一版 [v1.23.5](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.5) |
+| 源码分支 | `main`（当前发布点 `89adaa6754931a3d879a8d47d86e9cced59377ce`；上一版 `22117a0325c6fffc5264dfa159a17155eb6d3091`） |
 | 部署注意 | **改过 `deploy/linux/*.service` 的版本，OTA 后必须重跑 `install.sh`**（或在「设置 → 本机设备」页复制一键修复命令）——OTA 只替换二进制，不更新单元文件 |
-| 交付包 | [v1.23.5.zip](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.5)（42,925,949 B，SHA-256 `91c08943a3379e4508cfd07466a5dbb41d7af425fd5c8f7a4b56ffbc60e5599c`）；上一发布版 `v1.23.4.zip` 42,921,687 B SHA-256 `bf6972c8aba10c7fb24ea6a3f04e7ed0346e2093a8f3b5c2931e826be60a00aa` |
+| 交付包 | [v1.23.6.zip](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.6)（42,925,881 B，SHA-256 `ae054b1ca17de744ab2d7cc085387bea09093ab66bdaf0e5498de28d19b00165`）；上一发布版 `v1.23.5.zip` 42,925,949 B SHA-256 `91c08943a3379e4508cfd07466a5dbb41d7af425fd5c8f7a4b56ffbc60e5599c` |
 | 架构 | REST + WS + SSE 三通道；Socket / TCP / SSH 三种引擎 |
 | 目标平台 | Linux x64（SEA 单可执行文件），Unraid / 自托管 NAS |
 
@@ -119,7 +119,7 @@
 
 ---
 
-## v1.23.6 — 2026-09-19（未发布）
+## v1.23.6 — 2026-09-19（已发布）
 
 > UI 精简：移除「本机设备」卡片标题下方的说明文字。
 
@@ -127,7 +127,7 @@
 
 - **`src/components/ActivityPanel.tsx`**：删除标题 `本机设备` 下的说明文字「设备唯一标识与硬件指纹（用于安装量 / 活跃度统计，自动静默上报）」（连同其 `<p>` 元素），并去掉标题上多余的 `mb-1` 间距，避免留下悬空外边距。
 - 该文案仅为页面说明，**不涉及接口、字段与指纹逻辑**；`GET /api/telemetry/status`、`hardware` / `details` 结构均无改动。
-- **验证**：前端 `tsc --noEmit` 通过。
+- **验证**：前端 `tsc --noEmit` 通过；新产物 `index-BTls4NNc.js` 中该文案**已无命中**，卡片标题「本机设备标识」仍在。
 
 ### ⚠️ 未完成 / 已知限制
 
@@ -135,7 +135,15 @@
 
 ### 📌 下一步
 
-- 无（如需打包发布，走 SEA 交付流程）。
+- 无。
+
+### 发布记录（2026-09-19）
+
+- **Release**：[v1.23.6](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.6)（assets：`docker-manager-yanzi-linux-x64-v1.23.6.zip` + latest 别名 `…-linux-x64.zip` + `quick-install.sh`）
+- **源码 commit**：`89adaa6754931a3d879a8d47d86e9cced59377ce`（`main`，97 文件）
+- **交付包**：`docker-manager-yanzi-linux-x64-v1.23.6.zip` — 42,925,881 B，SHA-256 `ae054b1ca17de744ab2d7cc085387bea09093ab66bdaf0e5498de28d19b00165`
+- **构建校验**：前后端 `tsc` 双绿；前端产物 `index-BTls4NNc.js`（+ `index-aXNdmFyW.css`）已内嵌；二进制 ELF magic `7f 45 4c 46`、129,764,544 B；单元模板（1985 B）与 `/system/service-unit` 自检均在包内
+- **部署注意**：本版**未改动 `deploy/linux/*.service`**，OTA 直接覆盖二进制即可，无需重跑 `install.sh`
 
 ---
 
