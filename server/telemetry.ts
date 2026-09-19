@@ -236,8 +236,67 @@ export function collectHardwareFingerprint(): { fingerprint: string; virtualized
 
 // ---------- 设备标识 7 维采集（≥3 匹配决定硬件环境是否变化） ----------
 
-/** 采集 GPU 标识：lspci 优先，nvidia-smi 兜底，失败返回空串 */
+/**
+ * 从 /sys/bus/pci/devices 直读 GPU 型号（不依赖 lspci，普通用户可读，
+ * 绕过非 root systemd 服务下 lspci 受限/PATH 缺失导致 GPU 识别为空的问题）。
+ * 仅匹配 PCI class 0x03xx（显示控制器：VGA / 3D / Display）。
+ */
+function collectGpuFromSysfs(): string {
+  try {
+    const devDir = "/sys/bus/pci/devices";
+    if (!fs.existsSync(devDir)) return "";
+    for (const e of fs.readdirSync(devDir)) {
+      const cls = readTextFile(path.join(devDir, e, "class"));
+      if (!/^0x03/i.test(cls.trim())) continue; // 仅显示控制器（0x03xx）
+      const vendor = readTextFile(path.join(devDir, e, "vendor"));
+      const device = readTextFile(path.join(devDir, e, "device"));
+      if (vendor && device) {
+        const name = resolvePciName(vendor, device);
+        if (name) return name;
+      }
+    }
+    return "";
+  } catch {
+    return "";
+  }
+}
+
+/** 解析 pci.ids 数据库：vendor/device 形如 0x8086 / 0x1916，返回「厂商 设备」型号串 */
+function resolvePciName(vendorHex: string, deviceHex: string): string {
+  const vid = vendorHex.replace(/^0x/i, "").toLowerCase();
+  const did = deviceHex.replace(/^0x/i, "").toLowerCase();
+  for (const db of ["/usr/share/misc/pci.ids", "/usr/share/hwdata/pci.ids", "/usr/share/pci.ids"]) {
+    const txt = readTextFile(db);
+    if (!txt) continue;
+    let inTargetVendor = false;
+    let vendorName = "";
+    for (const line of txt.split("\n")) {
+      if (line.startsWith("#") || line.trim() === "") continue;
+      if (/^\s/.test(line)) {
+        // 缩进行：设备 / 子系统（厂商块内）
+        const m = line.match(/^\s+([0-9a-f]{4})\s+(\S.*)$/);
+        if (m && inTargetVendor && m[1] === did) return `${vendorName} ${m[2].trim()}`;
+      } else {
+        // 厂商行
+        const m = line.match(/^([0-9a-f]{4})\s+(\S.*)$/);
+        if (m) {
+          if (m[1] === vid) {
+            inTargetVendor = true;
+            vendorName = m[2].trim();
+          } else if (inTargetVendor) {
+            break; // 已离开目标厂商块
+          }
+        }
+      }
+    }
+  }
+  return `Vendor ${vid} Device ${did}`;
+}
+
+/** 采集 GPU 标识：sysfs 直读优先（非 root 服务可识别），lspci 兜底，nvidia-smi 再兜底，失败返回空串 */
 function collectGpu(): string {
+  const sysfs = collectGpuFromSysfs();
+  if (sysfs) return sysfs.slice(0, 120);
   const lspci = tryExec("lspci", ["-nn"]);
   const gpuLine = lspci.split("\n").find((l) => /VGA|3D|Display|Graphics/i.test(l));
   if (gpuLine) return gpuLine.replace(/^\S+\s/, "").trim().slice(0, 120);

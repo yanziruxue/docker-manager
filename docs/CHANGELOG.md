@@ -23,7 +23,7 @@
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.23.1**（**已发布**）；UI 优化：本机设备标识卡片明细区改为每行一条（之前宽屏双列）。上一版 **v1.23.0**（已发布）：后台镜像更新检查完成经 SSE 实时推通知中心 + 设备标识卡片改版展示完整硬件详情 |
+| 当前版本 | **v1.23.2**（**待发布**）；GPU 识别兼容性修复：本机设备标识卡片 GPU 行改 sysfs 直读（非 root systemd 服务下也能识别核显/独显型号）。上一版 **v1.23.1**（已发布）：本机设备标识卡片明细区改为每行一条 |
 | 版本号规则 | Major 人工发布；Minor 新功能；Patch 修复/优化/UI。v1.22.0 因新增「镜像更新→通知中心」与「硬件指纹作主键」两项新能力归为 Minor |
 | 最新 Release | [v1.23.1](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.1)（本机设备标识卡片明细区改为每行一条；含 `quick-install.sh` asset）；上一版 [v1.23.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.0) |
 | 源码分支 | `main`（当前发布点 `4fbc23d6d424ba89338f240ca03a8f6212b6fd23`；上一版 `94bdf498c2ca2d93fe9c6bbeb8552c6a89aca636`） |
@@ -118,7 +118,28 @@
 
 ---
 
-## v1.23.1 — 2026-09-19（待发布）
+## v1.23.2 — 2026-09-19（待发布）
+
+> GPU 识别兼容性修复：本机设备标识卡片的 GPU 行在裸机 systemd 服务（非 root 用户 `docker-manager-yanzi`）部署下原显示「—」。原 `collectGpu()` 依赖 `lspci`/`nvidia-smi`；现改为直接读取 `/sys/bus/pci/devices` 解析 PCI 显示控制器（class 0x03），**彻底摆脱对 `lspci` 的依赖**（`/sys/bus/pci` 权限 0444，普通用户可读），裸机非 root 服务也能稳定识别核显/独显型号。
+
+### ✅ 已完成
+
+- **GPU 采集改 sysfs 直读优先**：`server/telemetry.ts` 新增 `collectGpuFromSysfs()`（遍历 `/sys/bus/pci/devices/*`，按 PCI class `0x03` 过滤显示控制器，读 `vendor`/`device` 并解析 `/usr/share/misc/pci.ids`（或 `hwdata/pci.ids`）数据库拼出型号）+ `resolvePciName()`；`collectGpu()` 改为「sysfs 直读 → lspci 兜底 → nvidia-smi 兜底」的顺序。普通用户可读 `/sys/bus/pci`，故非 root systemd 服务下也能识别 GPU（如 `Intel Corporation Skylake GT2 [HD Graphics 520]`），不再依赖 `lspci` 是否可用。
+  - 文件：`server/telemetry.ts`（仅改 GPU 采集逻辑，6 维指纹 `collectGpu()` 返回值仍作统计主键维度，sysfs 解析出的型号与 lspci 语义一致，不影响设备指纹哈希）。
+  - 验证：`tsc -p server/tsconfig.json --noEmit` 全绿。
+
+### ⚠️ 未完成 / 已知限制
+
+- 主板序列号仍显示「—」：本机 `/sys/class/dmi/id/board_serial` 权限 `400`（仅 root），非 root 服务读不到；且该值本身是 BIOS 占位符 `Default string`，即便提权读到也无识别意义（方案 B 未采纳）。
+- GPU 显存：核显/AMD 集显无独立显存，`nvidia-smi` 不存在时 `memory` 字段留空，卡片 GPU 行仅显示型号（不强行标注「共享内存」以免误导独显）。
+
+### 📌 下一步
+
+- 无（主板如需展示可另议 sudo 提权方案，但值为假、意义有限）。
+
+---
+
+## v1.23.1 — 2026-09-19（已发布）
 
 > 本机设备标识卡片明细区布局优化：从「宽屏双列」改为始终单列（每行一条），提升长哈希 / 长路径类字段的可读性。纯 UI 调整，无后端改动。
 
