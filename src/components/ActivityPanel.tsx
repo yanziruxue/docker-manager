@@ -150,10 +150,7 @@ export function ActivityPanel() {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-lg font-semibold text-slate-800 mb-1">本机设备</h2>
-        <p className="text-sm text-slate-500">
-          设备唯一标识与硬件指纹（用于安装量 / 活跃度统计，自动静默上报）
-        </p>
+        <h2 className="text-lg font-semibold text-slate-800">本机设备</h2>
       </div>
 
       {/* 服务单元落后提示：单元由 install.sh 安装，OTA 不更新它 */}
