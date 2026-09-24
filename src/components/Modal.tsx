@@ -87,6 +87,7 @@ export function ConfirmDialog({
   loading = false,
   errorMessage,
   extraAction,
+  primaryFirst = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -100,7 +101,39 @@ export function ConfirmDialog({
   errorMessage?: string | null;
   /** 次要操作（如删除冲突后的「强制删除」），仅在提供时渲染 */
   extraAction?: { label: string; onClick: () => void; loading?: boolean };
+  /** true 时主操作（确认）排左侧、取消排右侧；默认相反（取消在左、确认在右） */
+  primaryFirst?: boolean;
 }) {
+  const cancelButton = (
+    <button
+      onClick={onClose}
+      disabled={loading}
+      className="px-4 py-2 text-sm font-medium text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+    >
+      {cancelText}
+    </button>
+  );
+  const extraButton = extraAction ? (
+    <button
+      onClick={extraAction.onClick}
+      disabled={loading}
+      className="px-4 py-2 text-sm font-medium text-white bg-amber-500 rounded-lg hover:bg-amber-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+    >
+      {extraAction.loading ? "处理中..." : extraAction.label}
+    </button>
+  ) : null;
+  const confirmButton = (
+    <button
+      onClick={onConfirm}
+      disabled={loading}
+      className={`px-4 py-2 text-sm font-medium text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+        danger ? "bg-red-500 hover:bg-red-600" : "bg-blue-500 hover:bg-blue-600"
+      }`}
+    >
+      {loading ? "处理中..." : confirmText}
+    </button>
+  );
+
   return (
     <Modal open={open} onClose={onClose} size="sm">
       <div className="py-2">
@@ -110,31 +143,19 @@ export function ConfirmDialog({
           <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2 mb-4">{errorMessage}</p>
         )}
         <div className="flex justify-end gap-3 mt-6">
-          <button
-            onClick={onClose}
-            disabled={loading}
-            className="px-4 py-2 text-sm font-medium text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {cancelText}
-          </button>
-          {extraAction && (
-            <button
-              onClick={extraAction.onClick}
-              disabled={loading}
-              className="px-4 py-2 text-sm font-medium text-white bg-amber-500 rounded-lg hover:bg-amber-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {extraAction.loading ? "处理中..." : extraAction.label}
-            </button>
+          {primaryFirst ? (
+            <>
+              {confirmButton}
+              {extraButton}
+              {cancelButton}
+            </>
+          ) : (
+            <>
+              {cancelButton}
+              {extraButton}
+              {confirmButton}
+            </>
           )}
-          <button
-            onClick={onConfirm}
-            disabled={loading}
-            className={`px-4 py-2 text-sm font-medium text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-              danger ? "bg-red-500 hover:bg-red-600" : "bg-blue-500 hover:bg-blue-600"
-            }`}
-          >
-            {loading ? "处理中..." : confirmText}
-          </button>
         </div>
       </div>
     </Modal>

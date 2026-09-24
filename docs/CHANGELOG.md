@@ -23,12 +23,12 @@
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.23.6**（**已发布**）；UI 精简——移除「本机设备」卡片标题下的说明文字。上一版 **v1.23.5**（已发布）：systemd 服务单元一致性自检——OTA 不更新 `/etc/systemd/system/` 下的单元，落后时在卡片提示缺失指令并提供一键复制的 root 修复命令 |
+| 当前版本 | **v1.24.0**（**未发布**）；含七项用户可见改动 + 3 项缺陷修复：① 堆栈编辑「格式化」支持**平铺 YAML 自动补缩进**（并修正触发时机，原先该分支永不触发）；② **网络管理**提至与「数据卷管理」同级的顶级导航（网络↔容器映射 / 增删改 / 上下行流量）；③ 网络 **host 驱动全局仅允许创建 1 个**；④ 仪表盘-资源监控改为**环形仪表盘**（CPU 各核小环 + 镜像 / 数据卷占用环）；⑤ 资源监控新增**内存双曲线图**（系统 + Docker 占用）、**网络上下行双曲线图**（10 秒~5 分钟时间范围）与**磁盘利用率表格**；⑥ 堆栈「格式化」改为**数组写法**（`environment` / `labels` 映射折叠成 `- K=V`，纯标量序列折叠成行内 `[a, b]`）；⑦ 镜像**拉取任务**前后端保留期统一 **30 分钟**，并在「详情」右侧新增 **×** 手动清理（前后端同时移除）。**修复**：创建堆栈「上传文件」方法的上传区此前只是**装饰性 div**（无点击 / 拖拽处理，形同失效）——已实现点击 / 拖拽导入 compose。上一未发布版 **v1.23.11**：镜像加速源改为 **daemon.json 代码编辑器**——设置页直接以 JSON 形式展示并编辑宿主机 `/etc/docker/daemon.json` 全文（语法高亮 / 行号 / 实时校验 / 格式化），点「保存到 daemon.json」整份写回（写前备份），内容有变化时弹窗询问**是否重启 Docker 生效**（左「重启」/ 右「暂不重启」）。上一发布版 **v1.23.6**：UI 精简——移除「本机设备」卡片标题下的说明文字 |
 | 版本号规则 | Major 人工发布；Minor 新功能；Patch 修复/优化/UI。v1.22.0 因新增「镜像更新→通知中心」与「硬件指纹作主键」两项新能力归为 Minor |
 | 最新 Release | [v1.23.6](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.6)（UI 精简；含 `quick-install.sh` asset）；上一版 [v1.23.5](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.5) |
 | 源码分支 | `main`（当前发布点 `89adaa6754931a3d879a8d47d86e9cced59377ce`；上一版 `22117a0325c6fffc5264dfa159a17155eb6d3091`） |
 | 部署注意 | **改过 `deploy/linux/*.service` 的版本，OTA 后必须重跑 `install.sh`**（或在「设置 → 本机设备」页复制一键修复命令）——OTA 只替换二进制，不更新单元文件 |
-| 交付包 | [v1.23.6.zip](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.6)（42,925,881 B，SHA-256 `ae054b1ca17de744ab2d7cc085387bea09093ab66bdaf0e5498de28d19b00165`）；上一发布版 `v1.23.5.zip` 42,925,949 B SHA-256 `91c08943a3379e4508cfd07466a5dbb41d7af425fd5c8f7a4b56ffbc60e5599c` |
+| 交付包 | **v1.24.0（本地已出包 · 未发布）** `docker-manager-yanzi-linux-x64-v1.24.0.zip` 42,949,964 B，SHA-256 `6ee5871302bd88b8efb248121b143494b571c57edd4cfb77481b2a2ddbbd0b84`（5 成员）；上一未发布版 v1.23.11 `docker-manager-yanzi-linux-x64-v1.23.11.zip` 42,933,917 B，SHA-256 `1f83e4b5625829a984065469f2db0eb84aa6904b1e4298f0a077e29ff97ad810` |
 | 架构 | REST + WS + SSE 三通道；Socket / TCP / SSH 三种引擎 |
 | 目标平台 | Linux x64（SEA 单可执行文件），Unraid / 自托管 NAS |
 
@@ -41,7 +41,7 @@
 | 容器管理 | ✅ | 列表 / 详情 / 启停 / 日志 / 资源监控 / Web 终端 / CSV 导出 |
 | 堆栈管理 | ✅ | Compose 自动发现 / 创建（含**上传堆栈备份初始化**）/ 编辑 / 操作 / 更新检查 / 备份恢复 / 批量操作 |
 | 镜像管理 | ✅ | 列表 / 筛选 / 拉取（**失败可重试**）/ 删除 / prune 未使用 / **导出下载 tar** / **上传 tar 导入** / **检查更新（真实 digest 比对，含「更新状态」列与单镜像检查）** |
-| 数据卷管理 | ✅ | 列表 / 新建 / 删除 / prune / 详情 |
+| 数据卷管理 | ✅ | 列表 / 新建 / 删除 / prune / 详情；**网络管理**（网络↔容器映射 / 增删改 / 上下行流量） |
 | 备份管理 | ✅ | 手动全量 + 堆栈级备份 / 恢复（含**上传备份文件直接恢复**）/ 导出（**zip** 格式，兼容历史 tar.gz）+ 自动备份调度器（周/月/年/Cron，含保留清理） |
 | 权限诊断与修复 | ✅ | 备份期自愈 `u+r` + 结构化诊断（属主/权限位/一条修复命令）+ `fix-perms` CLI + 启动体检与界面提示 |
 | 通知中心 | ✅ | 未读已读 + localStorage 持久化 |
@@ -116,6 +116,305 @@
 - 一次发布中同时含 Minor 与 Patch 时，按**最高级别**递增，低级别归零（例：`1.0.3` + 新功能 → `1.1.0`）
 - Major 由人工决定，不自动递增
 - 同一天内的多次改动合并为一个版本，逐条记录在版本下
+
+---
+
+## v1.24.0 — 2026-09-19（未发布）
+
+> 用户可见改动：① 堆栈「格式化」支持平铺 YAML 自动补缩进（并修正触发时机）；② 新增「网络管理」独立导航（原在数据卷管理 tab 内，本次提至与数据卷管理同级侧边栏）；③ 网络管理 host 驱动网络全局仅允许创建 1 个；④ 仪表盘-资源监控改为**环形仪表盘**（CPU 各核小环 + 镜像/数据卷占用环）；⑤ 资源监控新增**内存双曲线图**（系统占用 + Docker 占用，下方显示最大支持 / 已安装大小）、**网络上下行双曲线图**（含 10 秒~5 分钟时间范围）与**磁盘利用率表格**；⑥ 堆栈「格式化」改为**数组写法**（`environment` / `labels` 映射 → `- K=V`；纯标量序列 → 行内 `[a, b]`）；⑦ 镜像**拉取任务**两端保留期统一 **30 分钟**，并在「详情」右侧新增 **×** 手动清理（前后端同时移除）——即「30 分钟自动清理」+「手动 × 清理」两种并存。
+>
+> **缺陷修复**：创建堆栈「上传文件」方法的上传区此前只是一个**装饰性 div**（没有 `onClick` / `onDrop` / 隐藏 file input），点击与拖拽都无反应；已补齐真实导入逻辑。
+
+### ✅ 已完成
+
+- **Feature A — 堆栈编辑「格式化」支持平铺 YAML 自动补缩进**（修复 `src/components/YamlEditor.tsx`）
+  - 根因：平铺 YAML（`services:\niotdb:\nnetwork_mode: bridge…`）经 `js-yaml` 的 `load` 会抛错（0 列缩进不合法）→ 原 `format()` 直接走 catch 静默 no-op。
+  - 新增 `isFlatYaml(text)`（判定所有非空/非注释行都在第 0 列）与 `autoIndentYaml(text)`（基于栈的启发式：识别 `services/volumes/networks/…` 块级键、列表键 `ports/environment/volumes/…`、序列项 `- `，对多服务 / 嵌套 `deploy` 均正确补 2 空格缩进）。
+  - `format()` 先正常 `load→dump`；仅当 `yaml.load` 抛错且 `isFlatYaml` 为真时，先用 `autoIndentYaml` 补缩进再 `load→dump`，得到规范嵌套 YAML（如 `services:\n  iotdb:\n    ports:\n      - 6667:6667`）。已用独立 Node 脚本对单服务 / 多服务+deploy / 多服务+列表三种样例验证。
+  - 涉及文件：`src/components/YamlEditor.tsx`。
+
+- **Feature B — 数据卷管理新增「网络管理」页**（`src/pages/NetworkManager.tsx` 新 + `src/pages/Volumes.tsx` 接 tab）
+  - 后端：新增 `server/docker.ts` 的 `getNetworks / createNetwork / removeNetwork / editNetwork`（edit = remove+recreate，Docker 不支持原地改），及 `server/index.ts` 四个路由 `GET|POST /api/engines/:id/networks`、`PUT|DELETE /api/engines/:id/networks/:netId`。
+  - 网络↔容器映射取自 network inspect 的 `Containers` 项（自带每个容器 `RxBytes/TxBytes`），**累加即为该网络的下行/上行累计流量**，无需额外采样。
+  - 前端 `DockerNetwork` / `NetworkCreateOptions` 类型（`src/types.ts`）+ 4 个 API（`src/api.ts`）。页面展示：网络总数 / 已关联容器 / 本地网络（local）统计卡；表格含网络名（内部/ingress 徽标）、驱动、子网/网关、使用容器 chips（带 IP 标题）、流量（↓ 绿 / ↑ 蓝）、编辑/删除操作。支持新建 / 编辑（名称+驱动+子网+网关+选项+标签）/ 删除（带确认）。
+  - `Volumes.tsx` 顶部加「数据卷 / 网络管理」tab 切换，网络管理走 `NetworkManager` 组件。
+  - 涉及文件：`src/types.ts`、`src/api.ts`、`server/docker.ts`、`server/index.ts`、`src/pages/NetworkManager.tsx`、`src/pages/Volumes.tsx`。
+
+- **Feature B-2 —「网络管理」提至与「数据卷管理」同级的顶级导航**（`src/types.ts` + `src/components/Sidebar.tsx` + `src/App.tsx` + `src/pages/Volumes.tsx`）
+  - 根因：用户要求把网络管理从「数据卷管理」内部 tab 提升为独立的一级菜单项。
+  - `PageKey` 新增 `"networks"`；`Sidebar` 的 `navItems` 在「数据卷管理」下方加「网络管理」项（`Network` 图标，与数据卷管理同级）；`App.tsx` 加 `pageTitles.networks` 与 `{page === "networks" && <NetworkManager .../>}` 渲染分支。
+  - `Volumes.tsx` 移除「数据卷 / 网络管理」tab 切换与 `NetworkManager` 引用，恢复为纯数据卷页。
+  - 涉及文件：`src/types.ts`、`src/components/Sidebar.tsx`、`src/App.tsx`、`src/pages/Volumes.tsx`。
+
+- **Feature D — 网络管理 host 驱动网络仅允许创建 1 个**（`server/index.ts` + `src/pages/NetworkManager.tsx`）
+  - 后端 `POST /api/engines/:id/networks` 在进入 `createNetwork` 前，若 `driver === "host"` 先 `getNetworks` 查已存在的 host 驱动网络；若存在则返回 `409` 并提示「已存在 host 驱动网络「X」，host 驱动网络仅允许创建 1 个」（Docker 语义：host 共享主机网络栈，重复创建无意义）。
+  - 前端 `NetworkForm`：当已存在 host 网络且非正在编辑该网络时，从驱动下拉中移除 `host` 选项并给出琥珀提示；编辑该 host 网络本身时保留该选项。
+  - 涉及文件：`server/index.ts`、`src/pages/NetworkManager.tsx`。
+
+- **Feature C — 仪表盘-资源监控改为环形仪表盘（原半圆速度表重设计）**（`src/components/Gauge.tsx` 改写 + `src/pages/Dashboard.tsx` 改写）
+  - `Gauge` 改为**圆形进度环 + 居中大数字**：有 `max` 时按占比画彩环（内存），无 `max` 时满圈彩环（镜像 / 数据卷 / 网络 I/O）；参考截图风格美化（蓝/绿/琥珀/红/紫主题、圆角端点、居中数字）。
+  - 新增 `CpuCoresGauge`：CPU 使用率改为**各物理核小环簇**（每核一个 ring + 居中百分比，按利用率绿<60 / 琥珀 60–85 / 红≥85 着色），并展示合计百分比；仅本机 `connectionType === "socket"` 引擎可读 `/proc/stat` 得到各核数据，远程引擎显示提示。
+  - `EngineResourceStats` 新增 `cpuCores: { name: string; percent: number }[]`（后端 `getEngineResourceStats` 已通过 `sampleHostCpuCores` 采样填充）。
+  - 仪表盘资源监控区布局（整段）：CPU 各核环簇 + 内存 / 网络双曲线图 + 磁盘利用率表格 + 镜像 / 数据卷两个环形仪表。
+
+- **Feature E — 资源监控新增时间序列（内存 / 网络折线图）与磁盘利用率**（`server/docker.ts` + `server/index.ts` + `src/components/LineChart.tsx` 新 + `src/pages/Dashboard.tsx` + `src/api.ts` + `src/types.ts`）
+  - 后端 `getEngineResourceStats` 增字段：`memInstalledMB`（/proc/meminfo MemTotal）、`memFreeMB`（MemAvailable）、`memSystemMB`（宿主机已用 − Docker 已用）、`memMaxSupportedMB`（SMBIOS Type 16 Maximum Capacity；非 root 多为 0400 → 0，前端显示「—」）、`disks`（/proc/diskstats 差分算各整盘利用率 / 读写速率 / 活动状态）；均仅 `socket` 引擎有真实值。
+  - 新增每引擎**资源时间序列环形缓冲**（1s 采样、容量 300＝5 分钟）：`recordResourceSample()` / `getResourceHistory()`；新增路由 `GET /api/engines/:id/resource-history?range=10s|30s|1m|2m|5m`。
+  - 新增 `src/components/LineChart.tsx`：零依赖 SVG 多序列折线图（面积填充 + 自动量程 + `vectorEffect="non-scaling-stroke"` 保证任意宽度线宽不变）。
+  - 仪表盘：内存＝系统占用 / Docker 占用双曲线 + 下方「最大支持大小 / 已安装大小 / 空闲」；网络＝上下行双曲线 + 时间范围下拉 + 当前速率；磁盘＝设备 / 状态 / 读写速率 / 利用率表格。前端每 3s 拉一次历史，当前值仍由 SSE 1s 推送。
+  - 已知限制：时间序列仅在仪表盘 SSE 订阅期间采样（离开仪表盘不记录）；远程引擎（tcp/ssh）取不到宿主机内存 / 磁盘，`memSystemMB`＝0、`disks`＝[]；磁盘温度 / S.M.A.R.T. 需 root（smartctl），未提供。
+
+- **Feature F — 堆栈「格式化」改为数组写法**（`src/components/YamlEditor.tsx`）
+  - 需求：格式化后落到 compose 的「数组写法」——`environment` / `labels` 用 `- K=V`、序列用行内 `[a, b]`。
+  - 规则一「映射 → 数组」：`toKvArrayForm()` 把 `services.<名>.environment|labels`（含 `deploy.labels`）的键值映射折叠成 `K=V` 字符串数组；值为 null（compose 语义＝从宿主机透传）输出不带等号的裸 `K`。用 path 精确限定位置，避免把「名字恰好叫 environment 的服务」误判成映射。
+  - 规则二「序列 → 行内」：`foldSequencesToFlow()` 在 dump 之后把块状**纯标量序列**折叠成 `key: [a, b]`；只要序列中出现「项本身是映射」「块标量 `|` / `>`」「项有更深缩进的续行」之一，该键整体保持块状写法（强行行内化会产出非法 YAML）。流式项含 `,` `[` `]` `{` `}` 时补单引号（`quoteFlowItem`）。
+  - **顺带修复 Feature A 的触发时机**：纯顶格的 compose 其实是**合法** YAML，`yaml.load` 会把它解析成「一堆同级键」的扁平映射 → 原先挂在 `catch` 上的补缩进分支**永不触发**，格式化后依旧扁平。现改为**先判 `isFlatYaml` 再补缩进**，补缩进失败才落回常规解析。
+  - 举例：`ports:` + 两条 `- 6667:6667` / `- 1883:1883`，`environment:` 下 `TZ: Asia/Shanghai` / `PUID: 1000` → 输出 `ports: ['6667:6667', '1883:1883']`、`environment: [TZ=Asia/Shanghai, PUID=1000]`。
+  - 验证：把 `YamlEditor.tsx` 里真实的辅助函数块**自动切出**、esbuild 编译后跑测试——6 项「输出可解析 + 与变换后对象逐字段等价 + 二次格式化幂等」全通过（覆盖 `ulimits` 嵌套序列保留块状、多行块标量保留块状、`MSG=a, b` 补引号、服务名恰为 `environment` 不误判等）；2 项平铺 YAML 回归（单服务 / 多服务 + `deploy`）关键路径符合预期。共 8/8。
+  - 涉及文件：`src/components/YamlEditor.tsx`。
+
+- **Feature G — 镜像拉取任务：前后端保留期统一 30 分钟 + 手动「×」清理**（`server/docker.ts` + `server/index.ts` + `src/api.ts` + `src/pages/Images.tsx`）
+  - 背景：后端本就保留 30 分钟（`PULL_TASK_TTL`），但前端 `visiblePullTasks` 只展示「进行中 + 结束后 **5 分钟**」，还叠了 `.slice(0, 6)` 截断 —— 表现为「刚拉完就从任务条消失」，且被截断的任务既看不见、也无从清理。
+  - 前端保留期 **5 分钟 → 30 分钟**，与后端 TTL 严格对齐（后端还留着，前端就看得见）；**移除 `.slice(0, 6)` 截断**，避免静默隐藏。
+  - 新增行内「×」按钮（位于「详情」右侧）：点击后**前后端同时移除** —— 前端先本地摘除以获得即时反馈，再调 `DELETE /api/engines/:id/images/pull-tasks/:taskId`；调用失败则重拉列表校正回真实状态。若清掉的正是详情弹窗关注的任务，一并清空 `activePullTaskId`。
+  - 后端新增 `removePullTask(taskId)` 与对应路由：直接从内存任务表删除；若任务仍在进行中，先 `destroy()` 进度流 / `kill("SIGTERM")` CLI 子进程，避免孤儿进程与后续输出。至此清理逻辑为**两种并存**：30 分钟 TTL 惰性清理 + 手动清理。
+  - 「×」只出现在**已结束**的任务行（进行中的行已有「取消」按钮，避免两个语义相近的按钮并排）；后端仍兼容对进行中任务直接清理。
+  - 涉及文件：`server/docker.ts`、`server/index.ts`、`src/api.ts`、`src/pages/Images.tsx`。
+
+- **缺陷修复 — 创建堆栈「上传文件」的上传区从未接线**（`src/pages/Stacks.tsx`）
+  - 根因：`method === "upload"` 分支里的虚线区域是一个**纯装饰 div** —— 没有 `onClick`、没有 `onDrop` / `onDragOver`，页面里也不存在隐藏的 `<input type="file">`。因此点击与拖拽**必然**无反应（不是环境/浏览器问题，是该功能从未实现）。
+  - 实现：新增 `uploadFile` / `uploadDragging` / `uploadInputRef` 状态与 `handleComposeFile()`；虚线区接上 `onClick`（触发 file input）、`onDragOver` / `onDragLeave` / `onDrop`（拖拽高亮 + 取 `dataTransfer.files[0]`），并补 `role="button"` + `tabIndex` + Enter/Space 键盘可达；隐藏 input 选完文件后立即清空 `value`，保证同一文件能再次选择。
+  - 载入后回填 `composeContent`（「创建」按钮读的就是它），并展示**内容预览**与「切到 Web 编辑器修改」按钮；堆栈名称留空时用文件名兜底，按后端 `createStack` 的校验规则（`^[a-zA-Z0-9_-]+$`）清洗 —— 去扩展名、非白名单字符换横线、去首尾横线（`my.stack.yaml` → `my-stack`，`IOTDB v2.yaml` → `IOTDB-v2`）。纯中文文件名清洗后为空 → 不自动填充，由用户手填（后端本就不接受非 ASCII 名）。
+  - 同时修正方法描述：`createStackApi` **没有 env 参数**，故「上传本地 compose + env 文件」改为「上传本地 compose 文件」，不再承诺不支持的能力。
+  - 涉及文件：`src/pages/Stacks.tsx`。
+
+### ❌ 未完成 / 已知限制
+
+- 网络「编辑」为删除后重建，若编辑期间有容器依赖该网络、或网络正被使用，会删除失败（前端已带确认提示）；Docker 原生不支持改名/改子网。
+- 仪表盘网络 I/O 为运行容器实时速率（`EngineResourceStats`），非单网络粒度。
+- 资源时间序列仅在仪表盘 SSE 订阅期间采样（1s / 容量 300＝5 分钟），离开仪表盘即停止记录，不落盘。
+- 内存 / 磁盘 / 各核 CPU 均依赖宿主机 `/proc`，仅 `connectionType === "socket"` 引擎有真实值；远程引擎（tcp / ssh）`memSystemMB`＝0、`disks`＝[]、`cpuCores`＝[]。
+- 磁盘温度与 S.M.A.R.T. 需 root（`smartctl`），未提供；「最大支持大小」取自 SMBIOS Type 16，非 root 常为 0400 → 前端显示「—」。
+- 格式化会把 `environment` / `labels` 从映射改写成数组（compose 语义等价，但文本形态变了）；含多行标量、或序列项本身是映射的序列**不会**行内化，仍保持块状。
+- 纯顶格 YAML 一律按「补缩进后的嵌套结构」解释（如 `b:` 后跟同级 `c:` 会被理解为 `b.c`），与「全部同级键」的另一种合法解释不同——这是 Feature A / F 的既定取舍。
+- 创建堆栈的「上传文件」只接受 compose 文件（`.yml` / `.yaml` / `.txt`，上限 1 MB），**不支持 .env 文件**（`createStackApi` 无 env 参数）；纯中文文件名不会自动填充堆栈名，需手填。
+- 拉取任务的后端清理是**惰性**的（只在前端轮询 `pull-tasks` 时触发），因此镜像页长期不打开时，过期任务会停留在内存里直到下次访问；服务重启则内存任务表整体清空。
+
+### 🔜 下一步
+
+- 视反馈决定是否给网络管理页加「按容器筛选网络」或「网络流量趋势图」。
+- 视反馈决定是否把仪表盘其余卡片也统一为仪表风格。
+
+---
+
+## v1.23.11 — 2026-09-19（未发布）
+
+> 镜像加速源改显示方式：不再用「加速源列表 + 拖拽排序」逐条填，而是**直接以 daemon.json 代码展示并编辑**宿主机配置全文；保存后弹窗询问是否重启 Docker 生效（左「重启」/ 右「暂不重启」）。
+
+### ✅ 已完成
+
+- **新增 `src/components/JsonEditor.tsx`**：JSON 代码编辑器（与既有 `YamlEditor` 同源实现）
+  - 语法高亮：键 / 字符串 / 数字 / 布尔与 null / 结构标点分色；行号列 + 状态栏。
+  - 实时校验：直接用原生 `JSON.parse`（无第三方依赖）；错误定位**优先取新式消息的 `(line X column Y)`**，老式消息只有 `at position N` 时按字符偏移自行换算行列，状态栏显示「第 X 行 第 Y 列：原因」。
+  - 工具栏「格式化」（2 空格缩进、键顺序不变）、Tab 插 2 空格、`readOnly` 只读模式（无写权限时使用）。
+  - 叠层与滚动沿用 YamlEditor 的既有结论：两层 font/leading/padding/tabSize 必须全等，滚动同步用 CSS `transform` 平移而非 `scrollTop`（否则被较小滚动范围钳位导致文字错位）。
+- **设置页「镜像加速源」改为 daemon.json 编辑器**（`src/pages/Settings.tsx`）
+  - 打开页面把宿主文件内容读进编辑器（原样、含用户手写的其它配置项）；文件不存在时用应用设置里的加速源生成初始内容，没有则给空模板。
+  - 「保存到 daemon.json」按钮：整份写回宿主文件（写前自动备份到数据目录的 `daemon-json-backups/`，保留最近 10 份）；「重置」可丢弃未保存修改回到磁盘内容，「● 有未保存的修改」标记提示状态。
+  - 移除原「添加加速源 / 拖拽排序 / 逐条输入框」列表 UI；「推荐加速源」改为**填入编辑器**（合并进 `registry-mirrors` 且保留其它配置键，仍需点保存才写盘）。
+  - 「刷新」在有未保存修改时先弹确认框（避免静默丢弃编辑内容）。
+  - 保存成功后回读磁盘：编辑器文本对齐文件、并把 `registry-mirrors` 同步进应用设置（「拉取时改写镜像名」仍以设置里的列表为准）。
+- **保存后询问是否重启 Docker**
+  - 弹窗「重启 Docker 使配置生效」，两个按钮：**左「重启」右「暂不重启」**（为 `ConfirmDialog` 新增 `primaryFirst` 属性控制主操作位置，默认顺序不变，不影响既有调用）。
+  - 内容与磁盘语义一致时不落盘、不弹窗（仅提示「内容与当前一致，无需重启 Docker」），避免只重排缩进也要重启。
+  - APPLY 保存设置时若编辑器仍有未保存改动，会顺带一起写入宿主文件（同一入口，同样带重启询问），避免用户误以为 APPLY 已写盘。
+- **后端新增「整份文件写入」**（`server/daemon-config.ts` + `server/index.ts`）
+  - `writeDaemonConfigText(text)`：校验必须是可解析、顶层为对象的 JSON；空文本直接拒绝（防误清空）；写前备份 + 写后回读做语义校验；`changed` 以「规范化后语义是否变化」判定。现有文件本身解析失败时不参与比较（允许借编辑器修复坏文件）。
+  - `PUT /api/system/daemon-config` 支持 `{ content: string }`（新，整份文件）与 `{ registryMirrors: string[] }`（旧，仅替换该键、保留其它键），后者保留向后兼容。
+- **版本**：`package.json` → `1.23.11`。
+
+### ⚠️ 未完成 / 已知限制
+
+- daemon.json 顶层必须是 JSON 对象（Docker 本身也如此要求）；文件里若有注释（Docker 不支持）会在编辑器里报 JSON 错误。
+- 编辑器内容以「打开页面时的文件内容」为基准，若同时在终端改了该文件且未点刷新，保存会以页面内容覆盖（写前有备份可回滚）。
+- 无写权限时编辑器为只读，保存按钮禁用，仍按原逻辑展示 sudoers / systemd 授权指引。
+
+### 📌 下一步
+
+- 在真机设置页改一次加速源 → 保存 → 选「重启」，确认 daemon.json 落盘、Docker 重启后 `docker info` 的 Registry Mirrors 生效。
+
+### 📦 交付包（本地已出 · 未发布）
+
+- `build-upload/docker-manager-yanzi-linux-x64-v1.23.11.zip` — 42,933,917 B，SHA-256 `1f83e4b5625829a984065469f2db0eb84aa6904b1e4298f0a077e29ff97ad810`
+- 包内 5 个成员（`install.sh` 等脚本未改动，本版仅前端 / 后端代码）；二进制 ELF `7f 45 4c 46` 129,830,080 B，内嵌 `1.23.11`；bundle 内含 `writeDaemonConfigText` 与「写入 daemon.json（整份）」；内嵌前端（base64 解码后）含「保存到 daemon.json」「暂不重启」「有未保存的修改」。
+- 组件级浏览器验证（Playwright + 桩 fetch，真实 `Settings` 组件）：24 项断言全过 —— 编辑器载入文件内容含其它键、键/串双色高亮、`JSON 格式正确`、行号列 8 行、两层字体度量完全一致（13px/20px/12px/16px/tabSize 2）、未保存标记、保存后弹窗标题与「重启」「暂不重启」两个按钮且**重启在左**（x 760 < 832）、点「暂不重启」关闭、非法 JSON 时状态栏报错并禁用保存、重置恢复磁盘内容、填入推荐源保留其它键；`pageerror` / console error 均为空。
+
+---
+
+## v1.23.10 — 2026-09-19（未发布）
+
+> 安装流程收敛：撤掉 Docker / Docker Compose 自动安装，改为**只检测、缺失即提示并停止**；并修掉 `install.sh` 在 `systemctl start` 失败时因 `set -e` 直接退出、用户看不到任何提示的问题。
+
+### ✅ 已完成
+
+- **移除 Docker / Compose 自动安装**
+  - 删除 `deploy/linux/install-docker.sh`（连同其整条降级链：apt 官方源 → `get.docker.com` → 发行版仓库 → GitHub 代理等），`make-package.py` 同步去掉该成员。
+  - `install.sh` 不再调用任何包管理器安装 Docker：不写 apt/dnf 源、不装包、不改动系统。
+- **`deploy/linux/install.sh`：缺失即提示并停止**
+  - 检测口径不变（docker CLI / `docker info` / compose 需真正执行 `version`）；任一缺失即打印含 Debian·Ubuntu、RHEL 系安装命令的指引，并以 `[ERROR]` + 退出码 1 结束。
+  - 新增 `--ignore-docker`：跳过检查、继续安装应用本体（容器管理不可用）；移除失去意义的 `--no-docker` / `--apt-mirror` / `--script-mirror` / `-v`。
+  - 检查仍放在「创建服务用户」之前 —— 先有 `docker` 组，`usermod -aG docker` 与单元里的 `SupplementaryGroups=docker` 才能一次到位。
+- **修复：`systemctl start` 失败时脚本静默退出**
+  - 脚本开头是 `set -euo pipefail`，`systemctl start` 一旦返回非 0，脚本在打印任何提示前就退出（现场只看到 systemd 的两行报错 + shell 提示符）。现改为显式判返回值：失败时自动打印 `systemctl status --no-pager -l` 前 20 行与 `journalctl -u <服务> -n 30`，最后仍给出 `journalctl -u <服务> -f` 的后续指引。
+- **`deploy/linux/README.md`**：包内容去掉 `install-docker.sh`；新增「先装 Docker（本包不代装）」段（含停止安装的完整输出示例）；可选参数与常见问题改写为「只检测、不改动系统」。
+- **验证**（Windows 离线自测，桩 `docker` / `docker-compose`）
+  - `bash -n` 通过、纯 LF；`INSTALL_DOCKER` / `DOCKER_VERBOSE` / `APT_MIRROR` 等旧引用已无残留。
+  - 四条路径实测：① docker + compose 全缺 → 打印指引并 exit 1；② 有 docker 无 compose → 只报「未检测到 Docker Compose」并 exit 1；③ docker + 独立 `docker-compose` → 检查通过、继续到「创建服务用户」；④ `--ignore-docker` → 打印跳过提示后继续。
+- **版本**：`package.json` → `1.23.10`。
+
+### ⚠️ 未完成 / 已知限制
+
+- 本包不再为用户机器安装 Docker，装机前须自行准备（README 已列命令）；若目标机器是**非特权容器**，容器内无法运行 dockerd，需 privileged 模式或改用宿主 Docker socket。
+- v1.23.9 的安装进度框架随 `install-docker.sh` 一并移除（不再有 Docker 安装阶段）。
+- `install-docker.sh` 仅存在于 v1.23.9 及更早的本地 zip 中，发布产物里不再包含。
+
+### 📌 下一步
+
+- 在目标 Debian 上实跑：`sudo bash install.sh`（应先停在前置检查）→ 装好 Docker 后重跑（应直到服务启动），确认服务起不来时能看到自动打印的 status / journal。
+
+### 📦 交付包（本地已出 · 未发布）
+
+- `build-upload/docker-manager-yanzi-linux-x64-v1.23.10.zip` — 42,930,169 B，SHA-256 `caf5c9e1048dd9b59ae9b61e5c834547d139237b5d0119b067fb7576da8701c8`
+- 包内已核验：**5 个成员**（`install-docker.sh` 已移除）：二进制 ELF `7f 45 4c 46` 129,764,544 B + `install.sh` 14119 B + `uninstall.sh` 4239 B + `.service` 2619 B + `README.md` 7011 B，前四项 0755；`install.sh` 内 `--ignore-docker` / `docker_prereq_hint` / 「请先安装 Docker 与 Docker Compose」/ `systemctl start` 失败分支 / `journalctl -u` 全部命中，`install-docker` / `--apt-mirror` / `DOCKER_VERBOSE` 已无残留；二进制内嵌 `1.23.10`，bundle 内已无 `install-docker` 标识；文本文件无 CR。
+
+---
+
+## v1.23.9 — 2026-09-19（未发布）
+
+> 安装进度可视化：`install-docker.sh` 此前把 apt/curl 的输出全部静默（`-qq`、`>/dev/null 2>&1`、`curl -s`），于是装 Docker 的那几分钟里终端没有任何输出，看起来像卡死。本版给每一步加实时进度。
+
+### ✅ 已完成
+
+- **`deploy/linux/install-docker.sh`：新增进度显示框架**
+  - `run_step "<描述>" <命令…>`：命令在后台执行，同时起一个秒级心跳，在同一行（`\r\033[K` 原地覆盖）刷新 `[已耗时] 日志最后一行`；结束后打印 `↳ 完成（1m12s）` / `↳ 失败（退出码 N，…）`。
+  - 完整输出落盘 `/tmp/docker-manager-install-docker.<时间戳>.log`（每步带时间与退出码分节）；**失败时额外打印末尾 12 行 + 日志路径**，一眼分清是「源不可达 / dpkg 被锁 / 证书问题」。
+  - 覆盖全部耗时步骤：`apt-get update`、`apt-get install`（docker-ce、docker.io）、dnf 加源与安装、GPG 公钥与 `get.docker.com` / compose 二进制下载、`systemctl enable --now docker`；等待 daemon 就绪也改为 `[等待 Ns]` 原地刷新。
+  - **取消静默**：apt 去掉 `-qq`、不再 `>/dev/null 2>&1`；curl 改 `-fL --progress-bar`，并加 `--speed-limit 1024 --speed-time 30`（**30 秒低于 1KB/s 即断开**，避免连接假活时无限等待）。
+  - 新增「网络探测」段：安装前用 6s 超时探 `download.docker.com` / `get.docker.com` / `github.com`，不可达时直接给出 `--apt-mirror mirrors.aliyun.com/docker-ce`、`--script-mirror Aliyun` 建议。
+  - 新增 `-v/--verbose`（等价 `DOCKER_VERBOSE=1`）：不捕获输出、原样实时打印；`export DEBIAN_FRONTEND=noninteractive` 避免 dpkg 在无 tty 会话里等交互（另一种「像卡住」）；末尾打印本阶段总耗时。
+- **`deploy/linux/install.sh`**：调用子脚本前提示「需下载约 100–200 MB，可能耗时数分钟；下方会实时刷新进度」，调用后打印「Docker 安装阶段结束（耗时 Ns）」；新增 `-v/--verbose` 并透传 `DOCKER_VERBOSE`。
+- **`deploy/linux/README.md`**：补进度显示示例、日志路径与 `-v` 用法。
+- **验证**（Windows 离线自测）
+  - `bash -n` 两个脚本通过；`grep -c $'\r'` 均为 0（纯 LF）。
+  - 进度机制：模拟 2s / 62s 任务 → 心跳逐秒刷新、耗时分别报 `3s`（含 Windows 进程启动开销）/ `1m3s`；失败任务正确打印末尾输出与日志路径；`-v` 模式原样打印子命令输出。
+  - 依赖组合 4 例复测（桩 `docker` / `docker-compose`）：全齐 exit 0、仅 CLI exit 1、CLI + 独立 compose exit 0、全缺 exit 1 —— 重构未破坏检测逻辑。
+- **版本**：`package.json` → `1.23.9`。
+
+### ⚠️ 未完成 / 已知限制
+
+- 进度行依赖终端原地刷新：若把输出重定向到文件，`\r` 会落成一行行文本（属预期）。
+- 心跳只显示「日志最后一行」——完全不输出内容的步骤（如 `systemctl` 静默成功）只显示耗时计数，这是正常的。
+- 仍未在真实无 Docker 的 Linux 机器上实跑（与 v1.23.8 同一限制）；v1.23.8 / v1.23.7 的内容并入本包，均未单独发布。
+
+### 📌 下一步
+
+- 在最小 Debian 上实跑 `sudo bash install.sh`，确认进度输出 + 自动安装一次到位，再推送发布。
+
+### 📦 交付包（本地已出 · 未发布）
+
+- `build-upload/docker-manager-yanzi-linux-x64-v1.23.9.zip` — 42,937,097 B，SHA-256 `7e7862c69ef0c54f8d2dcd693968ecc70a6f3ea5542337ba006f0a52250ac161`
+- 包内已核验：6 个成员（二进制 ELF + `install.sh` 13869 B + `install-docker.sh` 19552 B + `uninstall.sh` + `.service` + `README.md`，前四项 0755）；`install-docker.sh` 内 `run_step` / `_ticker` / 网络探测 / `--speed-time 30` / `-v|--verbose` / `DEBIAN_FRONTEND` 全部命中；`install.sh` 内 `DOCKER_VERBOSE` / 「Docker 安装阶段结束」/「实时刷新进度」命中；二进制内嵌 `1.23.9`；全部文本文件无 CR。
+
+---
+
+## v1.23.8 — 2026-09-19（未发布）
+
+> Docker 依赖自动化：`install.sh` 检测到未安装 Docker / Docker Compose 时，自动调用新增的 `install-docker.sh` 安装（含国内镜像与多级降级），装不上的情况给出可复制的指引且不阻塞应用安装。
+
+### ✅ 已完成
+
+- **新增 `deploy/linux/install-docker.sh`（独立可执行）**
+  - 检测三项：`docker` CLI、`docker info` 守护进程、Compose（`docker compose version` 插件 / `docker-compose version` 独立），**口径与后端 `docker.ts` 的 `detectComposeModes()` 一致**（只判 `command -v` 会把装坏的残留二进制误判为可用）。
+  - 只补缺失的部分：已有 docker 只缺 compose 时，不会重装 docker。
+  - 安装策略（多级降级，前一步成功即止）：
+    - Debian/Ubuntu：官方 apt 源 → `get.docker.com` 脚本 → 发行版自带仓库（`docker.io`）
+    - RHEL 系 / Fedora：官方 dnf 源 → `get.docker.com` 脚本
+    - 其他：`get.docker.com` 脚本
+    - Compose 单独缺失：官方源 `docker-compose-plugin` → 发行版仓库 → 下载独立二进制（`github.com/docker/compose` releases，失败再走 `gh-proxy.com` 代理）
+  - 国内网络：`--apt-mirror mirrors.aliyun.com/docker-ce`（apt 源换镜像主机）、`--script-mirror Aliyun`（便捷脚本镜像参数）。
+  - 安装后 `systemctl enable --now docker`（无 systemd 时降级 `service docker start`），并轮询 `docker info` 确认守护进程可用。
+  - `--check` 只检测不改动；退出码 0 = docker 与 compose 均可用，1 = 仍有缺失（打印手工安装指引）。
+  - 实现取舍：**刻意不开 `set -e`**（每步安装失败都要降级到下一策略，需自行判断返回值），仅在 `install.sh` 侧用 `set -e`。
+- **`deploy/linux/install.sh`**
+  - 「检查 Docker」段重写为「检测 3 项 → 缺失则调用同目录 `install-docker.sh` → **复检** → 汇总」。位置刻意保持在「创建服务用户」之前：先装好 Docker 才有 `docker` 组，`usermod -aG docker` 与单元里的 `SupplementaryGroups=docker` 才能一次到位。
+  - 自动安装失败**不阻塞应用安装**（warn 后继续），因为无 Docker 时应用仍能启动（单元裁剪逻辑会摘掉 `SupplementaryGroups=docker`）。
+  - 安装成功摘要里，若依赖仍不完整，追加提示「装好 Docker 后请重跑 `sudo bash install.sh`」——用于补回组成员与单元配置。
+  - 新增参数：`--no-docker`（跳过自动安装）、`--apt-mirror <host>`、`--script-mirror <name>`、`-h/--help`。
+- **`deploy/linux/make-package.py`**：`install-docker.sh` 以 0755 打进交付包（与 `install.sh` 同目录，`install.sh` 通过 `${SCRIPT_DIR}` 定位）。
+- **`deploy/linux/README.md`**：补包内容、系统要求（Docker 改为可选自动安装）、安装参数说明、常见问题「没装 Docker / 没装 docker-compose」。
+- **验证**（Windows 离线自测，用假 `docker` / `docker-compose` 桩命令覆盖组合）
+  - `bash -n` 三个脚本全部通过。
+  - 依赖组合 4 例：全齐 → exit 0；只有 docker CLI（插件不存在）→ compose 报缺失 exit 1；docker（daemon 未运行）+ 独立 `docker-compose` → exit 0 且能识别「独立 ✓」；全缺 → 三项 ✗ exit 1。
+  - `install.sh` 链路：`-h` 正常（root 校验之前）；`--no-docker` 打印跳过提示；带 `--apt-mirror/--script-mirror` 时确认镜像参数被**透传**给 `install-docker.sh`；参数缺值报错清晰。
+- **版本**：`package.json` → `1.23.8`；本版**仅出包，未发布**（未推源码、未建 GitHub Release）。
+
+### ⚠️ 未完成 / 已知限制
+
+- 未在真实无 Docker 的 Linux 机器上实跑一次自动安装（本机 Windows 仅做语法检查 + 桩命令逻辑自测）；`get.docker.com` / `download.docker.com` 的实际可达性与国内镜像速度未验证。
+- 无 systemd 的环境（普通容器）只能装包、无法自动拉起 `dockerd`，脚本会明确提示需手工启动。
+- 与 v1.23.7 相同：单元裁剪后若**之后才安装 Docker**，现在重跑 `install.sh` 即可自动补回（不必再记手工命令）。
+- v1.23.7 未单独发布，其内容已并入本包。
+
+### 📌 下一步
+
+- 在最小 Debian 上实跑 `sudo bash install.sh`（无 Docker 场景），确认自动安装与后续组成员/单元配置一次到位，再推送发布。
+
+### 📦 交付包（本地已出 · 未发布）
+
+- `build-upload/docker-manager-yanzi-linux-x64-v1.23.8.zip` — 42,934,007 B，SHA-256 `19450029b77cf377efd4bbb812cdc1597fab65d0a51a57f040b85ec3a17e459f`
+- 包内已核验：6 个成员（二进制 + `install.sh` 13404 B + **新增 `install-docker.sh` 12484 B（0755）** + `uninstall.sh` 4239 B + `.service` 2619 B + `README.md` 6495 B）；`install.sh` 内 `detect_docker_deps` / `compose_ok()` / `--no-docker` / `--apt-mirror` / `--script-mirror` / 镜像参数透传 / 「装好 Docker 后请重跑」全部命中；`install-docker.sh` 内 `apt_official` / `dnf_official` / `install_via_script` / `install_compose_binary` / `gh-proxy.com` / `systemctl enable --now docker` 命中；二进制内嵌 `1.23.8` + `index-C-hL86Nh.js`；全部文本文件无 CR。
+
+---
+
+## v1.23.7 — 2026-09-19（未发布 · 已被 v1.23.8 取代）
+
+> 安装/卸载脚本健壮性修复：解决最小 Debian / 容器环境下 `install.sh` 失败的两个根因（PATH 缺 `/usr/sbin`、单元依赖的组不存在）。
+
+### ✅ 已完成
+
+- **`deploy/linux/install.sh` — PATH 与命令解析**
+  - 脚本开头固定 `PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"`（与 `.service` 内一致）。根因：精简 Debian 容器 / 最小镜像的 `PATH` 不含 `/usr/sbin`，`useradd` / `usermod` / `groupadd` / `visudo` / `runuser` 全报「未找到命令」——文件实际存在于 `/usr/sbin`，**不是包缺失**。
+  - 新增 `cmd_path()`（PATH → `/usr/sbin` 等绝对路径兜底）与 `require_cmd()`（缺失时给出可操作报错：`apt-get install -y passwd`），覆盖 `groupadd` / `useradd` / `usermod` / `visudo` / `runuser` 五处调用。
+  - 实现约束：`require_cmd` 的 `exit` 必须在主 shell 生效，故调用写成 `VAR="$(require_cmd x)"`，**不能**写成 `$(err ...)`（subshell 内 exit 不会终止主脚本，会带着空变量继续跑）。
+- **`deploy/linux/install.sh` — 服务组健壮化（修复 systemd `216/GROUP` 启动失败）**
+  - 日志现象：`Failed to determine supplementary groups: No such process` / `Failed at step GROUP spawning /bin/sh` / `status=216/GROUP`。
+  - 根因一：`useradd -r` 是否自动创建同名组取决于 `/etc/login.defs` 的 `USERGROUPS_ENAB`，精简镜像/容器常不创建，而单元写了 `Group=docker-manager-yanzi` → 缺组即 216/GROUP。改为**先 `groupadd -r`，再 `useradd -r -g "$SERVICE_USER"`**，不再依赖隐式行为。
+  - 根因二：单元 `SupplementaryGroups=docker` 要求 `docker` 组真实存在（systemd 不支持「可选补充组」），而该机器未装 Docker → 无 `docker` 组。改为安装时按 `getent group docker` 结果裁剪：存在则保留；不存在则 `sed` 删该行并 warn 说明影响（无法访问 `/var/run/docker.sock`）与补救命令。
+- **`deploy/linux/install.sh` — `visudo` 缺失不再误删授权**
+  - 原 `if ! visudo -c -f …`：命令不存在同样返回非 0，被误判为「校验失败」→ 删掉刚写好的 sudoers 片段并报「校验失败已回滚」。改为先判存在性，缺失时仅 warn 并保留文件。
+- **`deploy/linux/uninstall.sh`**
+  - 同样固定 `PATH` + `cmd_path()`；`userdel` 由「静默失败却照样打印已删除用户」改为**如实报告**（成功 / 失败 / 命令缺失）。
+  - 补充删除同名用户组（`groupdel`），与安装端显式建组配对，避免重装时残留旧 GID 归属。
+- **验证**
+  - `bash -n install.sh && bash -n uninstall.sh` 语法通过。
+  - 离线自测单元裁剪：对 `.service` 副本执行 `sed -i '/^SupplementaryGroups=docker$/d'` → 49 → 48 行；`SupplementaryGroups=docker` 命中 0，`RuntimeDirectory` / `ExecStartPre` / `NoNewPrivileges` 全部保留。
+  - 行尾符核查：`install.sh` / `uninstall.sh` / `.service` 均为纯 LF，确保 `sed` 的 `$` 锚点与 shebang 在 Linux 上可靠。
+  - grep 确认五处外部命令调用均已改为引用变量，无裸调用残留。
+
+### ⚠️ 未完成 / 已知限制
+
+- 未在真实最小 Debian 容器内实跑 `install.sh` 全流程（本机为 Windows，仅做语法检查与逻辑离线自测）。
+- 单元裁剪后若**之后才安装 Docker**，需手工执行提示中的 `groupadd docker && usermod -aG docker … && daemon-reexec && restart`，未做自动重扫。
+- 本次**仅出包，未发布**（未推源码、未建 GitHub Release）。
+
+### 📌 下一步
+
+- 在容器 / 最小镜像实跑一次 `install.sh` 验证后，再将 v1.23.7 一并推送发布。
+
+### 📦 交付包（本地已出 · 未发布）
+
+- `build-upload/docker-manager-yanzi-linux-x64-v1.23.7.zip` — 42,927,817 B，SHA-256 `41616e8128ef36028257ade553436520506491f3d61afb0f064c670fe464f923`
+- 包内已核验：`install.sh` 9495 B（`export PATH` / `cmd_path` / `require_cmd` / `sed` 裁剪 / `-g` 均命中）、`uninstall.sh` 4239 B（`cmd_path` / `$USERDEL` / `$GROUPDEL` 命中）、`.service` 2619 B（`RuntimeDirectory` / `SupplementaryGroups=docker` 保留）、二进制内嵌 `1.23.7` 与 `index-Dppf-B2p.js`；三个文本文件均无 CR。
 
 ---
 

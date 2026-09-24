@@ -51,6 +51,36 @@ export interface EngineResourceStats {
   blockReadKB: number;
   blockWriteKB: number;
   serverVersion: string;
+  /** 各物理核实时使用率（仅本机 socket 引擎可读 /proc/stat；远程引擎为空数组） */
+  cpuCores: { name: string; percent: number }[];
+  /** 已安装内存（MB）：本机引擎取 /proc/meminfo，远程回退 Docker MemTotal */
+  memInstalledMB: number;
+  /** 宿主机空闲内存（MB）：仅本机引擎有值，否则 0 */
+  memFreeMB: number;
+  /** 系统占用（MB）= 宿主机已用 - Docker 已用；仅本机引擎有值，否则 0 */
+  memSystemMB: number;
+  /** 主板最大支持内存（MB）：非 root 通常读不到 DMI → 0（前端显示「—」） */
+  memMaxSupportedMB: number;
+  /** 宿主机磁盘利用率（仅本机引擎，远程为空数组） */
+  disks: DiskStat[];
+}
+
+/** 资源时间序列单点（服务端 1s 采样，最多保留 5 分钟） */
+export interface ResourceSample {
+  ts: number;
+  memSystemMB: number;
+  memDockerMB: number;
+  netRxKBps: number;
+  netTxKBps: number;
+}
+
+/** 宿主机磁盘统计（/proc/diskstats 差分） */
+export interface DiskStat {
+  name: string;
+  readMBps: number;
+  writeMBps: number;
+  busyPct: number;
+  active: boolean;
 }
 
 /** 镜像拉取任务（后台任务系统） */
@@ -258,6 +288,51 @@ export interface DockerVolume {
   labels?: { key: string; value: string }[];
   options?: { key: string; value: string }[];
   inUse: boolean;
+}
+
+// ============ 网络相关 ============
+
+/** 网络下挂载的容器（含其在此网络内的 IP） */
+export interface DockerNetworkContainer {
+  id: string;
+  name: string;
+  ipv4?: string;
+  ipv6?: string;
+}
+
+/** 单个 Docker 网络（含关联的容器与其累计收发字节） */
+export interface DockerNetwork {
+  id: string;
+  name: string;
+  driver: string; // bridge / overlay / macvlan / host / null ...
+  scope: string; // local / swarm / global
+  enableIPv6: boolean;
+  internal: boolean; // 是否仅内部通信（不可访问外网）
+  attachable: boolean;
+  ingress: boolean; // 是否为 swarm 入口网络
+  subnet?: string;
+  gateway?: string;
+  ipv6Subnet?: string;
+  ipv6Gateway?: string;
+  /** 关联容器（网络 ↔ 容器映射） */
+  containers: DockerNetworkContainer[];
+  /** 下行（接收）累计字节：关联容器在此网络上的 RxBytes 之和 */
+  rxBytes: number;
+  /** 上行（发送）累计字节：关联容器在此网络上的 TxBytes 之和 */
+  txBytes: number;
+  created: string;
+  options: { key: string; value: string }[];
+  labels: { key: string; value: string }[];
+}
+
+/** 创建 / 编辑网络的入参（Docker 不支持原地编辑，编辑 = 删除后用相同配置重建） */
+export interface NetworkCreateOptions {
+  name: string;
+  driver?: string;
+  subnet?: string;
+  gateway?: string;
+  options?: Record<string, string>;
+  labels?: Record<string, string>;
 }
 
 // ============ 系统设置 ============
@@ -547,6 +622,7 @@ export type PageKey =
   | "stacks"
   | "images"
   | "volumes"
+  | "networks"
   | "notifications"
   | "settings";
 

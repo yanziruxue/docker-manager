@@ -6,6 +6,7 @@ import { Containers } from "./pages/Containers";
 import { Stacks } from "./pages/Stacks";
 import { Images } from "./pages/Images";
 import { Volumes } from "./pages/Volumes";
+import { NetworkManager } from "./pages/NetworkManager";
 import { Settings } from "./pages/Settings";
 import { Notifications } from "./pages/Notifications";
 import {
@@ -195,6 +196,7 @@ export default function App() {
     stacks: { title: "堆栈管理", breadcrumb: ["首页", "堆栈管理"] },
     images: { title: "镜像管理", breadcrumb: ["首页", "镜像管理"] },
     volumes: { title: "数据卷管理", breadcrumb: ["首页", "数据卷管理"] },
+    networks: { title: "网络管理", breadcrumb: ["首页", "网络管理"] },
     notifications: { title: "通知中心", breadcrumb: ["首页", "通知中心"] },
     settings: { title: "系统设置", breadcrumb: ["首页", "系统设置"] },
   };
@@ -644,7 +646,9 @@ export default function App() {
               resourceStats={resourceStats}
               stacks={stacks}
               images={images}
+              volumes={volumes}
               activities={activities}
+              engineId={activeEngineId}
               onNavigate={handleNavigate}
               loading={showDataState ? dataLoading : false}
               error={showDataState ? dataError : null}
@@ -698,6 +702,12 @@ export default function App() {
               error={showDataState ? dataError : null}
               engineId={activeEngineId}
               defaultVisibleColumns={settings?.columnVisibility?.volumes}
+              onRefresh={() => activeEngineId && loadEngineData(activeEngineId)}
+            />
+          )}
+          {page === "networks" && (
+            <NetworkManager
+              engineId={activeEngineId}
               onRefresh={() => activeEngineId && loadEngineData(activeEngineId)}
             />
           )}

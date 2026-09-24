@@ -1,4 +1,4 @@
-import type { DockerEngine, EngineResourceStats, SystemSettings, SchedulerStatus, SchedulerLastResult, ImageUpdateSummaryView } from "./types";
+import type { DockerEngine, EngineResourceStats, ResourceSample, SystemSettings, SchedulerStatus, SchedulerLastResult, ImageUpdateSummaryView, DockerNetwork, NetworkCreateOptions } from "./types";
 
 const BASE = "/api";
 
@@ -350,6 +350,11 @@ export function fetchEngineResourceStats(engineId: string): Promise<EngineResour
   return request<EngineResourceStats>(`/engines/${engineId}/resource-stats`);
 }
 
+/** 获取资源时间序列（仪表盘内存 / 网络折线图；range: 10s|30s|1m|2m|5m） */
+export function fetchResourceHistoryApi(engineId: string, range = "5m"): Promise<ResourceSample[]> {
+  return request<ResourceSample[]>(`/engines/${engineId}/resource-history?range=${range}`);
+}
+
 // ============ 容器操作 API ============
 
 export function containerActionApi(engineId: string, containerId: string, action: "start" | "stop" | "restart" | "pause" | "unpause"): Promise<void> {
@@ -398,6 +403,11 @@ export function fetchPullTaskApi(engineId: string, taskId: string): Promise<impo
 /** 取消拉取任务 */
 export function cancelPullTaskApi(engineId: string, taskId: string): Promise<import("./types").PullTask> {
   return request<import("./types").PullTask>(`/engines/${engineId}/images/pull-tasks/${taskId}/cancel`, { method: "POST" });
+}
+
+/** 手动清理单个拉取任务（前后端同时移除） */
+export function removePullTaskApi(engineId: string, taskId: string): Promise<void> {
+  return request<void>(`/engines/${engineId}/images/pull-tasks/${taskId}`, { method: "DELETE" });
 }
 
 /** 导出镜像为 tar 并触发浏览器下载（返回实际文件名） */
@@ -549,6 +559,36 @@ export function createVolumeApi(engineId: string, name: string, driver: string):
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name, driver }),
   });
+}
+
+// ============ 网络管理 API ============
+
+/** 获取网络列表（含关联容器与其累计收发字节） */
+export function fetchNetworksApi(engineId: string): Promise<DockerNetwork[]> {
+  return request<DockerNetwork[]>(`/engines/${engineId}/networks`);
+}
+
+/** 创建网络 */
+export function createNetworkApi(engineId: string, opts: NetworkCreateOptions): Promise<any> {
+  return request<any>(`/engines/${engineId}/networks`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(opts),
+  });
+}
+
+/** 编辑网络（后端 = 删除后用相同配置重建，保留原名称） */
+export function editNetworkApi(engineId: string, netId: string, opts: NetworkCreateOptions): Promise<any> {
+  return request<any>(`/engines/${engineId}/networks/${encodeURIComponent(netId)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(opts),
+  });
+}
+
+/** 删除网络 */
+export function removeNetworkApi(engineId: string, netId: string): Promise<void> {
+  return request<void>(`/engines/${engineId}/networks/${encodeURIComponent(netId)}`, { method: "DELETE" });
 }
 
 /** 创建堆栈（仅写入 compose 文件，不自动启动） */
@@ -979,11 +1019,11 @@ export function refreshDaemonPrivileges(): Promise<{
   );
 }
 
-/** 写回 registry-mirrors（保留 daemon.json 其它配置项） */
-export function saveDaemonConfigApi(registryMirrors: string[]): Promise<DaemonConfigWriteResult> {
+/** 写入整份 /etc/docker/daemon.json（设置页 JSON 编辑器：内容即文件内容） */
+export function saveDaemonConfigContent(content: string): Promise<DaemonConfigWriteResult> {
   return request<DaemonConfigWriteResult>("/system/daemon-config", {
     method: "PUT",
-    body: JSON.stringify({ registryMirrors }),
+    body: JSON.stringify({ content }),
   });
 }
 

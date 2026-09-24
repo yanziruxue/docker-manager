@@ -24,7 +24,6 @@ import {
   Pencil,
   Check,
   X,
-  GripVertical,
   Wifi,
   WifiOff,
   AlertCircle,
@@ -48,6 +47,7 @@ import {
   Radio,
   Copy as CopyIcon,
   Send,
+  Undo2,
 } from "lucide-react";
 import type { SystemSettings, BackupMode, DockerEngine, UpdateInfo, UpdateState, ResourceTag, ComposeTemplate } from "../types";
 import { Card, FormField, Input, Select, Toggle, IconButton } from "../components/UI";
@@ -66,6 +66,7 @@ import { sanitizeRecoveryInput, validateRecoveryCode, RECOVERY_LENGTH } from "..
 import { Tag } from "../components/Badge";
 import { TAG_PALETTE, TagChip, normalizeTagColor, hexWithAlpha, randomTagColor, hexToRgb, rgbToHex } from "../components/TagPicker";
 import { Modal, ConfirmDialog } from "../components/Modal";
+import { JsonEditor } from "../components/JsonEditor";
 import { CmdOutputModal, useCmdOutput } from "../components/CmdOutputModal";
 import {
   createEngine,
@@ -76,7 +77,7 @@ import {
   detectComposeModes,
   fetchDaemonConfig,
   refreshDaemonPrivileges,
-  saveDaemonConfigApi,
+  saveDaemonConfigContent,
   restartDockerApi,
   type DaemonConfigInfo,
   fetchAppVersion,
@@ -139,6 +140,17 @@ function formatCountdown(ms: number): string {
   const m = Math.floor(totalSec / 60);
   const s = totalSec % 60;
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+/**
+ * 推导 daemon.json 编辑器的初始文本：
+ * ① 文件有内容 → 原文（即使 JSON 坏了也原样给出，让用户在编辑器里直接修）；
+ * ② 文件不存在/为空 → 用应用设置里的加速源生成一份，没有则给空模板。
+ */
+function deriveDaemonText(info: DaemonConfigInfo, mirrors: string[]): string {
+  if (info.raw.trim()) return info.raw;
+  if (mirrors.length > 0) return JSON.stringify({ "registry-mirrors": mirrors }, null, 2) + "\n";
+  return '{\n  "registry-mirrors": []\n}\n';
 }
 
 function getDefaultSettings(): SystemSettings {
@@ -675,22 +687,44 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
   const lastBackupAt = backups && backups.length > 0 ? new Date(backups[0].mtime).toLocaleString() : "从未备份";
 
   // ============ 宿主机 Docker 守护进程配置（/etc/docker/daemon.json） ============
-  // 「镜像加速源」的真实来源：页面加载以文件内容为准回读，保存时写回文件（两侧同步）
+  // 「镜像加速源」以 daemon.json 代码形式展示与编辑：打开页面把文件内容读进编辑器，
+  // 点「保存到 daemon.json」按编辑器内容整份写回（写前备份），内容有变化则询问是否重启 Docker。
   const [daemon, setDaemon] = useState<DaemonConfigInfo | null>(null);
   const [daemonLoading, setDaemonLoading] = useState(false);
+  /** 编辑器文本 / 是否有未保存改动 / JSON 是否合法（由 JsonEditor 实时回调） */
+  const [daemonText, setDaemonText] = useState("");
+  const [daemonDirty, setDaemonDirty] = useState(false);
+  const [daemonJsonOk, setDaemonJsonOk] = useState(true);
+  const [savingDaemon, setSavingDaemon] = useState(false);
+  /** 已落盘内容（判断脏与「重置」用）；ref 与 state 同步，供稳定回调读取最新值 */
+  const daemonSavedTextRef = useRef("");
+  const daemonDirtyRef = useRef(false);
   // 保存后询问是否重启 Docker
   const [askRestart, setAskRestart] = useState(false);
   const [restarting, setRestarting] = useState(false);
+  // 有未保存改动时点「刷新」需先确认丢弃
+  const [askReload, setAskReload] = useState(false);
   // 无权限时展示的修复建议（可直接复制到终端执行）
   const [privilegeHint, setPrivilegeHint] = useState<string | null>(null);
   const daemonSyncedRef = useRef(false);
   const { cmdOutput, showOutput, closeOutput } = useCmdOutput();
+
+  const markDaemonDirty = (dirty: boolean) => {
+    daemonDirtyRef.current = dirty;
+    setDaemonDirty(dirty);
+  };
 
   const loadDaemon = useCallback(async (syncToList = false) => {
     setDaemonLoading(true);
     try {
       const info = await fetchDaemonConfig();
       setDaemon(info);
+      const text = deriveDaemonText(info, Array.isArray(info.registryMirrors) ? info.registryMirrors : []);
+      // 未保存的编辑不被后台刷新覆盖（只有用户确认丢弃时才重读）
+      if (!daemonDirtyRef.current) {
+        daemonSavedTextRef.current = text;
+        setDaemonText(text);
+      }
       // 首次加载：以 daemon.json 为准回填列表，实现「两侧修改同步」
       if (syncToList && !daemonSyncedRef.current && info.canRead && !info.parseError) {
         daemonSyncedRef.current = true;
@@ -759,27 +793,66 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
   };
 
   /**
-   * 保存设置后把加速源写回 daemon.json。
-   * 内容有变化 → 弹窗询问是否重启 Docker；失败 → 展示修复建议（应用设置已保存，不受影响）。
+   * 把编辑器内容整份写入 /etc/docker/daemon.json。
+   * 「保存到 daemon.json」按钮与 APPLY（存在未保存改动时）共用此入口。
+   * 成功且内容有变化 → 弹窗询问是否重启 Docker；失败 → 展示修复建议（不写坏原文件）。
    */
-  const syncDaemonMirrors = async (list: string[]) => {
-    // 明确无写权限时不打扰（页面已有常驻提示），配好 sudoers 后点「重新检测」即可
-    if (daemon && daemon.elevate === "none") return;
+  const writeDaemonFromEditor = async (opts?: { quietNoChange?: boolean }): Promise<boolean> => {
+    if (daemon && daemon.elevate === "none") {
+      setToast({ type: "error", message: "当前没有写入 /etc/docker/daemon.json 的权限，请先按提示授权" });
+      return false;
+    }
+    if (!daemonJsonOk) {
+      setToast({ type: "error", message: "JSON 格式错误，请先修正后再保存" });
+      return false;
+    }
+    if (!daemonText.trim()) {
+      setToast({ type: "error", message: "内容为空，如需清空配置请填入 {}" });
+      return false;
+    }
+    setSavingDaemon(true);
     try {
-      const r = await saveDaemonConfigApi(list.map((m) => (m || "").trim()).filter(Boolean));
+      const r = await saveDaemonConfigContent(daemonText);
       if (!r.ok) {
         if (r.hint) setPrivilegeHint(r.hint);
         setToast({ type: "error", message: r.error || "写入 /etc/docker/daemon.json 失败" });
-        return;
+        return false;
       }
-      loadDaemon().catch(() => {});
-      if (r.changed) setAskRestart(true);
+      // 以落盘内容回读：编辑器文本对齐磁盘，并把 registry-mirrors 同步进应用设置
+      // （「拉取时改写镜像名」仍以应用设置里的列表为准）
+      const info = await fetchDaemonConfig();
+      setDaemon(info);
+      if (info.canRead && !info.parseError) {
+        const text = info.raw.trim() ? info.raw : daemonText;
+        daemonSavedTextRef.current = text;
+        setDaemonText(text);
+        setData((prev) => ({
+          ...prev,
+          docker: { ...prev.docker, registryMirrors: info.registryMirrors },
+        }));
+      }
+      markDaemonDirty(false);
+      if (r.changed) {
+        setAskRestart(true);
+      } else if (!opts?.quietNoChange) {
+        setToast({ type: "success", message: "内容与当前一致，无需重启 Docker" });
+      }
+      return true;
     } catch (err: any) {
       setToast({
         type: "error",
         message: `写入 daemon.json 失败：${String(err?.message || err || "未知错误")}`,
       });
+      return false;
+    } finally {
+      setSavingDaemon(false);
     }
+  };
+
+  /** 丢弃编辑器里未保存的修改，回到磁盘内容 */
+  const resetDaemonText = () => {
+    setDaemonText(daemonSavedTextRef.current);
+    markDaemonDirty(false);
   };
 
   // ============ 系统更新（OTA）状态 ============
@@ -1268,8 +1341,12 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
       return;
     }
 
-    // 同步写回宿主机 /etc/docker/daemon.json 的 registry-mirrors（两侧保持一致）
-    await syncDaemonMirrors(data.docker.registryMirrors || []);
+    // 镜像加速源改由「daemon.json 编辑器」直接管理：若编辑器里有未保存的改动，
+    // APPLY 顺手一起写入宿主文件（与「保存到 daemon.json」同一入口，含重启询问），
+    // 避免用户以为 APPLY 已经写盘而丢失编辑内容。失败原因由该入口自行提示。
+    if (daemonDirtyRef.current) {
+      await writeDaemonFromEditor({ quietNoChange: true });
+    }
   };
 
   const sections = [
@@ -1303,41 +1380,46 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
     setData({ ...data, [section]: { ...(data as Record<string, any>)[section], [field]: value } });
   };
 
-  // 镜像加速源多源列表 + 拖拽排序
-  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  // 应用设置里的加速源列表：现仅作为「拉取时改写镜像名」与旧接口的输入，
+  // 编辑入口已改为下面的 daemon.json 编辑器（保存时自动同步回此列表）
   const mirrors = Array.isArray(data.docker?.registryMirrors) ? data.docker.registryMirrors : [];
-  const setMirrors = (next: string[]) => update("docker", "registryMirrors", next);
-  const addMirror = () => setMirrors([...mirrors, ""]);
-  const removeMirror = (i: number) => setMirrors(mirrors.filter((_, j) => j !== i));
-  const updateMirrorAt = (i: number, val: string) => {
-    const n = [...mirrors];
-    n[i] = val;
-    setMirrors(n);
-  };
-  const onMirrorDragOver = (i: number, e: React.DragEvent) => {
-    e.preventDefault();
-    if (dragIdx === null || dragIdx === i) return;
-    const n = [...mirrors];
-    const [m] = n.splice(dragIdx, 1);
-    n.splice(i, 0, m);
-    setMirrors(n);
-    setDragIdx(i);
-  };
-  // 实测可用的公益 Docker Hub 加速源（2026-08），用户可一键填入
+  // 实测可用的公益 Docker Hub 加速源（2026-08），用户可一键填入编辑器
   const RECOMMENDED_MIRRORS: { url: string; label: string }[] = [
     { url: "https://docker.xuanyuan.me", label: "轩辕镜像（公益免费，实测 ~12MB/s）" },
     { url: "https://docker.1ms.run", label: "毫秒镜像（稳定）" },
     { url: "https://docker.1panel.live", label: "1Panel 镜像（实测可用）" },
     { url: "https://hub.1panel.dev", label: "1Panel Hub 镜像（实测可用）" },
   ];
-  const addRecommendedMirrors = () => {
-    const existing = new Set(mirrors.map((m) => m.trim()).filter(Boolean));
+  /** 把推荐加速源合并进编辑器内容（保留其它配置键）；只改编辑区，仍需点保存才落盘 */
+  const insertRecommendedMirrors = () => {
+    let parsed: Record<string, unknown> = {};
+    if (daemonText.trim()) {
+      let v: unknown;
+      try {
+        v = JSON.parse(daemonText);
+      } catch {
+        setToast({ type: "error", message: "当前 JSON 无法解析，请先修正后再填入" });
+        return;
+      }
+      if (!v || typeof v !== "object" || Array.isArray(v)) {
+        setToast({ type: "error", message: "当前内容顶层不是 JSON 对象，无法填入" });
+        return;
+      }
+      parsed = v as Record<string, unknown>;
+    }
+    const current = Array.isArray(parsed["registry-mirrors"])
+      ? (parsed["registry-mirrors"] as unknown[]).map((x) => String(x)).filter((x) => x.trim())
+      : mirrors.filter((m) => m.trim());
+    const existing = new Set(current.map((m) => m.trim()));
     const toAdd = RECOMMENDED_MIRRORS.filter((r) => !existing.has(r.url)).map((r) => r.url);
     if (toAdd.length === 0) {
       setToast({ type: "success", message: "推荐加速源已存在" });
       return;
     }
-    setMirrors([...mirrors, ...toAdd]);
+    const text = JSON.stringify({ ...parsed, "registry-mirrors": [...current, ...toAdd] }, null, 2) + "\n";
+    setDaemonText(text);
+    markDaemonDirty(text !== daemonSavedTextRef.current);
+    setToast({ type: "success", message: `已填入 ${toAdd.length} 个推荐加速源，点「保存到 daemon.json」写入` });
   };
 
   return (
@@ -1774,9 +1856,15 @@ docker-compose version</code>
                       )}
                       <button
                         type="button"
-                        onClick={() => (daemon?.elevate === "none" ? handleRefreshPrivileges() : loadDaemon())}
+                        onClick={() =>
+                          daemon?.elevate === "none"
+                            ? handleRefreshPrivileges()
+                            : daemonDirty
+                            ? setAskReload(true)
+                            : loadDaemon()
+                        }
                         disabled={daemonLoading}
-                        title={daemon?.elevate === "none" ? "重新检测写入权限" : "重新读取 daemon.json"}
+                        title={daemon?.elevate === "none" ? "重新检测写入权限" : "重新读取 daemon.json（丢弃未保存修改）"}
                         className="flex items-center gap-1 px-2 py-1 text-xs text-slate-600 bg-slate-100 rounded hover:bg-slate-200 disabled:opacity-50"
                       >
                         <RefreshCw size={12} className={daemonLoading ? "animate-spin" : ""} />
@@ -1794,12 +1882,13 @@ docker-compose version</code>
                     </div>
                   </div>
                   <p className="text-xs text-slate-500 mb-3">
-                    直接读写宿主机{" "}
+                    下方编辑器内即宿主机{" "}
                     <code className="px-1 py-0.5 bg-slate-100 rounded text-[11px]">
                       {daemon?.path || "/etc/docker/daemon.json"}
                     </code>{" "}
-                    的 registry-mirrors：打开页面时以文件内容为准回读，点 APPLY 保存时写回文件（保留其它配置项）。
-                    <span className="text-amber-600"> 修改后需重启 Docker 才会生效。</span>
+                    的完整内容（打开页面时以文件为准回读），可直接修改；点「保存到 daemon.json」整份写回，
+                    写前自动备份到应用数据目录。
+                    <span className="text-amber-600"> 保存后需重启 Docker 才会生效。</span>
                   </p>
 
                   {daemon?.error && (
@@ -1841,40 +1930,45 @@ docker-compose version</code>
                       )}
                     </div>
                   )}
-                  {mirrors.map((m, i) => (
-                    <div
-                      key={i}
-                      draggable
-                      onDragStart={() => setDragIdx(i)}
-                      onDragOver={(e) => onMirrorDragOver(i, e)}
-                      onDragEnd={() => setDragIdx(null)}
-                      className={`flex items-center gap-2 mb-2 rounded-lg border border-slate-200 bg-white px-2 py-1.5 ${dragIdx === i ? "opacity-50 ring-2 ring-blue-300" : ""}`}
+                  {/* daemon.json 编辑器：展示与编辑的就是文件内容本身 */}
+                  <JsonEditor
+                    value={daemonText}
+                    onChange={(v) => {
+                      setDaemonText(v);
+                      markDaemonDirty(v !== daemonSavedTextRef.current);
+                    }}
+                    onValidChange={setDaemonJsonOk}
+                    minHeight={300}
+                    title="daemon.json（编辑内容即文件内容）"
+                    readOnly={daemon?.elevate === "none"}
+                    placeholder={'{\n  "registry-mirrors": []\n}'}
+                  />
+
+                  {/* 保存 / 重置：保存写入宿主文件，成功后询问是否重启 Docker */}
+                  <div className="mt-3 flex items-center gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => writeDaemonFromEditor()}
+                      disabled={savingDaemon || daemon?.elevate === "none" || !daemonJsonOk}
+                      title="把编辑器内容整份写入 /etc/docker/daemon.json（写前自动备份）"
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-blue-600 rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      <GripVertical size={16} className="cursor-move text-slate-300 shrink-0" />
-                      <span className="text-[11px] text-slate-400 shrink-0 w-4 text-center select-none">{i + 1}</span>
-                      <Input
-                        value={m}
-                        onChange={(val) => updateMirrorAt(i, val)}
-                        placeholder="例如 docker.m.daocloud.io"
-                        className="flex-1"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => removeMirror(i)}
-                        className="shrink-0 p-1 text-slate-400 hover:text-red-500"
-                        title="删除"
-                      >
-                        <X size={16} />
-                      </button>
-                    </div>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={() => addMirror()}
-                    className="mt-1 flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700"
-                  >
-                    <Plus size={14} /> 添加加速源
-                  </button>
+                      {savingDaemon ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+                      保存到 daemon.json
+                    </button>
+                    <button
+                      type="button"
+                      onClick={resetDaemonText}
+                      disabled={!daemonDirty || savingDaemon}
+                      title="放弃未保存的修改，恢复为磁盘上的内容"
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-600 bg-slate-100 rounded hover:bg-slate-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <Undo2 size={13} /> 重置
+                    </button>
+                    {daemonDirty && (
+                      <span className="text-[11px] text-amber-600">● 有未保存的修改</span>
+                    )}
+                  </div>
 
                   {/* 推荐加速源：实测可用的公益 Docker Hub 代理，一键填入 */}
                   <div className="mt-3 p-2.5 bg-blue-50 border border-blue-200 rounded-lg">
@@ -1882,10 +1976,11 @@ docker-compose version</code>
                       <p className="text-xs font-medium text-blue-800">推荐加速源（Docker Hub 代理，2026-08 实测可用）</p>
                       <button
                         type="button"
-                        onClick={addRecommendedMirrors}
-                        className="shrink-0 flex items-center gap-1 px-2 py-1 text-xs text-white bg-blue-600 rounded hover:bg-blue-700"
+                        onClick={insertRecommendedMirrors}
+                        disabled={daemon?.elevate === "none"}
+                        className="shrink-0 flex items-center gap-1 px-2 py-1 text-xs text-white bg-blue-600 rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        <Zap size={12} /> 一键填入
+                        <Zap size={12} /> 填入编辑器
                       </button>
                     </div>
                     <ul className="space-y-0.5 text-[11px] text-blue-700 font-mono">
@@ -1903,7 +1998,7 @@ docker-compose version</code>
 
                   {daemon && daemon.otherKeys.length > 0 && (
                     <p className="mt-2 text-[11px] text-slate-400">
-                      daemon.json 中其它配置项（写入时原样保留）：{daemon.otherKeys.join("、")}
+                      文件中还包含其它配置项（随编辑器内容一并写入 / 原样保留）：{daemon.otherKeys.join("、")}
                     </p>
                   )}
 
@@ -3225,16 +3320,29 @@ docker-compose version</code>
           </div>
         )}
 
-        {/* 加速源写回后询问是否重启 Docker */}
+        {/* daemon.json 写回后询问是否重启 Docker（左「重启」/ 右「暂不重启」） */}
         <ConfirmDialog
           open={askRestart}
           onClose={() => setAskRestart(false)}
           onConfirm={doRestartDocker}
-          title="重启 Docker 服务"
-          message="镜像加速源已写入 /etc/docker/daemon.json，需要重启 Docker 才会生效。重启期间运行中的容器默认不会停止，但管理面板会有几秒无法连接。是否立即重启？"
-          confirmText="是，立即重启"
-          cancelText="稍后自行重启"
+          title="重启 Docker 使配置生效"
+          message="daemon.json 已写入，需要重启 Docker 才会生效。重启不会停止运行中的容器，但管理面板会有几秒无法连接。是否立即重启 Docker？"
+          confirmText="重启"
+          cancelText="暂不重启"
+          primaryFirst
           loading={restarting}
+        />
+
+        {/* 有未保存改动时点「刷新」：先确认丢弃 */}
+        <ConfirmDialog
+          open={askReload}
+          onClose={() => setAskReload(false)}
+          onConfirm={() => { setAskReload(false); loadDaemon(); }}
+          title="重新读取 daemon.json"
+          message="编辑器里有未保存的修改，重新读取会丢弃这些修改，并用磁盘上的内容覆盖编辑器。是否继续？"
+          confirmText="丢弃并重新读取"
+          cancelText="取消"
+          danger
         />
 
         {/* 无权限写入时的修复建议 */}

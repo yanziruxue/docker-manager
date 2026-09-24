@@ -349,6 +349,90 @@ export function writeDaemonConfig(registryMirrors: string[]): WriteDaemonResult 
   return { ok: true, changed: true, elevate, backupPath, content: text, output: w.output };
 }
 
+/**
+ * 写入整份 daemon.json 文本（供设置页的 JSON 编辑器使用）。
+ *
+ * 与 writeDaemonConfig 的差别：不做「只替换 registry-mirrors、其余键合并保留」——
+ * 编辑器里展示的本来就是整个文件，用户改了什么就写什么（写前照例备份）。
+ *
+ * 校验与安全：
+ * - 必须是可解析、顶层为对象的 JSON；空文本直接拒绝（避免误清空整个配置）；
+ * - changed 以「规范化后的语义是否变化」判定 —— 仅重排缩进/空白不会触发重启提示；
+ * - 现有文件本身解析失败时不做语义比较（视为必改），允许用户借编辑器修复坏文件。
+ */
+export function writeDaemonConfigText(text: string): WriteDaemonResult {
+  const priv = detectPrivileges();
+  const elevate: ElevateMode = priv.isRoot ? "root" : priv.sudo ? "sudo" : "none";
+  const hint = elevate === "none" ? buildSudoersHint(priv.user) : undefined;
+
+  if (elevate === "none") {
+    return { ok: false, changed: false, elevate, error: "当前进程既非 root，也没有可用的免密 sudo，无法写入 /etc/docker/daemon.json", hint };
+  }
+
+  if (!text || !text.trim()) {
+    return { ok: false, changed: false, elevate, error: "内容为空，已中止写入（如需清空配置请填入 {}）", hint };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (e: any) {
+    return { ok: false, changed: false, elevate, error: `JSON 解析失败，已中止写入：${e?.message || "格式错误"}`, hint };
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { ok: false, changed: false, elevate, error: "daemon.json 顶层必须是 JSON 对象", hint };
+  }
+
+  // 统一序列化：2 空格缩进 + 结尾换行（也是与磁盘内容做语义比较的基准）
+  const nextText = JSON.stringify(parsed, null, 2) + "\n";
+
+  const { raw, error } = readRaw();
+  if (error) {
+    return { ok: false, changed: false, elevate, error: `无法读取现有配置：${error}`, hint };
+  }
+
+  if (raw.trim()) {
+    try {
+      const currentText = JSON.stringify(JSON.parse(raw), null, 2) + "\n";
+      if (currentText === nextText) return { ok: true, changed: false, elevate, content: raw };
+    } catch {
+      // 现有文件坏了 → 不做语义比较，允许覆盖修复
+    }
+  }
+
+  const dirErr = ensureDir();
+  if (dirErr) return { ok: false, changed: false, elevate, error: dirErr, hint };
+
+  const backupPath = backupRaw(raw);
+  const w = writeText(nextText);
+  if (!w.ok) {
+    return { ok: false, changed: false, elevate, backupPath, error: w.error || "写入失败", hint };
+  }
+
+  // 写后校验：重新读取并做语义比对
+  const verify = readRaw();
+  let verified = false;
+  if (!verify.error && verify.raw.trim()) {
+    try {
+      verified = JSON.stringify(JSON.parse(verify.raw), null, 2) + "\n" === nextText;
+    } catch {
+      verified = false;
+    }
+  }
+  if (!verified) {
+    return {
+      ok: false,
+      changed: true,
+      elevate,
+      backupPath,
+      error: "写入后校验不一致，请检查 /etc/docker/daemon.json（可能未真正生效）",
+      hint,
+    };
+  }
+
+  return { ok: true, changed: true, elevate, backupPath, content: nextText, output: w.output };
+}
+
 // ---------------------------------------------------------------- 重启
 
 /** 重启宿主机 Docker 服务：systemctl 优先，回退 service */

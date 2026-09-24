@@ -1025,6 +1025,23 @@ export function cancelImagePull(taskId: string): PullTaskInfo {
   return toPublicInfo(task);
 }
 
+/**
+ * 手动清理单个拉取任务 —— 与「30 分钟 TTL 惰性清理」并列的第二种清理方式。
+ * 直接从内存任务表移除，前端轮询一次即消失（前后端同时清理）。
+ * 若任务仍在进行中，先中止进度流 / CLI 子进程，避免留下孤儿进程与后续输出。
+ */
+export function removePullTask(taskId: string): void {
+  const task = pullTasks.get(taskId);
+  if (!task) throw new Error(`拉取任务不存在: ${taskId}`);
+  if (task.status === "pulling") {
+    try { task.stream?.destroy?.(); } catch { /* 忽略销毁异常 */ }
+    try { task.child?.kill("SIGTERM"); } catch { /* 忽略终止异常 */ }
+    task.status = "canceled";
+    task.endedAt = Date.now();
+  }
+  pullTasks.delete(taskId);
+}
+
 /** 获取单个任务信息 */
 export function getPullTask(taskId: string): PullTaskInfo {
   const task = pullTasks.get(taskId);
@@ -2347,6 +2364,157 @@ export async function createVolume(engine: DockerEngine, name: string, driver: s
   return await withTimeout(docker.createVolume({ Name: name, Driver: driver }), 10000);
 }
 
+// ============ 网络管理 ============
+
+export interface DockerNetworkContainerInfo {
+  id: string;
+  name: string;
+  ipv4?: string;
+  ipv6?: string;
+}
+
+export interface DockerNetworkInfo {
+  id: string;
+  name: string;
+  driver: string;
+  scope: string;
+  enableIPv6: boolean;
+  internal: boolean;
+  attachable: boolean;
+  ingress: boolean;
+  subnet?: string;
+  gateway?: string;
+  ipv6Subnet?: string;
+  ipv6Gateway?: string;
+  containers: DockerNetworkContainerInfo[];
+  /** 下行（接收）累计字节：关联容器在此网络上的 RxBytes 之和 */
+  rxBytes: number;
+  /** 上行（发送）累计字节：关联容器在此网络上的 TxBytes 之和 */
+  txBytes: number;
+  created: string;
+  options: { key: string; value: string }[];
+  labels: { key: string; value: string }[];
+}
+
+export interface NetworkCreateOptions {
+  name: string;
+  driver?: string;
+  subnet?: string;
+  gateway?: string;
+  options?: Record<string, string>;
+  labels?: Record<string, string>;
+}
+
+/**
+ * 列出网络：列表 + 逐个 inspect。Docker network inspect 的 Containers 项自带
+ * RxBytes / TxBytes（该容器在此网络上的累计收发），直接累加即可得到「网络级」上行/下行；
+ * 无需额外拉容器 stats（避免 N 次采样）。单个 inspect 失败不影响其余网络。
+ */
+export async function getNetworks(engine: DockerEngine): Promise<DockerNetworkInfo[]> {
+  const docker = getDocker(engine);
+  const list = (await withTimeout(docker.listNetworks(), 10000)) || [];
+  const networks = await Promise.all(
+    (list as any[]).map(async (n: any): Promise<DockerNetworkInfo> => {
+      const fallback: DockerNetworkInfo = {
+        id: n.Id,
+        name: n.Name,
+        driver: n.Driver || "",
+        scope: n.Scope || "",
+        enableIPv6: false,
+        internal: false,
+        attachable: false,
+        ingress: false,
+        containers: [],
+        rxBytes: 0,
+        txBytes: 0,
+        created: "",
+        options: [],
+        labels: [],
+      };
+      try {
+        const info = await withTimeout(docker.getNetwork(n.Id).inspect(), 10000);
+        const ipam = info.IPAM?.Config || [];
+        const v4 = ipam.find((c: any) => c.Subnet && !String(c.Subnet).includes(":")) || ipam[0] || {};
+        const v6 = ipam.find((c: any) => c.Subnet && String(c.Subnet).includes(":")) || {};
+        const containersMap = info.Containers || {};
+        const containers: DockerNetworkContainerInfo[] = [];
+        let rx = 0;
+        let tx = 0;
+        for (const cid of Object.keys(containersMap)) {
+          const c: any = containersMap[cid];
+          rx += Number(c.RxBytes) || 0;
+          tx += Number(c.TxBytes) || 0;
+          containers.push({
+            id: cid,
+            name: c.Name || cid.slice(0, 12),
+            ipv4: c.IPv4Address && c.IPv4Address !== "" ? c.IPv4Address : undefined,
+            ipv6: c.IPv6Address && c.IPv6Address !== "" ? c.IPv6Address : undefined,
+          });
+        }
+        return {
+          id: info.Id,
+          name: info.Name,
+          driver: info.Driver,
+          scope: info.Scope,
+          enableIPv6: !!info.EnableIPv6,
+          internal: !!info.Internal,
+          attachable: !!info.Attachable,
+          ingress: !!info.Ingress,
+          subnet: v4.Subnet,
+          gateway: v4.Gateway,
+          ipv6Subnet: v6.Subnet,
+          ipv6Gateway: v6.Gateway,
+          containers,
+          rxBytes: rx,
+          txBytes: tx,
+          created: info.Created,
+          options: Object.entries(info.Options || {}).map(([key, value]) => ({ key, value: String(value) })),
+          labels: Object.entries(info.Labels || {}).map(([key, value]) => ({ key, value: String(value) })),
+        };
+      } catch {
+        return fallback;
+      }
+    })
+  );
+  return networks;
+}
+
+/** 创建网络（CheckDuplicate 避免重名覆盖已有网络） */
+export async function createNetwork(engine: DockerEngine, opts: NetworkCreateOptions): Promise<any> {
+  const docker = getDocker(engine);
+  const ipam: any = { Driver: "default", Config: [] as any[] };
+  if (opts.subnet) {
+    ipam.Config.push({ Subnet: opts.subnet, ...(opts.gateway ? { Gateway: opts.gateway } : {}) });
+  }
+  return await withTimeout(
+    docker.createNetwork({
+      Name: opts.name,
+      Driver: opts.driver || "bridge",
+      CheckDuplicate: true,
+      IPAM: ipam.Config.length > 0 ? ipam : undefined,
+      Options: opts.options || {},
+      Labels: opts.labels || {},
+    }),
+    10000
+  );
+}
+
+/** 删除网络 */
+export async function removeNetwork(engine: DockerEngine, id: string): Promise<void> {
+  const docker = getDocker(engine);
+  await withTimeout(docker.getNetwork(id).remove(), 10000);
+}
+
+/**
+ * 编辑网络：Docker 不支持原地修改（名称、子网、驱动均不可变），实现为
+ * 删除后用相同配置重建。opts 必须包含期望的最终 name（可与原名相同）。
+ */
+export async function editNetwork(engine: DockerEngine, id: string, opts: NetworkCreateOptions): Promise<any> {
+  const docker = getDocker(engine);
+  await withTimeout(docker.getNetwork(id).remove(), 10000);
+  return await createNetwork(engine, opts);
+}
+
 function formatUptime(startMs: number): string {
   const diff = Date.now() - startMs;
   if (diff < 0) return "—";
@@ -2488,6 +2656,196 @@ interface NetSnapshot {
 }
 const lastNetSnapshot = new Map<string, NetSnapshot>();
 
+/**
+ * 宿主机各核 CPU 使用率快照（仅「本机 socket 引擎」有意义，供仪表盘 CPU 多核环形图）。
+ * /proc/stat 是自开机以来的累计值，必须与上次采样差分；首次采样无基线 → 各核 0。
+ * 远程引擎（tcp/ssh）读不到对端 /proc/stat，返回空数组，前端回退为单环进度。
+ */
+interface CpuCoreSnapshot {
+  total: number;
+  busy: number;
+}
+const lastCpuCoreSnapshot = new Map<string, { ts: number; cores: Map<string, CpuCoreSnapshot> }>();
+
+function sampleHostCpuCores(engineId: string): { name: string; percent: number }[] {
+  let text = "";
+  try {
+    text = fs.readFileSync("/proc/stat", "utf8");
+  } catch {
+    return [];
+  }
+  const cur = new Map<string, CpuCoreSnapshot>();
+  for (const line of text.split("\n")) {
+    if (!/^cpu\d+\s/.test(line)) continue;
+    const parts = line.trim().split(/\s+/);
+    const nums = parts.slice(1).map((n) => Number(n) || 0);
+    const total = nums.reduce((a, b) => a + b, 0);
+    const idle = (nums[3] || 0) + (nums[4] || 0); // idle + iowait
+    cur.set(parts[0], { total, busy: total - idle });
+  }
+  if (cur.size === 0) return [];
+  const prev = lastCpuCoreSnapshot.get(engineId);
+  const out: { name: string; percent: number }[] = [];
+  let idx = 0;
+  for (const [key, c] of cur) {
+    let percent = 0;
+    if (prev) {
+      const p = prev.cores.get(key);
+      if (p) {
+        const dTotal = c.total - p.total;
+        const dBusy = c.busy - p.busy;
+        if (dTotal > 0) percent = Math.max(0, Math.min(100, (dBusy / dTotal) * 100));
+      }
+    }
+    out.push({ name: `核心${idx + 1}`, percent: Math.round(percent * 10) / 10 });
+    idx++;
+  }
+  lastCpuCoreSnapshot.set(engineId, { ts: Date.now(), cores: cur });
+  return out;
+}
+
+/* ============ 宿主机内存 / 磁盘 / 资源时间序列（仅本机 socket 引擎可取真实值） ============ */
+
+/** 读取 /proc/meminfo，返回 MB（读不到返回 null） */
+function readHostMemMB(): { total: number; available: number } | null {
+  try {
+    const text = fs.readFileSync("/proc/meminfo", "utf8");
+    const pick = (key: string) => {
+      const m = text.match(new RegExp("^" + key + ":\\s+(\\d+)", "m"));
+      return m ? Number(m[1]) / 1024 : 0; // kB → MB
+    };
+    const total = pick("MemTotal");
+    if (!total) return null;
+    const available = pick("MemAvailable") || pick("MemFree");
+    return { total, available };
+  } catch {
+    return null;
+  }
+}
+
+/** 主板「最大支持内存」（MB）：读 SMBIOS DMI Type 16（Maximum Capacity），读不到返回 0（非 root 通常 0400 读不到） */
+let cachedMaxMemMB = -1;
+function readMaxSupportedMemMB(): number {
+  if (cachedMaxMemMB >= 0) return cachedMaxMemMB;
+  cachedMaxMemMB = 0;
+  try {
+    const buf = fs.readFileSync("/sys/firmware/dmi/tables/DMI");
+    let off = 0;
+    while (off + 4 <= buf.length) {
+      const type = buf[off];
+      const len = buf[off + 1];
+      if (len < 4) break;
+      if (type === 16 && off + 0x0b <= buf.length) {
+        const capKB = buf.readUInt32LE(off + 0x07); // DWORD，单位 KB；0x80000000/0xFFFFFFFF = 未知
+        if (capKB && capKB !== 0x80000000 && capKB !== 0xffffffff) {
+          cachedMaxMemMB = Math.round(capKB / 1024);
+          break;
+        }
+      }
+      let p = off + len; // 跳到下一个结构（跳过字符串区，以 0x0000 结束）
+      while (p + 1 < buf.length && !(buf[p] === 0 && buf[p + 1] === 0)) p++;
+      off = p + 2;
+    }
+  } catch {
+    cachedMaxMemMB = 0;
+  }
+  return cachedMaxMemMB;
+}
+
+/** 资源时间序列单点（SSE 1s 一采 → 1s≈1 点） */
+export interface ResourceSample {
+  ts: number;
+  memSystemMB: number; // 系统占用（宿主机已用 - Docker 已用）
+  memDockerMB: number; // Docker 容器合计
+  netRxKBps: number;
+  netTxKBps: number;
+}
+
+const RESOURCE_HISTORY_MAX = 300; // 5 分钟 @1s
+const resourceHistory = new Map<string, ResourceSample[]>();
+
+function recordResourceSample(engineId: string, s: ResourceSample): void {
+  let arr = resourceHistory.get(engineId);
+  if (!arr) {
+    arr = [];
+    resourceHistory.set(engineId, arr);
+  }
+  arr.push(s);
+  if (arr.length > RESOURCE_HISTORY_MAX) arr.splice(0, arr.length - RESOURCE_HISTORY_MAX);
+}
+
+/** 取某引擎最近 maxPoints 条历史样本（按时间升序） */
+export function getResourceHistory(engineId: string, maxPoints = RESOURCE_HISTORY_MAX): ResourceSample[] {
+  const arr = resourceHistory.get(engineId) || [];
+  return arr.length > maxPoints ? arr.slice(arr.length - maxPoints) : arr.slice();
+}
+
+/** 宿主机磁盘统计（/proc/diskstats 差分算利用率；仅 socket 引擎） */
+export interface DiskStat {
+  name: string;
+  readMBps: number;
+  writeMBps: number;
+  busyPct: number; // 利用率（ms doing I/O / 间隔）
+  active: boolean;
+}
+interface DiskSnapshot {
+  ts: number;
+  devs: Map<string, { sectorsRead: number; sectorsWritten: number; busyMs: number }>;
+}
+const lastDiskSnapshot = new Map<string, DiskSnapshot>();
+const DISK_WHOLE = /^(sd[a-z]+|hd[a-z]+|vd[a-z]+|nvme\d+n\d+|mmcblk\d+)$/;
+
+function sampleHostDisks(engineId: string): DiskStat[] {
+  let text = "";
+  try {
+    text = fs.readFileSync("/proc/diskstats", "utf8");
+  } catch {
+    return [];
+  }
+  const cur = new Map<string, { sectorsRead: number; sectorsWritten: number; busyMs: number }>();
+  for (const line of text.split("\n")) {
+    const p = line.trim().split(/\s+/);
+    if (p.length < 14) continue;
+    const name = p[2];
+    if (!DISK_WHOLE.test(name)) continue; // 只取整盘，排除分区 / loop / dm / md
+    cur.set(name, {
+      sectorsRead: Number(p[5]) || 0,
+      sectorsWritten: Number(p[9]) || 0,
+      busyMs: Number(p[12]) || 0, // ms doing I/O
+    });
+  }
+  if (cur.size === 0) return [];
+  const now = Date.now();
+  const prev = lastDiskSnapshot.get(engineId);
+  const dtMs = prev ? now - prev.ts : 0;
+  const out: DiskStat[] = [];
+  for (const [name, c] of cur) {
+    let busyPct = 0;
+    let readMBps = 0;
+    let writeMBps = 0;
+    if (prev && dtMs > 0) {
+      const p = prev.devs.get(name);
+      if (p) {
+        const dSecR = Math.max(0, c.sectorsRead - p.sectorsRead);
+        const dSecW = Math.max(0, c.sectorsWritten - p.sectorsWritten);
+        const dBusy = Math.max(0, c.busyMs - p.busyMs);
+        readMBps = (dSecR * 512) / (dtMs * 1000); // 512B/扇区 → MB/s
+        writeMBps = (dSecW * 512) / (dtMs * 1000);
+        busyPct = Math.min(100, (dBusy / dtMs) * 100);
+      }
+    }
+    out.push({
+      name,
+      readMBps: Math.round(readMBps * 10) / 10,
+      writeMBps: Math.round(writeMBps * 10) / 10,
+      busyPct: Math.round(busyPct * 10) / 10,
+      active: busyPct > 1 || readMBps > 0.05 || writeMBps > 0.05,
+    });
+  }
+  lastDiskSnapshot.set(engineId, { ts: now, devs: cur });
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export async function getEngineResourceStats(engine: DockerEngine): Promise<any> {
   const docker = getDocker(engine);
 
@@ -2548,11 +2906,47 @@ export async function getEngineResourceStats(engine: DockerEngine): Promise<any>
   }
   lastNetSnapshot.set(engine.id, { ts: now, rxKB: netRxKB, txKB: netTxKB });
 
+  const isLocal = engine.connectionType === "socket";
+  // 各核 CPU 使用率：仅本机 socket 引擎可读 /proc/stat；远程引擎为空
+  const cpuCores = isLocal ? sampleHostCpuCores(engine.id) : [];
+  // 宿主机磁盘利用率：仅本机引擎可读 /proc/diskstats
+  const disks = isLocal ? sampleHostDisks(engine.id) : [];
+
+  // 宿主机内存：/proc/meminfo 给出已安装/可用；系统占用 = 宿主机已用 - Docker 已用
+  let memInstalledMB = memTotalMB;
+  let memFreeMB = 0;
+  let memSystemMB = 0;
+  if (isLocal) {
+    const hm = readHostMemMB();
+    if (hm) {
+      memInstalledMB = Math.round(hm.total);
+      memFreeMB = Math.round(hm.available);
+      memSystemMB = Math.max(0, Math.round(hm.total - hm.available - memoryUsageMB));
+    }
+  }
+  const memMaxSupportedMB = isLocal ? readMaxSupportedMemMB() : 0;
+
+  const round1 = (n: number) => Math.round(n * 10) / 10;
+  // 记录时间序列样本（供仪表盘内存 / 网络折线图）
+  recordResourceSample(engine.id, {
+    ts: now,
+    memSystemMB,
+    memDockerMB: Math.round(memoryUsageMB),
+    netRxKBps: round1(netRxKBps),
+    netTxKBps: round1(netTxKBps),
+  });
+
   return {
     ncpu,
     memTotalMB,
+    memInstalledMB,
+    memFreeMB,
+    memSystemMB,
+    memMaxSupportedMB,
     runningContainers: (running as any[]).length,
     sampledContainers: sampled,
+    cpuCores,
+    disks,
     cpuPercent: Math.round(cpuPercent * 100) / 100,
     cpuMaxPercent: ncpu * 100,
     memoryUsageMB,

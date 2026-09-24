@@ -2041,9 +2041,48 @@ function CreateStackModal({ onClose, engineId, onRefresh }: { onClose: () => voi
   const [backupFile, setBackupFile] = useState<File | null>(null);
   const backupInputRef = useRef<HTMLInputElement>(null);
 
+  // 上传 compose 文件：点击与拖拽两条路径共用同一处理函数
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadDragging, setUploadDragging] = useState(false);
+  const uploadInputRef = useRef<HTMLInputElement>(null);
+
+  /**
+   * 载入用户选择的 compose 文件：回填 composeContent（「创建」按钮读的就是它）+ 堆栈名称兜底。
+   * 名称按后端 `createStack` 的校验规则（仅字母 / 数字 / 横线 / 下划线）清洗：文件名里的
+   * 点与空格统一换成横线，否则 `my.stack.yml` 这类名字会被后端直接拒绝。
+   * 名称留空时才用文件名兜底，不覆盖用户已填的内容。
+   */
+  const handleComposeFile = async (file?: File | null) => {
+    if (!file) return;
+    if (file.size > 1024 * 1024) {
+      setCreateError(`文件过大（${(file.size / 1024 / 1024).toFixed(1)} MB），上限 1 MB`);
+      return;
+    }
+    let text = "";
+    try {
+      text = await file.text();
+    } catch {
+      setCreateError("读取文件失败，请重试或改用 Web 编辑器");
+      return;
+    }
+    if (!text.trim()) {
+      setCreateError("文件内容为空");
+      return;
+    }
+    setUploadFile(file);
+    setComposeContent(text);
+    setYamlValid(true);
+    setCreateError(null);
+    const derived = file.name
+      .replace(/\.[^.]*$/, "")
+      .replace(/[^A-Za-z0-9_-]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+    if (derived) setStackName((prev) => (prev.trim() ? prev : derived));
+  };
+
   const methods = [
     { key: "editor", label: "Web 编辑器", icon: <Edit3 size={20} />, desc: "从零编写 compose 文件" },
-    { key: "upload", label: "上传文件", icon: <Upload size={20} />, desc: "上传本地 compose + env 文件" },
+    { key: "upload", label: "上传文件", icon: <Upload size={20} />, desc: "上传本地 compose 文件" },
     { key: "convert", label: "命令转换", icon: <ArrowLeftRight size={20} />, desc: "docker run → Compose" },
     { key: "fromBackup", label: "堆栈备份", icon: <Package size={20} />, desc: "上传堆栈备份直接还原" },
   ];
@@ -2176,11 +2215,65 @@ function CreateStackModal({ onClose, engineId, onRefresh }: { onClose: () => voi
             <FormField label="描述">
               <Input value={stackDescription} onChange={setStackDescription} placeholder="简要描述堆栈用途" disabled={creating} />
             </FormField>
-            <div className="border-2 border-dashed border-slate-200 rounded-lg p-8 text-center hover:border-blue-400 transition-colors cursor-pointer">
-              <Upload size={32} className="mx-auto text-slate-400 mb-2" />
-              <p className="text-sm text-slate-600">点击或拖拽上传 compose 文件</p>
-              <p className="text-xs text-slate-400 mt-1">支持 .yml, .yaml 格式</p>
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={() => { if (!creating) uploadInputRef.current?.click(); }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  if (!creating) uploadInputRef.current?.click();
+                }
+              }}
+              onDragOver={(e) => { e.preventDefault(); if (!creating) setUploadDragging(true); }}
+              onDragLeave={() => setUploadDragging(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setUploadDragging(false);
+                if (!creating) void handleComposeFile(e.dataTransfer.files?.[0]);
+              }}
+              className={`w-full border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
+                creating
+                  ? "opacity-50 cursor-not-allowed border-slate-200"
+                  : uploadDragging
+                    ? "border-blue-500 bg-blue-50 cursor-pointer"
+                    : "border-slate-200 hover:border-blue-400 cursor-pointer"
+              }`}
+            >
+              <Upload size={32} className={`mx-auto mb-2 ${uploadDragging ? "text-blue-500" : "text-slate-400"}`} />
+              <p className="text-sm text-slate-600">{uploadFile ? uploadFile.name : "点击或拖拽上传 compose 文件"}</p>
+              <p className="text-xs text-slate-400 mt-1">
+                {uploadFile ? "已载入内容，可直接创建或切到 Web 编辑器修改" : "支持 .yml / .yaml / .txt，上限 1 MB"}
+              </p>
             </div>
+            <input
+              ref={uploadInputRef}
+              type="file"
+              accept=".yml,.yaml,.txt,text/yaml,text/plain"
+              className="hidden"
+              disabled={creating}
+              onChange={(e) => {
+                void handleComposeFile(e.target.files?.[0]);
+                e.target.value = "";
+              }}
+            />
+            {uploadFile && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-slate-500">内容预览</span>
+                  <button
+                    onClick={() => setMethod("editor")}
+                    disabled={creating}
+                    className="flex items-center gap-1 px-2 py-1 text-xs text-slate-600 border border-slate-200 rounded hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <Edit3 size={12} /> 切到 Web 编辑器修改
+                  </button>
+                </div>
+                <pre className="w-full max-h-56 overflow-auto p-3 font-mono text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg whitespace-pre-wrap break-all">
+                  {composeContent}
+                </pre>
+              </div>
+            )}
           </div>
         )}
 

@@ -23,6 +23,7 @@ import {
   getContainerLogs,
   getContainerStats,
   getEngineResourceStats,
+  getResourceHistory,
   getActivityLogs,
   containerAction,
   removeContainer,
@@ -33,6 +34,7 @@ import {
   listPullTasks,
   getPullTask,
   cancelImagePull,
+  removePullTask,
   removeVolume,
   pruneVolumes,
   createVolume,
@@ -53,12 +55,16 @@ import {
   resizeContainerTerminal,
   getComposeCmd,
   detectComposeModes,
+  getNetworks,
+  createNetwork,
+  removeNetwork,
+  editNetwork,
 } from "./docker.js";
 import { createFullBackup, restoreFullBackup, restoreUploadedBackup, exportConfigArchive, listBackupFiles, deleteBackupFile, backupFilePath, migrateLegacyBackups } from "./backup.js";
 import { getSettings, saveSettings } from "./settings.js";
 import { startUpdateScheduler, getSchedulerStatus, runSchedulerCheckNow, checkEngineImages, getImageUpdateCache, startBackupScheduler, getBackupSchedulerStatus } from "./scheduler.js";
 import { addPushClient, removePushClient } from "./push.js";
-import { readDaemonConfigInfo, writeDaemonConfig, restartDockerService, refreshPrivileges } from "./daemon-config.js";
+import { readDaemonConfigInfo, writeDaemonConfig, writeDaemonConfigText, restartDockerService, refreshPrivileges } from "./daemon-config.js";
 import { CURRENT_VERSION, getInstallDir, checkForUpdate, performUpdate, performUpdateFromUpload, getUpdateState, getUpdateDir, markUpdateError, saveUploadPackage, getPendingUpload, getPendingUploadPath, schedulePendingExpiry, discardPendingUpload, cancelPendingExpiry, cancelUpdate } from "./updater.js";
 import { COMPOSE_DIR } from "./paths.js";
 import {
@@ -548,6 +554,92 @@ app.get("/api/engines/:id/volumes", async (req, res) => {
     res.json({ success: true, data: volumes });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message || "获取数据卷失败" });
+  }
+});
+
+/** 获取网络列表（含关联容器与其累计收发字节） */
+app.get("/api/engines/:id/networks", async (req, res) => {
+  const engine = getEngine(req.params.id);
+  if (!engine) {
+    res.status(404).json({ success: false, error: "引擎不存在" });
+    return;
+  }
+  try {
+    const networks = await getNetworks(engine);
+    res.json({ success: true, data: networks });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || "获取网络失败" });
+  }
+});
+
+/** 创建网络 */
+app.post("/api/engines/:id/networks", async (req, res) => {
+  const engine = getEngine(req.params.id);
+  if (!engine) {
+    res.status(404).json({ success: false, error: "引擎不存在" });
+    return;
+  }
+  const { name, driver, subnet, gateway, options, labels } = req.body || {};
+  if (!name || typeof name !== "string" || !name.trim()) {
+    res.status(400).json({ success: false, error: "网络名称不能为空" });
+    return;
+  }
+  // host 驱动网络全局仅允许存在 1 个（Docker 语义：host 共享主机网络栈，重复创建无意义）
+  if (driver === "host") {
+    try {
+      const existing = await getNetworks(engine);
+      const hostNet = (existing || []).find((n: any) => n.driver === "host");
+      if (hostNet) {
+        res.status(409).json({
+          success: false,
+          error: `已存在 host 驱动网络「${hostNet.name}」，host 驱动网络仅允许创建 1 个`,
+        });
+        return;
+      }
+    } catch {
+      /* 读取现有网络失败不阻断创建，交由下方 createNetwork 处理 */
+    }
+  }
+  try {
+    const result = await createNetwork(engine, { name: name.trim(), driver, subnet, gateway, options, labels });
+    res.json({ success: true, data: result });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || "创建网络失败" });
+  }
+});
+
+/** 编辑网络（删除后用相同配置重建） */
+app.put("/api/engines/:id/networks/:netId", async (req, res) => {
+  const engine = getEngine(req.params.id);
+  if (!engine) {
+    res.status(404).json({ success: false, error: "引擎不存在" });
+    return;
+  }
+  const { name, driver, subnet, gateway, options, labels } = req.body || {};
+  if (!name || typeof name !== "string" || !name.trim()) {
+    res.status(400).json({ success: false, error: "网络名称不能为空" });
+    return;
+  }
+  try {
+    const result = await editNetwork(engine, req.params.netId, { name: name.trim(), driver, subnet, gateway, options, labels });
+    res.json({ success: true, data: result });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || "编辑网络失败" });
+  }
+});
+
+/** 删除网络 */
+app.delete("/api/engines/:id/networks/:netId", async (req, res) => {
+  const engine = getEngine(req.params.id);
+  if (!engine) {
+    res.status(404).json({ success: false, error: "引擎不存在" });
+    return;
+  }
+  try {
+    await removeNetwork(engine, req.params.netId);
+    res.json({ success: true, data: "网络已删除" });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || "删除网络失败" });
   }
 });
 
@@ -1070,6 +1162,19 @@ app.get("/api/engines/:id/resource-stats", async (req, res) => {
   }
 });
 
+/** 资源时间序列（仪表盘内存 / 网络折线图；服务端 1s 采样，最多保留 5 分钟） */
+app.get("/api/engines/:id/resource-history", (req, res) => {
+  const engine = getEngine(req.params.id);
+  if (!engine) {
+    res.status(404).json({ success: false, error: "引擎不存在" });
+    return;
+  }
+  const pointsByRange: Record<string, number> = { "10s": 10, "30s": 30, "1m": 60, "2m": 120, "5m": 300 };
+  const range = String(req.query.range || "5m");
+  const points = pointsByRange[range] || 300;
+  res.json({ success: true, data: getResourceHistory(engine.id, points) });
+});
+
 // ============ 资源监控 SSE 流（仪表盘实时推送） ============
 
 interface SseStream {
@@ -1297,13 +1402,29 @@ app.post("/api/system/daemon-config/refresh-privileges", (_req, res) => {
 });
 
 /**
- * 写回 registry-mirrors（保留其它配置项）。写成功且内容有变化时需要重启 Docker 才生效，
- * 是否重启由前端询问用户后调用 /api/system/docker/restart。
+ * 写入 daemon.json。支持两种载荷：
+ * - `{ content: string }`：整份文件内容（设置页 JSON 编辑器，内容即文件内容）；
+ * - `{ registryMirrors: string[] }`：仅替换 registry-mirrors、保留其它键（旧调用）。
+ * 写成功且内容有变化时需要重启 Docker 才生效，是否重启由前端询问用户后调用
+ * /api/system/docker/restart。
  */
 app.put("/api/system/daemon-config", (req, res) => {
-  const mirrors = (req as any).body?.registryMirrors;
+  const body = ((req as any).body || {}) as { content?: unknown; registryMirrors?: unknown };
+
+  if (typeof body.content === "string") {
+    const result = writeDaemonConfigText(body.content);
+    apiLog.info(
+      `写入 daemon.json（整份）| 成功=${result.ok} 变更=${result.changed} 提权=${result.elevate}${
+        result.error ? ` 失败=${result.error}` : ""
+      }`
+    );
+    res.json({ success: true, data: result });
+    return;
+  }
+
+  const mirrors = body.registryMirrors;
   if (!Array.isArray(mirrors)) {
-    res.status(400).json({ success: false, error: "registryMirrors 必须是字符串数组" });
+    res.status(400).json({ success: false, error: "需要提供 content（字符串）或 registryMirrors（字符串数组）" });
     return;
   }
   const result = writeDaemonConfig(mirrors.map((m: unknown) => String(m ?? "")));
@@ -1659,6 +1780,19 @@ app.post("/api/engines/:id/images/pull-tasks/:taskId/cancel", (req, res) => {
     res.json({ success: true, data: task });
   } catch (err: any) {
     res.status(404).json({ success: false, error: err.message || "取消失败" });
+  }
+});
+
+/** 手动清理单个拉取任务（前后端同时移除；进行中的任务会先中止） */
+app.delete("/api/engines/:id/images/pull-tasks/:taskId", (req, res) => {
+  const engine = getEngine(req.params.id);
+  if (!engine) { res.status(404).json({ success: false, error: "引擎不存在" }); return; }
+  apiLog.info(`清理镜像拉取任务 | 引擎=${engine.name} 任务=${req.params.taskId}`);
+  try {
+    removePullTask(req.params.taskId);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(404).json({ success: false, error: err.message || "清理失败" });
   }
 });
 

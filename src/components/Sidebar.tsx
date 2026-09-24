@@ -8,6 +8,7 @@ import {
   Settings,
   Boxes,
   Bell,
+  Network,
   Wifi,
   WifiOff,
   AlertCircle,
@@ -46,6 +47,7 @@ const navItems: { key: PageKey; label: string; icon: React.ReactNode }[] = [
   { key: "stacks", label: "堆栈管理", icon: <Layers size={18} /> },
   { key: "images", label: "镜像管理", icon: <Image size={18} /> },
   { key: "volumes", label: "数据卷管理", icon: <Database size={18} /> },
+  { key: "networks", label: "网络管理", icon: <Network size={18} /> },
   { key: "notifications", label: "通知中心", icon: <Bell size={18} /> },
   { key: "settings", label: "系统设置", icon: <Settings size={18} /> },
 ];

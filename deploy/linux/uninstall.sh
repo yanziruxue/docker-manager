@@ -9,6 +9,9 @@
 # ============================================
 set -euo pipefail
 
+# 固定 PATH：精简 Debian 容器 / 最小镜像常缺 /usr/sbin，会导致 userdel / groupdel 找不到
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
 APP_NAME="docker-manager-yanzi"
 INSTALL_DIR="/opt/${APP_NAME}"
 # 数据/日志/配置都在安装目录下，--keep 时保留 data/ 子目录
@@ -19,6 +22,16 @@ RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 log()   { echo -e "${GREEN}[INFO]${NC}  $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 err()   { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
+
+# 命令解析：先查 PATH，再退回常见绝对路径（/usr/sbin 等）。找不到返回非 0。
+cmd_path() {
+  local name="$1" p
+  command -v "$name" 2>/dev/null && return 0
+  for p in /usr/sbin /sbin /usr/bin /bin /usr/local/sbin /usr/local/bin; do
+    if [ -x "${p}/${name}" ]; then echo "${p}/${name}"; return 0; fi
+  done
+  return 1
+}
 
 if [ "$(id -u)" -ne 0 ]; then
   err "请使用 root 权限: sudo bash uninstall.sh [--keep|--purge]"
@@ -91,10 +104,26 @@ if [ -f "/etc/sudoers.d/${APP_NAME}" ]; then
   log "已删除 /etc/sudoers.d/${APP_NAME}"
 fi
 
-# 删除用户
+# 删除用户（原先 `userdel ... || true` 会静默失败却照样打印「已删除」，属于假成功）
 if id -u "$SERVICE_USER" &>/dev/null; then
-  userdel "$SERVICE_USER" 2>/dev/null || true
-  log "已删除用户 ${SERVICE_USER}"
+  if USERDEL="$(cmd_path userdel)"; then
+    if "$USERDEL" "$SERVICE_USER" 2>/dev/null; then
+      log "已删除用户 ${SERVICE_USER}"
+    else
+      warn "删除用户 ${SERVICE_USER} 失败（可能仍有进程占用），可手动执行: userdel ${SERVICE_USER}"
+    fi
+  else
+    warn "未找到 userdel，跳过删除用户 ${SERVICE_USER}"
+  fi
+fi
+
+# 删除同名用户组（安装脚本会显式创建，卸载一并清理，避免重装时残留旧的 GID 归属）
+if getent group "$SERVICE_USER" &>/dev/null; then
+  if GROUPDEL="$(cmd_path groupdel)" && "$GROUPDEL" "$SERVICE_USER" 2>/dev/null; then
+    log "已删除用户组 ${SERVICE_USER}"
+  else
+    warn "删除用户组 ${SERVICE_USER} 失败，可手动执行: groupdel ${SERVICE_USER}"
+  fi
 fi
 
 echo ""

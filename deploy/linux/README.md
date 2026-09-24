@@ -25,8 +25,9 @@ docker-manager-yanzi.zip
 ## 系统要求
 
 - Linux x86_64（glibc，如 Debian/Ubuntu/CentOS 等）
-- Docker 已安装并运行（服务通过 docker 组访问 `/var/run/docker.sock`）
 - systemd
+- Docker + Docker Compose：**需自行预先安装**。`install.sh` 不代装 Docker，
+  检测到缺失会打印安装指引并**停止安装**（不改动系统）。
 
 ## 安装
 
@@ -40,11 +41,50 @@ sudo bash install.sh
 
 安装脚本会：
 
-1. 创建系统用户 `docker-manager-yanzi`（不可登录）并加入 `docker` 组
-2. 复制二进制到 `/opt/docker-manager-yanzi/`
-3. 创建 `data/ logs/ config/` 子目录
-4. 注册并启动 systemd 服务 `docker-manager-yanzi`
-5. 旧版本自动备份为 `/opt/docker-manager-yanzi.bak.<时间戳>`
+1. 检测 Docker / Compose：缺失即提示并停止（`--ignore-docker` 可跳过检查）
+2. 创建系统用户 `docker-manager-yanzi`（不可登录）并加入 `docker` 组
+3. 复制二进制到 `/opt/docker-manager-yanzi/`
+4. 创建 `data/ logs/ config/` 子目录
+5. 注册并启动 systemd 服务 `docker-manager-yanzi`
+6. 旧版本自动备份为 `/opt/docker-manager-yanzi.bak.<时间戳>`
+
+可选参数：
+
+```bash
+sudo bash install.sh --ignore-docker     # 跳过 Docker 检查，仅装应用（容器管理不可用）
+```
+
+## 先装 Docker（本包不代装）
+
+`install.sh` 会先检查 Docker CLI、docker 守护进程与 Compose。任一项缺失即打印安装指引并**停止安装**，不修改系统：
+
+```
+━━━ 检查 Docker 依赖 ━━━
+[WARN]  未检测到 Docker 与 Docker Compose
+
+请先安装 Docker 与 Docker Compose（本安装包不负责安装 Docker）：
+
+  Debian / Ubuntu:
+    curl -fsSL https://get.docker.com | sh
+    # 国内网络可加镜像：
+    curl -fsSL https://get.docker.com | sh -s -- --mirror Aliyun
+
+  RHEL / CentOS / Rocky / AlmaLinux:
+    dnf -y install dnf-plugins-core
+    dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+    dnf -y install docker-ce docker-ce-cli containerd.io docker-compose-plugin
+
+  装完后启用服务并确认可用：
+    systemctl enable --now docker
+    docker --version && docker compose version
+
+  然后重新执行本脚本：
+    sudo bash install.sh
+
+[ERROR] 请先安装 Docker 与 Docker Compose，安装完成后再重新执行本脚本
+```
+
+装好 Docker 后重跑 `sudo bash install.sh`：脚本会创建 `docker` 组、把服务用户加进去，并保留单元里的 `SupplementaryGroups=docker`。
 
 安装完成后访问：
 
@@ -119,6 +159,12 @@ sudo bash uninstall.sh --purge                 # 连数据一起删除
 ```
 
 ## 常见问题
+
+**机器上没装 Docker / 没装 docker-compose**
+
+`install.sh` 只做检测：缺失时会打印安装指引并以退出码 1 结束，**不改动系统**（不会调用 apt/dnf，不会写源）。按指引装好 Docker 与 Compose、确认 `docker compose version` 能正常输出后，重跑 `sudo bash install.sh` 即可。
+
+只想先把应用本体装起来（容器管理不可用）：`sudo bash install.sh --ignore-docker`
 
 **启动后报 EACCES（无法访问 docker.sock）**
 

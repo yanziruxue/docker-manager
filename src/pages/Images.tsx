@@ -33,6 +33,7 @@ import {
   fetchPullTasksApi,
   fetchPullTaskApi,
   cancelPullTaskApi,
+  removePullTaskApi,
   downloadImageApi,
   uploadImageApi,
   ApiError,
@@ -544,12 +545,36 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
     try { await cancelPullTaskApi(engineId, taskId); } catch { /* 状态由轮询同步 */ }
   };
 
-  // 拉取任务条展示范围：进行中 + 5 分钟内结束的任务
+  /**
+   * 手动清理任务条上的拉取任务（第二种清理方式，前后端同时移除）。
+   * 先本地摘掉，避免要等下一次轮询才消失；调用失败则重新拉列表校正回真实状态。
+   * 若清掉的正是详情弹窗关注的任务，一并清空 activePullTaskId（否则弹窗会退回新建表单）。
+   */
+  const removePullFromBar = async (taskId: string) => {
+    if (!engineId) return;
+    setPullTasks((prev) => prev.filter((t) => t.id !== taskId));
+    setActivePullTaskId((cur) => (cur === taskId ? null : cur));
+    try {
+      await removePullTaskApi(engineId, taskId);
+    } catch {
+      try {
+        const list = await fetchPullTasksApi(engineId);
+        setPullTasks(list);
+      } catch { /* 引擎离线等瞬时错误忽略 */ }
+    }
+  };
+
+  /**
+   * 拉取任务条展示范围：进行中 + 30 分钟内结束的任务。
+   * 30 分钟与后端 `PULL_TASK_TTL` 严格对齐 —— 到期由后端惰性清理，前端不再提前隐藏，
+   * 保证「后端还留着，前端就看得见」；手动清理走行尾「×」（前后端同时删）。
+   * 不做条数截断：截断会让保留期形同虚设（任务静默消失且无从清理）。
+   */
   const visiblePullTasks = useMemo(() => {
     const now = Date.now();
     return pullTasks.filter(
-      (t) => t.status === "pulling" || (t.endedAt && now - t.endedAt < 5 * 60 * 1000)
-    ).slice(0, 6);
+      (t) => t.status === "pulling" || (t.endedAt && now - t.endedAt < 30 * 60 * 1000)
+    );
   }, [pullTasks]);
 
   /**
@@ -1025,6 +1050,16 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
                 <span className="flex items-center gap-1 text-xs text-blue-500 whitespace-nowrap">
                   <Eye size={12} /> 详情
                 </span>
+                {t.status !== "pulling" && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); void removePullFromBar(t.id); }}
+                    title="清理该任务（前后端同时移除）"
+                    aria-label="清理该任务"
+                    className="flex items-center justify-center w-5 h-5 shrink-0 text-slate-400 rounded hover:bg-slate-200 hover:text-slate-700"
+                  >
+                    <X size={13} />
+                  </button>
+                )}
                 {t.status === "pulling" && (
                   <button
                     onClick={(e) => { e.stopPropagation(); cancelPullFromBar(t.id); }}
