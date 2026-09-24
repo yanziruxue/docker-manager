@@ -17,18 +17,18 @@
 
 ## 开发进度总览
 
-> 最后更新：2026-09-19
+> 最后更新：2026-09-24
 
 ### 当前状态
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.24.0**（**未发布**）；含七项用户可见改动 + 3 项缺陷修复：① 堆栈编辑「格式化」支持**平铺 YAML 自动补缩进**（并修正触发时机，原先该分支永不触发）；② **网络管理**提至与「数据卷管理」同级的顶级导航（网络↔容器映射 / 增删改 / 上下行流量）；③ 网络 **host 驱动全局仅允许创建 1 个**；④ 仪表盘-资源监控改为**环形仪表盘**（CPU 各核小环 + 镜像 / 数据卷占用环）；⑤ 资源监控新增**内存双曲线图**（系统 + Docker 占用）、**网络上下行双曲线图**（10 秒~5 分钟时间范围）与**磁盘利用率表格**；⑥ 堆栈「格式化」改为**数组写法**（`environment` / `labels` 映射折叠成 `- K=V`，纯标量序列折叠成行内 `[a, b]`）；⑦ 镜像**拉取任务**前后端保留期统一 **30 分钟**，并在「详情」右侧新增 **×** 手动清理（前后端同时移除）。**修复**：创建堆栈「上传文件」方法的上传区此前只是**装饰性 div**（无点击 / 拖拽处理，形同失效）——已实现点击 / 拖拽导入 compose。上一未发布版 **v1.23.11**：镜像加速源改为 **daemon.json 代码编辑器**——设置页直接以 JSON 形式展示并编辑宿主机 `/etc/docker/daemon.json` 全文（语法高亮 / 行号 / 实时校验 / 格式化），点「保存到 daemon.json」整份写回（写前备份），内容有变化时弹窗询问**是否重启 Docker 生效**（左「重启」/ 右「暂不重启」）。上一发布版 **v1.23.6**：UI 精简——移除「本机设备」卡片标题下的说明文字 |
+| 当前版本 | **v1.24.0**（**已发布 2026-09-24** · [Release](https://github.com/yanziruxue/docker-manager/releases/tag/v1.24.0)，当前 **Latest**）；含七项用户可见改动 + 3 项缺陷修复：① 堆栈编辑「格式化」支持**平铺 YAML 自动补缩进**（并修正触发时机，原先该分支永不触发）；② **网络管理**提至与「数据卷管理」同级的顶级导航（网络↔容器映射 / 增删改 / 上下行流量）；③ 网络 **host 驱动全局仅允许创建 1 个**；④ 仪表盘-资源监控改为**环形仪表盘**（CPU 各核小环 + 镜像 / 数据卷占用环）；⑤ 资源监控新增**内存双曲线图**（系统 + Docker 占用）、**网络上下行双曲线图**（10 秒~5 分钟时间范围）与**磁盘利用率表格**；⑥ 堆栈「格式化」改为**数组写法**（`environment` / `labels` 映射折叠成 `- K=V`，纯标量序列折叠成行内 `[a, b]`）；⑦ 镜像**拉取任务**前后端保留期统一 **30 分钟**，并在「详情」右侧新增 **×** 手动清理（前后端同时移除）。**修复**：创建堆栈「上传文件」方法的上传区此前只是**装饰性 div**（无点击 / 拖拽处理，形同失效）——已实现点击 / 拖拽导入 compose。上一（并入同一 Release 发布的）**v1.23.11**：镜像加速源改为 **daemon.json 代码编辑器**——设置页直接以 JSON 形式展示并编辑宿主机 `/etc/docker/daemon.json` 全文（语法高亮 / 行号 / 实时校验 / 格式化），点「保存到 daemon.json」整份写回（写前备份），内容有变化时弹窗询问**是否重启 Docker 生效**（左「重启」/ 右「暂不重启」）。上一发布版 **v1.23.6**：UI 精简——移除「本机设备」卡片标题下的说明文字 |
 | 版本号规则 | Major 人工发布；Minor 新功能；Patch 修复/优化/UI。v1.22.0 因新增「镜像更新→通知中心」与「硬件指纹作主键」两项新能力归为 Minor |
-| 最新 Release | [v1.23.6](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.6)（UI 精简；含 `quick-install.sh` asset）；上一版 [v1.23.5](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.5) |
-| 源码分支 | `main`（当前发布点 `89adaa6754931a3d879a8d47d86e9cced59377ce`；上一版 `22117a0325c6fffc5264dfa159a17155eb6d3091`） |
+| 最新 Release | [v1.24.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.24.0)（七项改动 + 3 项修复；assets：版本化 zip + latest 别名 + `quick-install.sh`；notes 合并 v1.23.7→v1.24.0）；上一版 [v1.23.6](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.6) |
+| 源码分支 | `main`（当前发布点 `9697b7678644ff44d22969595005d3b5c94240ad`；上一版 `89adaa6754931a3d879a8d47d86e9cced59377ce`） |
 | 部署注意 | **改过 `deploy/linux/*.service` 的版本，OTA 后必须重跑 `install.sh`**（或在「设置 → 本机设备」页复制一键修复命令）——OTA 只替换二进制，不更新单元文件 |
-| 交付包 | **v1.24.0（本地已出包 · 未发布）** `docker-manager-yanzi-linux-x64-v1.24.0.zip` 42,949,964 B，SHA-256 `6ee5871302bd88b8efb248121b143494b571c57edd4cfb77481b2a2ddbbd0b84`（5 成员）；上一未发布版 v1.23.11 `docker-manager-yanzi-linux-x64-v1.23.11.zip` 42,933,917 B，SHA-256 `1f83e4b5625829a984065469f2db0eb84aa6904b1e4298f0a077e29ff97ad810` |
+| 交付包 | **v1.24.0（已发布 · [Release](https://github.com/yanziruxue/docker-manager/releases/tag/v1.24.0)）** `docker-manager-yanzi-linux-x64-v1.24.0.zip` 42,949,964 B，SHA-256 `6ee5871302bd88b8efb248121b143494b571c57edd4cfb77481b2a2ddbbd0b84`（5 成员，已上传且远端 size 与本地一致）；`latest` 别名 `docker-manager-yanzi-linux-x64.zip`（同内容）+ `quick-install.sh` 9,371 B。历史未发布版 v1.23.11 `docker-manager-yanzi-linux-x64-v1.23.11.zip` 42,933,917 B，SHA-256 `1f83e4b5625829a984065469f2db0eb84aa6904b1e4298f0a077e29ff97ad810` |
 | 架构 | REST + WS + SSE 三通道；Socket / TCP / SSH 三种引擎 |
 | 目标平台 | Linux x64（SEA 单可执行文件），Unraid / 自托管 NAS |
 
@@ -119,7 +119,7 @@
 
 ---
 
-## v1.24.0 — 2026-09-19（未发布）
+## v1.24.0 — 2026-09-19（已发布 2026-09-24）
 
 > 用户可见改动：① 堆栈「格式化」支持平铺 YAML 自动补缩进（并修正触发时机）；② 新增「网络管理」独立导航（原在数据卷管理 tab 内，本次提至与数据卷管理同级侧边栏）；③ 网络管理 host 驱动网络全局仅允许创建 1 个；④ 仪表盘-资源监控改为**环形仪表盘**（CPU 各核小环 + 镜像/数据卷占用环）；⑤ 资源监控新增**内存双曲线图**（系统占用 + Docker 占用，下方显示最大支持 / 已安装大小）、**网络上下行双曲线图**（含 10 秒~5 分钟时间范围）与**磁盘利用率表格**；⑥ 堆栈「格式化」改为**数组写法**（`environment` / `labels` 映射 → `- K=V`；纯标量序列 → 行内 `[a, b]`）；⑦ 镜像**拉取任务**两端保留期统一 **30 分钟**，并在「详情」右侧新增 **×** 手动清理（前后端同时移除）——即「30 分钟自动清理」+「手动 × 清理」两种并存。
 >
@@ -204,6 +204,18 @@
 
 - 视反馈决定是否给网络管理页加「按容器筛选网络」或「网络流量趋势图」。
 - 视反馈决定是否把仪表盘其余卡片也统一为仪表风格。
+
+### 🚀 发布记录（2026-09-24）
+
+- **Release**：[v1.24.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.24.0)（已转正 · 当前 **Latest**）
+- **源码 commit**：`9697b7678644ff44d22969595005d3b5c94240ad`（`main`）
+- **assets**：
+  - `docker-manager-yanzi-linux-x64-v1.24.0.zip` — 42,949,964 B，SHA-256 `6ee5871302bd88b8efb248121b143494b571c57edd4cfb77481b2a2ddbbd0b84`
+  - `docker-manager-yanzi-linux-x64.zip` — 同内容（latest 稳定别名，供 `quick-install.sh` 与手动下载）
+  - `quick-install.sh` — 9,371 B
+- **Release notes**：因上一发布版为 v1.23.6，本次 notes **合并 v1.23.7 → v1.24.0 六个累积未发布版本**的完整变更（22,451 字符，含首部汇总导语）。
+- **备注（踩坑）**：`gh release create` 带资产时的行为是**先建 Draft、传完资产再转为正式**。本次 42 MB 上传超出命令超时导致进程中断，Release 停在 **Draft** 且只到位 `quick-install.sh`；已用 `gh release upload --clobber` 补传两个 zip、`gh release edit --notes-file` 覆盖为合并稿、再 `--draft=false --latest` 转正。
+- **升级路径**：应用内「系统更新 → 检查更新」应能发现 v1.24.0（GitHub Releases 单一源，已为非 draft / 非 prerelease / Latest）。
 
 ---
 
