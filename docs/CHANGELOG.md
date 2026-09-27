@@ -23,12 +23,12 @@
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.31.1**（**未发布** · 2026-09-27）；**修复「OTA 更新完成后页面永不自动刷新」**（用户报告「更新完成后不会自动退出登录」）：两条更新链路原先都用走 `request()` 封装的 `fetchAppVersion()`（`/api/system/version`，需登录）当「新进程是否上线」判据，而 v1.31.0 的 `REINIT_REQUIRED` 拦截把该端点排除在白名单外 ⇒ 账号待重设期间**必然 403** ⇒ 被读成「进程还没起来」⇒ `reload()` 永不执行（`Settings.tsx` 侧更是 `.catch()` 无计数、**无限轮询**），浏览器永久停在**旧前端 bundle**（看着仍「已登录」、业务请求全 403）；另 `App.tsx` 的 `attempts > 40` 计数写在 `.then()` 里，下载超 60s 就会提前停掉轮询。**修法**：新增共享模块 **`src/lib/restart-wait.ts`** —— **判据与状态码解耦**（裸 `fetch` 探活；「探到 `403 REINIT_REQUIRED`」＝**新进程铁证**立即刷新；或「失联→恢复」刷新；另有兜底盲刷与总超时，绝不无限轮询），两条链路统一改走它（**自动更新传 `blindReloadAfterMs: null` 不盲刷**以免打断下载、**手动更新传 `60_000`** 允许兜底刷新），并给两处加 `restartWaitRef` 取消上一个等待循环 + 卸载清理（**清理必须放在独立的「仅挂载/卸载」effect**，不能并进依赖 `authState` 的 effect，否则升级中切到重设态会取消等待、丢掉刷新）。**落点按用户确认：保留会话** ⇒ 刷新后进**「账号重新设置」页**（不强制登出），普通重启仍不掉线。新增回归门禁 **`scripts/check-restart-wait.mjs`（18 项 + 2 处负向自检）**。上一版 **v1.31.0**（**未发布** · 2026-09-27）；**找回码规则收敛为 18~24 位 + 区分大小写**（`normalizeRecoveryCode` 由 `toUpperCase()` 改为 `trim()`；前端 `RECOVERY_MIN_LENGTH=18`/`RECOVERY_MAX_LENGTH=24`、后端 `RECOVERY_MIN_CODE_LENGTH=18`/`RECOVERY_MAX_CODE_LENGTH=24`；文案统一「找回码需 18~24 位」；`/api/auth/recovery` 补 `minLength`/`maxLength`）**并撤销 v1.30.3 的 `allowLegacy` 放行与 `RECOVERY_LEGACY_CODE_LENGTH` 常量**（18 位本身已合法）；为免把按「大写哈希」存的老记录锁死，新增 **`legacyUpperVariants()` 回退**（仅当输入含小写时额外试一次大写变体）⇒ **新记录输入错大小写仍 401，老记录输入小写仍可用**。**同版新增「升级后强制重走账号初始化」**：引入 **`credentialVersion`**（本版要求 **2**），老记录无该字段 ⇒ `needsReinit=true` ⇒ 登录后**强制重走「用户名 + 密码 + 找回码」**（`SetupWizard mode="reinit"`）；服务端在 `/api` 层加 **`REINIT_REQUIRED` 拦截**（白名单仅 `/auth/{init-status,login,logout,me,reinit,reset-by-recovery}`，其余含全部业务接口返回 **`403 {code:"REINIT_REQUIRED"}`**）—— ⚠️ **该拦截中间件必须注册在 `/api/auth/*` 路由之前**（Express 按注册顺序执行）；新增 **`POST /api/auth/reinit`**（成功即 `destroySessionsForUser` 作废该用户**全部会话**并连当前会话一并销毁）⇒ 前端回登录页用新凭据重登（`LoginPage` 加绿色 `notice` 提示条）；**安全底线：reinit 仍需先以旧凭据登录**，否则任何访问者都能夺取管理员。**同版验证**：hooks 门禁 + 前后端 `tsc` 三项 0 退出；老库全链路冒烟 **40/40 PASS**、全新安装路径 **11/11 PASS**（含 `403 REINIT_REQUIRED`、会话 A/B 双双作废、历史大写记录输入小写 → 200、新记录输入全大写/全小写各 → 401、`credentialVersion=2` 落盘）。⚠️ **浏览器侧 UI 回归未做**（外网权限被拒）。上一版 **v1.30.3**（**未发布** · 2026-09-27）；**密码找回码 18 → 24 位 + 旧码兼容**（前端 `RECOVERY_LENGTH` / 后端 `RECOVERY_CODE_LENGTH` 双双改为 24；新增 `allowLegacy` 开关：`init` 与「设置/重设」**仅收 24 位**，`reset-by-recovery` **额外接受历史 18 位码** —— 因该路由「先格式校验、后比哈希」，一律严格会把已设旧码的用户在忘密码时永久锁死；放宽**仅在长度**，字符集 / 哈希比对 / 10 分钟限流均不变。验证：隔离单测 **32/32** + 真实服务端冒烟 **21/21**（含「库中换成 18 位码哈希 → 用该码重置成功 200」的零锁死核心用例）。详见本版段）。上一版 **v1.30.2**（**未发布** · 2026-09-27）；**Compose 格式化补齐两条规范 + 新增规范文档**（① `unquoteListScalars` **列表去引号**：`- '8080:80'` → `- 8080:80`，判据为**逐值回验**（纯量形式重解析须仍为同一字符串）⇒ 自动挡下 `"123"`/`'true'`/`"[::1]:80"`；② `forceBlockStyle` 改为**只对非空集合**置 `flow=false` ⇒ `data: {}` 不再被展开成两行；③ 新增 **`docs/编码规范compose.md`**（规范 + 实现管线 + 已知限制 + 自检清单 + 实测前后对照）。修复隔离单测 **20/20** 通过、文档自校验 **11/11** 通过（附录 A「输出」与格式化器真实产出**逐字节一致**）。详见本版段）。上一版 **v1.30.1**（**未发布** · 2026-09-27）；**安装数量上报载荷补全**（与本机设备卡片 13 项**逐项对齐**：新增 `deviceFile` + `details`（主板型号 / 产品序列号 / 系统UUID + CPU / GPU / 内存 / 硬盘明细）；卡片文案改为「仅上传本机应用安装信息用于安装数量收集」）。上一版 **v1.30.0**（**未发布** · 2026-09-27）；**Compose 编辑器「格式化」升级为「规范对齐 + 保留注释」**（对齐《YAML 编码规范 · Docker Compose 专用》：数组一律**块状**、服务参数按 **§4.2** 排序（**image 置末**）、顶层 **§4.1** 排序、**全程保留注释**；格式化逻辑提炼为可导出纯函数 `formatComposeYaml`；新增前端依赖 **`yaml@2`**）。上一版 **v1.29.0**（**未发布** · 2026-09-26）；**安装量/活跃度上报模型重构 + 设备标识文件「写一次 + 自愈校验」+ 上传开关**——① 端点改 **`https://yanzi-api.ziruxue.top/api/yanzi-docker/event`**，新增鉴权头 **`X-Telemetry-Key`**（＝设备标识）；② 上报时机＝**安装/重装 + 每次启动或重启 + 每 12 小时**，失败 **10 分钟重试**（401/403 不密集重试），载荷新增 **`installedAt`** 且**不含任何业务数据**；③ 删掉前端从未接线的 `GET /api/telemetry/stats` 死代码；④ 标识文件落点改 **`<安装目录>/config/device.info`**，**只在创建时写一次**，重装/更新启动时按**「创建时间 vs 修改时间」**校验（容差 2 秒、只比 mtime、btime 不可用则跳过），不一致即**重新生成**（24 小时内不重报 install）；运行态拆到 `config/telemetry-state.json`（老配置自动迁移 `installReported`）；⑤ **系统设置 → 本机设备**新增 **「上传安装数量统计」开关（默认开启）**，存 `settings.json` 的 `telemetry.enabled`，关闭后不发任何请求；卡片只显示**「安装时间」**一行 + 上传开关（按用户要求**已移除「下次上报」「上报地址」「上次上报」三行、「上报时机…」说明段，以及「最近一次上报未成功…」失败块**；「已修改，点 APPLY 保存后生效」「当前为关闭状态」两条开关状态提示保留）。⑥ **上传开关开启或关闭都立即触发一次上报**（`PUT /api/settings` 检测 `telemetry.enabled` 前后值变化 → `reportOnToggle`，install+active 均发、载荷带 `uploadEnabled` 字段；关闭方向绕过「上传已关闭」守卫）。已隔离实测 12 项（桩掉 fetch 核对报文、重建/限流/删除/升级迁移/开关生效、开关变更即上报 install+active 且 `uploadEnabled` 随方向翻转、关闭方向绕过守卫仍发出、对照组 `reportOnce(false)` 被守卫拦下）。上一版 **v1.28.0**（**未发布** · 2026-09-25）；**两项仪表盘新增**——① **磁盘磁贴新增「读写速率 + 利用率」双轴曲线**（形态与处理器曲线一致：**常驻 + 自带折叠开关**，原利用率表降为可折叠区；三条序列＝读速率/写速率走左轴 MB/s、平均利用率走右轴固定 0–100%；后端 `ResourceSample.disks` **复用本帧已采的磁盘数据**，刻意不重调 `sampleHostDisks()`；远程引擎自动不渲染）。② **四处曲线（处理器 / 内存 / 网络 / 磁盘）统一支持「悬停取值」**——鼠标移到曲线上显示**游标竖线 + 每个序列的圆点 + 数值提示框**，提示框首行为**该点时间标签**，各序列按各自轴格式化；`LineChart` 新增 `labels` / `formatValue` / `yMaxRight` / `formatMaxRight`。已出包、未发布。上一版 **v1.27.2**（**未发布** · 2026-09-25）；**🚨 P0 回归修复——登录后白屏**。v1.27.1 把 `TileGrid.useMinWidth()` 的两个 hook 写在了 `Dashboard.tsx` 的「提前 return」之后，违反 Rules of Hooks：首次渲染 `loading=true` 走 `LoadingState` 分支（只调 2 个 hook），数据到达后再次渲染多出 2 个 hook → React 抛 `Rendered more hooks than during the previous render` 并卸载整棵树 → `#root` 为空（白屏）。修复＝把两个 hook 移到提前 return **之前**；并新增门禁 `scripts/check-hooks.mjs`（TS AST 扫描「hook 在提前 return 之后 / 位于条件分支内」，已挂到 `npm run build:frontend` 之前）。**已出包（21:53）、未发布**。上一版 **v1.27.1**（**未发布** · **⚠️ 已部署该版的实例会白屏，勿再部署**）——新增 `TileGrid.useMinWidth()` 按断点重组列的构成（**≥1800** 三列＝原编排 / **1024–1799** 两列＝磁盘归列 1、网络归列 2 / **<1024** 单列堆叠还原原顺序）；**该修复本身有效，已保留在 v1.27.2 中**。上一版 **v1.27.0**（**未发布** · 已出包 · 2026-09-25）；**五项仪表盘改动**——① **镜像磁贴移到第 2 列**（堆栈正下方）→ 第 2 列＝容器/堆栈/镜像、第 3 列＝网络/磁盘；② 容器磁贴标题「Docker 容器」→「**容器**」；③ **网络曲线可按网口 / Docker 虚拟网卡选择**（新功能：后端读 `/proc/net/dev` 逐网口差分采样 + 新增 `GET /api/engines/:id/net-interfaces`；前端磁贴头下拉，默认「全部（容器合计）」与旧口径完全一致，选中的网口按磁贴持久化，网桥用「网络管理」页的网络名打标签）；④ 系统概览新增「**正常运行时间**」（后端读 `/proc/uptime`）；⑤ 处理器磁贴**折叠后仍显示「整体负载」横条**，整体负载曲线常驻、可折叠后**单独显示**（`Tile` 新增 `persistent` 插槽）。上三版 **v1.26.2**（**未发布** · **已被本版取代**）：「处理器 / 内存」口径统一——① 处理器副标题 `合计 26% / 400%` → **`整体负载 26% / 100%`**（不再用 `ncpu×100` 总容量分母），整体负载曲线量程固定 **0–100%**；② 内存副标题补 **`· 剩余 x.x GB`**，双曲线量程钉在**已安装总量**（上限＝「共多少」），**删除「最大支持大小 / 已安装大小 / 空闲」一行**（`memMaxSupportedMB` 前端不再使用，后端字段保留）。上两版 **v1.26.1**（**未发布** · **已被取代**）：卡片**只有图标可点**（去掉整卡跳转）+ **Docker 容器磁贴移除 4 条状态进度条**；**v1.26.0**（**未发布** · **已被取代**）：仪表盘「Docker 容器」「堆栈」两个磁贴改为 **Unraid 式卡片**（卡片 = 图标 + 名称 + 「▶ 运行中 / ■ 已停止」状态，堆栈卡片右侧为 `N/M` 容器数；**点容器图标开 WebUI**——未运行 / 未配置弹 Toast，**点堆栈图标弹容器子表**；两个磁贴各加一排状态筛选；容器磁贴移除「未使用镜像可清理」提示；子表抽为共享组件 `StackContainersModal`）。上一版 **v1.25.0**（**未发布**）；五项改动——① **镜像锁定**（新功能）：可锁定镜像使其在「清理未使用」时被跳过，锁定状态持久化在服务端 `config/image-locks.json`（`id` / `ref` 双匹配，同时覆盖「多 tag 镜像」与「同 tag 重新拉取」两种场景；**无锁定时仍走原生 `prune -a` 零回归**，有锁定时自行枚举候选并逐个 `rmi`）；② 镜像分类简化为「**使用中 / 未使用**」（悬空归入未使用，未使用数量**包含锁定项**，另单独显示已锁定数量）；③ 资源监控仪表盘精简，移除「Docker 镜像占用」「Docker 数据卷占用」两个环形仪表（连带清理 `Gauge` import 与 `volumes` 死参数；后端 `imageDiskMB` / `volumeDiskMB` 字段保留未动）；④ **仪表盘重构为 Unraid 式三列磁贴布局**（新增 `Tile` / `TileGrid`，三列断点反推 1800px；磁贴可折叠、**只折叠不移除**、折叠态存 localStorage；处理器改横向条形、内存改双曲线磁贴；移除 4 个统计卡片与「最近活动」，`activities` prop 一并去掉）；⑤ **处理器磁贴新增「整体负载曲线」**（可独立折叠，后端 `ResourceSample` 补采 `cpuPercent`），并把处理器 / 内存 / 网络三处曲线的时间范围统一为磁贴头下拉（10 秒~5 分钟，按磁贴持久化 `dm.chart.<id>.range`）。上一已发布版 **v1.24.0**（2026-09-24 · [Release](https://github.com/yanziruxue/docker-manager/releases/tag/v1.24.0) · 当前 **Latest**）：含七项用户可见改动 + 3 项缺陷修复：① 堆栈编辑「格式化」支持**平铺 YAML 自动补缩进**（并修正触发时机，原先该分支永不触发）；② **网络管理**提至与「数据卷管理」同级的顶级导航（网络↔容器映射 / 增删改 / 上下行流量）；③ 网络 **host 驱动全局仅允许创建 1 个**；④ 仪表盘-资源监控改为**环形仪表盘**（CPU 各核小环 + 镜像 / 数据卷占用环）；⑤ 资源监控新增**内存双曲线图**（系统 + Docker 占用）、**网络上下行双曲线图**（10 秒~5 分钟时间范围）与**磁盘利用率表格**；⑥ 堆栈「格式化」改为**数组写法**（`environment` / `labels` 映射折叠成 `- K=V`，纯标量序列折叠成行内 `[a, b]`）；⑦ 镜像**拉取任务**前后端保留期统一 **30 分钟**，并在「详情」右侧新增 **×** 手动清理（前后端同时移除）。**修复**：创建堆栈「上传文件」方法的上传区此前只是**装饰性 div**（无点击 / 拖拽处理，形同失效）——已实现点击 / 拖拽导入 compose。上一（并入同一 Release 发布的）**v1.23.11**：镜像加速源改为 **daemon.json 代码编辑器**——设置页直接以 JSON 形式展示并编辑宿主机 `/etc/docker/daemon.json` 全文（语法高亮 / 行号 / 实时校验 / 格式化），点「保存到 daemon.json」整份写回（写前备份），内容有变化时弹窗询问**是否重启 Docker 生效**（左「重启」/ 右「暂不重启」）。上一发布版 **v1.23.6**：UI 精简——移除「本机设备」卡片标题下的说明文字 |
+| 当前版本 | **v1.31.1**（**已发布 2026-09-27** · [Release](https://github.com/yanziruxue/docker-manager/releases/tag/v1.31.1) · commit `841770d1b131a28e3d915d7d40c856424fd2da3d`）；**修复「OTA 更新完成后页面永不自动刷新」**（用户报告「更新完成后不会自动退出登录」）：两条更新链路原先都用走 `request()` 封装的 `fetchAppVersion()`（`/api/system/version`，需登录）当「新进程是否上线」判据，而 v1.31.0 的 `REINIT_REQUIRED` 拦截把该端点排除在白名单外 ⇒ 账号待重设期间**必然 403** ⇒ 被读成「进程还没起来」⇒ `reload()` 永不执行（`Settings.tsx` 侧更是 `.catch()` 无计数、**无限轮询**），浏览器永久停在**旧前端 bundle**（看着仍「已登录」、业务请求全 403）；另 `App.tsx` 的 `attempts > 40` 计数写在 `.then()` 里，下载超 60s 就会提前停掉轮询。**修法**：新增共享模块 **`src/lib/restart-wait.ts`** —— **判据与状态码解耦**（裸 `fetch` 探活；「探到 `403 REINIT_REQUIRED`」＝**新进程铁证**立即刷新；或「失联→恢复」刷新；另有兜底盲刷与总超时，绝不无限轮询），两条链路统一改走它（**自动更新传 `blindReloadAfterMs: null` 不盲刷**以免打断下载、**手动更新传 `60_000`** 允许兜底刷新），并给两处加 `restartWaitRef` 取消上一个等待循环 + 卸载清理（**清理必须放在独立的「仅挂载/卸载」effect**，不能并进依赖 `authState` 的 effect，否则升级中切到重设态会取消等待、丢掉刷新）。**落点按用户确认：保留会话** ⇒ 刷新后进**「账号重新设置」页**（不强制登出），普通重启仍不掉线。新增回归门禁 **`scripts/check-restart-wait.mjs`（18 项 + 2 处负向自检）**。上一版 **v1.31.0**（**已随 v1.31.1 发布** · 2026-09-27）；**找回码规则收敛为 18~24 位 + 区分大小写**（`normalizeRecoveryCode` 由 `toUpperCase()` 改为 `trim()`；前端 `RECOVERY_MIN_LENGTH=18`/`RECOVERY_MAX_LENGTH=24`、后端 `RECOVERY_MIN_CODE_LENGTH=18`/`RECOVERY_MAX_CODE_LENGTH=24`；文案统一「找回码需 18~24 位」；`/api/auth/recovery` 补 `minLength`/`maxLength`）**并撤销 v1.30.3 的 `allowLegacy` 放行与 `RECOVERY_LEGACY_CODE_LENGTH` 常量**（18 位本身已合法）；为免把按「大写哈希」存的老记录锁死，新增 **`legacyUpperVariants()` 回退**（仅当输入含小写时额外试一次大写变体）⇒ **新记录输入错大小写仍 401，老记录输入小写仍可用**。**同版新增「升级后强制重走账号初始化」**：引入 **`credentialVersion`**（本版要求 **2**），老记录无该字段 ⇒ `needsReinit=true` ⇒ 登录后**强制重走「用户名 + 密码 + 找回码」**（`SetupWizard mode="reinit"`）；服务端在 `/api` 层加 **`REINIT_REQUIRED` 拦截**（白名单仅 `/auth/{init-status,login,logout,me,reinit,reset-by-recovery}`，其余含全部业务接口返回 **`403 {code:"REINIT_REQUIRED"}`**）—— ⚠️ **该拦截中间件必须注册在 `/api/auth/*` 路由之前**（Express 按注册顺序执行）；新增 **`POST /api/auth/reinit`**（成功即 `destroySessionsForUser` 作废该用户**全部会话**并连当前会话一并销毁）⇒ 前端回登录页用新凭据重登（`LoginPage` 加绿色 `notice` 提示条）；**安全底线：reinit 仍需先以旧凭据登录**，否则任何访问者都能夺取管理员。**同版验证**：hooks 门禁 + 前后端 `tsc` 三项 0 退出；老库全链路冒烟 **40/40 PASS**、全新安装路径 **11/11 PASS**（含 `403 REINIT_REQUIRED`、会话 A/B 双双作废、历史大写记录输入小写 → 200、新记录输入全大写/全小写各 → 401、`credentialVersion=2` 落盘）。⚠️ **浏览器侧 UI 回归未做**（外网权限被拒）。上一版 **v1.30.3**（**已随 v1.31.1 发布** · 2026-09-27）；**密码找回码 18 → 24 位 + 旧码兼容**（前端 `RECOVERY_LENGTH` / 后端 `RECOVERY_CODE_LENGTH` 双双改为 24；新增 `allowLegacy` 开关：`init` 与「设置/重设」**仅收 24 位**，`reset-by-recovery` **额外接受历史 18 位码** —— 因该路由「先格式校验、后比哈希」，一律严格会把已设旧码的用户在忘密码时永久锁死；放宽**仅在长度**，字符集 / 哈希比对 / 10 分钟限流均不变。验证：隔离单测 **32/32** + 真实服务端冒烟 **21/21**（含「库中换成 18 位码哈希 → 用该码重置成功 200」的零锁死核心用例）。详见本版段）。上一版 **v1.30.2**（**已随 v1.31.1 发布** · 2026-09-27）；**Compose 格式化补齐两条规范 + 新增规范文档**（① `unquoteListScalars` **列表去引号**：`- '8080:80'` → `- 8080:80`，判据为**逐值回验**（纯量形式重解析须仍为同一字符串）⇒ 自动挡下 `"123"`/`'true'`/`"[::1]:80"`；② `forceBlockStyle` 改为**只对非空集合**置 `flow=false` ⇒ `data: {}` 不再被展开成两行；③ 新增 **`docs/编码规范compose.md`**（规范 + 实现管线 + 已知限制 + 自检清单 + 实测前后对照）。修复隔离单测 **20/20** 通过、文档自校验 **11/11** 通过（附录 A「输出」与格式化器真实产出**逐字节一致**）。详见本版段）。上一版 **v1.30.1**（**已随 v1.31.1 发布** · 2026-09-27）；**安装数量上报载荷补全**（与本机设备卡片 13 项**逐项对齐**：新增 `deviceFile` + `details`（主板型号 / 产品序列号 / 系统UUID + CPU / GPU / 内存 / 硬盘明细）；卡片文案改为「仅上传本机应用安装信息用于安装数量收集」）。上一版 **v1.30.0**（**已随 v1.31.1 发布** · 2026-09-27）；**Compose 编辑器「格式化」升级为「规范对齐 + 保留注释」**（对齐《YAML 编码规范 · Docker Compose 专用》：数组一律**块状**、服务参数按 **§4.2** 排序（**image 置末**）、顶层 **§4.1** 排序、**全程保留注释**；格式化逻辑提炼为可导出纯函数 `formatComposeYaml`；新增前端依赖 **`yaml@2`**）。上一版 **v1.29.0**（**已随 v1.31.1 发布** · 2026-09-26）；**安装量/活跃度上报模型重构 + 设备标识文件「写一次 + 自愈校验」+ 上传开关**——① 端点改 **`https://yanzi-api.ziruxue.top/api/yanzi-docker/event`**，新增鉴权头 **`X-Telemetry-Key`**（＝设备标识）；② 上报时机＝**安装/重装 + 每次启动或重启 + 每 12 小时**，失败 **10 分钟重试**（401/403 不密集重试），载荷新增 **`installedAt`** 且**不含任何业务数据**；③ 删掉前端从未接线的 `GET /api/telemetry/stats` 死代码；④ 标识文件落点改 **`<安装目录>/config/device.info`**，**只在创建时写一次**，重装/更新启动时按**「创建时间 vs 修改时间」**校验（容差 2 秒、只比 mtime、btime 不可用则跳过），不一致即**重新生成**（24 小时内不重报 install）；运行态拆到 `config/telemetry-state.json`（老配置自动迁移 `installReported`）；⑤ **系统设置 → 本机设备**新增 **「上传安装数量统计」开关（默认开启）**，存 `settings.json` 的 `telemetry.enabled`，关闭后不发任何请求；卡片只显示**「安装时间」**一行 + 上传开关（按用户要求**已移除「下次上报」「上报地址」「上次上报」三行、「上报时机…」说明段，以及「最近一次上报未成功…」失败块**；「已修改，点 APPLY 保存后生效」「当前为关闭状态」两条开关状态提示保留）。⑥ **上传开关开启或关闭都立即触发一次上报**（`PUT /api/settings` 检测 `telemetry.enabled` 前后值变化 → `reportOnToggle`，install+active 均发、载荷带 `uploadEnabled` 字段；关闭方向绕过「上传已关闭」守卫）。已隔离实测 12 项（桩掉 fetch 核对报文、重建/限流/删除/升级迁移/开关生效、开关变更即上报 install+active 且 `uploadEnabled` 随方向翻转、关闭方向绕过守卫仍发出、对照组 `reportOnce(false)` 被守卫拦下）。上一版 **v1.28.0**（**已随 v1.31.1 发布** · 2026-09-25）；**两项仪表盘新增**——① **磁盘磁贴新增「读写速率 + 利用率」双轴曲线**（形态与处理器曲线一致：**常驻 + 自带折叠开关**，原利用率表降为可折叠区；三条序列＝读速率/写速率走左轴 MB/s、平均利用率走右轴固定 0–100%；后端 `ResourceSample.disks` **复用本帧已采的磁盘数据**，刻意不重调 `sampleHostDisks()`；远程引擎自动不渲染）。② **四处曲线（处理器 / 内存 / 网络 / 磁盘）统一支持「悬停取值」**——鼠标移到曲线上显示**游标竖线 + 每个序列的圆点 + 数值提示框**，提示框首行为**该点时间标签**，各序列按各自轴格式化；`LineChart` 新增 `labels` / `formatValue` / `yMaxRight` / `formatMaxRight`。已出包（已随 v1.31.1 发布）。上一版 **v1.27.2**（**已随 v1.31.1 发布** · 2026-09-25）；**🚨 P0 回归修复——登录后白屏**。v1.27.1 把 `TileGrid.useMinWidth()` 的两个 hook 写在了 `Dashboard.tsx` 的「提前 return」之后，违反 Rules of Hooks：首次渲染 `loading=true` 走 `LoadingState` 分支（只调 2 个 hook），数据到达后再次渲染多出 2 个 hook → React 抛 `Rendered more hooks than during the previous render` 并卸载整棵树 → `#root` 为空（白屏）。修复＝把两个 hook 移到提前 return **之前**；并新增门禁 `scripts/check-hooks.mjs`（TS AST 扫描「hook 在提前 return 之后 / 位于条件分支内」，已挂到 `npm run build:frontend` 之前）。**已出包（21:53）、已随 v1.31.1 发布**。上一版 **v1.27.1**（**已随 v1.31.1 发布** · **⚠️ 已部署该版的实例会白屏，勿再部署**）——新增 `TileGrid.useMinWidth()` 按断点重组列的构成（**≥1800** 三列＝原编排 / **1024–1799** 两列＝磁盘归列 1、网络归列 2 / **<1024** 单列堆叠还原原顺序）；**该修复本身有效，已保留在 v1.27.2 中**。上一版 **v1.27.0**（**已随 v1.31.1 发布** · 已出包 · 2026-09-25）；**五项仪表盘改动**——① **镜像磁贴移到第 2 列**（堆栈正下方）→ 第 2 列＝容器/堆栈/镜像、第 3 列＝网络/磁盘；② 容器磁贴标题「Docker 容器」→「**容器**」；③ **网络曲线可按网口 / Docker 虚拟网卡选择**（新功能：后端读 `/proc/net/dev` 逐网口差分采样 + 新增 `GET /api/engines/:id/net-interfaces`；前端磁贴头下拉，默认「全部（容器合计）」与旧口径完全一致，选中的网口按磁贴持久化，网桥用「网络管理」页的网络名打标签）；④ 系统概览新增「**正常运行时间**」（后端读 `/proc/uptime`）；⑤ 处理器磁贴**折叠后仍显示「整体负载」横条**，整体负载曲线常驻、可折叠后**单独显示**（`Tile` 新增 `persistent` 插槽）。上三版 **v1.26.2**（**已随 v1.31.1 发布** · **已被本版取代**）：「处理器 / 内存」口径统一——① 处理器副标题 `合计 26% / 400%` → **`整体负载 26% / 100%`**（不再用 `ncpu×100` 总容量分母），整体负载曲线量程固定 **0–100%**；② 内存副标题补 **`· 剩余 x.x GB`**，双曲线量程钉在**已安装总量**（上限＝「共多少」），**删除「最大支持大小 / 已安装大小 / 空闲」一行**（`memMaxSupportedMB` 前端不再使用，后端字段保留）。上两版 **v1.26.1**（**已随 v1.31.1 发布** · **已被取代**）：卡片**只有图标可点**（去掉整卡跳转）+ **Docker 容器磁贴移除 4 条状态进度条**；**v1.26.0**（**已随 v1.31.1 发布** · **已被取代**）：仪表盘「Docker 容器」「堆栈」两个磁贴改为 **Unraid 式卡片**（卡片 = 图标 + 名称 + 「▶ 运行中 / ■ 已停止」状态，堆栈卡片右侧为 `N/M` 容器数；**点容器图标开 WebUI**——未运行 / 未配置弹 Toast，**点堆栈图标弹容器子表**；两个磁贴各加一排状态筛选；容器磁贴移除「未使用镜像可清理」提示；子表抽为共享组件 `StackContainersModal`）。上一版 **v1.25.0**（**已随 v1.31.1 发布**）；五项改动——① **镜像锁定**（新功能）：可锁定镜像使其在「清理未使用」时被跳过，锁定状态持久化在服务端 `config/image-locks.json`（`id` / `ref` 双匹配，同时覆盖「多 tag 镜像」与「同 tag 重新拉取」两种场景；**无锁定时仍走原生 `prune -a` 零回归**，有锁定时自行枚举候选并逐个 `rmi`）；② 镜像分类简化为「**使用中 / 未使用**」（悬空归入未使用，未使用数量**包含锁定项**，另单独显示已锁定数量）；③ 资源监控仪表盘精简，移除「Docker 镜像占用」「Docker 数据卷占用」两个环形仪表（连带清理 `Gauge` import 与 `volumes` 死参数；后端 `imageDiskMB` / `volumeDiskMB` 字段保留未动）；④ **仪表盘重构为 Unraid 式三列磁贴布局**（新增 `Tile` / `TileGrid`，三列断点反推 1800px；磁贴可折叠、**只折叠不移除**、折叠态存 localStorage；处理器改横向条形、内存改双曲线磁贴；移除 4 个统计卡片与「最近活动」，`activities` prop 一并去掉）；⑤ **处理器磁贴新增「整体负载曲线」**（可独立折叠，后端 `ResourceSample` 补采 `cpuPercent`），并把处理器 / 内存 / 网络三处曲线的时间范围统一为磁贴头下拉（10 秒~5 分钟，按磁贴持久化 `dm.chart.<id>.range`）。上一已发布版 **v1.24.0**（2026-09-24 · [Release](https://github.com/yanziruxue/docker-manager/releases/tag/v1.24.0) · 发布时的 Latest）：含七项用户可见改动 + 3 项缺陷修复：① 堆栈编辑「格式化」支持**平铺 YAML 自动补缩进**（并修正触发时机，原先该分支永不触发）；② **网络管理**提至与「数据卷管理」同级的顶级导航（网络↔容器映射 / 增删改 / 上下行流量）；③ 网络 **host 驱动全局仅允许创建 1 个**；④ 仪表盘-资源监控改为**环形仪表盘**（CPU 各核小环 + 镜像 / 数据卷占用环）；⑤ 资源监控新增**内存双曲线图**（系统 + Docker 占用）、**网络上下行双曲线图**（10 秒~5 分钟时间范围）与**磁盘利用率表格**；⑥ 堆栈「格式化」改为**数组写法**（`environment` / `labels` 映射折叠成 `- K=V`，纯标量序列折叠成行内 `[a, b]`）；⑦ 镜像**拉取任务**前后端保留期统一 **30 分钟**，并在「详情」右侧新增 **×** 手动清理（前后端同时移除）。**修复**：创建堆栈「上传文件」方法的上传区此前只是**装饰性 div**（无点击 / 拖拽处理，形同失效）——已实现点击 / 拖拽导入 compose。上一（并入同一 Release 发布的）**v1.23.11**：镜像加速源改为 **daemon.json 代码编辑器**——设置页直接以 JSON 形式展示并编辑宿主机 `/etc/docker/daemon.json` 全文（语法高亮 / 行号 / 实时校验 / 格式化），点「保存到 daemon.json」整份写回（写前备份），内容有变化时弹窗询问**是否重启 Docker 生效**（左「重启」/ 右「暂不重启」）。上一发布版 **v1.23.6**：UI 精简——移除「本机设备」卡片标题下的说明文字 |
 | 版本号规则 | Major 人工发布；Minor 新功能；Patch 修复/优化/UI。v1.22.0 因新增「镜像更新→通知中心」与「硬件指纹作主键」两项新能力归为 Minor |
-| 最新 Release | [v1.24.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.24.0)（七项改动 + 3 项修复；assets：版本化 zip + latest 别名 + `quick-install.sh`；notes 合并 v1.23.7→v1.24.0）；上一版 [v1.23.6](https://github.com/yanziruxue/docker-manager/releases/tag/v1.23.6) |
-| 源码分支 | `main`（当前发布点 `9697b7678644ff44d22969595005d3b5c94240ad`；上一版 `89adaa6754931a3d879a8d47d86e9cced59377ce`） |
+| 最新 Release | [v1.31.1](https://github.com/yanziruxue/docker-manager/releases/tag/v1.31.1)（**OTA 更新完成后页面自动刷新**（`restart-wait.ts`，判据与状态码解耦）+ Compose 格式化保注释 / 找回码 18~24 位区分大小写 / 升级后强制重走账号初始化 / 仪表盘磁盘读写双轴曲线等；assets：版本化 zip + latest 别名 + `quick-install.sh`；notes 合并 **v1.25.0 → v1.31.1 共 15 个版本段**；⚠️ **升级后需重走一次账号初始化**）；上一版 [v1.24.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.24.0) |
+| 源码分支 | `main`（当前发布点 `841770d1b131a28e3d915d7d40c856424fd2da3d`（v1.31.1，115 文件）；上一版 `9697b7678644ff44d22969595005d3b5c94240ad`（v1.24.0）） |
 | 部署注意 | **改过 `deploy/linux/*.service` 的版本，OTA 后必须重跑 `install.sh`**（或在「设置 → 本机设备」页复制一键修复命令）——OTA 只替换二进制，不更新单元文件 |
-| 交付包 | **✅ 请用 v1.31.1（本地已打包 · 未发布 · 2026-09-27 18:09 · 合并 v1.30.0 → v1.31.1）** `docker-manager-yanzi-linux-x64-v1.31.1.zip` **43,012,286 B**，SHA-256 `a4d2a9b37d0f8d6d20c8f0b1b8c336e6f4e750aed59f003740f21dca7fd9037b`（5 成员；`latest` 别名 `docker-manager-yanzi-linux-x64.zip` 同字节）。内嵌前端 `index-VmWdxDzK.js`（1,054,919 B）+ `index-DXQY1OXf.css`（46,486 B），二进制 **130,026,688 B**（ELF `7f 45 4c 46` 已校验）、二进制 SHA-256 `ccadc027e68b2ff0f288ed39d36eaecb7b737f02b65d64445f43078c394e2350`。**包内产物端到端 15/15 PASS**（起包内 `deploy/linux/bundle.js` + 真实 HTTP）：`/` 下发 `no-cache, must-revalidate` 且引用 asset 名与本地 `dist/assets/` 完全一致（`index-VmWdxDzK.js`，**服务端实发字节数同为 1,054,919**，用 `arrayBuffer().byteLength` 比对）、hash asset 下发 `max-age=3600`；asset 内**含 `blindReloadAfterMs` / `giveUpAfterMs` / `REINIT_REQUIRED`**，**旧轮询残留 0 命中**（`attempts >= 30` / `attempts > 40`），v1.31.0 的「账号重新设置」「区分大小写」文案仍在；`/api/engines` 与 `/api/system/version` 未登录各 **401**、全新实例 `init-status` 为 `initialized=false / needsReinit=false`（拦截不误伤）。上一包 **v1.31.0（本地已打包 · 未发布 · 已作废 · 2026-09-27 17:18 · 合并 v1.30.0 → v1.31.0）** `docker-manager-yanzi-linux-x64-v1.31.0.zip` **43,011,657 B**，SHA-256 `52b1bde0b22fea3c136c6dbd3ebb0efeabb7d2347c3aba3ce1dfdf67dd4fa868`（5 成员；`latest` 别名 `docker-manager-yanzi-linux-x64.zip` 同字节）。内嵌前端 `index-DnzIT-rt.js`（1,054,253 B）+ `index-DXQY1OXf.css`（46,486 B），二进制 **130,026,688 B**（ELF `7f 45 4c 46` 已校验）、二进制 SHA-256 `2938d6f760da08462f213cda3dfbfecd02aec8d00714ec3e48f6c29c7bc8ab4a`。**包内产物端到端 29/29 PASS**（起包内 `deploy/linux/bundle.js` + 真实 HTTP）：`/` 下发 `no-cache, must-revalidate` 且引用的 asset 名与本地 `dist/assets/` 完全一致（`index-DnzIT-rt.js`，**服务端实发字节数同为 1,054,253**）、hash asset 下发 `max-age=3600`；asset 内**含新文案「账号重新设置」「区分大小写」、长度常量 `cr=18, ds=24`**，**旧文案「历史 18 位找回码仍可使用」「必须满 24 位」各 0 命中**；全新安装 `initialized=false / needsReinit=false`、`/api/engines` 返回 **401（非 403 REINIT_REQUIRED，拦截不误伤）**；`init` 17 / 25 位与含符号各 `400`、18 位混合大小写 `200`；`/api/auth/recovery` → **`length=24 / minLength=18 / maxLength=24`**；**★ 大小写敏感实测**：设置入口写入混合大小写码 → 重置时输入**全大写**与**全小写**各 **401**、输入**原样** 200、重置后新密码可登录；`users.json` 落 `credentialVersion=2` 且无明文。`bundle.js` 内标识符自检：`CREDENTIAL_VERSION` / `reinitUser` / `needsReinit` / `requiresAccountReinit` / `legacyUpperVariants` / `destroySessionsForUser` / `REINIT_REQUIRED` / `REINIT_ALLOWED_AUTH` / `/api/auth/reinit` **全命中**，`allowLegacy` 与 `RECOVERY_LEGACY_CODE_LENGTH` **均已消失**。上一包 **v1.30.3（本地已打包 · 未发布 · 2026-09-27 16:26 · 合并 v1.30.0+v1.30.1+v1.30.2+v1.30.3）** `docker-manager-yanzi-linux-x64-v1.30.3.zip` **43,009,477 B**，SHA-256 `81f44f2ab9dcc8b1b7e9987ca7da3eb45270e9e83af94e3c95c8d10d498b093b`（5 成员；`latest` 别名 `docker-manager-yanzi-linux-x64.zip` 同字节）。内嵌前端 `index-DTZwuIZz.js`（1,031,860 B）+ `index-DXQY1OXf.css`，二进制 **130,026,688 B**（ELF `7f 45 4c 46` 已校验）、二进制 SHA-256 `234df32ad36d363a28814ec1338391bbee1058ad8c3f1fd1402f69e0c55b00f4`。**端到端 13/13 PASS**（直接起包内 `deploy/linux/bundle.js` 产物 + 真实 HTTP）：`GET /` 下发 asset 名与 `dist/assets/` 完全一致（`index-DTZwuIZz.js`，字节数同为 1,031,860）、下发 JS 含新提示「历史 18 位找回码仍可使用」；`GET /api/auth/recovery` → **`length: 24`**；**设置入口 18 位 → 400「找回码必须满 24 位」**、**重置入口 18 位 → 401（而非 400，格式已放行）**、重置入口 24 位 → 200；**★ 把 `users.json` 哈希换成 18 位码 scrypt 值后，用该 18 位码重置 → 200（零锁死兼容）**、重置后新密码可登录；`users.json` 无明文码。**该包已含 v1.30.0 的新前端依赖 `yaml@2`，必须整链路重建（不可只换前端）**。**⛔ 同日 v1.30.2 包（`be77bdea…`，43,009,268 B）与 v1.30.1 包（`b18dba14…`，43,008,983 B）均已作废、勿部署**（前者无 24 位找回码改动，后者还缺去引号与空集合紧凑两项修正）。上一包 **v1.30.2（已作废）** `docker-manager-yanzi-linux-x64-v1.30.2.zip` **43,009,268 B**，SHA-256 `be77bdeab728a9a4967efec4acaa4181b01052fb24aff6038a91e09c9b029d0c`（5 成员；`latest` 别名 `docker-manager-yanzi-linux-x64.zip` 同字节）。内嵌前端 `index-DFTUNF1u.js`（1,052,288 B）+ `index-DXQY1OXf.css`，二进制 **130,026,688 B**（ELF `7f 45 4c 46` 已校验）。包内校验：`bundle.js` 含 `1.30.2` / `deviceFile` / `collectHardwareDetails` / `DEVICE_FILE` / `reportOnToggle` / `yanzi-docker/event` / `X-Telemetry-Key`；**起服务后 `GET /` 实际下发的 asset 名与 `dist/assets/` 完全一致**（`index-DFTUNF1u.js`，字节数同为 1,052,288）、`/` 下发 `no-cache, must-revalidate`；拉该 asset 复核 **`QUOTE_SINGLE` ×5 / `QUOTE_DOUBLE` ×8**（＝新增的去引号代码确在包内）、新文案「仅上传本机应用安装信息用于安装数量收集」1、旧文案「仅上传本机设备信息」0。**⛔ 同日 v1.30.1 包（`b18dba14…`，43,008,983 B）已作废、勿部署**（不含去引号与空集合紧凑两项修正）。上一包 **v1.30.1（已作废）** `docker-manager-yanzi-linux-x64-v1.30.1.zip` **43,008,983 B**，SHA-256 `b18dba145720fa1bb27b59e04a1827e89010260fcbfede797724ff120b030b4f`（5 成员；`latest` 别名 `docker-manager-yanzi-linux-x64.zip` 同字节）。内嵌前端 `index-DP_7QR3z.js`（1,051,545 B）+ `index-DXQY1OXf.css`，二进制 **130,026,688 B**（ELF `7f 45 4c 46` 已校验；较上版 +131 KB＝新增 `yaml@2`）。上一包 **v1.29.0（本地已打包 · 未发布 · 2026-09-26 22:3x · 第五次出包）** `docker-manager-yanzi-linux-x64-v1.29.0.zip` **42,964,804 B**，SHA-256 `8021ff26338dbe1abda44a853a54b4df1003b5b51d6c7bed7f7aad6d08f7d9fe`（5 成员；`latest` 别名 `docker-manager-yanzi-linux-x64.zip` 同字节）。内嵌前端 `index-BLRjQQWX.js` + `index-Cyz0Tb5B.css`，二进制 129,895,616 B（ELF `7f 45 4c 46` 已校验）。**卡片可见信息最终收敛为**：上传开关 + 用途说明 + **「安装时间」一行** + 硬件明细；**已按用户要求依次移除**「下次上报」「上报地址」两行 →「上报时机…失败 10 分钟后重试」说明段 →**「上次上报」行** →**「最近一次上报未成功…（接口未就绪 / 无外网时属正常，会自动重试）」失败块**（`nextReportAt` / `endpoint` / `reportIntervalHours` / `lastReportAt` / `lastError` 字段仍在 `GET /api/telemetry/status` 返回值中，保留接口契约；「已修改，点右下角 APPLY 保存后生效」「当前为关闭状态（已保存）」两条开关状态提示保留）。包内校验：`bundle.js` 含 `1.29.0` / `yanzi-docker/event` / `X-Telemetry-Key` / `telemetry-state.json`，**含「最近一次上报未成功」「从未成功上报」「接口未就绪」均为 false**；**起服务后 `GET /` 实际返回的 asset 名与 `dist/assets/` 一致**（`index-BLRjQQWX.js`）；`/` 下发 `no-cache, must-revalidate`；前端产物中「上次上报」「从未成功上报」「最近一次上报未成功」「接口未就绪」「会自动重试」**各 0 命中**，「安装时间」「上传安装数量统计」「保存后生效」「当前为关闭状态」各 1 命中；**浏览器实测两态**：① 默认 —— 「上次上报 / 失败块 / 接口未就绪」均 `false`、「安装时间」与开关在位、琥珀元素 **0**、`__errs=0`；② `?err=1`（后端返回 `lastError: "fetch failed"`）—— **失败块仍不出现**（`.border-amber-200` 元素数 **0**、页面文字不含 `fetch failed`）。`/api/telemetry/status` 返回 **200**、**`/api/telemetry/stats` 返回 404（已删除）**。已作废的四次同版本包：42,964,320 B `41535e27…`（第四次）／42,964,532 B `6b0fd03a…`（第三次）／42,964,576 B `6db4c1ea…`（第二次）／42,964,716 B `08132742…`（首次）。上一包 **v1.28.0（本地已打包 · 未发布 · 2026-09-25 22:33）** `docker-manager-yanzi-linux-x64-v1.28.0.zip` **42,961,767 B**，SHA-256 `453b316ac0f569d7372ca3f17bc940fe02234ea9ce1ab0039e122c8efc7cd0a5`（5 成员；`latest` 别名 `docker-manager-yanzi-linux-x64.zip` 同字节）。内嵌前端 `index-CdCgZBv3.js` + `index-Cyz0Tb5B.css`，二进制 129,895,616 B（ELF `7f 45 4c 46` 已校验）。包内校验：`dist/` 全部 4 个文件在 `bundle.js` 中**逐字节命中（4/4）**；**起服务后 `GET /` 实际返回的 asset 名与 `dist/assets/` 完全一致**（`index-CdCgZBv3.js` / `index-Cyz0Tb5B.css`，即内嵌前端确为本次构建）；`bundle.js` 含 `1.28.0`；前端产物含「磁盘速率曲线 / 读速率 / 写速率 / 利用率」新文案；`/` 下发 `no-cache, must-revalidate`、hash asset 下发 `public, max-age=3600`。上一包 **v1.27.2（本地已打包 · 未发布 · 2026-09-25 21:53）** `docker-manager-yanzi-linux-x64-v1.27.2.zip` **42,960,127 B**，SHA-256 `c620d4ba87373e05698d0839999a9222b209e9939564a4d92f0a6de244729142`（5 成员，含 P0 白屏修复；`latest` 别名 `docker-manager-yanzi-linux-x64.zip` 同字节）。内嵌前端 `index-DHivVXy8.js` + `index-MBxwDWR1.css`，二进制 129,895,616 B（ELF `7f 45 4c 46` 已校验）。包内校验：`dist/` 全部 4 个文件在 `bundle.js` 中**逐字节命中（4/4）**、内嵌 `index.html` 引用的 asset 名与 `dist/assets/` 完全一致、`bundle.js` 含 `1.27.2`。上一包 **⛔ v1.27.1（本地已打包 · 未发布 · 2026-09-25 21:36 · 已废弃）** `docker-manager-yanzi-linux-x64-v1.27.1.zip` **42,959,903 B**，SHA-256 `c9cfefc461c95b62b11102f300d1651dfcaf336b29767c3c670888c76d72b291`——**该包登录后白屏（Hooks 顺序违规），不得部署**；内嵌前端 `index-NezwHrp_.js`。上一包 **v1.27.0（本地已打包 · 未发布 · 2026-09-25 17:12）** `docker-manager-yanzi-linux-x64-v1.27.0.zip` **42,959,803 B**，SHA-256 `f2a7834e5bdf29c3dc39b6f0961a98947d02904d57ef78507934b4cedce55ba2`（5 成员，含全部改动）；`latest` 别名 `docker-manager-yanzi-linux-x64.zip`（同字节）。内嵌前端产物 `index-CM9gDGp0.js` + `index-MBxwDWR1.css`，二进制 129,895,616 B（ELF magic `7f 45 4c 46` 已校验；冒烟实测 `GET /` 引用的 asset 名与本地 `dist/assets/` 一致、`Cache-Control: no-cache, must-revalidate`、bundle 内含 `net-interfaces` / `listNetInterfaces` / `readHostUptimeSec` / `netIfaces` / `hostUptimeSec` 等新标识符）；**同源码重打两次 SHA 必然不同（bundle 内嵌构建时间戳），别误判**。上三未发布版 **v1.26.2 / v1.26.1 / v1.26.0**（内容已是旧交互，保留未删，待确认后清理，避免误部署，见踩坑 11）：`…-v1.26.2.zip`（42,957,476 B，SHA `9fcfc8db…`）/ `…-v1.26.1.zip`（42,957,623 B，SHA `1d9d70e9…`）/ `…-v1.26.0.zip`（42,958,150 B，SHA `d0325cc1…`）。上一未发布版 **v1.25.0** `docker-manager-yanzi-linux-x64-v1.25.0.zip` 42,955,136 B，SHA-256 `7dccab6072ba358812e66c5fd83e657f58e034f5fa42205541edf119bbc9d5ec`（含 Feature A~E）。上一已发布版 **v1.24.0（已发布 · [Release](https://github.com/yanziruxue/docker-manager/releases/tag/v1.24.0)）** `docker-manager-yanzi-linux-x64-v1.24.0.zip` 42,949,964 B，SHA-256 `6ee5871302bd88b8efb248121b143494b571c57edd4cfb77481b2a2ddbbd0b84`（已上传且远端 size 与本地一致）；`latest` 别名同内容 + `quick-install.sh` 9,371 B |
+| 交付包 | **✅ 请用 v1.31.1（**已发布 2026-09-27** · 出包 2026-09-27 18:09 · Release notes 合并 v1.25.0 → v1.31.1 共 15 段）** `docker-manager-yanzi-linux-x64-v1.31.1.zip` **43,012,286 B**，SHA-256 `a4d2a9b37d0f8d6d20c8f0b1b8c336e6f4e750aed59f003740f21dca7fd9037b`（5 成员；`latest` 别名 `docker-manager-yanzi-linux-x64.zip` 同字节）。内嵌前端 `index-VmWdxDzK.js`（1,054,919 B）+ `index-DXQY1OXf.css`（46,486 B），二进制 **130,026,688 B**（ELF `7f 45 4c 46` 已校验）、二进制 SHA-256 `ccadc027e68b2ff0f288ed39d36eaecb7b737f02b65d64445f43078c394e2350`。**包内产物端到端 15/15 PASS**（起包内 `deploy/linux/bundle.js` + 真实 HTTP）：`/` 下发 `no-cache, must-revalidate` 且引用 asset 名与本地 `dist/assets/` 完全一致（`index-VmWdxDzK.js`，**服务端实发字节数同为 1,054,919**，用 `arrayBuffer().byteLength` 比对）、hash asset 下发 `max-age=3600`；asset 内**含 `blindReloadAfterMs` / `giveUpAfterMs` / `REINIT_REQUIRED`**，**旧轮询残留 0 命中**（`attempts >= 30` / `attempts > 40`），v1.31.0 的「账号重新设置」「区分大小写」文案仍在；`/api/engines` 与 `/api/system/version` 未登录各 **401**、全新实例 `init-status` 为 `initialized=false / needsReinit=false`（拦截不误伤）。上一包 **v1.31.0（本地已打包 · 未单独上传 · 已作废 · 2026-09-27 17:18 · 合并 v1.30.0 → v1.31.0）** `docker-manager-yanzi-linux-x64-v1.31.0.zip` **43,011,657 B**，SHA-256 `52b1bde0b22fea3c136c6dbd3ebb0efeabb7d2347c3aba3ce1dfdf67dd4fa868`（5 成员；`latest` 别名 `docker-manager-yanzi-linux-x64.zip` 同字节）。内嵌前端 `index-DnzIT-rt.js`（1,054,253 B）+ `index-DXQY1OXf.css`（46,486 B），二进制 **130,026,688 B**（ELF `7f 45 4c 46` 已校验）、二进制 SHA-256 `2938d6f760da08462f213cda3dfbfecd02aec8d00714ec3e48f6c29c7bc8ab4a`。**包内产物端到端 29/29 PASS**（起包内 `deploy/linux/bundle.js` + 真实 HTTP）：`/` 下发 `no-cache, must-revalidate` 且引用的 asset 名与本地 `dist/assets/` 完全一致（`index-DnzIT-rt.js`，**服务端实发字节数同为 1,054,253**）、hash asset 下发 `max-age=3600`；asset 内**含新文案「账号重新设置」「区分大小写」、长度常量 `cr=18, ds=24`**，**旧文案「历史 18 位找回码仍可使用」「必须满 24 位」各 0 命中**；全新安装 `initialized=false / needsReinit=false`、`/api/engines` 返回 **401（非 403 REINIT_REQUIRED，拦截不误伤）**；`init` 17 / 25 位与含符号各 `400`、18 位混合大小写 `200`；`/api/auth/recovery` → **`length=24 / minLength=18 / maxLength=24`**；**★ 大小写敏感实测**：设置入口写入混合大小写码 → 重置时输入**全大写**与**全小写**各 **401**、输入**原样** 200、重置后新密码可登录；`users.json` 落 `credentialVersion=2` 且无明文。`bundle.js` 内标识符自检：`CREDENTIAL_VERSION` / `reinitUser` / `needsReinit` / `requiresAccountReinit` / `legacyUpperVariants` / `destroySessionsForUser` / `REINIT_REQUIRED` / `REINIT_ALLOWED_AUTH` / `/api/auth/reinit` **全命中**，`allowLegacy` 与 `RECOVERY_LEGACY_CODE_LENGTH` **均已消失**。上一包 **v1.30.3（本地已打包 · 未单独上传 · 2026-09-27 16:26 · 合并 v1.30.0+v1.30.1+v1.30.2+v1.30.3）** `docker-manager-yanzi-linux-x64-v1.30.3.zip` **43,009,477 B**，SHA-256 `81f44f2ab9dcc8b1b7e9987ca7da3eb45270e9e83af94e3c95c8d10d498b093b`（5 成员；`latest` 别名 `docker-manager-yanzi-linux-x64.zip` 同字节）。内嵌前端 `index-DTZwuIZz.js`（1,031,860 B）+ `index-DXQY1OXf.css`，二进制 **130,026,688 B**（ELF `7f 45 4c 46` 已校验）、二进制 SHA-256 `234df32ad36d363a28814ec1338391bbee1058ad8c3f1fd1402f69e0c55b00f4`。**端到端 13/13 PASS**（直接起包内 `deploy/linux/bundle.js` 产物 + 真实 HTTP）：`GET /` 下发 asset 名与 `dist/assets/` 完全一致（`index-DTZwuIZz.js`，字节数同为 1,031,860）、下发 JS 含新提示「历史 18 位找回码仍可使用」；`GET /api/auth/recovery` → **`length: 24`**；**设置入口 18 位 → 400「找回码必须满 24 位」**、**重置入口 18 位 → 401（而非 400，格式已放行）**、重置入口 24 位 → 200；**★ 把 `users.json` 哈希换成 18 位码 scrypt 值后，用该 18 位码重置 → 200（零锁死兼容）**、重置后新密码可登录；`users.json` 无明文码。**该包已含 v1.30.0 的新前端依赖 `yaml@2`，必须整链路重建（不可只换前端）**。**⛔ 同日 v1.30.2 包（`be77bdea…`，43,009,268 B）与 v1.30.1 包（`b18dba14…`，43,008,983 B）均已作废、勿部署**（前者无 24 位找回码改动，后者还缺去引号与空集合紧凑两项修正）。上一包 **v1.30.2（已作废）** `docker-manager-yanzi-linux-x64-v1.30.2.zip` **43,009,268 B**，SHA-256 `be77bdeab728a9a4967efec4acaa4181b01052fb24aff6038a91e09c9b029d0c`（5 成员；`latest` 别名 `docker-manager-yanzi-linux-x64.zip` 同字节）。内嵌前端 `index-DFTUNF1u.js`（1,052,288 B）+ `index-DXQY1OXf.css`，二进制 **130,026,688 B**（ELF `7f 45 4c 46` 已校验）。包内校验：`bundle.js` 含 `1.30.2` / `deviceFile` / `collectHardwareDetails` / `DEVICE_FILE` / `reportOnToggle` / `yanzi-docker/event` / `X-Telemetry-Key`；**起服务后 `GET /` 实际下发的 asset 名与 `dist/assets/` 完全一致**（`index-DFTUNF1u.js`，字节数同为 1,052,288）、`/` 下发 `no-cache, must-revalidate`；拉该 asset 复核 **`QUOTE_SINGLE` ×5 / `QUOTE_DOUBLE` ×8**（＝新增的去引号代码确在包内）、新文案「仅上传本机应用安装信息用于安装数量收集」1、旧文案「仅上传本机设备信息」0。**⛔ 同日 v1.30.1 包（`b18dba14…`，43,008,983 B）已作废、勿部署**（不含去引号与空集合紧凑两项修正）。上一包 **v1.30.1（已作废）** `docker-manager-yanzi-linux-x64-v1.30.1.zip` **43,008,983 B**，SHA-256 `b18dba145720fa1bb27b59e04a1827e89010260fcbfede797724ff120b030b4f`（5 成员；`latest` 别名 `docker-manager-yanzi-linux-x64.zip` 同字节）。内嵌前端 `index-DP_7QR3z.js`（1,051,545 B）+ `index-DXQY1OXf.css`，二进制 **130,026,688 B**（ELF `7f 45 4c 46` 已校验；较上版 +131 KB＝新增 `yaml@2`）。上一包 **v1.29.0（本地已打包 · 未单独上传 · 2026-09-26 22:3x · 第五次出包）** `docker-manager-yanzi-linux-x64-v1.29.0.zip` **42,964,804 B**，SHA-256 `8021ff26338dbe1abda44a853a54b4df1003b5b51d6c7bed7f7aad6d08f7d9fe`（5 成员；`latest` 别名 `docker-manager-yanzi-linux-x64.zip` 同字节）。内嵌前端 `index-BLRjQQWX.js` + `index-Cyz0Tb5B.css`，二进制 129,895,616 B（ELF `7f 45 4c 46` 已校验）。**卡片可见信息最终收敛为**：上传开关 + 用途说明 + **「安装时间」一行** + 硬件明细；**已按用户要求依次移除**「下次上报」「上报地址」两行 →「上报时机…失败 10 分钟后重试」说明段 →**「上次上报」行** →**「最近一次上报未成功…（接口未就绪 / 无外网时属正常，会自动重试）」失败块**（`nextReportAt` / `endpoint` / `reportIntervalHours` / `lastReportAt` / `lastError` 字段仍在 `GET /api/telemetry/status` 返回值中，保留接口契约；「已修改，点右下角 APPLY 保存后生效」「当前为关闭状态（已保存）」两条开关状态提示保留）。包内校验：`bundle.js` 含 `1.29.0` / `yanzi-docker/event` / `X-Telemetry-Key` / `telemetry-state.json`，**含「最近一次上报未成功」「从未成功上报」「接口未就绪」均为 false**；**起服务后 `GET /` 实际返回的 asset 名与 `dist/assets/` 一致**（`index-BLRjQQWX.js`）；`/` 下发 `no-cache, must-revalidate`；前端产物中「上次上报」「从未成功上报」「最近一次上报未成功」「接口未就绪」「会自动重试」**各 0 命中**，「安装时间」「上传安装数量统计」「保存后生效」「当前为关闭状态」各 1 命中；**浏览器实测两态**：① 默认 —— 「上次上报 / 失败块 / 接口未就绪」均 `false`、「安装时间」与开关在位、琥珀元素 **0**、`__errs=0`；② `?err=1`（后端返回 `lastError: "fetch failed"`）—— **失败块仍不出现**（`.border-amber-200` 元素数 **0**、页面文字不含 `fetch failed`）。`/api/telemetry/status` 返回 **200**、**`/api/telemetry/stats` 返回 404（已删除）**。已作废的四次同版本包：42,964,320 B `41535e27…`（第四次）／42,964,532 B `6b0fd03a…`（第三次）／42,964,576 B `6db4c1ea…`（第二次）／42,964,716 B `08132742…`（首次）。上一包 **v1.28.0（本地已打包 · 未单独上传 · 2026-09-25 22:33）** `docker-manager-yanzi-linux-x64-v1.28.0.zip` **42,961,767 B**，SHA-256 `453b316ac0f569d7372ca3f17bc940fe02234ea9ce1ab0039e122c8efc7cd0a5`（5 成员；`latest` 别名 `docker-manager-yanzi-linux-x64.zip` 同字节）。内嵌前端 `index-CdCgZBv3.js` + `index-Cyz0Tb5B.css`，二进制 129,895,616 B（ELF `7f 45 4c 46` 已校验）。包内校验：`dist/` 全部 4 个文件在 `bundle.js` 中**逐字节命中（4/4）**；**起服务后 `GET /` 实际返回的 asset 名与 `dist/assets/` 完全一致**（`index-CdCgZBv3.js` / `index-Cyz0Tb5B.css`，即内嵌前端确为本次构建）；`bundle.js` 含 `1.28.0`；前端产物含「磁盘速率曲线 / 读速率 / 写速率 / 利用率」新文案；`/` 下发 `no-cache, must-revalidate`、hash asset 下发 `public, max-age=3600`。上一包 **v1.27.2（本地已打包 · 未单独上传 · 2026-09-25 21:53）** `docker-manager-yanzi-linux-x64-v1.27.2.zip` **42,960,127 B**，SHA-256 `c620d4ba87373e05698d0839999a9222b209e9939564a4d92f0a6de244729142`（5 成员，含 P0 白屏修复；`latest` 别名 `docker-manager-yanzi-linux-x64.zip` 同字节）。内嵌前端 `index-DHivVXy8.js` + `index-MBxwDWR1.css`，二进制 129,895,616 B（ELF `7f 45 4c 46` 已校验）。包内校验：`dist/` 全部 4 个文件在 `bundle.js` 中**逐字节命中（4/4）**、内嵌 `index.html` 引用的 asset 名与 `dist/assets/` 完全一致、`bundle.js` 含 `1.27.2`。上一包 **⛔ v1.27.1（本地已打包 · 未单独上传 · 2026-09-25 21:36 · 已废弃）** `docker-manager-yanzi-linux-x64-v1.27.1.zip` **42,959,903 B**，SHA-256 `c9cfefc461c95b62b11102f300d1651dfcaf336b29767c3c670888c76d72b291`——**该包登录后白屏（Hooks 顺序违规），不得部署**；内嵌前端 `index-NezwHrp_.js`。上一包 **v1.27.0（本地已打包 · 未单独上传 · 2026-09-25 17:12）** `docker-manager-yanzi-linux-x64-v1.27.0.zip` **42,959,803 B**，SHA-256 `f2a7834e5bdf29c3dc39b6f0961a98947d02904d57ef78507934b4cedce55ba2`（5 成员，含全部改动）；`latest` 别名 `docker-manager-yanzi-linux-x64.zip`（同字节）。内嵌前端产物 `index-CM9gDGp0.js` + `index-MBxwDWR1.css`，二进制 129,895,616 B（ELF magic `7f 45 4c 46` 已校验；冒烟实测 `GET /` 引用的 asset 名与本地 `dist/assets/` 一致、`Cache-Control: no-cache, must-revalidate`、bundle 内含 `net-interfaces` / `listNetInterfaces` / `readHostUptimeSec` / `netIfaces` / `hostUptimeSec` 等新标识符）；**同源码重打两次 SHA 必然不同（bundle 内嵌构建时间戳），别误判**。上三未单独上传的包 **v1.26.2 / v1.26.1 / v1.26.0**（内容已是旧交互，保留未删，待确认后清理，避免误部署，见踩坑 11）：`…-v1.26.2.zip`（42,957,476 B，SHA `9fcfc8db…`）/ `…-v1.26.1.zip`（42,957,623 B，SHA `1d9d70e9…`）/ `…-v1.26.0.zip`（42,958,150 B，SHA `d0325cc1…`）。上一未单独上传的包 **v1.25.0** `docker-manager-yanzi-linux-x64-v1.25.0.zip` 42,955,136 B，SHA-256 `7dccab6072ba358812e66c5fd83e657f58e034f5fa42205541edf119bbc9d5ec`（含 Feature A~E）。上一已发布版 **v1.24.0（已发布 · [Release](https://github.com/yanziruxue/docker-manager/releases/tag/v1.24.0)）** `docker-manager-yanzi-linux-x64-v1.24.0.zip` 42,949,964 B，SHA-256 `6ee5871302bd88b8efb248121b143494b571c57edd4cfb77481b2a2ddbbd0b84`（已上传且远端 size 与本地一致）；`latest` 别名同内容 + `quick-install.sh` 9,371 B |
 | 架构 | REST + WS + SSE 三通道；Socket / TCP / SSH 三种引擎 |
 | 目标平台 | Linux x64（SEA 单可执行文件），Unraid / 自托管 NAS |
 
@@ -119,7 +119,7 @@
 
 ---
 
-## v1.31.1 — 2026-09-27（未发布）
+## v1.31.1 — 2026-09-27（**已发布 2026-09-27** · 合并 v1.25.0 → v1.31.1）
 
 > 主题：**修复「OTA 更新完成后页面永不自动刷新」** —— 升级后浏览器停在旧前端 bundle，界面看着仍是「已登录」，但点任何业务功能都 `403`，用户感知为「**更新完成后不会自动退出登录 / 没有回到账号重设页**」。
 
@@ -197,7 +197,7 @@ v1.31.0 新增的 `REINIT_REQUIRED` 拦截层把该端点**排除在白名单之
 - **未做真机 OTA 复现**（需 Linux 部署 + 老凭据版本账号）：本次结论为**代码级推导 + 桩序列断言**，未走一次真实的「下载 → 替换 → systemd 重启 → 页面刷新」。复现步骤：老账号（`credentialVersion` 缺失）+ 升级到本版 + 点「应用更新」→ 观察 `Network` 中 `/api/system/version` 由 200 变 403、且页面自动刷新进入「账号重新设置」页。
 - **重启窗口比轮询间隔短时抓不到「失联」**：若 systemd 重启 < 1s 且**账号已完成重设**（新进程也返回 200），则两条判据都不命中 ⇒ 依赖 `blindReloadAfterMs` 兜底（手动路径 60s 会刷新；**自动路径传 `null`，此场景不会自动刷新**，需手动 F5）。这是刻意取舍：自动路径若盲刷会在下载中途刷新、更容易卡死。
 - **刷新后落点是「账号重新设置」页而非登录页**：因会话跨重启保留（按用户确认的方案），若期望「升级即登出」需另加「会话与二进制版本绑定」的服务端兜底，本版不做。
-- 仍**未发布 GitHub Release**（v1.25.0 → v1.31.1 累积未发布）。
+- ~~未发布~~ ✅ **已于 2026-09-27 发布** [Release v1.31.1](https://github.com/yanziruxue/docker-manager/releases/tag/v1.31.1)：notes 合并 **v1.25.0 → v1.31.1 共 15 个版本段**（59,222 字符，含升级须知前置块），源码 commit `841770d1b131a28e3d915d7d40c856424fd2da3d`，tag `v1.31.1` 指向同一 commit。
 
 ### 交付包（2026-09-27 18:09）
 
@@ -207,15 +207,26 @@ v1.31.0 新增的 `REINIT_REQUIRED` 拦截层把该端点**排除在白名单之
 
 > 上一包 `docker-manager-yanzi-linux-x64-v1.31.0.zip`（43,011,657 B / `52b1bde0…`）**已作废** —— 它不含本次的自动刷新修复。
 
+### 发布记录（2026-09-27）
+
+| 项 | 值 |
+|---|---|
+| Tag | `v1.31.1` → commit `841770d1b131a28e3d915d7d40c856424fd2da3d`（与源码分支发布点一致） |
+| Release | [v1.31.1](https://github.com/yanziruxue/docker-manager/releases/tag/v1.31.1)（非 draft / 非 pre / 已设为 **Latest**；target = `main`） |
+| assets | `docker-manager-yanzi-linux-x64-v1.31.1.zip`（43,012,286 B，远端 digest `sha256:a4d2a9b37d0f8d6d20c8f0b1b8c336e6f4e750aed59f003740f21dca7fd9037b` **与本地 SHA 完全一致**）、`docker-manager-yanzi-linux-x64.zip`（latest 别名，同字节）、`quick-install.sh`（9,371 B） |
+| notes | 合并 **v1.25.0 → v1.31.1 共 15 个版本段**（59,222 字符），含「升级须知」前置块 |
+| 通道 | GitHub REST API（本机 `node` 无法 spawn `gh`/`git`，`publish-release.mjs` 已加 `--via-api` 回退） |
+| OTA 核验 | `/releases/latest` → `tag_name=v1.31.1`；正则 `/linux-x64.*\.zip$/i` 命中版本化 zip；下载地址 `https://github.com/yanziruxue/docker-manager/releases/download/v1.31.1/docker-manager-yanzi-linux-x64-v1.31.1.zip` |
+
 ### 下一步
 
-- **发布 GitHub Release**：合并 v1.25.0 → v1.31.1 的 notes（脚本只提取当前 TAG 一段），**必须提示「OTA 升级后需重走一次账号初始化」**。
+- ~~发布 GitHub Release~~ ✅ **已完成**（2026-09-27）：notes 合并 v1.25.0 → v1.31.1 共 15 个版本段（`publish-release.mjs --merge-from`），已含「OTA 升级后需重走一次账号初始化」与「本次升级页面不会自动刷新，请手动 F5」两条须知。
 - 补 `needsReinit → reinit → 回 login` 的**点击级**运行时回归（建议 `jsdom` 或真实浏览器）。
 - （可选）给 `POST /api/auth/login` 加失败限流。
 
 ---
 
-## v1.31.0 — 2026-09-27（未发布）
+## v1.31.0 — 2026-09-27（已随 v1.31.1 发布）
 
 > 主题：**找回码规则改为 18~24 位 + 区分大小写**（撤销 v1.30.3 的「仅 24 位 + `allowLegacy` 放行」临时策略）+ **升级后强制重走账号初始化**（用户名 / 密码 / 找回码）。
 
@@ -308,7 +319,7 @@ v1.31.0 新增的 `REINIT_REQUIRED` 拦截层把该端点**排除在白名单之
 
 ---
 
-## v1.30.3 — 2026-09-27（未发布）
+## v1.30.3 — 2026-09-27（已随 v1.31.1 发布）
 
 > 主题：**密码找回码长度 18 → 24 位**（仍为「仅字母和数字、忽略大小写」）+ **旧 18 位码兼容策略**（重置入口放行，零锁死）。
 
@@ -362,7 +373,7 @@ v1.31.0 新增的 `REINIT_REQUIRED` 拦截层把该端点**排除在白名单之
 - **隔离单测 32/32 通过**（esbuild 打包前后端两份 `validateRecoveryCode` 同进程对比）：常量值；设置入口 24 通过 / 18 与 23 被拒 / 25 位前端截断通过；重置入口 24 与 18 通过、20 与 19 被拒；清洗（剔符号 / 截断 / 保大小写）；后端 trim 与大小写不参与判定；前后端在长度 ≤ 24 时判定与文案一致，并显式断言两处「既有设计差异」（前端输入期清洗截断、后端校验原始值）。
 - **真实服务端冒烟 21/21 通过**（`tsx server/index.ts` + 临时 `DATA_DIR/CONFIG_DIR/LOG_DIR` + 独立端口）：init 带 24 位码 200；`GET /auth/recovery` 返回 `length: 24`；**设置入口** 18 位 → `400 必须满 24 位`、23 位 → 400、小写 24 位 → 200、当前密码错 → 400；**重置入口** 23 位 → 400、**18 位 → 401（而非 400，证明格式已放行）**、24 位正确码 → 200、立即复用 → 429、改后新密码可登录；**核心兼容用例**：直接把 `users.json` 的哈希换成 18 位码的 scrypt 值（模拟历史记录）→ 用该 18 位码重置 **200**，小写形式在冷却中返回 429（证明格式与大小写均已通过）；`users.json` 无任何明文码。
 
-### 交付包（本轮已出包 · 未发布）
+### 交付包（本轮已出包 · 已随 v1.31.1 发布）
 
 - `build-upload/docker-manager-yanzi-linux-x64-v1.30.3.zip` **43,009,477 B**，
   SHA-256 `81f44f2ab9dcc8b1b7e9987ca7da3eb45270e9e83af94e3c95c8d10d498b093b`（5 成员；`latest` 别名
@@ -389,7 +400,7 @@ v1.31.0 新增的 `REINIT_REQUIRED` 拦截层把该端点**排除在白名单之
 
 ---
 
-## v1.30.2 — 2026-09-27（未发布）
+## v1.30.2 — 2026-09-27（已随 v1.31.1 发布）
 
 > 主题：**补齐 v1.30.0 未落地的两条规范**（去引号 / 空集合紧凑）+ 新增 **`docs/编码规范compose.md`** 规范文档。
 > 背景：编写规范文档时对「格式化」做隔离实测，发现 ① §1.4「端口无需引号」**并未实现**（`- '8080:80'` 格式化后原样保留引号）；② §2.2 相关的**空集合**被 `forceBlockStyle` 误展开成两行（`data: {}` → `data:` + `    {}`）。经确认后一并修正。
@@ -427,7 +438,7 @@ v1.31.0 新增的 `REINIT_REQUIRED` 拦截层把该端点**排除在白名单之
 - **修复隔离单测 20/20 通过**：去引号（单/双引号端口、`environment`、`volumes`）✓；危险值保留引号（`"123"` / `'true'` / `"[::1]:8080:80"`）✓；`8080:80/udp` 可去引号 ✓；空 map / 空 seq 保持紧凑 ✓；4 组**语义等价（键序无关深比）** ✓；4 组**幂等** ✓；非法 YAML 原样返回 ✓。
 - **文档自校验 11/11 通过**：脚本抽取 `docs/编码规范compose.md` 内全部 ```` ```yaml ```` 块 → 逐个 `js-yaml.load` ＋ 断言 `formatComposeYaml(block) === block`。其中 **附录 A 的「输出」示例与格式化器真实产出逐字节一致**；6 个规范性示例全部「已符合规范」；反例块（§1.2 错误写法 / §2.2 行内数组）如预期会被格式化改动。
 
-### 交付包（本轮已出包 · 未发布）
+### 交付包（本轮已出包 · 已随 v1.31.1 发布）
 
 - `build-upload/docker-manager-yanzi-linux-x64-v1.30.2.zip` **43,009,268 B**，
   SHA-256 `be77bdeab728a9a4967efec4acaa4181b01052fb24aff6038a91e09c9b029d0c`（5 成员；`latest` 别名
@@ -454,7 +465,7 @@ v1.31.0 新增的 `REINIT_REQUIRED` 拦截层把该端点**排除在白名单之
 
 ---
 
-## v1.30.1 — 2026-09-27（未发布）
+## v1.30.1 — 2026-09-27（已随 v1.31.1 发布）
 
 > 主题：**安装数量上报载荷补全**（与本机设备卡片逐项对齐）+ 卡片文案调整。
 
@@ -494,7 +505,7 @@ v1.31.0 新增的 `REINIT_REQUIRED` 拦截层把该端点**排除在白名单之
 - hooks 门禁 + 前后端 `tsc --noEmit` 全绿。
 - **载荷隔离实测**（esbuild 打包 `telemetry.ts` + 桩 `fetch` + 临时 `CONFIG_DIR`）：打印真实上报 JSON，断言 13 项对应字段（含 `deviceFile`、`details.dmi.{boardName,productSerial,productUuid}`、`details.{cpu,gpu,memory,disk}`）**全部存在**；请求 URL / `Content-Type` / `X-Telemetry-Key` 均正确。
 
-### 交付包（本轮已出包 · 未发布）
+### 交付包（本轮已出包 · 已随 v1.31.1 发布）
 
 - **⛔ 本包已作废**（同日 v1.30.2 包取代）：不含 v1.30.2 的两项规范修正（列表去引号、空集合紧凑），**勿再部署**。
 - 本包**合并 v1.30.0 + v1.30.1 两项改动**（v1.30.0 引入前端依赖 `yaml@2`，故必须整链路重建）。
@@ -521,7 +532,7 @@ v1.31.0 新增的 `REINIT_REQUIRED` 拦截层把该端点**排除在白名单之
 - 远端接口开放后核对新增字段的落库与展示。
 - 待确认后发 GitHub Release（需把 v1.29.0 / v1.30.0 / v1.30.1 三段 notes 合并）。
 
-## v1.30.0 — 2026-09-27（未发布）
+## v1.30.0 — 2026-09-27（已随 v1.31.1 发布）
 
 > 主题：**Compose 编辑器「格式化」升级为「规范对齐 + 保留注释」**（对齐《YAML 编码规范 · Docker Compose 专用》）。
 
@@ -569,7 +580,7 @@ v1.31.0 新增的 `REINIT_REQUIRED` 拦截层把该端点**排除在白名单之
 
 - 如需保留「锚点 / 别名」或自定义排序规则，可在同一条管线（`formatComposeYaml`）内扩展。
 
-## v1.29.0 — 2026-09-26（未发布）
+## v1.29.0 — 2026-09-26（已随 v1.31.1 发布）
 
 > 主题：**安装量 / 活跃度上报模型重构**（对接新接口契约）+ **设备标识文件「写一次 + 自愈校验」** + **上传开关**。
 
@@ -643,7 +654,7 @@ v1.31.0 新增的 `REINIT_REQUIRED` 拦截层把该端点**排除在白名单之
 - 远端接口开放后做一次真机联调（核对 `X-Telemetry-Key` 鉴权与「最后活跃时间」刷新）；
 - 中心统计服务另行建设；若要区分虚拟化实例，再调整指纹维度（会改变存量 deviceId，需谨慎）。
 
-## v1.28.0 — 2026-09-25（未发布）
+## v1.28.0 — 2026-09-25（已随 v1.31.1 发布）
 
 > 两项仪表盘能力：**磁盘曲线**（读写速率 + 利用率双轴）+ **曲线悬停取值**（四个磁贴共享）。
 > 均为 Minor（新增可视化能力），无破坏性改动。
@@ -703,17 +714,17 @@ v1.31.0 新增的 `REINIT_REQUIRED` 拦截层把该端点**排除在白名单之
 
 ### 未完成 / 已知限制
 
-- **未发布**（未推源码、未建 Release）。
+- **发布**：已并入 [v1.31.1](https://github.com/yanziruxue/docker-manager/releases/tag/v1.31.1)（2026-09-27）发布；当时未单独推源码 / 建 Release。
 - 磁盘曲线仅覆盖**本机（socket 引擎）**：远程 TCP/SSH 引擎不采 `/proc/diskstats`，曲线小节自动不渲染。
 - 悬停取值依赖鼠标事件，**触屏设备无对应交互**（未做长按/点击取值）。
 
 ### 下一步
 
-- 发布时 notes 需合并 v1.25.0 → v1.28.0 **八个**未发布段。
+- ~~发布时…~~ ✅ 已随 [v1.31.1](https://github.com/yanziruxue/docker-manager/releases/tag/v1.31.1) 发布（notes 实际合并 v1.25.0 → v1.31.1 共 15 段）。
 
 ---
 
-## v1.27.2 — 2026-09-25（未发布）
+## v1.27.2 — 2026-09-25（已随 v1.31.1 发布）
 
 > 🚨 **P0 回归修复：登录后白屏** —— v1.27.1 引入的 React Hooks 调用顺序违规。
 
@@ -767,15 +778,15 @@ v1.27.1 当初漏掉这个 P0，就是因为 mock 直接给了非空数据、`lo
 ### 未完成 / 已知限制
 
 - **v1.27.1 是坏的**：已部署 v1.27.1 的实例会白屏。**不要部署 v1.27.1**，请直接上 v1.27.2（或回退 v1.27.0 —— v1.27.0 没有这两个 hook，只是保留了折叠重排缺陷）。
-- **未发布**（未推源码、未建 Release）。
+- **发布**：已并入 [v1.31.1](https://github.com/yanziruxue/docker-manager/releases/tag/v1.31.1)（2026-09-27）发布；当时未单独推源码 / 建 Release。
 
 ### 下一步
 
-- 尽快发布（建议直接发 v1.27.2，notes 合并 v1.25.0 → v1.27.2 **七个**未发布段）。
+- ✅ 已随 [v1.31.1](https://github.com/yanziruxue/docker-manager/releases/tag/v1.31.1) 发布（2026-09-27）。
 
 ---
 
-## v1.27.1 — 2026-09-25（未发布 · **线上白屏事故 · 已被 v1.27.2 取代，勿部署**）
+## v1.27.1 — 2026-09-25（已随 v1.31.1 发布 · **线上白屏事故 · 已被 v1.27.2 取代，勿部署**）
 
 > ⚠️ 本版**把线上界面打挂过**（登录后白屏，React Hooks 调用顺序违规），修复见上方 v1.27.2。
 > 本版对「折叠重排」缺陷的修复本身有效，已保留在 v1.27.2 中。
@@ -817,15 +828,15 @@ v1.27.1 当初漏掉这个 P0，就是因为 mock 直接给了非空数据、`lo
 ### 未完成 / 已知限制
 
 - 列与列之间**不共享内容高度**：某列明显较矮时其下方仍有空白（栅格固有行为，Unraid 同）。本次靠「磁盘归系统列、网络归应用列」让两列更接近。
-- **未发布**（未推源码、未建 Release）。`build-upload/` 里 v1.25.0 ~ v1.27.0 五个旧包仍保留（内容均为旧版本），发布时应只发 v1.27.1。
+- **发布**：已并入 [v1.31.1](https://github.com/yanziruxue/docker-manager/releases/tag/v1.31.1)（2026-09-27）发布；当时未单独推源码 / 建 Release。`build-upload/` 里 v1.25.0 ~ v1.27.0 五个旧包仍保留（内容均为旧版本），发布时应只发 v1.27.1。
 
 ### 下一步
 
-- 需要上线时发布 v1.27.1：`push-via-api.mjs` 推源码 + `publish-release.mjs`；**notes 必须手工合并 v1.25.0 → v1.27.1 六个未发布段**（当前 Latest 仍是 v1.24.0，`publish-release.mjs` 只提当前 TAG 一段）。
+- ✅ 已随 [v1.31.1](https://github.com/yanziruxue/docker-manager/releases/tag/v1.31.1) 发布（2026-09-27）；v1.27.1 本身因白屏事故**未单独发布**。
 
 ---
 
-## v1.27.0 — 2026-09-25（未发布）
+## v1.27.0 — 2026-09-25（已随 v1.31.1 发布）
 
 > 仪表盘五项改动：① **镜像磁贴移到第 2 列**（堆栈下方）；② 容器磁贴标题「Docker 容器」→「**容器**」；③ **网络曲线可按网口 / Docker 虚拟网卡选择**（新功能，含后端按网口采样）；④ 系统概览新增「**正常运行时间**」；⑤ 处理器磁贴**折叠后仍显示整体负载**，整体负载曲线可折叠后单独显示。
 
@@ -879,7 +890,7 @@ v1.27.1 当初漏掉这个 P0，就是因为 mock 直接给了非空数据、`lo
 
 ---
 
-## v1.26.2 — 2026-09-25（未发布 · 已被 v1.27.0 取代）
+## v1.26.2 — 2026-09-25（已随 v1.31.1 发布 · 已被 v1.27.0 取代）
 
 > 对「处理器 / 内存」两个磁贴的**指标口径**做统一：处理器副标题由「合计 26% / 400%」改为「**整体负载 26% / 100%**」并让整体负载曲线量程固定 0–100%；内存曲线量程钉在「共多少」（已安装总量），副标题补「剩余 x.x GB」，删掉「最大支持大小 / 已安装大小 / 空闲」一行。
 
@@ -911,7 +922,7 @@ v1.27.1 当初漏掉这个 P0，就是因为 mock 直接给了非空数据、`lo
 
 ---
 
-## v1.26.1 — 2026-09-25（未发布 · 已被 v1.26.2 取代）
+## v1.26.1 — 2026-09-25（已随 v1.31.1 发布 · 已被 v1.26.2 取代）
 
 > 对 v1.26.0 卡片化改动的两处调整：① 卡片**只有图标可点** —— 名称 / 状态行 / 右侧计数 / 空白一律无动作（去掉整卡跳转与 hover 暗示）；② **Docker 容器磁贴移除 4 条状态进度条**（数量信息本就在磁贴摘要与筛选条上）。
 
@@ -937,7 +948,7 @@ v1.27.1 当初漏掉这个 P0，就是因为 mock 直接给了非空数据、`lo
 
 ---
 
-## v1.26.0 — 2026-09-25（未发布）
+## v1.26.0 — 2026-09-25（已随 v1.31.1 发布）
 
 > 仪表盘「Docker 容器」「堆栈」两个磁贴改为 **Unraid 式卡片列表**：卡片 = 图标 + 名称 + 「▶ 运行中 / ■ 已停止」状态（堆栈卡片右侧多为 `N/M` 容器数）；**点容器图标开 WebUI**（未运行 / 未配置则弹提示），**点堆栈图标弹容器子表**；两个磁贴各加一排状态筛选；容器磁贴的 4 条状态进度条保留、移除「未使用镜像可清理」提示。
 
@@ -972,7 +983,7 @@ v1.27.1 当初漏掉这个 P0，就是因为 mock 直接给了非空数据、`lo
 
 ### ⚠️ 未完成 / 已知限制
 
-- **尚未发布**：未推源码、未建 GitHub Release（用户只要求出包）。
+- **发布**：已并入 [v1.31.1](https://github.com/yanziruxue/docker-manager/releases/tag/v1.31.1)（2026-09-27）发布（当时仅出包，未单独建 Release）。
 - `deploy/linux/` 留有本次构建中间产物（`bundle.js` 4.9 MB + `docker-manager-yanzi` 129.9 MB +
   `sea-prep.blob` 5.1 MB + zip 42.9 MB ≈ 178 MB）——**均在 `.gitignore` 内，不会误推**；
   如需回收空间可删（下次构建会重新生成）。
@@ -987,7 +998,7 @@ v1.27.1 当初漏掉这个 P0，就是因为 mock 直接给了非空数据、`lo
 
 ---
 
-## v1.25.0 — 2026-09-25（未发布）
+## v1.25.0 — 2026-09-25（已随 v1.31.1 发布）
 
 > ① **镜像锁定**（新功能）：可锁定镜像，使其在「清理未使用」时被跳过，锁定状态由服务端持久化；② 镜像分类简化为「**使用中 / 未使用**」，悬空归入未使用，并显示已锁定数量；③ 资源监控仪表盘精简，移除「Docker 镜像占用」「Docker 数据卷占用」两个环形仪表；④ **仪表盘重构为 Unraid 式三列磁贴布局**（磁贴可折叠、**只折叠不移除**；处理器改横向条形、内存改双曲线磁贴；移除统计卡片与「最近活动」）；⑤ **处理器磁贴新增「整体负载曲线」**（可独立折叠；后端 `ResourceSample` 补采 `cpuPercent`），并把**处理器 / 内存 / 网络三处曲线的时间范围统一**为磁贴头下拉（10 秒~5 分钟，按磁贴持久化为 `dm.chart.<id>.range`，切换仅本地切片、不发请求）。
 
