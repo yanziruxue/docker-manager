@@ -9,6 +9,7 @@ import type { ChildProcess } from "node:child_process";
 import type { DockerEngine } from "./engines.js";
 import { COMPOSE_DIR } from "./paths.js";
 import { getSettings } from "./settings.js";
+import { getImageLocks, isImageLocked, pruneStaleLocks, normalizeId, type ImageLock } from "./image-locks.js";
 import { resolveBackupDir, backupFilePath, runTar, copyTree } from "./backup.js";
 import { zipDirectory, extractZip } from "./zip.js";
 
@@ -2292,32 +2293,160 @@ export function classifyImageRemoveError(
   };
 }
 
-export async function pruneImages(engine: DockerEngine, opts?: { all?: boolean }): Promise<any> {
+/** 清理结果：`Locked` 为本次被锁定跳过、未参与清理的镜像数（供前端提示） */
+export interface PruneImagesResult {
+  ImagesDeleted: any[];
+  SpaceReclaimed: number;
+  Locked: number;
+}
+
+/**
+ * 清理镜像。
+ * - `all !== true`：仅清悬空（`docker image prune`），**不受锁定影响**。
+ * - `all === true`：清所有未被容器引用的镜像，**锁定项会被跳过**。
+ *
+ * Docker 的 `image prune -a` 不支持排除指定镜像（`--filter` 无 label 反选），所以
+ * 「存在锁定」时必须自行枚举候选集并逐个删除；「无锁定」时仍走原生 prune，
+ * 既保证零回归，`SpaceReclaimed` 也仍是 Docker 的精确统计。
+ */
+export async function pruneImages(
+  engine: DockerEngine,
+  opts?: { all?: boolean }
+): Promise<PruneImagesResult> {
   // 远程 SSH 引擎走远程 docker CLI（与镜像拉取铁律一致：远程引擎不依赖 dockerode 直连，
   // dockerode 经 SSH 隧道调用 prune 行为不可靠，易出现「点了没反应」的观感）
   const all = opts?.all === true;
   if (engine.connectionType === "ssh") {
-    return pruneImagesViaCli(engine, all);
+    return pruneImagesViaCli(engine, all, all ? getImageLocks(engine.id) : []);
   }
   const docker = getDocker(engine);
   if (!all) {
-    return await withTimeout(docker.pruneImages(), 15000);
+    const r = await withTimeout(docker.pruneImages(), 15000);
+    return { ImagesDeleted: r?.ImagesDeleted || [], SpaceReclaimed: r?.SpaceReclaimed || 0, Locked: 0 };
   }
-  // 清理未使用：等价于 `docker image prune -a`，删除所有未被容器引用的镜像（含非悬空）。
-  // Docker API 一次只能按 dangling 过滤，故分两次：悬空 + 未被引用的非悬空，合并结果。
-  const r1 = await withTimeout(docker.pruneImages({ filters: { dangling: ["true"] } }), 15000);
-  const r2 = await withTimeout(docker.pruneImages({ filters: { dangling: ["false"] } }), 15000);
-  return {
-    ImagesDeleted: [...(r1?.ImagesDeleted || []), ...(r2?.ImagesDeleted || [])],
-    SpaceReclaimed: (r1?.SpaceReclaimed || 0) + (r2?.SpaceReclaimed || 0),
-  };
+  const locks = getImageLocks(engine.id);
+  if (locks.length === 0) {
+    // 清理未使用：等价于 `docker image prune -a`，删除所有未被容器引用的镜像（含非悬空）。
+    // Docker API 一次只能按 dangling 过滤，故分两次：悬空 + 未被引用的非悬空，合并结果。
+    const r1 = await withTimeout(docker.pruneImages({ filters: { dangling: ["true"] } }), 15000);
+    const r2 = await withTimeout(docker.pruneImages({ filters: { dangling: ["false"] } }), 15000);
+    return {
+      ImagesDeleted: [...(r1?.ImagesDeleted || []), ...(r2?.ImagesDeleted || [])],
+      SpaceReclaimed: (r1?.SpaceReclaimed || 0) + (r2?.SpaceReclaimed || 0),
+      Locked: 0,
+    };
+  }
+  return pruneImagesKeepLocked(docker, engine, locks);
+}
+
+/** 取镜像层总占用（`/system/df` 的 LayersSize，字节）；失败返回 null */
+async function imageLayersSize(docker: Docker): Promise<number | null> {
+  try {
+    const df: any = await withTimeout(docker.df(), 15000);
+    const n = df?.LayersSize;
+    return typeof n === "number" && n >= 0 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 从 dockerode 镜像对象提取归一化 ID 与有效的 repo:tag 列表 */
+function imageRefsOf(img: any): { id: string; repoTags: string[] } {
+  const repoTags: string[] = (img?.RepoTags || []).filter(
+    (t: string) => !!t && t !== "<none>:<none>"
+  );
+  return { id: normalizeId(img?.Id || ""), repoTags };
+}
+
+/**
+ * 有锁定时的清理（socket / tcp）：
+ * 枚举「未被任何容器引用」的镜像 → 排除锁定项 → 逐个删除。
+ * 分两轮删除：`docker rmi` 删父镜像时若其子镜像仍在会失败，故把失败的留到下一轮重试。
+ */
+async function pruneImagesKeepLocked(
+  docker: Docker,
+  engine: DockerEngine,
+  locks: ImageLock[]
+): Promise<PruneImagesResult> {
+  const [rawContainers, rawImages] = await Promise.all([
+    withTimeout(docker.listContainers({ all: true }), 15000).catch(() => [] as any[]),
+    withTimeout(docker.listImages(), 15000),
+  ]);
+
+  // 「使用中」的唯一判据＝有容器引用该镜像 ID（与 `docker image prune -a` 的语义一致，
+  // 运行中与已停止的容器都算引用）。
+  const usedIds = new Set<string>();
+  for (const c of rawContainers || []) {
+    const id = normalizeId(c?.ImageID || "");
+    if (id) usedIds.add(id);
+  }
+
+  // 顺手清掉已不存在的锁定（镜像可能已被手动删除），再据此过滤
+  const allImages = (rawImages || []).map(imageRefsOf);
+  pruneStaleLocks(engine.id, allImages);
+
+  const candidates: { id: string; repoTags: string[]; size: number }[] = [];
+  let lockedCount = 0;
+  for (let i = 0; i < allImages.length; i++) {
+    const { id, repoTags } = allImages[i];
+    if (!id || usedIds.has(id)) continue;
+    if (isImageLocked(locks, { id, repoTags })) {
+      lockedCount++;
+      continue;
+    }
+    candidates.push({ id, repoTags, size: Number((rawImages as any[])[i]?.Size) || 0 });
+  }
+
+  if (candidates.length === 0) {
+    return { ImagesDeleted: [], SpaceReclaimed: 0, Locked: lockedCount };
+  }
+
+  const before = await imageLayersSize(docker);
+  const deleted: any[] = [];
+  let fallbackBytes = 0;
+  let remaining = candidates;
+  for (let round = 0; round < 2 && remaining.length > 0; round++) {
+    const next: typeof remaining = [];
+    for (const cand of remaining) {
+      try {
+        await withTimeout(docker.getImage(cand.id).remove(), 20000);
+        // 一个镜像对应一条记录（前端按条数统计「已删除 N 个镜像」，不能重复计数）
+        deleted.push(
+          cand.repoTags.length > 0 ? { Untagged: cand.repoTags[0] } : { Deleted: `sha256:${cand.id}` }
+        );
+        fallbackBytes += cand.size;
+      } catch {
+        next.push(cand);
+      }
+    }
+    remaining = next;
+  }
+
+  const after = before !== null ? await imageLayersSize(docker) : null;
+  const reclaimed =
+    before !== null && after !== null && before >= after ? before - after : fallbackBytes;
+  return { ImagesDeleted: deleted, SpaceReclaimed: reclaimed, Locked: lockedCount };
 }
 
 /** SSH 远程引擎：通过 `docker image prune` 清理镜像，并解析输出来适配前端格式。
- *  all=false 仅清理悬空（默认），all=true 清理所有未被容器引用的镜像（等价于 -a） */
-function pruneImagesViaCli(engine: DockerEngine, all = false): { ImagesDeleted: any[]; SpaceReclaimed: number } {
-  const cmd = all ? "docker image prune -a -f 2>&1" : "docker image prune -f 2>&1";
-  const out = sshExec(engine, cmd, { timeout: 120000 });
+ *  all=false 仅清理悬空（默认），all=true 清理所有未被容器引用的镜像（等价于 -a）。
+ *  locks 非空时改走逐个 `docker rmi`，以便跳过锁定项。 */
+function pruneImagesViaCli(
+  engine: DockerEngine,
+  all = false,
+  locks: ImageLock[] = []
+): PruneImagesResult {
+  if (!all) {
+    return { ...parseImagePruneOutput(sshExec(engine, "docker image prune -f 2>&1", { timeout: 120000 })), Locked: 0 };
+  }
+  if (locks.length === 0) {
+    return { ...parseImagePruneOutput(sshExec(engine, "docker image prune -a -f 2>&1", { timeout: 120000 })), Locked: 0 };
+  }
+  return pruneImagesCliKeepLocked(engine, locks);
+}
+
+/** 解析 `docker image prune` 的文本输出 */
+function parseImagePruneOutput(out: string): { ImagesDeleted: any[]; SpaceReclaimed: number } {
   const deleted: any[] = [];
   let space = 0;
   for (const rawLine of out.split("\n")) {
@@ -2330,6 +2459,91 @@ function pruneImagesViaCli(engine: DockerEngine, all = false): { ImagesDeleted: 
     }
   }
   return { ImagesDeleted: deleted, SpaceReclaimed: space };
+}
+
+/** 取远端 IMAGES 占用（`docker system df`，字节）；失败返回 null */
+function sshImagesDfSize(engine: DockerEngine): number | null {
+  try {
+    const out = sshExec(engine, "docker system df --format '{{.Type}}|{{.Size}}' 2>/dev/null", {
+      timeout: 30000,
+    });
+    for (const line of out.split("\n")) {
+      const [type, size] = line.trim().split("|");
+      if ((type || "").toLowerCase().startsWith("image")) {
+        const m = (size || "").match(/([\d.]+)\s*(\w+)/);
+        if (m) return parseDockerSizeToBytes(m[1], m[2]);
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** 有锁定时（SSH）：枚举未使用镜像 → 排除锁定 → `docker rmi`（Docker 自身按依赖顺序处理） */
+function pruneImagesCliKeepLocked(engine: DockerEngine, locks: ImageLock[]): PruneImagesResult {
+  const usedRaw = sshExec(
+    engine,
+    "docker ps -aq | xargs -r docker inspect --format '{{.Image}}' 2>/dev/null || true",
+    { timeout: 30000 }
+  );
+  const usedIds = new Set(usedRaw.split("\n").map((l) => normalizeId(l)).filter(Boolean));
+
+  const listRaw = sshExec(
+    engine,
+    "docker images --no-trunc --format '{{.ID}}|{{.Repository}}|{{.Tag}}' 2>/dev/null",
+    { timeout: 30000 }
+  );
+  const candidates: { id: string; ref: string }[] = [];
+  let lockedCount = 0;
+  for (const line of listRaw.split("\n")) {
+    const [rawId, repo, tag] = line.trim().split("|");
+    const id = normalizeId(rawId || "");
+    if (!id || usedIds.has(id)) continue;
+    const dangling = !repo || repo === "<none>" || tag === "<none>";
+    const ref = dangling ? "" : `${repo}:${tag}`;
+    if (isImageLocked(locks, { id, repoTags: ref ? [ref] : [] })) {
+      lockedCount++;
+      continue;
+    }
+    candidates.push({ id, ref });
+  }
+  if (candidates.length === 0) {
+    return { ImagesDeleted: [], SpaceReclaimed: 0, Locked: lockedCount };
+  }
+
+  const before = sshImagesDfSize(engine);
+  const out = sshExec(
+    engine,
+    `docker rmi ${candidates.map((c) => c.id).join(" ")} 2>&1 || true`,
+    { timeout: 300000 }
+  );
+  const removed: any[] = [];
+  for (const rawLine of out.split("\n")) {
+    const line = rawLine.trim();
+    const untagged = line.match(/^Untagged:\s*(\S+)/);
+    const deleted = line.match(/^Deleted:\s*(\S+)/);
+    if (untagged) removed.push({ Untagged: untagged[1] });
+    else if (deleted) removed.push({ Deleted: deleted[1] });
+  }
+  // 批量删除一条都没成功（如依赖顺序问题）→ 逐个兜底重试
+  if (removed.length === 0) {
+    for (const cand of candidates) {
+      try {
+        const one = sshExec(engine, `docker rmi ${cand.id} 2>&1 || true`, { timeout: 120000 });
+        const u = one.match(/^Untagged:\s*(\S+)/m);
+        const d = one.match(/^Deleted:\s*(\S+)/m);
+        if (u) removed.push({ Untagged: u[1] });
+        else if (d) removed.push({ Deleted: d[1] });
+      } catch {
+        // 单个失败不影响其余
+      }
+    }
+  }
+
+  const after = before !== null ? sshImagesDfSize(engine) : null;
+  const reclaimed = before !== null && after !== null && before >= after ? before - after : 0;
+  return { ImagesDeleted: removed, SpaceReclaimed: reclaimed, Locked: lockedCount };
 }
 
 /** 解析 docker 输出的容量（如 1.234GB / 512.3MB / 0B）为字节数 */
@@ -2759,6 +2973,23 @@ export interface ResourceSample {
   memDockerMB: number; // Docker 容器合计
   netRxKBps: number;
   netTxKBps: number;
+  /** 运行容器 CPU 合计（%），与 stats.cpuPercent 同源，供仪表盘「整体负载曲线」 */
+  cpuPercent: number;
+  /**
+   * 逐网口速率（KB/s）：键 = 网口名（含 Docker 网桥 docker0 / br-xxxx）。
+   * 仅本机 socket 引擎可读 /proc/net/dev；远程引擎为 undefined（前端回退到合计口径）。
+   */
+  netIfaces?: Record<string, { rx: number; tx: number }>;
+  /**
+   * 逐磁盘速率与利用率：键 = 设备名（`sda` / `nvme0n1` …）。
+   * `read` / `write` 单位 **MB/s**，`busy` 单位 **%**。
+   * 仅本机 socket 引擎可读 /proc/diskstats；远程引擎为 undefined（前端退化为「无曲线」）。
+   *
+   * ⚠️ 这份数据**必须复用** `getEngineResourceStats` 同一帧里已经算好的 `disks`，
+   * 绝不能在这里再调一次 `sampleHostDisks()` —— 它会写差分快照，把时间基准挪到帧中间，
+   * 导致下一帧速率虚高（与 `listNetInterfaces` 不复用 `sampleHostNetIfaces` 是同一个坑）。
+   */
+  disks?: Record<string, { read: number; write: number; busy: number }>;
 }
 
 const RESOURCE_HISTORY_MAX = 300; // 5 分钟 @1s
@@ -2778,6 +3009,17 @@ function recordResourceSample(engineId: string, s: ResourceSample): void {
 export function getResourceHistory(engineId: string, maxPoints = RESOURCE_HISTORY_MAX): ResourceSample[] {
   const arr = resourceHistory.get(engineId) || [];
   return arr.length > maxPoints ? arr.slice(arr.length - maxPoints) : arr.slice();
+}
+
+/** 宿主机正常运行时间（秒）：读 /proc/uptime（首列）；读不到返回 0（远程引擎 / 非 Linux） */
+function readHostUptimeSec(): number {
+  try {
+    const text = fs.readFileSync("/proc/uptime", "utf8");
+    const sec = Number(text.trim().split(/\s+/)[0]);
+    return Number.isFinite(sec) && sec > 0 ? Math.round(sec) : 0;
+  } catch {
+    return 0;
+  }
 }
 
 /** 宿主机磁盘统计（/proc/diskstats 差分算利用率；仅 socket 引擎） */
@@ -2846,6 +3088,125 @@ function sampleHostDisks(engineId: string): DiskStat[] {
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/** 单个网口的实时速率（/proc/net/dev 差分；仅 socket 引擎） */
+export interface NetIfaceStat {
+  name: string;
+  rxKBps: number;
+  txKBps: number;
+}
+
+/** 网络曲线可选接口（网口 + Docker 网桥虚拟网卡） */
+export interface NetIfaceOption {
+  /** 网口名（= /proc/net/dev 的键，前端据此在样本里取数） */
+  name: string;
+  /** 展示名：Docker 网桥会带上网络名，如 `iotdb-net (bridge)`；否则就是网口名 */
+  label: string;
+  kind: "host" | "docker";
+}
+
+interface NetIfaceSnapshot {
+  ts: number;
+  bytes: Map<string, { rx: number; tx: number }>;
+}
+const lastNetIfaceSnapshot = new Map<string, NetIfaceSnapshot>();
+
+/**
+ * 是否把该接口列进选择器：`lo` 无意义；`veth*` 是每个容器一对的管道端口，
+ * 数量多且没有稳定可读的标签，排除。
+ */
+function isExposedNetIface(name: string): boolean {
+  return name !== "lo" && !name.startsWith("veth");
+}
+
+/**
+ * 解析 /proc/net/dev → Map(网口名 → 自开机累计字节)。
+ * 冒号后依次是：rx bytes packets errs drop fifo frame compressed multicast | tx bytes packets …
+ * 读不到（非 Linux / 权限不足）返回空 Map。
+ */
+function readNetDevBytes(): Map<string, { rx: number; tx: number }> {
+  const cur = new Map<string, { rx: number; tx: number }>();
+  let text = "";
+  try {
+    text = fs.readFileSync("/proc/net/dev", "utf8");
+  } catch {
+    return cur;
+  }
+  for (const line of text.split("\n")) {
+    const colon = line.indexOf(":");
+    if (colon < 0) continue;
+    const name = line.slice(0, colon).trim();
+    if (!name || !isExposedNetIface(name)) continue;
+    const cols = line.slice(colon + 1).trim().split(/\s+/);
+    cur.set(name, { rx: Number(cols[0]) || 0, tx: Number(cols[8]) || 0 });
+  }
+  return cur;
+}
+
+/**
+ * 逐网口实时速率：与上次采样差分。
+ * 既覆盖物理网口（eth0 / enp1s0 / bond0…），也覆盖 Docker 在本机建的网桥虚拟网卡（docker0 / br-xxxx）。
+ * 远程引擎（tcp/ssh）读不到对端 /proc/net/dev，返回空数组。
+ */
+function sampleHostNetIfaces(engineId: string): NetIfaceStat[] {
+  const cur = readNetDevBytes();
+  if (cur.size === 0) return [];
+
+  const now = Date.now();
+  const prev = lastNetIfaceSnapshot.get(engineId);
+  const dtMs = prev ? now - prev.ts : 0;
+  const out: NetIfaceStat[] = [];
+  for (const [name, c] of cur) {
+    let rxKBps = 0;
+    let txKBps = 0;
+    if (prev && dtMs > 0) {
+      const p = prev.bytes.get(name);
+      if (p) {
+        rxKBps = Math.max(0, c.rx - p.rx) / 1024 / (dtMs / 1000);
+        txKBps = Math.max(0, c.tx - p.tx) / 1024 / (dtMs / 1000);
+      }
+    }
+    out.push({
+      name,
+      rxKBps: Math.round(rxKBps * 10) / 10,
+      txKBps: Math.round(txKBps * 10) / 10,
+    });
+  }
+  lastNetIfaceSnapshot.set(engineId, { ts: now, bytes: cur });
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * 列出网络曲线可选的接口。
+ * 数据源是 /proc/net/dev（仅本机 socket 引擎），再用 listNetworks 把
+ * `docker0` / `br-<网络 ID 前 12 位>` 这类网桥映射回 Docker 网络名 —— 也就是「网络管理」页里那些网络。
+ * 注意：只有 **bridge 驱动**会在本机留下网桥接口；overlay / macvlan / host 网络不产生独立网口，故不在列表中。
+ */
+export async function listNetInterfaces(engine: DockerEngine): Promise<NetIfaceOption[]> {
+  // 只取网口名：这里刻意不调 sampleHostNetIfaces，避免把差分快照的时间基准
+  // 挪到 SSE 采样间隔中间（会让下一帧速率虚高）。
+  const names = Array.from(readNetDevBytes().keys()).sort((a, b) => a.localeCompare(b));
+  if (names.length === 0) return [];
+
+  const bridges = new Map<string, string>();
+  try {
+    const docker = getDocker(engine);
+    const list = ((await withTimeout(docker.listNetworks(), 10000)) || []) as any[];
+    for (const n of list) {
+      if (!n || n.Driver !== "bridge" || !n.Id) continue;
+      // 默认 bridge 网络落在 docker0，其余用户自定义 bridge 网络是 br-<id 前 12 位>
+      const ifaceName = n.Name === "bridge" ? "docker0" : `br-${String(n.Id).slice(0, 12)}`;
+      bridges.set(ifaceName, `${n.Name} (bridge)`);
+    }
+  } catch {
+    // 拿不到网络列表就退回裸网口名（不影响物理网口）
+  }
+
+  return names.map((name) => {
+    const label = bridges.get(name);
+    return { name, label: label || name, kind: label ? ("docker" as const) : ("host" as const) };
+  });
+}
+
 export async function getEngineResourceStats(engine: DockerEngine): Promise<any> {
   const docker = getDocker(engine);
 
@@ -2911,6 +3272,10 @@ export async function getEngineResourceStats(engine: DockerEngine): Promise<any>
   const cpuCores = isLocal ? sampleHostCpuCores(engine.id) : [];
   // 宿主机磁盘利用率：仅本机引擎可读 /proc/diskstats
   const disks = isLocal ? sampleHostDisks(engine.id) : [];
+  // 各网口实时速率：仅本机 socket 引擎可读 /proc/net/dev（同时覆盖物理网口与 Docker 网桥虚拟网卡）
+  const netIfaces = isLocal ? sampleHostNetIfaces(engine.id) : [];
+  const netIfacesMap: Record<string, { rx: number; tx: number }> = {};
+  for (const n of netIfaces) netIfacesMap[n.name] = { rx: n.rxKBps, tx: n.txKBps };
 
   // 宿主机内存：/proc/meminfo 给出已安装/可用；系统占用 = 宿主机已用 - Docker 已用
   let memInstalledMB = memTotalMB;
@@ -2925,15 +3290,27 @@ export async function getEngineResourceStats(engine: DockerEngine): Promise<any>
     }
   }
   const memMaxSupportedMB = isLocal ? readMaxSupportedMemMB() : 0;
+  // 宿主机正常运行时间：仅本机引擎可读 /proc/uptime
+  const hostUptimeSec = isLocal ? readHostUptimeSec() : 0;
 
   const round1 = (n: number) => Math.round(n * 10) / 10;
-  // 记录时间序列样本（供仪表盘内存 / 网络折线图）
+  // 逐磁盘速率快照：**只搬运上面本帧已算好的 `disks`**，不再读一次 /proc/diskstats
+  //（再读一次会写差分快照、把时间基准挪到帧中间 → 下一帧速率虚高）
+  const disksMap: Record<string, { read: number; write: number; busy: number }> = {};
+  for (const d of disks) disksMap[d.name] = { read: d.readMBps, write: d.writeMBps, busy: d.busyPct };
+
+  // 记录时间序列样本（供仪表盘处理器 / 内存 / 网络 / 磁盘折线图）
   recordResourceSample(engine.id, {
     ts: now,
     memSystemMB,
     memDockerMB: Math.round(memoryUsageMB),
     netRxKBps: round1(netRxKBps),
     netTxKBps: round1(netTxKBps),
+    cpuPercent: Math.round(cpuPercent * 100) / 100,
+    // 逐网口速率只在有值时带上：远程引擎保持 undefined（前端回退到合计口径）
+    netIfaces: netIfaces.length > 0 ? netIfacesMap : undefined,
+    // 逐磁盘速率同理：远程引擎保持 undefined（前端显示「无曲线」）
+    disks: disks.length > 0 ? disksMap : undefined,
   });
 
   return {
@@ -2954,6 +3331,10 @@ export async function getEngineResourceStats(engine: DockerEngine): Promise<any>
     volumeDiskMB: Math.round(volumeDiskBytes / 1024 / 1024),
     netRxKBps: Math.round(netRxKBps * 10) / 10,
     netTxKBps: Math.round(netTxKBps * 10) / 10,
+    /** 逐网口实时速率（本机 socket 引擎；远程引擎为空数组） */
+    netIfaces,
+    /** 宿主机正常运行时间（秒）：本机引擎读 /proc/uptime，否则 0 */
+    hostUptimeSec,
     blockReadKB: Math.round(blockReadKB),
     blockWriteKB: Math.round(blockWriteKB),
     serverVersion: info.ServerVersion || "",

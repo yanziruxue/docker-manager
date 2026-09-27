@@ -24,6 +24,7 @@ import {
   getContainerStats,
   getEngineResourceStats,
   getResourceHistory,
+  listNetInterfaces,
   getActivityLogs,
   containerAction,
   removeContainer,
@@ -60,6 +61,7 @@ import {
   removeNetwork,
   editNetwork,
 } from "./docker.js";
+import { getImageLocks, setImageLock } from "./image-locks.js";
 import { createFullBackup, restoreFullBackup, restoreUploadedBackup, exportConfigArchive, listBackupFiles, deleteBackupFile, backupFilePath, migrateLegacyBackups } from "./backup.js";
 import { getSettings, saveSettings } from "./settings.js";
 import { startUpdateScheduler, getSchedulerStatus, runSchedulerCheckNow, checkEngineImages, getImageUpdateCache, startBackupScheduler, getBackupSchedulerStatus } from "./scheduler.js";
@@ -70,8 +72,8 @@ import { COMPOSE_DIR } from "./paths.js";
 import {
   getTelemetryStatus,
   reportOnce,
+  reportOnToggle,
   startTelemetryHeartbeat,
-  fetchRemoteStats,
 } from "./telemetry.js";
 import { createEmbeddedStatic, type EmbeddedDist } from "./serve-embedded.js";
 import { setLogLevel, getLogLevel, createLogger } from "./logger.js";
@@ -91,9 +93,13 @@ import {
   markRecoveryCodeUsed,
   recoveryCooldownRemainingMs,
   hasRecoveryCode,
-  RECOVERY_CODE_LENGTH,
+  RECOVERY_MIN_CODE_LENGTH,
+  RECOVERY_MAX_CODE_LENGTH,
+  needsReinit,
+  requiresAccountReinit,
+  reinitUser,
 } from "./users.js";
-import { createSession, getSessionUser, destroySession, requireAuth, invalidateSessionTtlCache } from "./auth.js";
+import { createSession, getSessionUser, destroySession, requireAuth, invalidateSessionTtlCache, destroySessionsForUser } from "./auth.js";
 import { runFixPermsCli, runPermissionCheckCli, expectedUid } from "./perms-cli.js";
 import { scanPermIssues, formatIssue, currentUser, fixCommandLine } from "./perms.js";
 import { checkServiceUnit, describeServiceUnitGap } from "./unit-status.js";
@@ -189,9 +195,41 @@ const __dirname = path.dirname(__filename);
 app.use(cors());
 app.use(express.json());
 
+/**
+ * 账号重新初始化期间仍然放行的 auth 接口白名单。
+ * 其余接口（业务接口以及 `/api/auth/recovery`、`/api/auth/password`）一律 403 REINIT_REQUIRED，
+ * 确保「必须完整重走一遍账号设置流程」不可被绕过（前端只是体验层，后端才是兜底）。
+ */
+const REINIT_ALLOWED_AUTH = new Set([
+  "/auth/init-status",
+  "/auth/login",
+  "/auth/logout",
+  "/auth/me",
+  "/auth/reinit",
+  "/auth/reset-by-recovery",
+]);
+
+/**
+ * 「账号待重新初始化」前置拦截。
+ * ⚠️ **必须注册在 `/api/auth/*` 路由之前**：Express 按注册顺序执行，
+ * 若放在下面的鉴权守卫处（那已在 auth 路由之后），拦不住任何 `/api/auth/*` 接口。
+ */
+app.use("/api", (req, res, next) => {
+  if (!requiresAccountReinit()) return next();
+  const p = req.path.replace(/\/+$/, "") || "/";
+  if (REINIT_ALLOWED_AUTH.has(p)) return next();
+  res.status(403).json({
+    success: false,
+    code: "REINIT_REQUIRED",
+    error: "请先完成账号重新设置（用户名 / 密码 / 找回码）",
+  });
+});
+
 // ============ 鉴权（公开路由，无需登录） ============
 app.get("/api/auth/init-status", (_req, res) => {
-  res.json({ success: true, data: { initialized: countUsers() > 0 } });
+  // needsReinit：存在「待重新初始化」的账号（老凭据版本）——
+  // 前端据此在登录后强制用户重走一遍「用户名 + 密码 + 找回码」设置流程。
+  res.json({ success: true, data: { initialized: countUsers() > 0, needsReinit: requiresAccountReinit() } });
 });
 
 app.post("/api/auth/init", (req, res) => {
@@ -233,7 +271,39 @@ app.post("/api/auth/login", (req, res) => {
     return;
   }
   createSession(res, user.id);
-  res.json({ success: true, data: { id: user.id, username: user.username, role: user.role } });
+  // needsReinit：老凭据版本账号 → 前端登录后进入「账号重新设置」流程（用户名 + 密码 + 找回码）
+  res.json({
+    success: true,
+    data: { id: user.id, username: user.username, role: user.role, needsReinit: needsReinit(user) },
+  });
+});
+
+/**
+ * 重新初始化账号（老凭据版本升级后强制重走）。
+ * 安全前提：**必须先通过旧凭据登录**（requireAuth），否则任何能访问该实例的人都能夺取管理员账号。
+ * 提交后覆盖用户名 / 密码 / 找回码（找回码必填，18~24 位且区分大小写），写凭据版本 2，
+ * 并**销毁该账号的全部会话**（用户名/密码已变更，所有端必须重新登录）。
+ */
+app.post("/api/auth/reinit", requireAuth, (req, res) => {
+  const auth = (req as any).user;
+  const record = findUserById(auth.id);
+  if (!record) {
+    res.status(404).json({ success: false, error: "用户不存在" });
+    return;
+  }
+  if (!needsReinit(record)) {
+    res.status(409).json({ success: false, error: "账号已完成重新设置" });
+    return;
+  }
+  try {
+    const updated = reinitUser(auth.id, req.body || {});
+    // 全部会话（含当前）作废，用户用新用户名 / 密码重新登录
+    destroySessionsForUser(updated.id);
+    destroySession(req, res);
+    res.json({ success: true, data: { id: updated.id, username: updated.username, role: updated.role } });
+  } catch (e: any) {
+    res.status(400).json({ success: false, error: e?.message || "重新设置账号失败" });
+  }
 });
 
 app.post("/api/auth/logout", (req, res) => {
@@ -287,7 +357,10 @@ app.get("/api/auth/recovery", requireAuth, (req, res) => {
   res.json({
     success: true,
     data: {
-      length: RECOVERY_CODE_LENGTH,
+      /** 兼容旧字段：等于上限 */
+      length: RECOVERY_MAX_CODE_LENGTH,
+      minLength: RECOVERY_MIN_CODE_LENGTH,
+      maxLength: RECOVERY_MAX_CODE_LENGTH,
       hasRecovery: hasRecoveryCode(record),
       setAt: record.recoverySetAt || null,
       lastUsedAt: record.recoveryLastUsedAt || null,
@@ -339,6 +412,7 @@ app.delete("/api/auth/recovery", requireAuth, (req, res) => {
  */
 app.post("/api/auth/reset-by-recovery", (req, res) => {
   const { username, code, newPassword } = req.body || {};
+  // 规则已统一为 18~24 位（18 位本身合法）⇒ 重置入口无需再单独放宽
   const fmtErr = validateRecoveryCode(code || "");
   if (fmtErr) {
     res.status(400).json({ success: false, error: fmtErr });
@@ -373,6 +447,7 @@ app.post("/api/auth/reset-by-recovery", (req, res) => {
 });
 
 // 鉴权守卫：除 /api/auth 外，所有 /api 路由必须登录
+// （「账号待重新初始化」的拦截在上面、对应路由注册之前）
 app.use("/api", (req, res, next) => {
   if (req.path.startsWith("/auth")) return next();
   return requireAuth(req, res, next);
@@ -385,19 +460,10 @@ app.get("/api/telemetry/status", (_req, res) => {
   res.json({ success: true, data: getTelemetryStatus() });
 });
 
-/** 立即上报一次（页面「立即上报」按钮；force=true 忽略当日已报） */
+/** 立即上报一次（页面「立即上报」按钮；force=true 忽略 12 小时周期判断） */
 app.post("/api/telemetry/report", async (_req, res) => {
   const r = await reportOnce(true);
   res.json({ success: true, data: { ...r, status: getTelemetryStatus() } });
-});
-
-/**
- * 拉取统计服务端聚合数据（后端代理转发，规避浏览器跨域）。
- * 服务端未就绪或离线时返回 null，页面优雅降级。
- */
-app.get("/api/telemetry/stats", async (_req, res) => {
-  const stats = await fetchRemoteStats();
-  res.json({ success: true, data: stats });
 });
 
 // ============ 引擎 API ============
@@ -1175,6 +1241,20 @@ app.get("/api/engines/:id/resource-history", (req, res) => {
   res.json({ success: true, data: getResourceHistory(engine.id, points) });
 });
 
+/** 网络曲线可选接口（本机网口 + Docker 网桥虚拟网卡；仅本机 socket 引擎有值，远程返回空数组） */
+app.get("/api/engines/:id/net-interfaces", async (req, res) => {
+  const engine = getEngine(req.params.id);
+  if (!engine) {
+    res.status(404).json({ success: false, error: "引擎不存在" });
+    return;
+  }
+  try {
+    res.json({ success: true, data: await listNetInterfaces(engine) });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || "获取网络接口列表失败" });
+  }
+});
+
 // ============ 资源监控 SSE 流（仪表盘实时推送） ============
 
 interface SseStream {
@@ -1317,6 +1397,9 @@ app.get("/api/settings", (_req, res) => {
 
 /** 保存系统设置 */
 app.put("/api/settings", (req, res) => {
+  // 保存前记录旧的上传开关状态，用于判定是否因本次保存发生变更
+  const prev = getSettings();
+  const prevEnabled = !!(prev?.telemetry && typeof prev.telemetry.enabled === "boolean" ? prev.telemetry.enabled : true);
   const settings = saveSettings(req.body);
   // 「会话超时」等设置变更后使 TTL 缓存立即失效，无需重启即生效
   invalidateSessionTtlCache();
@@ -1324,6 +1407,11 @@ app.put("/api/settings", (req, res) => {
   if (settings?.docker?.logLevel) {
     setLogLevel(settings.docker.logLevel);
     apiLog.info(`日志级别已更新: ${settings.docker.logLevel}`);
+  }
+  // 上传开关（开启/关闭）发生变更 → 异步触发一次上报，把最新开关状态透给远端；不阻塞响应
+  const nextEnabled = !!(settings?.telemetry && typeof settings.telemetry.enabled === "boolean" ? settings.telemetry.enabled : true);
+  if (nextEnabled !== prevEnabled) {
+    void reportOnToggle(nextEnabled).catch(() => {});
   }
   res.json({ success: true, data: settings });
 });
@@ -1645,6 +1733,37 @@ app.post("/api/engines/:id/images/prune", async (req, res) => {
   } catch (err: any) {
     apiLog.error(`${label}失败 | 引擎=${engine.name} 错误=${err.message}`);
     res.status(500).json({ success: false, error: err.message || "清理失败" });
+  }
+});
+
+// ============ 镜像锁定 API ============
+// 锁定后「清理未使用镜像」会跳过该镜像。状态存服务端，换浏览器 / 清缓存后依然生效。
+
+/** 取某引擎的镜像锁定列表 */
+app.get("/api/engines/:id/images/locks", (req, res) => {
+  const engine = getEngine(req.params.id);
+  if (!engine) { res.status(404).json({ success: false, error: "引擎不存在" }); return; }
+  res.json({ success: true, data: getImageLocks(engine.id) });
+});
+
+/** 加锁 / 解锁（body: { id, ref?, locked }） */
+app.post("/api/engines/:id/images/locks", (req, res) => {
+  const engine = getEngine(req.params.id);
+  if (!engine) { res.status(404).json({ success: false, error: "引擎不存在" }); return; }
+  const id = typeof req.body?.id === "string" ? req.body.id.trim() : "";
+  const ref = typeof req.body?.ref === "string" ? req.body.ref.trim() : "";
+  const locked = req.body?.locked === true;
+  if (!id) { res.status(400).json({ success: false, error: "缺少镜像 ID" }); return; }
+  if (!/^[0-9a-fA-F]{12,64}$/.test(id.replace(/^sha256:/i, ""))) {
+    res.status(400).json({ success: false, error: "镜像 ID 格式不合法" });
+    return;
+  }
+  try {
+    const locks = setImageLock(engine.id, { id, ref }, locked);
+    apiLog.info(`${locked ? "锁定" : "解锁"}镜像 | 引擎=${engine.name} id=${id.slice(0, 12)} ref=${ref || "-"}`);
+    res.json({ success: true, data: locks });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || "操作失败" });
   }
 });
 

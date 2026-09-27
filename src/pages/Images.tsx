@@ -18,8 +18,10 @@ import {
   Upload,
   ImageDown,
   RotateCcw,
+  Lock,
+  Unlock,
 } from "lucide-react";
-import type { DockerImage, PullTask, ImageUpdateStatusView } from "../types";
+import type { DockerImage, PullTask, ImageUpdateStatusView, ImageLock } from "../types";
 import { Tag } from "../components/Badge";
 import { ConfirmDialog, Modal } from "../components/Modal";
 import { CmdOutputModal, useCmdOutput } from "../components/CmdOutputModal";
@@ -36,6 +38,8 @@ import {
   removePullTaskApi,
   downloadImageApi,
   uploadImageApi,
+  fetchImageLocksApi,
+  setImageLockApi,
   ApiError,
 } from "../api";
 import { addOpLog } from "../opLog";
@@ -448,7 +452,8 @@ function ImageImportPanel({
 
 export function Images({ images, loading, error, engineId, onRefresh, defaultVisibleColumns, onCheckAllUpdates, onCheckImageUpdate, checkingUpdates, imageUpdateStatus, imageUpdateError }: ImagesProps) {
   const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<"all" | "dangling" | "used" | "unused">("all");
+  // 分类只有「使用中 / 未使用」；悬空不再单列，归入未使用
+  const [filter, setFilter] = useState<"all" | "used" | "unused">("all");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [confirmCleanUnused, setConfirmCleanUnused] = useState(false);
   const [showColumnPicker, setShowColumnPicker] = useState(false);
@@ -458,22 +463,38 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
   const [forceDeleteAvailable, setForceDeleteAvailable] = useState(false);
   const [pruning, setPruning] = useState(false);
   const [pruneError, setPruneError] = useState<string | null>(null);
+  /** 已锁定镜像列表（服务端持久化，换浏览器也生效） */
+  const [locks, setLocks] = useState<ImageLock[]>([]);
+  /** 正在切换锁定状态的镜像 sha256，用于按钮 loading */
+  const [lockBusy, setLockBusy] = useState<string | null>(null);
   const { cmdOutput, showOutput, closeOutput } = useCmdOutput();
+
+  // 拉取锁定列表
+  useEffect(() => {
+    if (!engineId) { setLocks([]); return; }
+    let canceled = false;
+    fetchImageLocksApi(engineId)
+      .then((list) => { if (!canceled) setLocks(Array.isArray(list) ? list : []); })
+      .catch(() => { if (!canceled) setLocks([]); });
+    return () => { canceled = true; };
+  }, [engineId]);
 
   /** 把 dockerode pruneImages 的返回格式化为 tail 文本 */
   const formatImagePrune = (result: any): string => {
     if (!result) return "（无输出）";
     const deleted = Array.isArray(result.ImagesDeleted) ? result.ImagesDeleted : [];
     const space = typeof result.SpaceReclaimed === "number" ? result.SpaceReclaimed : 0;
+    const locked = typeof result.Locked === "number" ? result.Locked : 0;
     const lines: string[] = [];
     if (deleted.length === 0) {
-      lines.push("无需清理（没有可删除的悬空或未使用镜像）");
+      lines.push("无需清理（没有可删除的未使用镜像）");
     } else {
       lines.push(`已删除 ${deleted.length} 个镜像：`);
       for (const d of deleted) {
         lines.push(`- ${d.Deleted || d.Untagged || JSON.stringify(d)}`);
       }
     }
+    if (locked > 0) lines.push(`已跳过 ${locked} 个锁定镜像（解除锁定后可清理）`);
     lines.push(`释放空间：${formatBytes(space)}`);
     return lines.join("\n");
   };
@@ -746,6 +767,35 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
     }
   };
 
+  /** 加锁 / 解锁镜像：锁定的镜像在「清理未使用」时会被跳过 */
+  const handleToggleLock = async (img: DockerImage) => {
+    if (!engineId) return;
+    const key = img.sha256 || img.id;
+    // 悬空镜像无有效引用，只按 ID 锁定
+    const ref = img.isDangling ? "" : `${img.repository}:${img.tag}`;
+    const nextLocked = !isLocked(img);
+    setLockBusy(key);
+    try {
+      const list = await setImageLockApi(engineId, { id: key, ref, locked: nextLocked });
+      setLocks(Array.isArray(list) ? list : []);
+      addOpLog({
+        action: nextLocked ? "锁定镜像" : "解锁镜像",
+        target: buildImageRef(img),
+        status: "success",
+        engineId,
+      });
+    } catch (e: any) {
+      showOutput({
+        title: nextLocked ? "锁定镜像" : "解锁镜像",
+        name: buildImageRef(img),
+        output: e.message || "操作失败",
+        failed: true,
+      });
+    } finally {
+      setLockBusy(null);
+    }
+  };
+
   const handlePruneUnused = async () => {
     if (!engineId) return;
     setPruning(true);
@@ -805,9 +855,9 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
     return images.filter((img) => {
       const matchSearch = img.repository.toLowerCase().includes(search.toLowerCase()) || img.tag.toLowerCase().includes(search.toLowerCase());
       let matchFilter = true;
-      if (filter === "dangling") matchFilter = img.isDangling;
-      else if (filter === "used") matchFilter = img.associatedContainers.length > 0;
-      else if (filter === "unused") matchFilter = img.associatedContainers.length === 0 && !img.isDangling;
+      if (filter === "used") matchFilter = img.associatedContainers.length > 0;
+      // 「未使用」= 无任何容器引用；悬空镜像已归入此分类（不再单列）
+      else if (filter === "unused") matchFilter = img.associatedContainers.length === 0;
       return matchSearch && matchFilter;
     });
   }, [images, search, filter]);
@@ -818,25 +868,40 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
     return sum + num;
   }, 0);
 
-  const danglingCount = images.filter((i) => i.isDangling).length;
-  const danglingSize = images.filter((i) => i.isDangling).reduce((sum, img) => {
+  /** MB 数值（用于汇总） */
+  const sizeMB = (img: typeof images[number]) => {
     const num = parseFloat(img.size);
-    if (img.size.includes("GB")) return sum + num * 1024;
-    return sum + num;
-  }, 0);
+    if (isNaN(num)) return 0;
+    return img.size.includes("GB") ? num * 1024 : num;
+  };
+  /** 按镜像 ID 去重：多 tag 镜像只算一个（Docker 按 ID 整体删除） */
+  const uniqImageCount = (list: typeof images) =>
+    new Set(list.map((i) => i.sha256 || i.id)).size;
+
   const isUnused = (i: typeof images[number]) => i.associatedContainers.length === 0;
+  /** 未使用总数（**包含已锁定项**，与筛选标签数字一致） */
   const unusedCount = images.filter(isUnused).length;
-  const unusedSize = images.filter(isUnused).reduce((sum, img) => {
-    const num = parseFloat(img.size);
-    if (img.size.includes("GB")) return sum + num * 1024;
-    return sum + num;
-  }, 0);
+  const unusedSize = images.filter(isUnused).reduce((sum, img) => sum + sizeMB(img), 0);
+
+  /** 该镜像是否已锁定：镜像 ID 命中，或 repo:tag 命中 */
+  const isLocked = (img: typeof images[number]) =>
+    locks.some(
+      (l) => (!!l.id && l.id === img.sha256) || (!!l.ref && l.ref === `${img.repository}:${img.tag}`)
+    );
+  /** 已锁定的镜像数（按 ID 去重） */
+  const lockedCount = uniqImageCount(images.filter(isLocked));
+  /** 被锁定因而会被清理跳过的未使用镜像数（按 ID 去重） */
+  const lockedUnusedCount = uniqImageCount(images.filter((i) => isUnused(i) && isLocked(i)));
+  /** 本次「清理未使用」实际会删除的镜像数（按 ID 去重，不含锁定项） */
+  const deletableCount = uniqImageCount(images.filter((i) => isUnused(i) && !isLocked(i)));
+  const deletableSize = images
+    .filter((i) => isUnused(i) && !isLocked(i))
+    .reduce((sum, img) => sum + sizeMB(img), 0);
 
   const filterOptions = [
     { key: "all", label: "全部", count: images.length },
-    { key: "dangling", label: "悬空", count: danglingCount },
     { key: "used", label: "使用中", count: images.filter((i) => i.associatedContainers.length > 0).length },
-    { key: "unused", label: "未使用", count: images.filter((i) => i.associatedContainers.length === 0 && !i.isDangling).length },
+    { key: "unused", label: "未使用", count: unusedCount },
   ];
 
   if (loading && images.length === 0) return <LoadingState message="正在加载镜像列表..." />;
@@ -845,7 +910,7 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
   return (
     <div className="p-6 space-y-4">
       {/* Stats Cards */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-5 gap-4">
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center"><ImageIcon size={18} className="text-blue-500" /></div>
@@ -866,19 +931,28 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
         </div>
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-amber-50 flex items-center justify-center"><AlertTriangle size={18} className="text-amber-500" /></div>
+            <div className="w-10 h-10 rounded-lg bg-green-50 flex items-center justify-center"><Layers size={18} className="text-green-500" /></div>
             <div>
-              <p className="text-xs text-slate-500">悬空镜像</p>
-              <p className="text-xl font-bold text-slate-800">{danglingCount} <span className="text-sm font-normal text-slate-400">({danglingSize.toFixed(0)} MB)</span></p>
+              <p className="text-xs text-slate-500">使用中</p>
+              <p className="text-xl font-bold text-slate-800">{images.filter((i) => i.associatedContainers.length > 0).length}</p>
             </div>
           </div>
         </div>
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-green-50 flex items-center justify-center"><Layers size={18} className="text-green-500" /></div>
+            <div className="w-10 h-10 rounded-lg bg-amber-50 flex items-center justify-center"><AlertTriangle size={18} className="text-amber-500" /></div>
             <div>
-              <p className="text-xs text-slate-500">使用中</p>
-              <p className="text-xl font-bold text-slate-800">{images.filter((i) => i.associatedContainers.length > 0).length}</p>
+              <p className="text-xs text-slate-500">未使用</p>
+              <p className="text-xl font-bold text-slate-800">{unusedCount} <span className="text-sm font-normal text-slate-400">({unusedSize.toFixed(0)} MB)</span></p>
+            </div>
+          </div>
+        </div>
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-slate-100 flex items-center justify-center"><Lock size={18} className="text-slate-500" /></div>
+            <div>
+              <p className="text-xs text-slate-500">已锁定</p>
+              <p className="text-xl font-bold text-slate-800">{lockedCount}</p>
             </div>
           </div>
         </div>
@@ -965,10 +1039,15 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
           </div>
           <button
             onClick={() => setConfirmCleanUnused(true)}
-            disabled={unusedCount === 0}
+            disabled={deletableCount === 0}
+            title={
+              lockedUnusedCount > 0
+                ? `未使用共 ${unusedCount} 个，其中 ${lockedUnusedCount} 个已锁定，本次不会清理`
+                : undefined
+            }
             className="flex items-center gap-1.5 px-3 py-2 text-sm text-white bg-red-500 rounded-lg hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <Trash2 size={14} /> 清理未使用 ({unusedCount})
+            <Trash2 size={14} /> 清理未使用 ({deletableCount})
           </button>
           {onCheckAllUpdates && (
             <button
@@ -1107,6 +1186,7 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-mono text-slate-700">{img.repository}</span>
                         {img.isDangling && <Tag text="悬空" color="amber" />}
+                        {isLocked(img) && <Tag text="已锁定" color="purple" />}
                       </div>
                     </td>
                   )}
@@ -1175,6 +1255,17 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
                               disabled: !onCheckImageUpdate,
                               onClick: () => onCheckImageUpdate?.(`${img.repository}:${img.tag}`),
                             },
+                            {
+                              label:
+                                lockBusy === (img.sha256 || img.id)
+                                  ? "处理中..."
+                                  : isLocked(img)
+                                    ? "解除锁定（允许被清理）"
+                                    : "锁定（清理未使用时跳过）",
+                              icon: isLocked(img) ? <Unlock size={14} /> : <Lock size={14} />,
+                              disabled: lockBusy === (img.sha256 || img.id),
+                              onClick: () => handleToggleLock(img),
+                            },
                             { separator: true },
                             {
                               label: img.associatedContainers.length > 0 ? "删除（使用中）" : "删除",
@@ -1224,7 +1315,13 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
         onClose={() => { setConfirmCleanUnused(false); setPruneError(null); }}
         onConfirm={() => { handlePruneUnused(); }}
         title="清理未使用镜像"
-        message={`将删除 ${unusedCount} 个未被容器引用的镜像（含悬空），释放约 ${unusedSize.toFixed(0)} MB 空间。此操作不可撤销，正在运行的容器依赖的镜像不会被删除。`}
+        message={
+          `将删除 ${deletableCount} 个未被容器引用的镜像（含悬空），释放约 ${deletableSize.toFixed(0)} MB 空间。` +
+          (lockedUnusedCount > 0
+            ? `未使用镜像共 ${unusedCount} 个，其中 ${lockedUnusedCount} 个已锁定，本次将跳过。`
+            : "") +
+          `此操作不可撤销，正在运行的容器依赖的镜像不会被删除。`
+        }
         confirmText="清理"
         danger
         loading={pruning}

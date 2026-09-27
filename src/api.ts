@@ -1,4 +1,4 @@
-import type { DockerEngine, EngineResourceStats, ResourceSample, SystemSettings, SchedulerStatus, SchedulerLastResult, ImageUpdateSummaryView, DockerNetwork, NetworkCreateOptions } from "./types";
+import type { DockerEngine, EngineResourceStats, ResourceSample, SystemSettings, SchedulerStatus, SchedulerLastResult, ImageUpdateSummaryView, DockerNetwork, NetworkCreateOptions, NetInterfaceOption } from "./types";
 
 const BASE = "/api";
 
@@ -25,13 +25,19 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
     credentials: "include",
     ...options,
   });
+  const json = await res.json().catch(() => ({ success: false, error: "响应解析失败" }));
   // 会话失效（非鉴权接口）：通知 App 回到登录页
   if (res.status === 401 && !url.startsWith("/auth/")) {
     if (typeof window !== "undefined") {
       window.dispatchEvent(new Event("auth:unauthorized"));
     }
   }
-  const json = await res.json().catch(() => ({ success: false, error: "响应解析失败" }));
+  // 账号待重新初始化：通知 App 进入「账号重新设置」流程（后端兜底拒绝，前端据此切换界面）
+  if (res.status === 403 && (json as { code?: string }).code === "REINIT_REQUIRED") {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new Event("auth:reinit-required"));
+    }
+  }
   if (!res.ok || !json.success) {
     throw new ApiError(json.error || "请求失败", json.code, res.status);
   }
@@ -44,11 +50,17 @@ export interface AuthUser {
   id: string;
   username: string;
   role: string;
+  /**
+   * 账号是否处于「待重新设置」状态（老凭据版本）。
+   * 由 `POST /auth/login` 返回；为 true 时前端必须进入「账号重新设置」流程，
+   * 重走一遍「用户名 + 密码 + 找回码」。
+   */
+  needsReinit?: boolean;
 }
 
-/** 是否已初始化（存在用户） */
-export function getAuthInitStatus(): Promise<{ initialized: boolean }> {
-  return request<{ initialized: boolean }>("/auth/init-status");
+/** 是否已初始化（存在用户）+ 是否存在待重新初始化的账号 */
+export function getAuthInitStatus(): Promise<{ initialized: boolean; needsReinit?: boolean }> {
+  return request<{ initialized: boolean; needsReinit?: boolean }>("/auth/init-status");
 }
 
 /** 首次部署创建管理员账号（recoveryCode 可选，留空可后续在设置页补设） */
@@ -58,6 +70,23 @@ export function initAccount(
   recoveryCode?: string
 ): Promise<AuthUser> {
   return request<AuthUser>("/auth/init", {
+    method: "POST",
+    body: JSON.stringify({ username, password, recoveryCode }),
+  });
+}
+
+/**
+ * 重新初始化账号（老凭据版本升级后强制重走）。
+ * 需**先通过旧凭据登录**（requireAuth）；提交后覆盖用户名 / 密码 / 找回码，
+ * 并销毁该账号的全部会话 ⇒ 调用方应随后回到登录页，用新凭据重新登录。
+ * @param recoveryCode **必填**，18~24 位字母数字，**区分大小写**
+ */
+export function reinitAccount(
+  username: string,
+  password: string,
+  recoveryCode: string
+): Promise<AuthUser> {
+  return request<AuthUser>("/auth/reinit", {
     method: "POST",
     body: JSON.stringify({ username, password, recoveryCode }),
   });
@@ -113,12 +142,32 @@ export interface TelemetryStatus {
   /** 设备标识（硬件指纹 6 维哈希，统计主键） */
   deviceId: string;
   virtualized: boolean;
+  /** 标识文件创建时间（≈ 安装时间） */
   createdAt: string;
   appVersion: string;
   osVersion: string;
   arch: string;
+  /** 标识文件路径 */
   deviceFile: string;
-  /** 硬件环境是否未变化（设备指纹稳定） */
+  /** 运行态文件路径 */
+  stateFile: string;
+  /** 上传开关（系统设置 → 本机设备） */
+  enabled: boolean;
+  /** 上报端点 */
+  endpoint: string;
+  /** 上报周期（小时） */
+  reportIntervalHours: number;
+  /** 是否已成功上报过 install */
+  installReported: boolean;
+  /** 最近一次成功上报时间 */
+  lastReportAt?: string;
+  /** 最近一次成功上报 active 的时间 */
+  lastActiveAt?: string;
+  /** 下一次计划上报时间（含失败重试） */
+  nextReportAt?: string;
+  /** 最近一次上报错误信息 */
+  lastError?: string;
+  /** 硬件环境是否与标识生成时一致（仅提示，不再触发身份重建） */
   envUnchanged: boolean;
   /** 已识别的硬件维度数（0-6） */
   matchCount: number;
@@ -128,37 +177,18 @@ export interface TelemetryStatus {
   details: DeviceDetails;
 }
 
-/** 远端统计服务端聚合数据（服务端未就绪时为 null） */
-export interface TelemetryStats {
-  /** 安装总次数（含重装） */
-  installs: number;
-  /** 新增设备数（按硬件指纹 device_uuid 去重） */
-  newDevices: number;
-  /** 日活 */
-  dau: number;
-  /** 月活 */
-  mau: number;
-  /** 近 N 日趋势 */
-  trend?: { date: string; dau: number; installs: number }[];
-}
-
 /** 本机设备标识与上报状态 */
 export function fetchTelemetryStatus(): Promise<TelemetryStatus> {
   return request<TelemetryStatus>("/telemetry/status");
 }
 
-/** 立即上报一次（force=true，忽略当日已报） */
+/** 立即上报一次（force=true，忽略 12 小时周期判断） */
 export function reportTelemetryNow(): Promise<{
   sent: string[];
   error?: string;
   status: TelemetryStatus;
 }> {
   return request("/telemetry/report", { method: "POST" });
-}
-
-/** 拉取统计服务端聚合数据（后端代理，未就绪返回 null） */
-export function fetchTelemetryStats(): Promise<TelemetryStats | null> {
-  return request<TelemetryStats | null>("/telemetry/stats");
 }
 
 /**
@@ -200,8 +230,12 @@ export function changeMyPassword(oldPassword: string, newPassword: string): Prom
 // ============ 密码找回码 ============
 
 export interface RecoveryStatus {
-  /** 找回码要求的长度（位） */
+  /** 找回码长度上限（位）；旧字段名，等价于 maxLength */
   length: number;
+  /** 找回码长度下限（位） */
+  minLength?: number;
+  /** 找回码长度上限（位） */
+  maxLength?: number;
   hasRecovery: boolean;
   setAt: string | null;
   lastUsedAt: string | null;
@@ -355,6 +389,11 @@ export function fetchResourceHistoryApi(engineId: string, range = "5m"): Promise
   return request<ResourceSample[]>(`/engines/${engineId}/resource-history?range=${range}`);
 }
 
+/** 获取网络曲线可选接口（本机网口 + Docker 网桥虚拟网卡；仅 socket 引擎有值） */
+export function fetchNetInterfacesApi(engineId: string): Promise<NetInterfaceOption[]> {
+  return request<NetInterfaceOption[]>(`/engines/${engineId}/net-interfaces`);
+}
+
 // ============ 容器操作 API ============
 
 export function containerActionApi(engineId: string, containerId: string, action: "start" | "stop" | "restart" | "pause" | "unpause"): Promise<void> {
@@ -376,6 +415,23 @@ export function pruneImagesApi(engineId: string, all: boolean = false): Promise<
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ all }),
+  });
+}
+
+/** 取某引擎的镜像锁定列表 */
+export function fetchImageLocksApi(engineId: string): Promise<import("./types").ImageLock[]> {
+  return request<import("./types").ImageLock[]>(`/engines/${engineId}/images/locks`);
+}
+
+/** 加锁 / 解锁镜像（锁定的镜像在「清理未使用」时会被跳过） */
+export function setImageLockApi(
+  engineId: string,
+  body: { id: string; ref?: string; locked: boolean }
+): Promise<import("./types").ImageLock[]> {
+  return request<import("./types").ImageLock[]>(`/engines/${engineId}/images/locks`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
   });
 }
 

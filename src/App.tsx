@@ -31,6 +31,7 @@ import {
   getImageUpdateStatusApi,
   type AuthUser,
 } from "./api";
+import { waitForRestartAndReload } from "./lib/restart-wait";
 import { SetupWizard } from "./components/auth/SetupWizard";
 import { LoginPage } from "./components/auth/LoginPage";
 import {
@@ -85,9 +86,11 @@ export default function App() {
   settingsRef.current = settings;
 
   // ============ 鉴权门卫 ============
-  // authState: loading(启动检测) → setup(首次初始化) / login(未登录) / authed(已登录)
-  const [authState, setAuthState] = useState<"loading" | "setup" | "login" | "authed">("loading");
+  // authState: loading(启动检测) → setup(首次初始化) / login(未登录) / reinit(账号待重新设置) / authed(已登录)
+  const [authState, setAuthState] = useState<"loading" | "setup" | "login" | "reinit" | "authed">("loading");
   const [me, setMe] = useState<AuthUser | null>(null);
+  /** 登录页顶部提示（账号重新设置完成后，引导用新凭据登录） */
+  const [loginNotice, setLoginNotice] = useState<string | undefined>(undefined);
 
   // 启动检测：并发判断「是否已初始化」与「当前是否已登录」
   useEffect(() => {
@@ -95,10 +98,17 @@ export default function App() {
     (async () => {
       try {
         const [init, meRes] = await Promise.all([
-          getAuthInitStatus().catch(() => ({ initialized: false })),
+          getAuthInitStatus().catch(() => ({ initialized: false, needsReinit: false })),
           getMe().catch(() => null),
         ]);
         if (cancelled) return;
+        // 老凭据版本升级后：必须重走一遍「用户名 + 密码 + 找回码」设置。
+        // 已有会话说明此前已用旧凭据登录过，可直接进入重设表单；否则先回登录页。
+        if (init.needsReinit) {
+          if (meRes) setMe(meRes);
+          setAuthState(meRes ? "reinit" : "login");
+          return;
+        }
         if (meRes) {
           setMe(meRes);
           setAuthState("authed");
@@ -126,6 +136,15 @@ export default function App() {
     return () => window.removeEventListener("auth:unauthorized", onUnauth);
   }, []);
 
+  // 后端兜底返回 403 REINIT_REQUIRED（账号待重新设置）→ 切到「账号重新设置」流程
+  useEffect(() => {
+    const onReinit = () => {
+      setAuthState((s) => (s === "authed" ? "reinit" : s));
+    };
+    window.addEventListener("auth:reinit-required", onReinit);
+    return () => window.removeEventListener("auth:reinit-required", onReinit);
+  }, []);
+
   // 会话心跳：会话为「绝对过期」，服务端不因请求而续期。
   // 每分钟探一次 /api/auth/me，即使页面静止、无任何业务请求，超时后也会自动回到登录页。
   useEffect(() => {
@@ -149,8 +168,17 @@ export default function App() {
   }, [authState]);
 
   const handleAuthDone = (user: AuthUser) => {
+    setLoginNotice(undefined);
     setMe(user);
-    setAuthState("authed");
+    // 老凭据版本账号（needsReinit）：登录成功后不进入应用，先重走一遍账号设置
+    setAuthState(user.needsReinit ? "reinit" : "authed");
+  };
+
+  /** 账号重新设置完成：后端已作废全部会话 → 回登录页，用新凭据重新登录 */
+  const handleReinitDone = () => {
+    setMe(null);
+    setLoginNotice("账号已重新设置，请使用新的用户名和密码登录");
+    setAuthState("login");
   };
 
   const handleLogout = async () => {
@@ -160,6 +188,7 @@ export default function App() {
       /* 忽略登出请求错误，仍强制回登录页 */
     }
     setMe(null);
+    setLoginNotice(undefined);
     setAuthState("login");
   };
 
@@ -202,27 +231,27 @@ export default function App() {
   };
 
   // 自动更新：检测到新版后自动下载应用，并监听后端重启后刷新前端（避免停留在旧前端 bundle）
+  // ⚠️ 此处 `applyUpdateApi()` 刚被调用，二进制可能仍在下载（旧进程会正常响应很久），
+  //    故传 `blindReloadAfterMs: null` **不做盲刷新**：刷新只由「观测到失联后恢复」或
+  //    「探活返回 403 REINIT_REQUIRED（新进程铁证）」触发。详见 src/lib/restart-wait.ts。
+  const restartWaitRef = useRef<(() => void) | null>(null);
   const triggerAutoUpdate = () => {
     applyUpdateApi().catch(() => {
       /* fire-and-forget：失败由更新状态端点反映，此处静默 */
     });
-    let sawDown = false;
-    let attempts = 0;
-    const id = setInterval(() => {
-      fetchAppVersion()
-        .then(() => {
-          if (sawDown) {
-            clearInterval(id);
-            window.location.reload();
-          } else if (++attempts > 40) {
-            clearInterval(id); // 旧进程未退出（异常），停止自动刷新，避免无限轮询
-          }
-        })
-        .catch(() => {
-          sawDown = true; // 旧进程已退出，等待新进程上线
-        });
-    }, 1500);
+    // 重复触发时先取消上一个等待循环，避免同一页面叠出多个探测轮询
+    restartWaitRef.current?.();
+    restartWaitRef.current = waitForRestartAndReload({ blindReloadAfterMs: null });
   };
+  // 卸载时收掉等待循环。
+  // ⚠️ 单独一个「仅挂载/卸载」的 effect：**不能**并进下面那个依赖 authState 的 effect ——
+  //    升级期间若因 403 切到「账号重新设置」态，该 effect 会重跑并取消等待，反而丢掉刷新。
+  useEffect(() => {
+    return () => {
+      restartWaitRef.current?.();
+      restartWaitRef.current = null;
+    };
+  }, []);
 
   // 初始化：加载引擎列表、活跃引擎 ID、系统设置
   // 依赖 authState：仅在登录态就绪后拉取（未登录时 /api 一律 401，提前拉取会静默失败且登录后不会重试）
@@ -603,7 +632,16 @@ export default function App() {
       );
     }
     if (authState === "setup") return <SetupWizard onDone={handleAuthDone} />;
-    return <LoginPage onDone={handleAuthDone} />;
+    if (authState === "reinit") {
+      return (
+        <SetupWizard
+          mode="reinit"
+          initialUsername={me?.username}
+          onDone={handleReinitDone}
+        />
+      );
+    }
+    return <LoginPage onDone={handleAuthDone} notice={loginNotice} />;
   }
 
   // relative：为内部 absolute 元素建立包含块，防止其逃逸到初始包含块撑高文档
@@ -646,9 +684,8 @@ export default function App() {
               resourceStats={resourceStats}
               stacks={stacks}
               images={images}
-              volumes={volumes}
-              activities={activities}
               engineId={activeEngineId}
+              defaultSubColumns={settings?.columnVisibility?.stacks}
               onNavigate={handleNavigate}
               loading={showDataState ? dataLoading : false}
               error={showDataState ? dataError : null}

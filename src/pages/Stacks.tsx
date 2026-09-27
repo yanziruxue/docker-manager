@@ -21,7 +21,6 @@ import {
   Layers,
   AlertCircle,
   CheckCircle2,
-  Tag as TagIcon,
   FileCode,
   FileText,
   Settings as SettingsIcon,
@@ -71,7 +70,7 @@ import { TagGroup, TagSelect } from "../components/TagPicker";
 import { LoadingState, ErrorState } from "../components/DataState";
 import { YamlEditor } from "../components/YamlEditor";
 import { EnvEditor } from "../components/EnvEditor";
-import { shortImageRef } from "../transforms";
+import { StackContainersModal } from "../components/StackContainersModal";
 
 /* ---------------- 堆栈图标：SVG 代码支持 ----------------
  * 图标字段（settings.iconUrl）本质是一个图片 URL 字符串，后端原样存进 meta.icon，
@@ -345,28 +344,7 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
     else next.add(key);
     setVisibleStackColumns(next);
   };
-  // 容器子表 列显隐（来自系统设置 → 列显隐 → 容器子表）：控制弹窗内子表，与主页完全独立
-  type SubColumnKey = "name" | "image" | "status" | "network" | "ip" | "ports" | "update";
-  const allSubColumns: { key: SubColumnKey; label: string }[] = [
-    { key: "name", label: "容器名称" },
-    { key: "image", label: "镜像" },
-    { key: "status", label: "状态" },
-    { key: "network", label: "网络" },
-    { key: "ip", label: "容器 IP" },
-    { key: "ports", label: "端口" },
-    { key: "update", label: "更新" },
-  ];
-  const [visibleColumns, setVisibleColumns] = useState<Set<SubColumnKey>>(
-    defaultSubColumns && defaultSubColumns.length > 0
-      ? new Set(defaultSubColumns as SubColumnKey[])
-      : new Set(allSubColumns.map((c) => c.key))
-  );
-  const toggleColumn = (key: SubColumnKey) => {
-    const next = new Set(visibleColumns);
-    if (next.has(key)) next.delete(key);
-    else next.add(key);
-    setVisibleColumns(next);
-  };
+  // 容器子表 列显隐：原内联实现已抽到 components/StackContainersModal.tsx（列显隐由该组件自持）
   // 点击外部关闭列选择器
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
@@ -920,108 +898,19 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
       {/* Stack Log Modal */}
       {logStack && <StackLogModal stack={logStack} onClose={() => setLogStack(null)} engineId={engineId} />}
 
-      {/* Container Sub-table Modal（点击状态列弹出，查看该堆栈的容器列表） */}
+      {/* Container Sub-table Modal（点击状态列弹出，查看该堆栈的容器列表）
+          —— 组件已抽到 components/StackContainersModal.tsx，仪表盘「堆栈」磁贴复用同一张子表 */}
       {containersModal && (
-        <Modal
-          open
+        <StackContainersModal
+          stack={containersModal}
           onClose={() => setContainersModal(null)}
-          title={`${L("Containers", "容器子表")} · ${containersModal.name}`}
-          size="lg"
-          dismissable
-        >
-          <div className="space-y-3">
-            {/* Profiles */}
-            {containersModal.profiles.length > 0 && (
-              <div className="flex items-center gap-2 py-2 border-b border-slate-100">
-                <TagIcon size={12} className="text-slate-400" />
-                <span className="text-xs text-slate-500">Profiles:</span>
-                {containersModal.profiles.map((p) => (
-                  <Tag key={p} text={p} color={p === containersModal.settings.defaultProfiles[0] ? "blue" : "slate"} />
-                ))}
-                <span className="text-xs text-slate-400 ml-2">默认: {containersModal.settings.defaultProfiles.join(", ") || "无"}</span>
-              </div>
-            )}
-
-            {/* 列显隐控制 */}
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-xs text-slate-400">显示列:</span>
-              {allSubColumns.map((c) => (
-                <button
-                  key={c.key}
-                  onClick={() => toggleColumn(c.key)}
-                  className={`px-2 py-0.5 rounded-full text-xs border transition-colors ${
-                    visibleColumns.has(c.key)
-                      ? "bg-blue-50 border-blue-200 text-blue-600"
-                      : "bg-slate-50 border-slate-200 text-slate-400"
-                  }`}
-                >
-                  {c.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Container Table */}
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="bg-slate-50">
-                    {visibleColumns.has("name") && <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-2">容器名称</th>}
-                    {visibleColumns.has("image") && <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-2">镜像</th>}
-                    {visibleColumns.has("status") && <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-2">状态</th>}
-                    {visibleColumns.has("network") && <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-2">网络</th>}
-                    {visibleColumns.has("ip") && <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-2">容器 IP</th>}
-                    {visibleColumns.has("ports") && <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-2">端口</th>}
-                    {visibleColumns.has("update") && <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-2">更新</th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {containersModal.containers.length === 0 ? (
-                    <tr>
-                      <td colSpan={visibleColumns.size || 1} className="px-3 py-8 text-center text-sm text-slate-400">该堆栈暂无容器</td>
-                    </tr>
-                  ) : (
-                    containersModal.containers.map((container) => (
-                      <tr
-                        key={container.name}
-                        className="hover:bg-slate-50 transition-colors cursor-context-menu border-b border-slate-50 last:border-0"
-                        onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setContextMenu({ x: e.clientX, y: e.clientY, stack: containersModal, container }); }}
-                      >
-                        {visibleColumns.has("name") && (
-                          <td className="px-3 py-2.5">
-                            <span className="text-sm font-medium text-slate-700">{container.name}</span>
-                            {container.isPinned && <Tag text="已固定" color="green" />}
-                          </td>
-                        )}
-                        {visibleColumns.has("image") && (
-                          <td className="px-3 py-2.5">
-                            <span className="text-xs font-mono text-slate-600" title={`${container.image}:${container.tag}`}>{shortImageRef(container.image)}</span>
-                            <span className="text-xs font-mono text-slate-400">:{container.tag}</span>
-                          </td>
-                        )}
-                        {visibleColumns.has("status") && <td className="px-3 py-2.5"><StatusBadge status={operatingStacks.has(container.name) ? "operating" : container.status} /></td>}
-                        {visibleColumns.has("network") && <td className="px-3 py-2.5"><span className="text-xs text-slate-500">{container.network}</span></td>}
-                        {visibleColumns.has("ip") && <td className="px-3 py-2.5"><span className="text-xs font-mono text-slate-500">{container.ip}</span></td>}
-                        {visibleColumns.has("ports") && <td className="px-3 py-2.5"><span className="text-xs font-mono text-slate-500">{container.ports}</span></td>}
-                        {visibleColumns.has("update") && (
-                          <td className="px-3 py-2.5">
-                            {container.hasUpdate ? (
-                              <span className="flex items-center gap-1 text-xs text-amber-600"><RefreshCw size={10} /> 可更新</span>
-                            ) : (
-                              <CheckCircle2 size={14} className="text-green-400" />
-                            )}
-                            {container.hasUpdate && (
-                              <button className="text-xs text-blue-600 hover:underline ml-2">强制更新</button>
-                            )}
-                          </td>
-                        )}
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </Modal>
+          defaultVisibleColumns={defaultSubColumns}
+          operatingNames={operatingStacks}
+          language={menuLanguage}
+          onContainerContextMenu={(e, stack, container) =>
+            setContextMenu({ x: e.clientX, y: e.clientY, stack, container })
+          }
+        />
       )}
 
       {/* Command Output Modal（启动/停止/重启/拉取/构建/删除/备份/批量 的 tail 文本输出，统一复用） */}
@@ -1554,7 +1443,7 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
                   onChange={(v) => { setComposeContent(v); setTplHint(null); }}
                   onValidChange={(v) => setYamlValid(v)}
                   onCursorLineChange={(l) => setCaretLine((prev) => (prev === l ? prev : l))}
-                  placeholder={"services:\n  web:\n    image: nginx:alpine\n    ports:\n      - \"8080:80\"\n    restart: unless-stopped"}
+                  placeholder={"services:\n  web:\n    restart: unless-stopped\n    ports:\n      - \"8080:80\"\n    image: nginx:alpine"}
                 />
                 {/* 右：一键填入模板面板（系统设置 → Compose 管理 配置） */}
                 {composeTemplates.length > 0 && (
@@ -2029,10 +1918,10 @@ function CreateStackModal({ onClose, engineId, onRefresh }: { onClose: () => voi
   const [stackDescription, setStackDescription] = useState("");
   const [composeContent, setComposeContent] = useState(`services:
   web:
-    image: nginx:alpine
+    restart: unless-stopped
     ports:
       - "8080:80"
-    restart: unless-stopped
+    image: nginx:alpine
 `);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -2201,7 +2090,7 @@ function CreateStackModal({ onClose, engineId, onRefresh }: { onClose: () => voi
                 }}
                 onValidChange={setYamlValid}
                 minHeight={260}
-                placeholder={"services:\n  web:\n    image: nginx:alpine\n    ports:\n      - '8080:80'\n    restart: unless-stopped"}
+                placeholder={"services:\n  web:\n    restart: unless-stopped\n    ports:\n      - '8080:80'\n    image: nginx:alpine"}
               />
             </FormField>
           </div>

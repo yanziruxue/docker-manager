@@ -63,6 +63,10 @@ export interface EngineResourceStats {
   memMaxSupportedMB: number;
   /** 宿主机磁盘利用率（仅本机引擎，远程为空数组） */
   disks: DiskStat[];
+  /** 逐网口实时速率（仅本机 socket 引擎可读 /proc/net/dev；远程引擎为空数组） */
+  netIfaces: NetIfaceStat[];
+  /** 宿主机正常运行时间（秒）：读 /proc/uptime，读不到（远程引擎 / 非 Linux）为 0 → 前端显示「—」 */
+  hostUptimeSec: number;
 }
 
 /** 资源时间序列单点（服务端 1s 采样，最多保留 5 分钟） */
@@ -72,6 +76,19 @@ export interface ResourceSample {
   memDockerMB: number;
   netRxKBps: number;
   netTxKBps: number;
+  /** 运行容器 CPU 合计（%），与 EngineResourceStats.cpuPercent 同源 */
+  cpuPercent: number;
+  /**
+   * 逐网口速率（KB/s）：键 = 网口名（含 Docker 网桥 docker0 / br-xxxx）。
+   * 仅本机 socket 引擎有值；远程引擎缺省（前端回退到合计口径）。
+   */
+  netIfaces?: Record<string, { rx: number; tx: number }>;
+  /**
+   * 逐磁盘速率与利用率：键 = 设备名（`sda` / `nvme0n1` …）。
+   * `read` / `write` 单位 **MB/s**，`busy` 单位 **%**。
+   * 仅本机 socket 引擎有值；远程引擎缺省（磁盘磁贴显示「无曲线」）。
+   */
+  disks?: Record<string, { read: number; write: number; busy: number }>;
 }
 
 /** 宿主机磁盘统计（/proc/diskstats 差分） */
@@ -81,6 +98,22 @@ export interface DiskStat {
   writeMBps: number;
   busyPct: number;
   active: boolean;
+}
+
+/** 单个网口的实时速率（/proc/net/dev 差分；仅本机 socket 引擎有值） */
+export interface NetIfaceStat {
+  name: string;
+  rxKBps: number;
+  txKBps: number;
+}
+
+/** 网络曲线的可选接口（本机网口 + Docker 网桥虚拟网卡） */
+export interface NetInterfaceOption {
+  /** 网口名（= /proc/net/dev 的键，前端据此在样本里取数） */
+  name: string;
+  /** 展示名：Docker 网桥带网络名（如 `iotdb-net (bridge)`），否则就是网口名 */
+  label: string;
+  kind: "host" | "docker";
 }
 
 /** 镜像拉取任务（后台任务系统） */
@@ -246,6 +279,16 @@ export interface DockerImage {
   associatedCount: number;        // 关联容器数量
   isDangling: boolean;
   sha256: string;
+}
+
+/** 镜像锁定记录（服务端持久化于 config/image-locks.json） */
+export interface ImageLock {
+  /** 镜像 sha256（不含 `sha256:` 前缀） */
+  id: string;
+  /** `repo:tag`；悬空镜像为空字符串 */
+  ref: string;
+  /** 加锁时间戳（ms） */
+  at: number;
 }
 
 /** 单个镜像的版本更新检查明细（后端 checkAllImageUpdates） */
@@ -610,8 +653,19 @@ export interface SystemSettings {
   modal: ModalConfig;
   /** Compose 模板（一键填入项） */
   compose: ComposeConfig;
+  /**
+   * 安装量 / 活跃度上报开关（系统设置 → 本机设备）。
+   * 默认开启；关闭后不再向远端发送任何数据。仅上报本机设备信息，用于安装数量统计。
+   */
+  telemetry: TelemetryConfig;
   /** 默认值版本号：服务端据此判断是否需要把老配置重置为新默认值 */
   defaultsVersion?: number;
+}
+
+/** 安装量 / 活跃度上报配置（系统设置 → 本机设备） */
+export interface TelemetryConfig {
+  /** 是否上传安装数量统计（默认 true；关闭后不再向远端发送任何数据） */
+  enabled: boolean;
 }
 
 // ============ UI 类型 ============

@@ -127,6 +127,14 @@ const DEFAULT_SETTINGS = {
       { content: "container_name: ", insert: "services" },
     ],
   },
+  /**
+   * 安装量 / 活跃度上报开关（系统设置 → 本机设备）。
+   * 默认开启；关闭后不再向远端发送任何数据（本机设备标识卡片仍可正常查看）。
+   * 上报内容仅为本机设备信息（硬件 6 维指纹 + 系统 + 应用版本），用于安装数量统计。
+   */
+  telemetry: {
+    enabled: true,
+  },
 };
 
 /**
@@ -207,6 +215,8 @@ export function getSettings(): any {
             : DEFAULT_SETTINGS.compose.templates,
         },
         columnVisibility: mergedColumns,
+        // 上报开关二级合并：旧配置没有 telemetry 段时继承默认值（开启）
+        telemetry: { ...DEFAULT_SETTINGS.telemetry, ...(parsed?.telemetry || {}) },
         defaultsVersion: DEFAULTS_VERSION,
       };
     }

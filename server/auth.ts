@@ -168,6 +168,23 @@ export function destroySession(req: Request, res: Response): void {
   res.clearCookie(SESSION_COOKIE, { path: "/" });
 }
 
+/**
+ * 销毁指定用户的**全部**会话（含当前浏览器与其他设备）。
+ * 用于「账号重新初始化」完成后强制所有人重新登录（用户名/密码已变更）。
+ * @returns 被清除的会话数量
+ */
+export function destroySessionsForUser(userId: string): number {
+  let removed = 0;
+  for (const [key, s] of sessions.entries()) {
+    if (s.userId === userId) {
+      sessions.delete(key);
+      removed++;
+    }
+  }
+  if (removed) persistSessions();
+  return removed;
+}
+
 /** 鉴权中间件：未登录/已超时返回 401（不做任何续期） */
 export function requireAuth(req: Request, res: Response, next: NextFunction): void {
   const user = getSessionUser(req);

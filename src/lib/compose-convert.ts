@@ -392,7 +392,9 @@ export function dockerRunToCompose(input: string): ConvertResult {
     .replace(/[^a-zA-Z0-9_-]/g, "-")
     .toLowerCase() || "app";
 
-  const service: Record<string, YamlValue> = { image: spec.image };
+  // 服务参数按《YAML 编码规范》§4.2 顺序装配（网络 > 重启 > 容器信息 > 端口 > 环境变量 >
+  // 数据挂载 > 其余 > 镜像）；`image` 在末尾统一追加，故此处先用空对象。
+  const service: Record<string, YamlValue> = {};
 
   const put = (key: string, v: YamlValue | undefined) => {
     if (v === undefined) return;
@@ -401,11 +403,24 @@ export function dockerRunToCompose(input: string): ConvertResult {
     service[key] = v;
   };
 
+  // 网络
+  if (spec.networks.length > 0) service.networks = spec.networks;
+  // 重启策略
+  put("restart", spec.restart);
+  // 容器信息
   put("container_name", spec.name);
   put("hostname", spec.hostname);
-  put("restart", spec.restart);
   put("user", spec.user);
   put("working_dir", spec.workdir);
+  // 端口
+  put("ports", spec.ports);
+  put("expose", spec.expose);
+  // 环境变量
+  put("environment", spec.env);
+  put("env_file", spec.envFiles);
+  // 数据挂载
+  put("volumes", spec.volumes);
+  // 其余参数（规范未指定顺序，排在挂载之后、镜像之前）
   put("entrypoint", spec.entrypoint);
   put("platform", spec.platform);
   put("pid", spec.pid);
@@ -418,12 +433,6 @@ export function dockerRunToCompose(input: string): ConvertResult {
   put("privileged", spec.privileged ? "true" : "");
   put("tty", spec.tty ? "true" : "");
   put("stdin_open", spec.stdinOpen ? "true" : "");
-
-  put("ports", spec.ports);
-  put("expose", spec.expose);
-  put("volumes", spec.volumes);
-  put("environment", spec.env);
-  put("env_file", spec.envFiles);
   put("labels", spec.labels);
   put("cap_add", spec.capAdd);
   put("devices", spec.devices);
@@ -473,11 +482,12 @@ export function dockerRunToCompose(input: string): ConvertResult {
     if (spec.healthCmd) warnings.push("healthcheck.test 已按 CMD-SHELL 形式生成，可按需改为数组格式");
   }
 
-  if (spec.networks.length > 0) service.networks = spec.networks;
-
   // command：单个词直接写，多个词用数组（保留原始分词，避免 shell 二次解析出错）
   if (spec.command.length === 1) service.command = spec.command[0];
   else if (spec.command.length > 1) service.command = spec.command;
+
+  // 镜像置于最末（规范 §4.2 顺序以镜像收尾）
+  service.image = spec.image;
 
   return done(toYamlDoc({ services: { [serviceName]: service } }), warnings);
 }

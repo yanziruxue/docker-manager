@@ -1,0 +1,50 @@
+{
+  "device_uuid": "3931da54efe47cd527b778800d009b28502dbd017a063eb5820328c6e75f3b4e",
+  "hw_fingerprint": "3931da54efe47cd527b778800d009b28502dbd017a063eb5820328c6e75f3b4e",
+  "event": "install",
+  "ts": "2026-09-27T07:51:25.471Z",
+  "uploadEnabled": true,
+  "installedAt": "2026-09-27T07:51:25.446Z",
+  "app": "docker-manager-yanzi",
+  "appVersion": "1.30.1",
+  "os": "linux",
+  "osVersion": "Windows_NT 10.0.26200",
+  "arch": "x64",
+  "channel": "sea-linux-x64",
+  "virtualized": false,
+  "deviceFile": "/opt/docker-manager-yanzi/config/device.info",
+  "hardware": {
+    "system": "Windows_NT 10.0.26200",
+    "cpu": "",
+    "gpu": "",
+    "memory": "15.7GB",
+    "diskUid": "",
+    "boardSerial": ""
+  },
+  "details": {
+    "cpu": {
+      "model": "",
+      "cores": 0,
+      "threads": 16,
+      "freqGHz": 0
+    },
+    "gpu": {
+      "model": "",
+      "memory": ""
+    },
+    "memory": {
+      "model": "",
+      "sizeGB": 16
+    },
+    "disk": {
+      "serial": "",
+      "model": "",
+      "size": ""
+    },
+    "dmi": {
+      "boardName": "",
+      "productSerial": "",
+      "productUuid": ""
+    }
+  }
+}

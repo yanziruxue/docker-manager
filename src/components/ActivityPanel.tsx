@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Cpu, Copy, Check, Loader2, Eye, EyeOff, AlertTriangle } from "lucide-react";
+import { Cpu, Copy, Check, Loader2, Eye, EyeOff, AlertTriangle, UploadCloud } from "lucide-react";
 import {
   fetchTelemetryStatus,
   fetchServiceUnitStatus,
@@ -9,7 +9,7 @@ import {
   type ServiceUnitStatus,
 } from "../api";
 import { copyText } from "../lib/clipboard";
-import { Card } from "./UI";
+import { Card, Toggle } from "./UI";
 
 /** 单条「标签：值」展示行 */
 function Row({
@@ -36,6 +36,14 @@ function Row({
       </span>
     </div>
   );
+}
+
+/** 时间戳 → 本地时间串（无效值返回空串） */
+function fmtTime(iso?: string): string {
+  if (!iso) return "";
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return "";
+  return new Date(t).toLocaleString("zh-CN", { hour12: false });
 }
 
 /** CPU：型号 核心数 线程数 频率 */
@@ -80,15 +88,26 @@ function fmtDisk(d?: DeviceDetails["disk"]): string {
 }
 
 /**
- * 本机设备标识（只读）。
+ * 本机设备标识（只读）+ 安装数量上传开关。
+ *
  * 设备标识 = 本机硬件指纹（主板+CPU+内存+硬盘+显卡+安装的系统 6 维哈希），
- * 作为安装量 / 活跃度统计的统计主键；硬件指纹不变即视为同一设备。
- * 卡片按「设备标识 / 运行环境 / 应用版本 / 架构 / 系统 / 标识文件 / 主板 / 主板型号 / 产品序列号 / 系统UUID / CPU / GPU / 内存 / 硬盘」展示。
+ * 作为安装量 / 活跃度统计的统计主键；标识文件创建后不再修改，只有被删或被改写才会重新生成。
+ *
+ * 上传开关（`settings.telemetry.enabled`，默认开启）：关闭后不再向远端发送任何数据。
+ * 开关值由设置页持有（单一写入方），改动后点右下角「APPLY」保存生效。
  *
  * 另附「服务单元落后」提示：单元文件由 install.sh 安装、OTA 不更新，落后时
  * 依赖新指令的功能（如 root 镜像 DMI 序列号）会静默失效，需提示用户重装单元。
  */
-export function ActivityPanel() {
+export function ActivityPanel({
+  telemetryEnabled,
+  onTelemetryEnabledChange,
+}: {
+  /** 上传开关当前值（来自系统设置；未传入时回退用后端返回值展示） */
+  telemetryEnabled?: boolean;
+  /** 切换上传开关（改动后需点「APPLY」保存） */
+  onTelemetryEnabledChange?: (val: boolean) => void;
+} = {}) {
   const [status, setStatus] = useState<TelemetryStatus | null>(null);
   const [unit, setUnit] = useState<ServiceUnitStatus | null>(null);
   const [loading, setLoading] = useState(true);
@@ -146,6 +165,12 @@ export function ActivityPanel() {
         : unit.mirrorFiles.length === 0
           ? "服务单元已是最新，但 DMI 镜像尚未生成（重启服务即可）"
           : "镜像已生成；仍为空说明 BIOS 未烧录该字段";
+
+  /** 上传开关：优先用设置页传入的值，其次用后端已保存的值（默认开启） */
+  const enabled = telemetryEnabled ?? status?.enabled ?? true;
+  /** 已改动但尚未保存（与后端已保存值不一致） */
+  const enabledDirty =
+    telemetryEnabled !== undefined && !!status && telemetryEnabled !== status.enabled;
 
   return (
     <div className="space-y-4">
@@ -216,6 +241,38 @@ export function ActivityPanel() {
                   {copied ? <Check size={14} className="text-green-500" /> : <Copy size={14} />}
                 </button>
               </div>
+            </div>
+
+            {/* 安装数量上传开关 */}
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5 text-sm font-medium text-slate-700">
+                    <UploadCloud size={14} className="text-slate-400" />
+                    上传安装数量统计
+                  </div>
+                  <div className="mt-1 text-xs leading-relaxed text-slate-500">
+                    仅上传本机应用安装信息用于安装数量收集，
+                    <span className="text-slate-600">不含容器 / 镜像 / 堆栈等任何业务数据，也不含账号信息</span>
+                    。默认开启，可随时关闭；关闭后不再发送任何数据。
+                  </div>
+                </div>
+                <div className="flex-shrink-0 pt-0.5">
+                  <Toggle active={enabled} onChange={onTelemetryEnabledChange} />
+                </div>
+              </div>
+              {(enabledDirty || !enabled) && (
+                <div className="mt-2 border-t border-slate-200 pt-2 text-[11px] leading-relaxed text-amber-600">
+                  {enabledDirty
+                    ? "已修改，点右下角「APPLY」保存后生效。"
+                    : "当前为关闭状态（已保存）。"}
+                </div>
+              )}
+            </div>
+
+            {/* 上报状态 */}
+            <div className="grid grid-cols-1 gap-y-2 text-sm border-t border-slate-100 pt-3">
+              <Row label="安装时间" value={fmtTime(status.createdAt)} title={status.createdAt} />
             </div>
 
             {/* 明细：一行一条 */}

@@ -35,5 +35,11 @@ deploy/linux/sea-prep.blob
 # ===== 临时测试目录 =====
 .tmp-*/
 
+# ===== 第三方 UI 参考快照（不入库）=====
+# Unraid WebGUI 的「另存完整网页」快照，仅作仪表盘改版的设计参考。
+# 内含 Unraid 自有资源（dynamix.js / jquery.ui.css 等，GPL v2），且体积 9MB，
+# 绝不推送到仓库（push-via-api.mjs 按「未跟踪文件 + .gitignore」枚举，必须显式忽略）。
+yanzi_Dashboard/
+
 # ===== vite dev 残留 =====
 vite.config.ts.timestamp-*.mjs

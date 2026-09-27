@@ -5,8 +5,10 @@
  *
  * 用 textarea + 高亮层叠（textarea 文字透明，光标可见，背后 <pre> 着色）
  * 实现轻量语法高亮；每次输入用 js-yaml 实时解析，捕获缩进/语法错误并在状态栏
- * 提示「YAML 格式错误」+ 行号 + 列号 + 原因。右上角「格式化」按钮重新序列化
- * 当前合法内容，等价于「自动修正缩进 + 格式化美化 + 转数组写法」。
+ * 提示「YAML 格式错误」+ 行号 + 列号 + 原因。右上角「格式化」按钮按
+ * 《YAML 编码规范（Docker Compose 专用）》重新序列化：2 空格缩进、数组块状、
+ * 服务参数按「网络 > 重启 > 容器信息 > 端口 > 环境变量 > 数据挂载 > 镜像」排序，
+ * 且**保留注释**（借助 `yaml`(eemeli) 文档模型做保注释往返）。
  *
  * 设计取舍：
  * - 不用 CodeMirror/Monaco：体积大、构建链复杂；本组件 ~10KB，零依赖冲突；
@@ -26,6 +28,9 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2, AlertCircle, Wand2 } from "lucide-react";
 import * as yaml from "js-yaml";
+// 格式化用 `yaml`(eemeli) 的文档模型做**保注释往返**（js-yaml 的 load→dump 会丢注释）；
+// lint 仍用 js-yaml（错误行列已接线）。
+import { parseDocument, isMap, isSeq, isPair, isScalar, parse } from "yaml";
 
 /** 高亮配色：与 shell 控制台风格一致（蓝键 / 绿串 / 黄数 / 粉布尔 / 橙列表项 / 灰注释） */
 const COLORS = {
@@ -275,109 +280,168 @@ function autoIndentYaml(text: string): string {
 
 /**
  * ============================================
- * 「数组写法」格式化（v1.24.0）
+ * 格式化归一化（保留注释 · 对齐《YAML 编码规范 · Docker Compose 专用》）
  * ============================================
- * 两条规则叠加，让格式化后的 compose 更紧凑：
- * 1) `environment` / `labels` 的**键值映射**折叠成 compose 的 `- K=V` 数组写法
- *    （Docker 对这两个键同时接受 map 与 array，语义完全等价）；
- * 2) 所有**纯标量序列**从块状写法折叠成行内流式数组 `[a, b]`。
- *
- * 结构化序列（序列项本身是映射 / 含块标量 `|` `>` / 项有续行）一律保持块状——
- * 强行行内化会产出非法 YAML，宁可难看也不能坏。
+ * 用 `yaml`(eemeli) 的文档模型做**保注释往返**：不做结构性改写（块标量 / 注释原样保留），
+ * 只做四件事再序列化：
+ *   1) **强制块状**：非空 map / seq 节点 `flow = false` ⇒ 消除行内 `[a, b]` / `{a: b}`，
+ *      统一多行连字符写法（§3.1 推荐 + §5.5 禁混用）；**空集合 `{}` / `[]` 保持紧凑**
+ *      （强制块状只会把 `data: {}` 拆成两行，无收益）；`environment` / `labels` 等
+ *      **不强制 map↔seq 互转**，保持用户原写法（避免注释错位）。
+ *   2) **去引号**（§1.4）：`ports` / `environment` / `volumes` 等列表项**若原本是引号标量**、
+ *      且「去掉引号后的纯量形式解析回来仍是同一个字符串」，则改为纯量（`'8080:80'` → `8080:80`）。
+ *      逐值用解析器回验 ⇒ 绝不会把 `"123"` 变数字、`"true"` 变布尔、或破坏 IPv6 `"[::1]:80"`。
+ *   3) **顶层排序**（§4.1）：services → volumes → networks → 其余（version / x-* 等）。
+ *   4) **服务内排序**（§4.2）：网络 > 重启策略 > 容器信息 > 端口 > 环境变量 > 数据挂载 >
+ *      其余参数 > 镜像（image 置末）。
+ * 缩进固定 2 空格、`key: value` 冒号后 1 空格由序列化器保证（§2.1 / §2.2）。
+ * 注释（整行 + 行尾）挂在节点上，键序重排时**随属主节点一起移动**，不丢失、不错位（§2.3）。
  */
 
-/** compose 中 map / array 两种写法等价的键（仅在这些键上做「映射→数组」折叠） */
-const KV_ARRAY_KEYS = new Set(["environment", "labels"]);
+/** §4.2 服务内参数权重表（数字越小越靠前；image 最大 ⇒ 置末） */
+const SERVICE_KEY_RANK: Record<string, number> = {
+  network_mode: 10,
+  networks: 11,
+  restart: 20,
+  container_name: 30,
+  hostname: 31,
+  ports: 40,
+  expose: 41,
+  environment: 50,
+  env_file: 51,
+  volumes: 60,
+  image: 90,
+};
+/** 未列出的服务参数：排在「数据挂载」之后、「镜像」之前 */
+const UNRANKED_RANK = 80;
 
-/** 值全为标量（含空值）的普通对象——只有这种才可能是 environment / labels 映射 */
-function isScalarMap(v: unknown): v is Record<string, unknown> {
-  if (!v || typeof v !== "object" || Array.isArray(v)) return false;
-  return Object.values(v as Record<string, unknown>).every(
-    (x) => x === null || x === undefined || typeof x !== "object"
+/** §4.1 顶层节点权重表 */
+const TOP_KEY_RANK: Record<string, number> = { services: 10, volumes: 20, networks: 30 };
+/** 未列出的顶层键（version / x-* 等）：排在标准节点之后，保留原相对顺序 */
+const TOP_UNRANKED_RANK = 50;
+
+/**
+ * 递归把**非空**集合节点强制为块状（flow=false），消除行内 `[a, b]` / `{a: b}`。
+ * 空集合（`{}` / `[]`）**跳过**：强制块状只会把 `data: {}` 拆成 `data:` + `    {}` 两行，
+ * 纯排版损失、零收益（语义本来等价）。保留紧凑写法。
+ */
+function forceBlockStyle(node: unknown): void {
+  if (isMap(node) || isSeq(node)) {
+    const items = (node as { items: unknown[] }).items;
+    if (items.length > 0) (node as { flow: boolean }).flow = false;
+    for (const item of items) {
+      if (isPair(item)) forceBlockStyle((item as { value: unknown }).value);
+      else forceBlockStyle(item);
+    }
+  }
+}
+
+/** 允许「去引号」的列表父键（§1.4：端口等常规场景无需引号） */
+const UNQUOTE_LIST_KEYS = new Set([
+  "ports", "expose", "environment", "env_file", "volumes", "devices", "tmpfs", "labels",
+]);
+
+/**
+ * 引号标量「去掉引号」后是否仍解析为同一个字符串。
+ * 判据是**逐值回验**而非正则白名单——只有它同时挡得住：
+ *   `"123"` → 数字 `123`、`"true"` → 布尔、`"1.0"` → 数字、
+ *   含 `: ` / ` #` 的纯量、以 `[` `{` `*` `&` `%` 等特殊符开头的纯量（IPv6 `"[::1]:80"` 即被挡下）。
+ */
+function plainSafeString(value: string): boolean {
+  if (value === "" || value.includes(": ") || value.includes(" #")) return false;
+  try {
+    return parse(value) === value;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 把列表中「可安全去引号」的引号标量改为纯量（§1.4：`'8080:80'` → `8080:80`）。
+ * 仅处理**值**、不动键；非标量项与不可安全去引号的值原样保留。
+ * 递归下钻嵌套 map（`services.<名>` 等），以便服务内参数也能命中。
+ */
+function unquoteListScalars(node: unknown): void {
+  if (!isMap(node)) return;
+  for (const pair of (node as { items: unknown[] }).items) {
+    if (!isPair(pair)) continue;
+    const key = pairKeyName(pair);
+    const value = (pair as { value: unknown }).value;
+    if (key && UNQUOTE_LIST_KEYS.has(key) && isSeq(value)) {
+      for (const item of (value as { items: unknown[] }).items) {
+        if (!isScalar(item)) continue;
+        const s = item as { type?: string; value: unknown };
+        if (s.type !== "QUOTE_SINGLE" && s.type !== "QUOTE_DOUBLE") continue;
+        if (plainSafeString(String(s.value))) s.type = "PLAIN";
+      }
+    }
+    unquoteListScalars(value);
+  }
+}
+
+/** 取 pair 的标量键名；非标量键（复杂键）返回 null（不参与排序） */
+function pairKeyName(pair: unknown): string | null {
+  if (!isPair(pair)) return null;
+  const k = (pair as { key: unknown }).key;
+  if (k && typeof k === "object" && "value" in k) return String((k as { value: unknown }).value);
+  return null;
+}
+
+/**
+ * 稳定排序一个 map 的 pair（相同权重保持原相对顺序）。
+ * 仅当 items 全部是 pair 时才排序——含异常结构（锚点 / 注释节点混入）时原样放过，
+ * 避免破坏文档。排序只移动 pair 位置，节点（含其注释）整体随之移动。
+ */
+function sortMapPairs(map: unknown, rank: (key: string) => number): void {
+  if (!isMap(map)) return;
+  const items = (map as { items: unknown[] }).items;
+  if (items.length < 2 || !items.every((it) => isPair(it))) return;
+  const indexed = items.map((p, i) => ({ p, i, r: rank(pairKeyName(p) ?? "") }));
+  indexed.sort((a, b) => a.r - b.r || a.i - b.i);
+  (map as { items: unknown[] }).items = indexed.map((x) => x.p);
+}
+
+/**
+ * 按规范重排键序：顶层（§4.1）+ services 下每个服务（§4.2）。
+ * 排序仅移动 pair 位置，节点整体（含其注释）随之移动，注释不丢。
+ */
+function normalizeKeyOrder(doc: ReturnType<typeof parseDocument>): void {
+  const root = doc.contents;
+  if (!isMap(root)) return;
+  // 顶层：services → volumes → networks → 其余
+  sortMapPairs(root, (k) =>
+    Object.prototype.hasOwnProperty.call(TOP_KEY_RANK, k) ? TOP_KEY_RANK[k] : TOP_UNRANKED_RANK
   );
+  // services.<服务名>：每个服务内按 §4.2 排序
+  const servicesPair = root.items.find((p) => isPair(p) && pairKeyName(p) === "services");
+  const services = servicesPair ? (servicesPair as { value: unknown }).value : null;
+  if (!isMap(services)) return;
+  for (const sp of (services as { items: unknown[] }).items) {
+    if (!isPair(sp)) continue;
+    sortMapPairs((sp as { value: unknown }).value, (k) =>
+      Object.prototype.hasOwnProperty.call(SERVICE_KEY_RANK, k) ? SERVICE_KEY_RANK[k] : UNRANKED_RANK
+    );
+  }
 }
 
 /**
- * 把 `services.<名称>.environment|labels`（含 `deploy.labels`）的键值映射改成
- * `- K=V` 数组写法；值为 null 表示「从宿主机透传」，输出不带等号的裸 `K`。
- * 用 path 精确限定位置，避免把「名字恰好叫 environment 的服务」误判成映射。
+ * 按《YAML 编码规范 · Docker Compose 专用》格式化一段 compose YAML（**保留注释**）：
+ * 扁平无缩进输入先走 `autoIndentYaml` 补缩进，再交给 `yaml` 文档模型做
+ * 块状归一化（flow→block，空集合除外）+ 列表去引号（§1.4）+ 键序重排（§4.1 / §4.2），
+ * 缩进固定 2 空格。输入不合法 / 解析异常时**原样返回**（调用方无需处理错误）。
  */
-function toKvArrayForm(node: unknown, path: string[]): void {
-  if (Array.isArray(node)) {
-    node.forEach((v) => toKvArrayForm(v, path));
-    return;
+export function formatComposeYaml(value: string): string {
+  const source = isFlatYaml(value) ? autoIndentYaml(value) : value;
+  try {
+    const doc = parseDocument(source);
+    if (doc.errors.length > 0 || doc.contents == null) return value;
+    forceBlockStyle(doc.contents);
+    unquoteListScalars(doc.contents);
+    normalizeKeyOrder(doc);
+    return doc.toString({ indent: 2, lineWidth: 0 }).replace(/\s+$/, "") + "\n";
+  } catch {
+    return value;
   }
-  if (!node || typeof node !== "object") return;
-  const obj = node as Record<string, unknown>;
-  for (const [k, v] of Object.entries(obj)) {
-    const p = [...path, k];
-    const isServiceField = p.length === 3 && p[0] === "services";
-    const isDeployLabels = p.length === 4 && p[0] === "services" && p[2] === "deploy" && k === "labels";
-    if (((isServiceField && KV_ARRAY_KEYS.has(k)) || isDeployLabels) && isScalarMap(v)) {
-      obj[k] = Object.entries(v).map(([kk, vv]) =>
-        vv === null || vv === undefined ? kk : `${kk}=${String(vv)}`
-      );
-      continue;
-    }
-    toKvArrayForm(v, p);
-  }
-}
-
-/** 流式数组内的标量项：含流式结构字符（, [ ] { }）时补单引号；js-yaml 已引用的原样保留 */
-function quoteFlowItem(item: string): string {
-  if (item === "") return "''";
-  const quoted =
-    item.length > 1 &&
-    ((item[0] === "'" && item.endsWith("'")) || (item[0] === '"' && item.endsWith('"')));
-  if (quoted) return item;
-  if (/[,[\]{}]/.test(item) || /:\s/.test(item)) return "'" + item.replace(/'/g, "''") + "'";
-  return item;
-}
-
-/**
- * 把「块状纯标量序列」折叠成行内流式数组：`key:\n  - a\n  - b` → `key: [a, b]`。
- * 只要序列中出现「项本身是映射」「块标量（`|` / `>`）」「项有更深缩进的续行」之一，
- * 该键就整体保持块状写法。
- */
-function foldSequencesToFlow(text: string): string {
-  const lines = text.split("\n");
-  const out: string[] = [];
-  let i = 0;
-  while (i < lines.length) {
-    // 形如 `  key:`（冒号后无值）的键行；排除以 `-` 开头的序列项
-    const keyLine = /^(\s*)([^#\s-][^:]*):\s*$/.exec(lines[i]);
-    if (keyLine) {
-      const itemRe = new RegExp("^" + " ".repeat(keyLine[1].length + 2) + "- (.*)$");
-      const items: string[] = [];
-      let j = i + 1;
-      let allScalar = true;
-      while (j < lines.length && itemRe.test(lines[j])) {
-        const content = (itemRe.exec(lines[j]) as RegExpExecArray)[1].replace(/\s+$/, "");
-        const isQuoted = /^['"]/.test(content);
-        // 块标量 / 映射起始 → 该键整体保留块状
-        if (!isQuoted && (/^[|>]/.test(content) || /^[^:]*:(\s|$)/.test(content))) {
-          allScalar = false;
-          break;
-        }
-        // 下一行缩进比「项所在列」更深 → 该项有续行（多行标量），必须保留块状
-        const nxt = lines[j + 1];
-        if (nxt !== undefined && nxt.trim() !== "" && /^\s*/.exec(nxt)![0].length > keyLine[1].length + 2) {
-          allScalar = false;
-          break;
-        }
-        items.push(content);
-        j++;
-      }
-      if (allScalar && items.length > 0) {
-        out.push(`${keyLine[1]}${keyLine[2]}: [${items.map(quoteFlowItem).join(", ")}]`);
-        i = j;
-        continue;
-      }
-    }
-    out.push(lines[i]);
-    i++;
-  }
-  return out.join("\n");
 }
 
 /** Lint 错误信息（行/列均为 1-based） */
@@ -513,51 +577,15 @@ export function YamlEditor({
   };
 
   /**
-   * 格式化（美化 + 修正缩进 + 转数组写法）：load 出的对象先做「数组写法」归一化
-   * （environment / labels 映射 → `- K=V`），再 dump 成 2 空格缩进、无 refs、
-   * 不自动换行的块状 YAML，最后把纯标量序列折叠成行内 `[a, b]`。
+   * 格式化：对齐《YAML 编码规范 · Docker Compose 专用》——
+   * 2 空格缩进 · `key: value` 冒号后 1 空格 · 数组一律**块状** `- `（消除行内 `[a, b]` 与混用）·
+   * 顶层 services>volumes>networks · 服务内按「网络 > 重启策略 > 容器信息 > 端口 > 环境变量 >
+   * 数据挂载 > 其余 > 镜像」排序 · **注释全程保留**（整行随属主节点移动、行尾随本行）。
    *
-   * dump 会把空值键（用户写的 `postgres:`）输出成 `postgres: null`——语义虽等价，
-   * 但不符合书写习惯且容易误导；后处理把行尾裸 null 还原为空值（js-yaml 对字符串
-   * "null" 会输出带引号的 'null'，因此裸 null 一定是真空值，可安全还原）。
-   *
-   * 扁平无缩进的 YAML（如用户从别处整段粘贴、所有行顶格）会被 js-yaml 直接报
-   * bad indentation，此时先走 autoIndentYaml 启发式补缩进，再 load→dump 得到规范嵌套。
+   * 扁平无缩进的 YAML（用户整段粘贴、所有行顶格）先走 autoIndentYaml 启发式补缩进，
+   * 再交给 `yaml` 文档模型做保注释归一化（js-yaml 的 load→dump 会丢注释，已弃用）。
    */
-  const dumpNormalized = (parsed: unknown): string => {
-    toKvArrayForm(parsed, []);
-    return foldSequencesToFlow(
-      yaml
-        .dump(parsed as object, { indent: 2, lineWidth: -1, noRefs: true, sortKeys: false })
-        .replace(/^(\s*(?:-\s+)?[^#:\n]+):null(\s*)$/gm, "$1:$2")
-        .replace(/^(\s*(?:-\s+)?[^#:\n]+):\s+null(\s*)$/gm, "$1:$2")
-    );
-  };
-
-  const format = () => {
-    // 整段顶格（无任何缩进）的 YAML 先启发式补缩进：纯顶格的 compose 其实是**合法**
-    // YAML，js-yaml 会把它解析成「一堆同级键」的扁平映射，直接 dump 出来依旧扁平 ——
-    // 得不到嵌套结构（Feature A 的补缩进分支原先挂在 catch 上，永远不触发）。
-    // 补缩进失败再落回常规 load。
-    if (isFlatYaml(value)) {
-      try {
-        const parsed = yaml.load(autoIndentYaml(value));
-        if (parsed !== undefined) {
-          onChange(dumpNormalized(parsed));
-          return;
-        }
-      } catch {
-        // 补缩进后仍不合法 → 尝试常规解析
-      }
-    }
-    try {
-      const parsed = yaml.load(value);
-      if (parsed === undefined) return;
-      onChange(dumpNormalized(parsed));
-    } catch {
-      // 不合法则不格式化（状态栏已有红色错误提示）
-    }
-  };
+  const format = () => onChange(formatComposeYaml(value));
 
   const isEmpty = value.trim() === "";
 
@@ -572,7 +600,7 @@ export function YamlEditor({
           <button
             onClick={format}
             disabled={isEmpty}
-            title="格式化 YAML（规范化缩进 + environment / labels 转数组写法 + 序列行内化）"
+            title="格式化 YAML（2 空格缩进 + 数组块状 + 服务参数按规范排序；保留注释）"
             className="flex items-center gap-1 px-2 py-1 text-xs text-slate-600 border border-slate-200 rounded hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
           >
             <Wand2 size={12} /> 格式化

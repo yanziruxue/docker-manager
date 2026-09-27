@@ -9,6 +9,19 @@ export default {
           hover: "#334155",
           active: "#3b82f6",
         },
+        // Unraid 官方色板（取自 default-color-palette.css，命名保留其 token 语义）
+        ink: "#1d1b1b", // 主文字（--black）
+        surface: "#f2f2f2", // 次级表面（--gray-100）
+        accent: "#0099ff", // 控件蓝（--blue-700）
+        brand: {
+          500: "#ff8c2f", // Unraid Brand Orange
+          800: "#f15a2c", // Unraid Brand Orange Dark
+        },
+      },
+      screens: {
+        // Unraid 仪表盘的三列断点为 1600px；本项目左侧有固定侧边栏，
+        // 故按「视口 - 侧边栏 - 内边距」反推为 1800px，保证每列仍有 ~490px 可用宽度。
+        "3xl": "1800px",
       },
       animation: {
         "fade-in": "fadeIn 0.2s ease-in-out",

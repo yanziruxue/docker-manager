@@ -62,7 +62,13 @@ import {
   type AuthUser,
   type RecoveryStatus,
 } from "../api";
-import { sanitizeRecoveryInput, validateRecoveryCode, RECOVERY_LENGTH } from "../lib/recovery-code";
+import {
+  sanitizeRecoveryInput,
+  validateRecoveryCode,
+  RECOVERY_MIN_LENGTH,
+  RECOVERY_MAX_LENGTH,
+} from "../lib/recovery-code";
+import { waitForRestartAndReload } from "../lib/restart-wait";
 import { Tag } from "../components/Badge";
 import { TAG_PALETTE, TagChip, normalizeTagColor, hexWithAlpha, randomTagColor, hexToRgb, rgbToHex } from "../components/TagPicker";
 import { Modal, ConfirmDialog } from "../components/Modal";
@@ -213,6 +219,8 @@ function getDefaultSettings(): SystemSettings {
         { content: "container_name: ", insert: "services" },
       ],
     },
+    // 默认开启上传安装数量统计（系统设置 → 本机设备 可关闭）
+    telemetry: { enabled: true },
     defaultsVersion: 2,
   };
 }
@@ -306,7 +314,7 @@ function ChangePasswordForm({ username }: { username?: string }) {
   );
 }
 
-/** 「用户」区块：18 位密码找回码管理（服务端仅存哈希，明文不可回显） */
+/** 「用户」区块：密码找回码管理（18~24 位、区分大小写；服务端仅存哈希，明文不可回显） */
 function RecoveryCodeForm() {
   const [status, setStatus] = useState<RecoveryStatus | null>(null);
   const [code, setCode] = useState("");
@@ -390,19 +398,19 @@ function RecoveryCodeForm() {
 
       <div className="grid grid-cols-2 gap-4">
         <FormField
-          label={`新找回码（${RECOVERY_LENGTH} 位）`}
+          label={`新找回码（${RECOVERY_MIN_LENGTH}~${RECOVERY_MAX_LENGTH} 位）`}
           required
-          hint="仅字母和数字，忽略大小写"
+          hint="仅字母和数字，区分大小写"
         >
           <div className="relative">
             <Input
               value={code}
               onChange={(v) => setCode(sanitizeRecoveryInput(v))}
-              placeholder={`${RECOVERY_LENGTH} 位字母或数字`}
+              placeholder={`${RECOVERY_MIN_LENGTH}~${RECOVERY_MAX_LENGTH} 位字母或数字`}
               className="pr-12 font-mono tracking-wider"
             />
             <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-slate-400 tabular-nums pointer-events-none">
-              {code.length}/{RECOVERY_LENGTH}
+              {code.length}/{RECOVERY_MAX_LENGTH}
             </span>
           </div>
         </FormField>
@@ -862,6 +870,8 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
   const [updateState, setUpdateState] = useState<UpdateState | null>(null);
   const [checking, setChecking] = useState(false);
   const statusTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  /** 「等重启 → 刷新页面」的取消函数（见 src/lib/restart-wait.ts），卸载时收掉 */
+  const restartWaitRef = useRef<(() => void) | null>(null);
   // 上传更新包：隐藏的 file input + 应用中的禁用态
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -907,10 +917,12 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nowTick, pendingUpload, updateInProgress]);
 
-  // 卸载时清理轮询定时器
+  // 卸载时清理轮询定时器与「等重启」等待循环
   useEffect(() => {
     return () => {
       if (statusTimerRef.current) clearInterval(statusTimerRef.current);
+      restartWaitRef.current?.();
+      restartWaitRef.current = null;
     };
   }, []);
 
@@ -927,9 +939,18 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
             // 更新完成：清除「系统更新」可用角标（含全局侧边栏）
             if (st.phase === "done") {
               onUpdateInfoChange?.(null);
-              // 更新已完成：后端进程即将退出并由 systemd 拉起新二进制，
+              // 更新已完成：二进制已替换、进程即将退出并由 systemd 拉起新二进制，
               // 等待其重新上线后自动刷新页面，确保前端 bundle 同步到新版。
-              waitForRestartAndReload();
+              // 此处只剩重启 ⇒ 允许兜底盲刷新（绝不卡死在旧前端）。
+              // 判定逻辑见 src/lib/restart-wait.ts：**不再依赖状态码** —— 升级后
+              // /system/version 会因「账号待重新设置」返回 403 REINIT_REQUIRED，
+              // 旧实现把它当成「进程还没起来」⇒ 页面永不刷新。
+              setUpdateState((prev) =>
+                prev ? { ...prev, message: "升级完成，等待服务重启…" } : prev
+              );
+              // 重复触发时先取消上一个等待循环，避免叠出多个探测轮询
+              restartWaitRef.current?.();
+              restartWaitRef.current = waitForRestartAndReload({ blindReloadAfterMs: 60_000 });
             }
           }
         })
@@ -937,40 +958,6 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
           // 进程已退出重启，忽略连接错误
         });
     }, 1500);
-  };
-
-  // 更新完成后自动刷新页面：两阶段监听 /system/version
-  // 1) 先等其失联（旧进程已退出）2) 再等其恢复响应（新进程已起）→ 刷新加载新前端
-  const waitForRestartAndReload = () => {
-    setUpdateState((prev) =>
-      prev ? { ...prev, message: "升级完成，等待服务重启…" } : prev
-    );
-    let sawDown = false; // 是否已观测到旧进程失联
-    let attempts = 0; // 旧进程仍在线时的轮询次数上限
-    const tick = () => {
-      fetchAppVersion()
-        .then(() => {
-          if (sawDown) {
-            // 新服务已重新响应 → 刷新加载新前端 bundle
-            window.location.reload();
-            return;
-          }
-          // 仍是旧进程在响应（尚未退出），继续等待
-          attempts += 1;
-          if (attempts >= 30) {
-            // 30s 内旧进程仍未退出（异常），直接刷新尝试，避免卡死
-            window.location.reload();
-            return;
-          }
-          setTimeout(tick, 1000);
-        })
-        .catch(() => {
-          // 旧进程已失联，进入「等待新进程上线」阶段
-          sawDown = true;
-          setTimeout(tick, 1000);
-        });
-    };
-    setTimeout(tick, 1000);
   };
 
   // 页面刷新/重进后，若后端更新正在进行，自动接管进度显示
@@ -2811,7 +2798,10 @@ docker-compose version</code>
 
         {activeSection === "activity" && (
           <div className="max-w-2xl space-y-5">
-            <ActivityPanel />
+            <ActivityPanel
+              telemetryEnabled={data.telemetry?.enabled ?? true}
+              onTelemetryEnabledChange={(val) => update("telemetry", "enabled", val)}
+            />
           </div>
         )}
 

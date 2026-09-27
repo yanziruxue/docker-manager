@@ -1,10 +1,17 @@
 /**
- * 安装量与活跃度遥测（仅上报端）
+ * 安装量与活跃度上报（仅上报端）
  *
  * 设计依据《Linux应用安装量与活跃用户统计方案（设备唯一标识+风控校验体系）》：
  *  - 主标识（统计主键）：本机硬件指纹 = 主板 + CPU + 内存 + 硬盘 + 显卡 + 安装的系统（6 维哈希）
- *  - 取消随机设备 UUID 作为标识：环境连续性直接由硬件指纹一致性决定（硬件指纹不变 = 同一设备）
- *  - 事件：install（首次冷启动/重装）/ active（日常启动、定时心跳，日粒度去重）
+ *  - 事件：install（首次安装 / 重装 / 标识文件重建）/ active（进程启动、重启、每 12 小时）
+ *
+ * 文件职责拆分（v1.29.0 起）：
+ *  - device.info（标识文件）：deviceId / createdAt(≈安装时间) / virtualized / hardware(安装时快照)
+ *    —— **只在创建时写一次**，之后纯只读；仅当「文件被删」或「创建时间与修改时间不一致」时重建。
+ *  - telemetry-state.json（运行态）：installReported / lastReportAt / lastActiveAt / lastError
+ *    —— 每次上报后写，**不参与标识文件的完整性校验**（避免「写一次」被自己打破）。
+ *
+ * 上传开关：系统设置 → 本机设备（`settings.telemetry.enabled`，默认开启），关闭后不发任何请求。
  *
  * 容错原则：任何失败（无权限、离线、采集失败）都不得影响主业务。
  */
@@ -15,6 +22,7 @@ import os from "node:os";
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { CONFIG_DIR } from "./paths.js";
+import { getSettings } from "./settings.js";
 
 /** 遥测事件类型 */
 export type TelemetryEvent = "install" | "active";
@@ -35,111 +43,228 @@ export interface DeviceHardware {
   boardSerial: string;
 }
 
-/** 设备标识文件（不放在程序安装目录，普通卸载不清除） */
-const DEVICE_FILE_GLOBAL = "/etc/docker-manager-yanzi/device.info";
-const DEVICE_FILE_FALLBACK = path.join(CONFIG_DIR, "device.info");
+/**
+ * 标识文件：位于应用配置目录（随安装目录持久化），**创建后不再修改**。
+ * 普通卸载不清除它（重装仍视为同一设备）。
+ */
+const DEVICE_FILE = path.join(CONFIG_DIR, "device.info");
+/** 运行态文件：每次上报后写，独立于标识文件（不参与「创建时间 / 修改时间」判据） */
+const STATE_FILE = path.join(CONFIG_DIR, "telemetry-state.json");
 
-/** 心跳检查间隔：30 分钟（跨天自动触发 active，日粒度去重，成本极低） */
-const HEARTBEAT_INTERVAL_MS = 30 * 60 * 1000;
-/** 启动后延迟首报，避免与启动流程争抢资源 */
+/** 上报周期：12 小时 */
+const REPORT_INTERVAL_MS = 12 * 60 * 60 * 1000;
+/** 周期判定的宽限：定时器可能比 12 小时整点早几十毫秒，避免因此空转一轮 */
+const DUE_SLACK_MS = 60 * 1000;
+/** 失败重试间隔：10 分钟（仅针对可重试错误：网络 / 5xx） */
+const RETRY_INTERVAL_MS = 10 * 60 * 1000;
+/** 启动后延迟首报：避开开机阶段网络未就绪与启动流程资源争抢 */
 const FIRST_REPORT_DELAY_MS = 30 * 1000;
 /** 单次网络请求超时 */
 const REQUEST_TIMEOUT_MS = 10 * 1000;
+/** 标识文件重建限流：24 小时内最多重建 1 次（防被外部持续改写导致 install 风暴） */
+const REBUILD_MIN_INTERVAL_MS = 24 * 60 * 60 * 1000;
+/** 创建时间 / 修改时间比较容差：创建本身是 create + write 两个动作，可能跨秒 */
+const MTIME_TOLERANCE_MS = 2000;
 
+/** 标识文件内容（写一次，之后只读） */
 export interface DeviceInfo {
   /** 主标识：本机硬件指纹（主板+CPU+内存+硬盘+显卡+系统 6 维哈希），统计去重唯一依据 */
   deviceId: string;
-  /** 首次生成时间（≈ 首次安装时间） */
+  /** 标识文件创建时间（≈ 安装时间；重装 / 重建后为新的时间） */
   createdAt: string;
   /** 是否虚拟化环境 */
   virtualized: boolean;
-  /** 本机设备标识 6 维（系统/CPU/GPU/内存/硬盘UID/主板序列号） */
+  /** 安装时采集的 6 维硬件快照（与 deviceId 同源，可复算校验；不再刷新） */
   hardware: DeviceHardware;
+}
+
+/** 运行态（可随时重写；不进标识文件，故不影响「创建时间 == 修改时间」判据） */
+interface TelemetryState {
   /** install 事件是否已成功上报 */
   installReported: boolean;
-  /** 最近一次成功上报 active 的自然日（YYYY-MM-DD），用于日粒度去重 */
-  lastActiveDate: string;
-  /** 最近一次上报时间 */
+  /** 最近一次**成功**上报时间 */
   lastReportAt?: string;
+  /** 最近一次**成功**上报 active 的时间（周期判定依据） */
+  lastActiveAt?: string;
+  /** 最近一次标识文件重建时间（重建限流依据） */
+  lastRebuildAt?: string;
   /** 最近一次上报错误信息 */
   lastError?: string;
 }
 
-// ---------- 设备标识文件读写 ----------
+// ---------- 标识文件：写一次 + 完整性自愈 ----------
 
-/** 解析实际可用的设备文件路径（优先系统全局配置目录，无权限则降级到配置目录） */
-function resolveDeviceFile(): string {
-  for (const p of [DEVICE_FILE_GLOBAL, DEVICE_FILE_FALLBACK]) {
-    if (fs.existsSync(p)) return p;
-  }
-  // 都不存在：用「实写 + 删」判定可写性，避免 accessSync 在某些环境给出假阳性
-  const tryWrite = (p: string) => {
-    try {
-      fs.mkdirSync(path.dirname(p), { recursive: true });
-      const probe = `${p}.probe`;
-      fs.writeFileSync(probe, "1", "utf-8");
-      fs.unlinkSync(probe);
-      return true;
-    } catch {
-      return false;
-    }
-  };
-  return tryWrite(DEVICE_FILE_GLOBAL) ? DEVICE_FILE_GLOBAL : DEVICE_FILE_FALLBACK;
+/** 标识文件路径（页面展示用） */
+export function getDeviceFilePath(): string {
+  return DEVICE_FILE;
 }
 
-function readDeviceInfo(): DeviceInfo | null {
-  const file = resolveDeviceFile();
+/** 标识文件完整性判定结果 */
+type DeviceFileCheck = "ok" | "missing" | "tampered" | "unknown";
+
+/**
+ * 校验标识文件的「创建时间 vs 修改时间」。
+ *  - 两者一致（含 1~2 秒容差）→ ok，不做任何修改；
+ *  - 修改时间明显晚于创建时间 → tampered，需要重新生成标识文件；
+ *  - 创建时间不可用（部分文件系统不提供 btime，Node 会回退成 ctime）→ unknown，宁可放过不误重建。
+ *
+ * 关键：只比 mtime，**不比 ctime** —— `chmod` / `chown` 只改 ctime，
+ * 安装脚本对目录/文件改权限不应被误判为「文件被改写」。
+ */
+function checkDeviceFile(file: string): DeviceFileCheck {
   try {
-    if (!fs.existsSync(file)) return null;
-    const raw = JSON.parse(fs.readFileSync(file, "utf-8"));
-    if (!raw?.deviceId) return null;
-    return raw as DeviceInfo;
+    if (!fs.existsSync(file)) return "missing";
+    const st = fs.statSync(file);
+    const btime = st.birthtimeMs;
+    const mtime = st.mtimeMs;
+    // btime 不可用或拿到的是 ctime 回退值（btime 比 mtime 还新）→ 跳过校验
+    if (!Number.isFinite(btime) || btime <= 0) return "unknown";
+    if (btime > mtime) return "unknown";
+    if (mtime > btime + MTIME_TOLERANCE_MS) return "tampered";
+    return "ok";
+  } catch {
+    return "unknown";
+  }
+}
+
+/** 读取标识文件原始 JSON（解析失败返回 null） */
+function readDeviceFileRaw(): Record<string, unknown> | null {
+  try {
+    if (!fs.existsSync(DEVICE_FILE)) return null;
+    const raw = JSON.parse(fs.readFileSync(DEVICE_FILE, "utf-8"));
+    return raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
   } catch {
     return null;
   }
 }
 
-function writeDeviceInfo(info: DeviceInfo): void {
-  const file = resolveDeviceFile();
-  try {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, JSON.stringify(info, null, 2), "utf-8");
-  } catch (e) {
-    console.warn("[telemetry] 设备标识写入失败:", (e as Error).message);
-  }
+/** 把原始 JSON 归一化为 DeviceInfo（缺 deviceId 视为无效） */
+function toDeviceInfo(raw: Record<string, unknown>): DeviceInfo | null {
+  if (!raw?.deviceId) return null;
+  return {
+    deviceId: String(raw.deviceId),
+    createdAt: String(raw.createdAt || ""),
+    virtualized: !!raw.virtualized,
+    hardware: (raw.hardware || {}) as DeviceHardware,
+  };
 }
 
 /**
- * 获取（必要时创建）设备信息。
- * 设备身份 = 本机硬件指纹（主板+CPU+内存+硬盘+显卡+系统 6 维哈希）：
- *  - 硬件指纹与已存记录一致 → 同一设备，沿用身份（仅刷新硬件快照）；
- *  - 无历史记录或硬件指纹变化 → 新设备，重新按当前硬件生成设备标识（install 重新上报）。
- * 不再使用随机设备 UUID 作为统计主键。
+ * 写入标识文件（**唯一的写入点**）：权限 0600（chmod 只动 ctime，不影响判据）。
+ *
+ * ⚠️ 必须「先写临时文件 → 原子替换」，**不能直接覆写已有文件**：
+ * 覆写会复用旧 inode，其**创建时间（btime）保持为最初创建时刻**（Linux ext4 / Windows 皆如此），
+ * 于是刚重建出来的文件立刻又满足「修改时间 > 创建时间」→ 每次调用都重建，陷入死循环。
+ * rename 会带上临时文件自己的 btime，`btime == mtime` 才成立。
  */
-export function getDeviceInfo(): DeviceInfo {
-  const current = collectHardwareAttrs();
-  const fp = collectHardwareFingerprint();
-  const deviceId = fp.fingerprint;
-  const existing = readDeviceInfo();
+function writeDeviceFile(info: DeviceInfo): void {
+  try {
+    fs.mkdirSync(path.dirname(DEVICE_FILE), { recursive: true });
+    const tmp = `${DEVICE_FILE}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(info, null, 2), { encoding: "utf-8", mode: 0o600 });
+    fs.renameSync(tmp, DEVICE_FILE);
+  } catch (e) {
+    console.warn("[telemetry] 标识文件写入失败:", (e as Error).message);
+  }
+}
 
-  // 无历史记录，或硬件指纹变化（环境已变）→ 视为新设备
-  if (!existing || existing.deviceId !== deviceId) {
-    const info: DeviceInfo = {
-      deviceId,
-      createdAt: new Date().toISOString(),
-      virtualized: fp.virtualized,
-      hardware: current,
-      installReported: false,
-      lastActiveDate: "",
+function readState(): TelemetryState {
+  try {
+    const raw = JSON.parse(fs.readFileSync(STATE_FILE, "utf-8"));
+    return {
+      installReported: !!raw?.installReported,
+      lastReportAt: raw?.lastReportAt,
+      lastActiveAt: raw?.lastActiveAt,
+      lastRebuildAt: raw?.lastRebuildAt,
+      lastError: raw?.lastError,
     };
-    writeDeviceInfo(info);
-    return info;
+  } catch {
+    return { installReported: false };
+  }
+}
+
+function writeState(patch: Partial<TelemetryState>): TelemetryState {
+  const next: TelemetryState = { ...readState(), ...patch };
+  try {
+    fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
+    fs.writeFileSync(STATE_FILE, JSON.stringify(next, null, 2), "utf-8");
+  } catch (e) {
+    console.warn("[telemetry] 上报状态写入失败:", (e as Error).message);
+  }
+  return next;
+}
+
+/**
+ * 老版本把运行态（installReported / lastReportAt）混存在 device.info 里：
+ * 升级到「运行态独立文件」后首次读取时迁移一次，避免存量部署升级后被误判为「首次安装」。
+ */
+function migrateLegacyState(raw: Record<string, unknown>): void {
+  const st = readState();
+  if (st.installReported) return;
+  if (raw?.installReported === true) {
+    writeState({
+      installReported: true,
+      lastReportAt: typeof raw.lastReportAt === "string" ? raw.lastReportAt : undefined,
+    });
+  }
+}
+
+export interface DeviceInfoResult {
+  info: DeviceInfo;
+  /** 本次是否**重新生成**了标识文件（＝文件被删 / 被改写，视为「重装」） */
+  regenerated: boolean;
+  /** 本次重建是否**计为一次重新安装**并上报 install（受 24 小时限流保护） */
+  reportInstall: boolean;
+}
+
+/**
+ * 获取本机设备标识（标识文件存在且完好时**只读，不做任何写入**）。
+ *
+ * 自愈规则（用户需求）：重装 / 更新后启动时校验「创建时间 vs 修改时间」——
+ *  - 一致 → 不做任何修改，沿用原标识（含 deviceId 与安装时间）；
+ *  - 不一致（或被删）→ **总是重新生成标识文件**（deviceId 按当前硬件指纹重算、安装时间取当下）。
+ *
+ * 24 小时限流只作用于「是否把这次重建当作一次新的安装上报」：
+ * 距上次重建不足 24 小时的重建**照常重建但不上报 install**，避免被外部脚本反复改写时
+ * 把统计端的安装量刷成天文数字（也避免重装/删文件的瞬间产生重复安装事件）。
+ */
+export function getDeviceInfo(): DeviceInfoResult {
+  const check = checkDeviceFile(DEVICE_FILE);
+  const raw = readDeviceFileRaw();
+  const existing = raw ? toDeviceInfo(raw) : null;
+
+  // ① 完好 → 只读返回（绝不回写，否则会破坏「创建时间 == 修改时间」）
+  if (check === "ok" && existing) {
+    return { info: existing, regenerated: false, reportInstall: false };
   }
 
-  // 硬件环境未变：沿用同一设备身份，仅刷新硬件快照
-  existing.hardware = current;
-  writeDeviceInfo(existing);
-  return existing;
+  if (raw) migrateLegacyState(raw);
+
+  // ② btime 不可用等无法判定的情形：文件内容可解析就放过，保持原标识
+  if (existing && check === "unknown") {
+    return { info: existing, regenerated: false, reportInstall: false };
+  }
+
+  // ③ 需要重建（文件缺失 / 被改写 / 内容不可解析）：总是重建，install 是否上报看限流
+  const lastRebuild = readState().lastRebuildAt;
+  const last = lastRebuild ? Date.parse(lastRebuild) : 0;
+  const withinLimit =
+    Number.isFinite(last) && last > 0 && Date.now() - last < REBUILD_MIN_INTERVAL_MS;
+  if (withinLimit) {
+    console.warn("[telemetry] 标识文件需要重新生成，但距上次重建不足 24 小时，本次不再上报 install");
+  }
+
+  const fp = collectHardwareFingerprint();
+  const info: DeviceInfo = {
+    deviceId: fp.fingerprint,
+    createdAt: new Date().toISOString(),
+    virtualized: fp.virtualized,
+    hardware: collectHardwareAttrs(),
+  };
+  writeDeviceFile(info);
+  // 限流窗口不因「被限流的重建」而顺延：否则持续被改写时永远报不出下一次 install
+  if (!withinLimit) writeState({ lastRebuildAt: info.createdAt });
+  return { info, regenerated: true, reportInstall: !withinLimit };
 }
 
 // ---------- 硬件指纹（仅风控，不参与统计） ----------
@@ -234,7 +359,7 @@ export function collectHardwareFingerprint(): { fingerprint: string; virtualized
   return { fingerprint, virtualized };
 }
 
-// ---------- 设备标识 7 维采集（≥3 匹配决定硬件环境是否变化） ----------
+// ---------- 设备标识 6 维采集 ----------
 
 /**
  * 从 /sys/bus/pci/devices 直读 GPU 型号（不依赖 lspci，普通用户可读，
@@ -463,22 +588,43 @@ interface TelemetryConfigLike {
   collectHwFingerprint?: boolean;
 }
 
-/** 读取遥测配置（未配置时走默认值：启用 + 官方端点） */
-const TELEMETRY_ENDPOINT = "https://docker-yanzi.ziruxue.top";
+/** 上报端点（可用环境变量 TELEMETRY_ENDPOINT 覆盖，便于自建/调试） */
+const TELEMETRY_ENDPOINT = process.env.TELEMETRY_ENDPOINT || "https://yanzi-api.ziruxue.top";
+/** 上报路径 */
+const TELEMETRY_PATH = "/api/yanzi-docker/event";
+
+/**
+ * 读取上报配置。`enabled` 取自「系统设置 → 本机设备」的上传开关
+ * （`settings.telemetry.enabled`，缺省视为开启）。
+ */
 function readConfig(): Required<TelemetryConfigLike> {
-  return { enabled: true, endpoint: TELEMETRY_ENDPOINT, collectHwFingerprint: true };
+  let enabled = true;
+  try {
+    const s = getSettings();
+    if (s?.telemetry && typeof s.telemetry.enabled === "boolean") enabled = s.telemetry.enabled;
+  } catch {
+    /* 读取失败按默认开启 */
+  }
+  return { enabled, endpoint: TELEMETRY_ENDPOINT, collectHwFingerprint: true };
 }
 
-/** 构造上报载荷 */
-function buildPayload(event: TelemetryEvent, info: DeviceInfo, collectHw: boolean) {
+/**
+ * 构造上报载荷（本机应用安装信息：硬件标识 + 硬件明细 + 系统 + 应用版本；
+ * **不含容器 / 镜像 / 堆栈等任何业务数据，也不含账号信息**）
+ * @param uploadEnabled 上传开关当前状态（开启/关闭），随每次上报带出，服务端可记录本机最新 opt-in 状态
+ */
+function buildPayload(event: TelemetryEvent, info: DeviceInfo, collectHw: boolean, uploadEnabled: boolean) {
   return {
-    // 统计主键 = 本机硬件指纹（主板+CPU+内存+硬盘+显卡+系统 6 维哈希）；
-    // 不再使用随机设备 UUID 作为标识。
+    // 统计主键 = 本机硬件指纹（主板+CPU+内存+硬盘+显卡+系统 6 维哈希）
     device_uuid: info.deviceId,
-    // 硬件指纹与统计主键同源（均为 6 维哈希），保留以兼容服务端风控字段
+    // 硬件指纹与统计主键同源，保留以兼容服务端风控字段
     hw_fingerprint: collectHw ? info.deviceId : "",
     event,
     ts: new Date().toISOString(),
+    /** 上传开关当前状态（开启/关闭）；不含任何业务数据，仅用于服务端记录本机最新 opt-in 状态 */
+    uploadEnabled,
+    /** 安装时间（＝标识文件创建时间；重装 / 重建后为新的时间） */
+    installedAt: info.createdAt,
     app: "docker-manager-yanzi",
     appVersion: currentAppVersion(),
     os: "linux",
@@ -486,112 +632,206 @@ function buildPayload(event: TelemetryEvent, info: DeviceInfo, collectHw: boolea
     arch: process.arch,
     channel: "sea-linux-x64",
     virtualized: info.virtualized,
-    // 6 维设备标识：统计服务端据此做硬件指纹一致性校验（取代旧的 device_uuid 主键）
+    /** 标识文件路径（本机 `config/device.info`，对应卡片「标识文件」） */
+    deviceFile: DEVICE_FILE,
+    // 6 维设备标识（安装时快照，与 deviceId 同源，服务端可复算校验）—— 对应卡片「主板」等
     hardware: collectHw ? info.hardware : null,
+    /**
+     * 富硬件明细（与「本机设备」卡片逐项对应）：
+     * cpu{model,cores,threads,freqGHz} / gpu{model,memory} / memory{model,sizeGB} /
+     * disk{serial,model,size} / dmi{boardName,productSerial,productUuid}
+     */
+    details: collectHw ? collectHardwareDetails() : null,
   };
 }
 
-/** 发送单次事件，成功返回 true；失败返回错误信息 */
+/** 发送单次事件；`fatal=true` 表示鉴权失败（401/403），不做密集重试 */
 async function sendEvent(
   event: TelemetryEvent,
   info: DeviceInfo,
-  cfg: Required<TelemetryConfigLike>
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  const url = `${cfg.endpoint}/api/telemetry/event`;
+  cfg: Required<TelemetryConfigLike>,
+  uploadEnabled: boolean
+): Promise<{ ok: true } | { ok: false; error: string; fatal: boolean }> {
+  const url = `${cfg.endpoint}${TELEMETRY_PATH}`;
   try {
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(buildPayload(event, info, cfg.collectHwFingerprint)),
+      headers: {
+        "Content-Type": "application/json",
+        // 鉴权：设备标识（硬件指纹）同时作为 X-Telemetry-Key
+        "X-Telemetry-Key": info.deviceId,
+      },
+      body: JSON.stringify(buildPayload(event, info, cfg.collectHwFingerprint, uploadEnabled)),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
-    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
+    if (!res.ok) {
+      const fatal = res.status === 401 || res.status === 403;
+      return { ok: false, error: `HTTP ${res.status}`, fatal };
+    }
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: (e as Error).message || "网络错误" };
+    return { ok: false, error: (e as Error).message || "网络错误", fatal: false };
   }
 }
 
-function today(): string {
-  return new Date().toISOString().slice(0, 10); // UTC 自然日，与统计端口径一致
+/** 下一次计划上报时间（含失败重试），页面展示用 */
+let nextAttemptAt: string | null = null;
+let timer: ReturnType<typeof setTimeout> | null = null;
+let started = false;
+
+/** 距上次**成功**上报 active 是否已满 12 小时周期（从未成功过则视为到期） */
+function dueForActive(state: TelemetryState): boolean {
+  if (!state.lastActiveAt) return true;
+  const t = Date.parse(state.lastActiveAt);
+  return !Number.isFinite(t) || Date.now() - t >= REPORT_INTERVAL_MS - DUE_SLACK_MS;
 }
 
 /**
- * 执行一次上报调度：
- *  - install 未上报则先报 install
- *  - active 按自然日去重，跨天自动触发
- * 返回本次实际发生的动作，便于页面展示。
+ * 执行一次上报：
+ *  - 标识文件被删 / 被改写 → 重新生成标识文件；若距上次重建已满 24 小时，
+ *    则视为重装并上报 `install`（附带新的安装时间）；
+ *  - 否则若距上次 active 成功已满 12 小时（或从未成功过）→ 上报 `active`；
+ *  - `force=true` 忽略周期判断（进程启动/重启首报、页面「立即上报」）。
+ * 任何失败都只写运行态 `lastError`，不抛异常、不影响主业务。
  */
-export async function reportOnce(force = false): Promise<{ sent: TelemetryEvent[]; error?: string }> {
+export async function reportOnce(force = false): Promise<{ sent: TelemetryEvent[]; error?: string; fatal?: boolean }> {
   const cfg = readConfig();
-  if (!cfg.enabled) return { sent: [], error: "遥测已关闭" };
+  if (!cfg.enabled) return { sent: [], error: "上传已关闭" };
 
-  const info = getDeviceInfo();
+  const { info, reportInstall } = getDeviceInfo();
+  const state = readState();
   const sent: TelemetryEvent[] = [];
 
-  const persist = (patch: Partial<DeviceInfo>) => {
-    const next = { ...info, ...patch, lastReportAt: new Date().toISOString() };
-    Object.assign(info, next);
-    writeDeviceInfo(info);
-  };
+  const needInstall = reportInstall || !state.installReported;
+  const needActive = !needInstall && (force || dueForActive(state));
+  const action: TelemetryEvent | null = needInstall ? "install" : needActive ? "active" : null;
+  if (!action) return { sent };
 
-  if (!info.installReported) {
-    const r = await sendEvent("install", info, cfg);
-    if (!r.ok) {
-      persist({ lastError: r.error });
-      return { sent, error: r.error };
-    }
-    persist({ installReported: true, lastError: undefined });
-    sent.push("install");
+  const r = await sendEvent(action, info, cfg, cfg.enabled);
+  const now = new Date().toISOString();
+  if (!r.ok) {
+    writeState({ lastError: r.error });
+    return { sent, error: r.error, fatal: r.fatal };
   }
-
-  if (force || info.lastActiveDate !== today()) {
-    const r = await sendEvent("active", info, cfg);
-    if (!r.ok) {
-      persist({ lastError: r.error });
-      return { sent, error: r.error };
-    }
-    persist({ lastActiveDate: today(), lastError: undefined });
-    sent.push("active");
-  }
-
+  // install 同样刷新活跃时间（远端据此判定在线）
+  writeState({
+    installReported: true,
+    lastReportAt: now,
+    lastActiveAt: now,
+    lastError: undefined,
+  });
+  sent.push(action);
   return { sent };
 }
 
-/** 启动后台心跳：延迟首报后按固定间隔检查（日粒度去重，跨天才真正发请求） */
-export function startTelemetryHeartbeat(): void {
-  setTimeout(() => {
-    void reportOnce();
-    setInterval(() => void reportOnce(), HEARTBEAT_INTERVAL_MS);
-  }, FIRST_REPORT_DELAY_MS).unref?.();
+/**
+ * 上传开关变更时立即上报（开启或关闭都触发）。
+ * - 开启：以 `enabled=true` 走正常载荷，依次上报 `install`（如需）与 `active`。
+ * - 关闭：`reportOnce` 会因 `!cfg.enabled` 直接返回「上传已关闭」而不发请求，
+ *   这里强制以 `{ ...readConfig(), enabled: true }` 绕过守卫，仍把最新开关状态透出。
+ * 不论开启或关闭，都**同时上报 install 与 active**（install 成功必带 active），
+ * 载荷携带 `uploadEnabled` 字段（＝本次开关新值），使服务端可记录本机最新 opt-in 状态。
+ * 任何失败只写运行态 `lastError`，不影响主业务。
+ */
+export async function reportOnToggle(enabled: boolean): Promise<{ sent: TelemetryEvent[]; error?: string; fatal?: boolean }> {
+  const { info } = getDeviceInfo();
+  // 强制 enabled:true 以绕过 reportOnce 的「上传已关闭」提前返回；真实开关态走 uploadEnabled 字段
+  const cfg = { ...readConfig(), enabled: true };
+  const sent: TelemetryEvent[] = [];
+  let lastError: string | undefined;
+  let fatal = false;
+
+  // 先 install 后 active；发 install 必发 active
+  for (const event of ["install", "active"] as TelemetryEvent[]) {
+    const r = await sendEvent(event, info, cfg, enabled);
+    if (!r.ok) {
+      lastError = r.error;
+      fatal = fatal || r.fatal;
+      continue;
+    }
+    sent.push(event);
+  }
+
+  const now = new Date().toISOString();
+  const patch: Partial<TelemetryState> = { lastReportAt: now, lastActiveAt: now, lastError };
+  if (sent.includes("install")) patch.installReported = true;
+  writeState(patch);
+  return { sent, error: lastError, fatal };
 }
 
-// ---------- 状态与统计 ----------
+/** 安排下一次上报；`force` 表示这次必须发（启动首报 / 失败重试） */
+function scheduleNext(delayMs: number, force: boolean): void {
+  if (timer) clearTimeout(timer);
+  nextAttemptAt = new Date(Date.now() + delayMs).toISOString();
+  timer = setTimeout(() => {
+    void (async () => {
+      const r = await reportOnce(force);
+      // 可重试错误（网络 / 5xx）10 分钟后再试；鉴权失败（401/403）不密集重试，等下一个周期
+      const retry = !!r.error && !r.fatal;
+      scheduleNext(retry ? RETRY_INTERVAL_MS : REPORT_INTERVAL_MS, retry);
+    })();
+  }, delayMs);
+  // 定时器不应阻止进程退出
+  (timer as unknown as { unref?: () => void }).unref?.();
+}
+
+/**
+ * 启动后台上报：进程启动 / 重启后延迟 30 秒首报（安装或活跃），
+ * 之后每 12 小时一次，失败则 10 分钟重试。
+ */
+export function startTelemetryHeartbeat(): void {
+  if (started) return;
+  started = true;
+  scheduleNext(FIRST_REPORT_DELAY_MS, true);
+}
+
+// ---------- 状态 ----------
 
 export interface TelemetryStatus {
   /** 设备标识（硬件指纹 6 维哈希，统计主键） */
   deviceId: string;
   virtualized: boolean;
+  /** 标识文件创建时间（≈ 安装时间） */
   createdAt: string;
   appVersion: string;
   osVersion: string;
   arch: string;
+  /** 标识文件路径 */
   deviceFile: string;
-  /** 硬件环境是否未变化（设备指纹稳定） */
+  /** 运行态文件路径 */
+  stateFile: string;
+  /** 上传开关（系统设置 → 本机设备） */
+  enabled: boolean;
+  /** 上报端点（便于排查） */
+  endpoint: string;
+  /** 上报周期（小时） */
+  reportIntervalHours: number;
+  /** 是否已成功上报过 install */
+  installReported: boolean;
+  /** 最近一次成功上报时间 */
+  lastReportAt?: string;
+  /** 最近一次成功上报 active 的时间 */
+  lastActiveAt?: string;
+  /** 下一次计划上报时间（含失败重试） */
+  nextReportAt?: string;
+  /** 最近一次上报错误信息 */
+  lastError?: string;
+  /** 硬件环境是否与标识生成时一致（仅提示，不再触发身份重建） */
   envUnchanged: boolean;
   /** 已识别的硬件维度数（0-6） */
   matchCount: number;
-  /** 本机设备标识 6 维（统计主键维度，不对外展示敏感序列号） */
+  /** 实时采集的 6 维（页面展示用；标识文件里保存的是安装时快照） */
   hardware: DeviceHardware;
   /** 设备标识卡片展示用的富硬件详情（CPU/GPU/内存/硬盘） */
   details: DeviceDetails;
 }
 
 export function getTelemetryStatus(): TelemetryStatus {
-  const info = getDeviceInfo();
+  const { info } = getDeviceInfo();
+  const state = readState();
+  const cfg = readConfig();
   const current = collectHardwareAttrs();
   const currentDeviceId = collectHardwareFingerprint().fingerprint;
-  const stored = readDeviceInfo();
   return {
     deviceId: info.deviceId,
     virtualized: info.virtualized,
@@ -599,29 +839,19 @@ export function getTelemetryStatus(): TelemetryStatus {
     appVersion: currentAppVersion(),
     osVersion: collectOsVersion(),
     arch: process.arch,
-    deviceFile: resolveDeviceFile(),
-    envUnchanged: stored ? stored.deviceId === currentDeviceId : true,
+    deviceFile: DEVICE_FILE,
+    stateFile: STATE_FILE,
+    enabled: cfg.enabled,
+    endpoint: cfg.endpoint,
+    reportIntervalHours: Math.round(REPORT_INTERVAL_MS / 3600000),
+    installReported: state.installReported,
+    lastReportAt: state.lastReportAt,
+    lastActiveAt: state.lastActiveAt,
+    nextReportAt: nextAttemptAt ?? undefined,
+    lastError: state.lastError,
+    envUnchanged: info.deviceId === currentDeviceId,
     matchCount: countNonEmpty(current),
-    hardware: info.hardware,
+    hardware: current,
     details: collectHardwareDetails(),
   };
-}
-
-/**
- * 拉取统计服务端聚合数据（后端代理，避免浏览器跨域）。
- * 约定接口：GET {endpoint}/api/telemetry/stats
- * 服务端未就绪/离线时返回 null，页面优雅降级。
- */
-export async function fetchRemoteStats(): Promise<unknown | null> {
-  const cfg = readConfig();
-  if (!cfg.enabled) return null;
-  try {
-    const res = await fetch(`${cfg.endpoint}/api/telemetry/stats`, {
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch {
-    return null;
-  }
 }

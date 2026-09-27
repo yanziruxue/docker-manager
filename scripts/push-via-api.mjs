@@ -10,13 +10,19 @@
  *
  * 用法：
  *   GITHUB_TOKEN=xxx node scripts/push-via-api.mjs [--repo owner/repo] [--msg "commit message"]
+ *   # 受限环境（node 的 child_process 会 EBUSY）改用外部清单：
+ *   git -c core.quotePath=false ls-files --others --exclude-standard > filelist.txt
+ *   GITHUB_TOKEN=xxx node scripts/push-via-api.mjs --files-from filelist.txt --msg "..."
  *
  * 行为：
  *   1. 读取远端 main 当前 commit（作为父提交，保证 fast-forward）
- *   2. git ls-files --others --exclude-standard 枚举待提交文件（遵循 .gitignore）
+ *   2. 枚举待提交文件：自带 `git ls-files --others --exclude-standard`（遵循 .gitignore），
+ *      或用 --files-from 指定清单文件
  *   3. 逐个上传 blob（base64）
  *   4. 以远端 tree 为 base_tree 创建新 tree（远端独有文件自动保留）
  *   5. 创建 commit 并 PATCH refs/heads/main
+ *
+ * ⚠️ 本脚本**不打 tag**：tag 由 `scripts/publish-release.mjs`（gh 或 REST）在创建 Release 时生成。
  */
 import { execSync } from "node:child_process";
 import fs from "node:fs";
@@ -27,10 +33,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 
 function parseArgs(argv) {
-  const a = { repo: process.env.GH_REPO || "yanziruxue/docker-manager", msg: "" };
+  const a = { repo: process.env.GH_REPO || "yanziruxue/docker-manager", msg: "", filesFrom: "" };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--repo") a.repo = argv[++i];
     else if (argv[i] === "--msg") a.msg = argv[++i];
+    else if (argv[i] === "--files-from") a.filesFrom = argv[++i];
   }
   return a;
 }
@@ -76,13 +83,32 @@ async function main() {
   console.log(`基线 commit: ${baseSha}`);
 
   // 2. 枚举本地待提交文件（遵循 .gitignore）
-  const files = execSync("git -c core.quotePath=false ls-files --others --exclude-standard", {
-    cwd: ROOT,
-    encoding: "utf-8",
-  })
-    .split("\n")
-    .map((s) => s.trim())
-    .filter(Boolean);
+  //    ⚠️ `--files-from <path>`：受限环境下 node 的 child_process 会 **EBUSY**（连 git 都 spawn 不了），
+  //    改为从外部生成的清单文件读取，生成方式：
+  //      git -c core.quotePath=false ls-files --others --exclude-standard > filelist.txt
+  let files;
+  if (args.filesFrom) {
+    files = fs
+      .readFileSync(args.filesFrom, "utf-8")
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean);
+  } else {
+    try {
+      files = execSync("git -c core.quotePath=false ls-files --others --exclude-standard", {
+        cwd: ROOT,
+        encoding: "utf-8",
+      })
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+    } catch (e) {
+      console.error(
+        "[ERROR] 无法执行 git 枚举文件（受限环境请改用 --files-from）：" + (e?.message || e)
+      );
+      process.exit(1);
+    }
+  }
   if (files.length === 0) {
     console.log("没有需要提交的文件");
     return;

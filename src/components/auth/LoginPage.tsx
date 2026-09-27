@@ -5,15 +5,18 @@ import { login, resetPasswordByRecovery, type AuthUser } from "../../api";
 import {
   sanitizeRecoveryInput,
   validateRecoveryCode,
-  RECOVERY_LENGTH,
+  RECOVERY_MIN_LENGTH,
+  RECOVERY_MAX_LENGTH,
 } from "../../lib/recovery-code";
 
 interface Props {
   onDone: (user: AuthUser) => void;
+  /** 顶部提示条（如账号重新设置完成后引导用新凭据登录） */
+  notice?: string;
 }
 
 /** 登录页（含「忘记密码 → 找回码重置」入口） */
-export function LoginPage({ onDone }: Props) {
+export function LoginPage({ onDone, notice }: Props) {
   const [mode, setMode] = useState<"login" | "recover">("login");
   const [presetUsername, setPresetUsername] = useState("");
 
@@ -30,6 +33,7 @@ export function LoginPage({ onDone }: Props) {
   return (
     <LoginForm
       initialUsername={presetUsername}
+      notice={notice}
       onDone={onDone}
       onRecover={(u) => {
         setPresetUsername(u);
@@ -41,10 +45,12 @@ export function LoginPage({ onDone }: Props) {
 
 function LoginForm({
   initialUsername,
+  notice,
   onDone,
   onRecover,
 }: {
   initialUsername: string;
+  notice?: string;
   onDone: (user: AuthUser) => void;
   onRecover: (username: string) => void;
 }) {
@@ -81,12 +87,17 @@ function LoginForm({
           <p className="text-sm text-slate-500 mt-1">Docker Stack Manager</p>
         </div>
 
+        {notice && (
+          <div className="mb-4 rounded-lg border border-green-100 bg-green-50 px-3 py-2.5 text-xs leading-relaxed text-green-700">
+            {notice}
+          </div>
+        )}
+
         {/* 原生表单：回车触发 submit（v1.15.5 兜底，不依赖 onKeyDown 透传） */}
         <form
           className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-4"
           onSubmit={(e) => { e.preventDefault(); if (!busy) submit(); }}
-        >
-          <FormField label="用户名">
+        >          <FormField label="用户名">
             <div className="relative">
               <User size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <Input
@@ -201,7 +212,10 @@ function RecoveryForm({
           </div>
           <h1 className="text-xl font-semibold text-slate-800">找回密码</h1>
           <p className="text-sm text-slate-500 mt-1">
-            使用 {RECOVERY_LENGTH} 位找回码重置登录密码
+            使用 {RECOVERY_MIN_LENGTH}~{RECOVERY_MAX_LENGTH} 位找回码重置登录密码
+          </p>
+          <p className="text-xs text-slate-400 mt-1">
+            找回码区分大小写，请按设置时的原始大小写输入
           </p>
         </div>
 
@@ -240,18 +254,18 @@ function RecoveryForm({
               <FormField
                 label="找回码"
                 required
-                hint={`${RECOVERY_LENGTH} 位字母或数字，忽略大小写`}
+                hint={`${RECOVERY_MIN_LENGTH}~${RECOVERY_MAX_LENGTH} 位字母或数字，区分大小写`}
               >
                 <div className="relative">
                   <KeyRound size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                   <Input
                     value={code}
                     onChange={(v) => setCode(sanitizeRecoveryInput(v))}
-                    placeholder={`${RECOVERY_LENGTH} 位字母或数字`}
+                    placeholder={`${RECOVERY_MIN_LENGTH}~${RECOVERY_MAX_LENGTH} 位字母或数字`}
                     className="pl-9 pr-12 font-mono tracking-wider"
                   />
                   <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-slate-400 tabular-nums">
-                    {code.length}/{RECOVERY_LENGTH}
+                    {code.length}/{RECOVERY_MAX_LENGTH}
                   </span>
                 </div>
               </FormField>
