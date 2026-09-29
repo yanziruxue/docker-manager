@@ -1,4 +1,4 @@
-import type { DockerEngine, EngineResourceStats, ResourceSample, SystemSettings, SchedulerStatus, SchedulerLastResult, ImageUpdateSummaryView, DockerNetwork, NetworkCreateOptions, NetInterfaceOption } from "./types";
+import type { DockerEngine, EngineResourceStats, ResourceSample, SystemSettings, SchedulerStatus, SchedulerLastResult, ImageUpdateSummaryView, DockerNetwork, NetworkCreateOptions, NetInterfaceOption, ContainerFileEntry } from "./types";
 
 const BASE = "/api";
 
@@ -151,18 +151,16 @@ export interface TelemetryStatus {
   deviceFile: string;
   /** 运行态文件路径 */
   stateFile: string;
-  /** 上传开关（系统设置 → 本机设备） */
+  /** 上传开关（系统设置 → 硬件信息） */
   enabled: boolean;
   /** 上报端点 */
   endpoint: string;
   /** 上报周期（小时） */
   reportIntervalHours: number;
-  /** 是否已成功上报过 install */
+  /** 是否已成功上报过「安装」事件 */
   installReported: boolean;
-  /** 最近一次成功上报时间 */
+  /** 最近一次成功上报时间（12 小时周期判定依据） */
   lastReportAt?: string;
-  /** 最近一次成功上报 active 的时间 */
-  lastActiveAt?: string;
   /** 下一次计划上报时间（含失败重试） */
   nextReportAt?: string;
   /** 最近一次上报错误信息 */
@@ -182,9 +180,28 @@ export function fetchTelemetryStatus(): Promise<TelemetryStatus> {
   return request<TelemetryStatus>("/telemetry/status");
 }
 
-/** 立即上报一次（force=true，忽略 12 小时周期判断） */
+/** 本机温度快照（`GET /system/thermal`；全部读 sysfs hwmon，**无需 root**） */
+export interface ThermalStatus {
+  /** CPU 温度；识别不到传感器为 null（无 `coretemp` / `k10temp`） */
+  cpu: { source: string; tempC: number } | null;
+  /** 各整盘温度；tempC 为 null 表示该盘无温度传感器 */
+  disks: { name: string; tempC: number | null }[];
+  /** `drivetemp` 内核模块是否已加载（SATA 盘温度依赖它；NVMe 自带 hwmon） */
+  drivetempLoaded: boolean;
+  /** 没有温度的 SATA 盘（非空 ⇒ 提示加载 drivetemp） */
+  sataWithoutTemp: string[];
+}
+
+/** 本机温度（CPU + 各整盘 + drivetemp 状态），供「系统设置 → 硬件信息」页温度卡片 */
+export function fetchThermalStatus(): Promise<ThermalStatus> {
+  return request<ThermalStatus>("/system/thermal");
+}
+
+/** 立即上报一次（force=true，忽略 12 小时周期判断；单字段模型，`sent` 为 `["install" | "heartbeat"]`） */
 export function reportTelemetryNow(): Promise<{
   sent: string[];
+  /** 本次上报类型（`"install"` = 安装 / 重装；`"heartbeat"` = 纯心跳）；未发出为 `null` */
+  upapi: "install" | "heartbeat" | null;
   error?: string;
   status: TelemetryStatus;
 }> {
@@ -402,6 +419,92 @@ export function containerActionApi(engineId: string, containerId: string, action
 
 export function removeContainerApi(engineId: string, containerId: string, force?: boolean): Promise<void> {
   return request<void>(`/engines/${engineId}/containers/${containerId}${force ? "?force=true" : ""}`, { method: "DELETE" });
+}
+
+// ============ 容器文件管理 API（参考 1panel） ============
+
+/** 列出容器内目录 */
+export function listContainerFilesApi(engineId: string, containerId: string, dir: string): Promise<{ dir: string; entries: ContainerFileEntry[] }> {
+  return request<{ dir: string; entries: ContainerFileEntry[] }>(`/engines/${engineId}/containers/${containerId}/files?path=${encodeURIComponent(dir)}`);
+}
+
+/** 查看容器内文件文本（二进制文件返回 isBinary=true，无 content） */
+export function readContainerFileApi(engineId: string, containerId: string, filePath: string): Promise<{ name: string; path: string; size: number; isBinary: boolean; content?: string }> {
+  return request<{ name: string; path: string; size: number; isBinary: boolean; content?: string }>(`/engines/${engineId}/containers/${containerId}/files/content?path=${encodeURIComponent(filePath)}`);
+}
+
+/** 写入（覆盖）容器内文件内容（原始文本，不走 JSON） */
+export async function writeContainerFileApi(engineId: string, containerId: string, filePath: string, content: string): Promise<void> {
+  const url = `/engines/${engineId}/containers/${containerId}/files/content?path=${encodeURIComponent(filePath)}`;
+  const res = await fetch(`${BASE}${url}`, {
+    method: "PUT",
+    credentials: "include",
+    headers: { "Content-Type": "application/octet-stream" },
+    body: content,
+  });
+  const json = await res.json().catch(() => ({ success: false, error: "响应解析失败" }));
+  if (res.status === 401 && !url.startsWith("/auth/")) {
+    if (typeof window !== "undefined") window.dispatchEvent(new Event("auth:unauthorized"));
+  }
+  if (!res.ok || !json.success) throw new ApiError(json.error || "写入失败", json.code, res.status);
+}
+
+/** 上传（覆盖）容器内文件：以原始二进制（ArrayBuffer）发送，二进制安全。 */
+export async function uploadContainerFileApi(engineId: string, containerId: string, filePath: string, data: ArrayBuffer): Promise<void> {
+  const url = `/engines/${engineId}/containers/${containerId}/files/content?path=${encodeURIComponent(filePath)}`;
+  const res = await fetch(`${BASE}${url}`, {
+    method: "PUT",
+    credentials: "include",
+    headers: { "Content-Type": "application/octet-stream" },
+    body: data,
+  });
+  const json = await res.json().catch(() => ({ success: false, error: "响应解析失败" }));
+  if (res.status === 401 && !url.startsWith("/auth/")) {
+    if (typeof window !== "undefined") window.dispatchEvent(new Event("auth:unauthorized"));
+  }
+  if (!res.ok || !json.success) throw new ApiError(json.error || "上传失败", json.code, res.status);
+}
+
+/** 下载容器内文件（以附件形式，二进制安全） */
+export function downloadContainerFileApi(engineId: string, containerId: string, filePath: string): Promise<string> {
+  return downloadAsBlob(`/engines/${engineId}/containers/${containerId}/files/content?path=${encodeURIComponent(filePath)}&download=1`);
+}
+
+/** 打包下载容器内目录（tar.gz，二进制安全；文件名取自 Content-Disposition） */
+export function downloadContainerArchiveApi(engineId: string, containerId: string, dirPath: string): Promise<string> {
+  return downloadAsBlob(`/engines/${engineId}/containers/${containerId}/files/archive?path=${encodeURIComponent(dirPath)}`);
+}
+
+/** 新建文件或目录 */
+export function createContainerEntryApi(engineId: string, containerId: string, path: string, type: "file" | "dir"): Promise<void> {
+  return request<void>(`/engines/${engineId}/containers/${containerId}/files`, {
+    method: "POST",
+    body: JSON.stringify({ action: "create", path, type }),
+  });
+}
+
+/** 重命名 / 移动容器内路径 */
+export function renameContainerPathApi(engineId: string, containerId: string, oldPath: string, newPath: string): Promise<void> {
+  return request<void>(`/engines/${engineId}/containers/${containerId}/files`, {
+    method: "POST",
+    body: JSON.stringify({ action: "rename", oldPath, newPath }),
+  });
+}
+
+/** 删除容器内路径 */
+export function removeContainerPathApi(engineId: string, containerId: string, path: string): Promise<void> {
+  return request<void>(`/engines/${engineId}/containers/${containerId}/files`, {
+    method: "POST",
+    body: JSON.stringify({ action: "delete", path }),
+  });
+}
+
+/** 修改容器内路径权限 */
+export function chmodContainerPathApi(engineId: string, containerId: string, path: string, mode: string): Promise<void> {
+  return request<void>(`/engines/${engineId}/containers/${containerId}/files`, {
+    method: "POST",
+    body: JSON.stringify({ action: "chmod", path, mode }),
+  });
 }
 
 // ============ 镜像操作 API ============

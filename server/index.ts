@@ -54,12 +54,21 @@ import {
   loadImageFromStream,
   attachContainerTerminal,
   resizeContainerTerminal,
+  listContainerFiles,
+  readContainerFile,
+  writeContainerFile,
+  createContainerEntry,
+  renameContainerPath,
+  removeContainerPath,
+  chmodContainerPath,
+  archiveContainerPath,
   getComposeCmd,
   detectComposeModes,
   getNetworks,
   createNetwork,
   removeNetwork,
   editNetwork,
+  getThermalStatus,
 } from "./docker.js";
 import { getImageLocks, setImageLock } from "./image-locks.js";
 import { createFullBackup, restoreFullBackup, restoreUploadedBackup, exportConfigArchive, listBackupFiles, deleteBackupFile, backupFilePath, migrateLegacyBackups } from "./backup.js";
@@ -460,9 +469,9 @@ app.get("/api/telemetry/status", (_req, res) => {
   res.json({ success: true, data: getTelemetryStatus() });
 });
 
-/** 立即上报一次（页面「立即上报」按钮；force=true 忽略 12 小时周期判断） */
+/** 立即上报一次（页面「立即上报」按钮；按 `manual` 触发 ⇒ 强制发送且 `upapi` 为 `heartbeat`） */
 app.post("/api/telemetry/report", async (_req, res) => {
-  const r = await reportOnce(true);
+  const r = await reportOnce("manual");
   res.json({ success: true, data: { ...r, status: getTelemetryStatus() } });
 });
 
@@ -1213,6 +1222,123 @@ app.get("/api/engines/:id/containers/:cid/stats", async (req, res) => {
   }
 });
 
+// ============ 容器文件管理（参考 1panel） ============
+
+/** 判断 Buffer 是否可当作文本查看：含 NUL 字节即视为二进制。 */
+function isBufferText(buf: Buffer): boolean {
+  if (buf.length === 0) return true;
+  return !buf.includes(0);
+}
+
+/** 列出容器内目录内容 */
+app.get("/api/engines/:id/containers/:cid/files", async (req, res) => {
+  const engine = getEngine(req.params.id);
+  if (!engine) { res.status(404).json({ success: false, error: "引擎不存在" }); return; }
+  const dir = typeof req.query.path === "string" && req.query.path ? req.query.path : "/";
+  try {
+    const entries = await listContainerFiles(engine, req.params.cid, dir);
+    res.json({ success: true, data: { dir, entries } });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || "列出目录失败" });
+  }
+});
+
+/** 打包下载容器内目录（或文件）为 tar.gz。选 tar 而非 zip：镜像内 tar 几乎必装、zip 常缺。 */
+app.get("/api/engines/:id/containers/:cid/files/archive", async (req, res) => {
+  const engine = getEngine(req.params.id);
+  if (!engine) { res.status(404).json({ success: false, error: "引擎不存在" }); return; }
+  const targetPath = typeof req.query.path === "string" && req.query.path ? req.query.path : "";
+  if (!targetPath) { res.status(400).json({ success: false, error: "缺少 path 参数" }); return; }
+  try {
+    const buf = await archiveContainerPath(engine, req.params.cid, targetPath);
+    const base = targetPath.replace(/\/+$/, "").split("/").pop() || "archive";
+    res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(base)}.tar.gz"`);
+    res.setHeader("Content-Type", "application/gzip");
+    res.setHeader("Content-Length", String(buf.length));
+    res.send(buf);
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || "打包下载失败" });
+  }
+});
+
+/** 查看/下载容器内文件内容。download=1 时以附件形式下发（二进制安全）；否则尽量按文本返回。 */
+app.get("/api/engines/:id/containers/:cid/files/content", async (req, res) => {
+  const engine = getEngine(req.params.id);
+  if (!engine) { res.status(404).json({ success: false, error: "引擎不存在" }); return; }
+  const filePath = typeof req.query.path === "string" && req.query.path ? req.query.path : "";
+  if (!filePath) { res.status(400).json({ success: false, error: "缺少 path 参数" }); return; }
+  try {
+    const buf = await readContainerFile(engine, req.params.cid, filePath);
+    const name = filePath.split("/").pop() || "file";
+    if (req.query.download === "1") {
+      res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(name)}"`);
+      res.setHeader("Content-Type", "application/octet-stream");
+      res.send(buf);
+      return;
+    }
+    if (isBufferText(buf)) {
+      res.json({ success: true, data: { name, path: filePath, size: buf.length, isBinary: false, content: buf.toString("utf-8") } });
+    } else {
+      res.json({ success: true, data: { name, path: filePath, size: buf.length, isBinary: true } });
+    }
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || "读取文件失败" });
+  }
+});
+
+/** 写入（覆盖）容器内文件内容。请求体为原始字节，不走 JSON。 */
+app.put("/api/engines/:id/containers/:cid/files/content",
+  express.raw({ type: "*/*", limit: "50mb" }),
+  async (req, res) => {
+    const engine = getEngine(req.params.id);
+    if (!engine) { res.status(404).json({ success: false, error: "引擎不存在" }); return; }
+    const filePath = typeof req.query.path === "string" && req.query.path ? req.query.path : "";
+    if (!filePath) { res.status(400).json({ success: false, error: "缺少 path 参数" }); return; }
+    const body = req.body as Buffer;
+    if (!Buffer.isBuffer(body)) { res.status(400).json({ success: false, error: "请求体为空" }); return; }
+    try {
+      await writeContainerFile(engine, req.params.cid, filePath, body);
+      res.json({ success: true, data: { path: filePath, size: body.length } });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message || "写入文件失败" });
+    }
+  });
+
+/** 文件管理操作：create / rename / delete / chmod */
+app.post("/api/engines/:id/containers/:cid/files", async (req, res) => {
+  const engine = getEngine(req.params.id);
+  if (!engine) { res.status(404).json({ success: false, error: "引擎不存在" }); return; }
+  const { action } = req.body || {};
+  try {
+    if (action === "create") {
+      const { path: targetPath, type } = req.body;
+      if (!targetPath || typeof targetPath !== "string") { res.status(400).json({ success: false, error: "缺少 path" }); return; }
+      if (type !== "file" && type !== "dir") { res.status(400).json({ success: false, error: "type 必须是 file 或 dir" }); return; }
+      await createContainerEntry(engine, req.params.cid, targetPath, type);
+      res.json({ success: true, data: { path: targetPath } });
+    } else if (action === "rename") {
+      const { oldPath, newPath } = req.body;
+      if (!oldPath || !newPath) { res.status(400).json({ success: false, error: "缺少 oldPath / newPath" }); return; }
+      await renameContainerPath(engine, req.params.cid, oldPath, newPath);
+      res.json({ success: true, data: { oldPath, newPath } });
+    } else if (action === "delete") {
+      const { path: targetPath } = req.body;
+      if (!targetPath) { res.status(400).json({ success: false, error: "缺少 path" }); return; }
+      await removeContainerPath(engine, req.params.cid, targetPath);
+      res.json({ success: true, data: { path: targetPath } });
+    } else if (action === "chmod") {
+      const { path: targetPath, mode } = req.body;
+      if (!targetPath || !mode) { res.status(400).json({ success: false, error: "缺少 path / mode" }); return; }
+      await chmodContainerPath(engine, req.params.cid, targetPath, String(mode));
+      res.json({ success: true, data: { path: targetPath, mode } });
+    } else {
+      res.status(400).json({ success: false, error: `不支持的操作：${action}` });
+    }
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || "操作失败" });
+  }
+});
+
 /** 获取引擎资源汇总（仪表盘资源监控） */
 app.get("/api/engines/:id/resource-stats", async (req, res) => {
   const engine = getEngine(req.params.id);
@@ -1614,10 +1740,18 @@ app.get("/api/system/version", (_req, res) => {
 });
 
 /**
+ * 本机温度快照（CPU + 各整盘 + drivetemp 模块状态）：全部读 sysfs hwmon，**无需 root**。
+ * 供「系统设置 → 硬件信息」页的温度卡片使用。
+ */
+app.get("/api/system/thermal", (_req, res) => {
+  res.json({ success: true, data: getThermalStatus() });
+});
+
+/**
  * systemd 服务单元一致性（只读）。
  *
  * 单元文件由 install.sh 安装、**OTA 不更新**，所以依赖新单元指令的功能在旧部署上会静默失效。
- * 返回缺失指令列表 + 一条可直接粘贴的 root 修复命令，供「本机设备」卡片提示。
+ * 返回缺失指令列表 + 一条可直接粘贴的 root 修复命令，供「硬件信息」卡片提示。
  */
 app.get("/api/system/service-unit", (_req, res) => {
   res.json({ success: true, data: checkServiceUnit() });
@@ -2001,7 +2135,7 @@ const server = app.listen(PORT, () => {
           `⚠️  系统服务单元落后：缺少 ${su.missing.length} 条指令（${describeServiceUnitGap(su)}）`
         );
         console.warn(
-          `   部分功能可能静默失效（如 DMI 产品序列号/UUID 展示）；修复见「系统设置 → 本机设备」页`
+          `   部分功能可能静默失效（如 DMI 产品序列号/UUID 展示）；修复见「系统设置 → 硬件信息」页`
         );
       }
     } catch {

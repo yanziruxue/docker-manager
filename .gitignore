@@ -11,6 +11,9 @@ build-upload/
 deploy/linux/bundle.js
 deploy/linux/docker-manager-yanzi
 deploy/linux/docker-manager-yanzi-linux-x64*.zip
+# Windows 误产物：在 Windows 上误跑 deploy/linux/build.sh（拿 Windows node 当 base）会产出，绝不入库
+deploy/linux/*.exe
+deploy/linux/*.exe.*
 
 # ===== 发布临时文件 =====
 .notes-*.md

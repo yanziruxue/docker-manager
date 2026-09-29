@@ -211,6 +211,7 @@ function getDefaultSettings(): SystemSettings {
     tags: [],
     modal: {
       autoCloseDelay: 5,
+      containerDetailStyle: "drawer",
     },
     compose: {
       templates: [
@@ -219,7 +220,7 @@ function getDefaultSettings(): SystemSettings {
         { content: "container_name: ", insert: "services" },
       ],
     },
-    // 默认开启上传安装数量统计（系统设置 → 本机设备 可关闭）
+    // 默认开启上传安装数量统计（系统设置 → 硬件信息 可关闭）
     telemetry: { enabled: true },
     defaultsVersion: 2,
   };
@@ -1346,7 +1347,7 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
     { key: "notifications", label: "通知配置", icon: <Bell size={16} /> },
     { key: "backup", label: "备份管理", icon: <Package size={16} /> },
     { key: "scheduler", label: "镜像更新", icon: <Clock size={16} /> },
-    { key: "activity", label: "本机设备", icon: <Activity size={16} /> },
+    { key: "activity", label: "硬件信息", icon: <Activity size={16} /> },
     { key: "update", label: "系统更新", icon: <Download size={16} /> },
   ];
 
@@ -3168,8 +3169,37 @@ docker-compose version</code>
           <div className="max-w-3xl space-y-5">
             <div>
               <h2 className="text-lg font-semibold text-slate-800 mb-1">弹窗设置</h2>
-              <p className="text-sm text-slate-500">配置操作结果弹窗的自动关闭行为</p>
+              <p className="text-sm text-slate-500">配置操作结果弹窗的自动关闭行为，以及容器详情的展示形式</p>
             </div>
+
+            <Card title="容器详情视图" icon={<Columns size={16} />}>
+              <FormField
+                label="容器详情展示形式"
+                hint="打开容器详情（基本信息 / 日志 / 资源监控 / 终端 / 文件）时的布局。「半页面」＝从右侧滑入、覆盖约半屏的抽屉，左侧列表仍可见；「弹窗」＝居中浮层。保存后立即生效。"
+              >
+                <div className="flex items-center gap-2 max-w-md">
+                  {([
+                    { value: "drawer", label: "半页面", desc: "右侧抽屉，覆盖约半屏" },
+                    { value: "modal", label: "弹窗", desc: "居中浮层" },
+                  ] as const).map((opt) => {
+                    const active = (data.modal?.containerDetailStyle ?? "drawer") === opt.value;
+                    return (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => update("modal", "containerDetailStyle", opt.value)}
+                        className={`flex-1 rounded-lg border px-4 py-3 text-left transition-colors ${
+                          active ? "border-blue-400 bg-blue-50" : "border-slate-200 hover:bg-slate-50"
+                        }`}
+                      >
+                        <div className={`text-sm font-medium ${active ? "text-blue-600" : "text-slate-700"}`}>{opt.label}</div>
+                        <div className="text-xs text-slate-400 mt-0.5">{opt.desc}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </FormField>
+            </Card>
 
             <Card title="自动关闭" icon={<Timer size={16} />}>
               <FormField

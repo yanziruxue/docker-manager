@@ -1,6 +1,22 @@
 // ============ 基础类型 ============
 
 export type ContainerStatus = "running" | "stopped" | "paused" | "restarting" | "updating";
+
+/** 容器内单条文件/目录条目（容器文件浏览器用） */
+export interface ContainerFileEntry {
+  name: string;
+  /** 容器内绝对路径 */
+  path: string;
+  size: number;
+  /** mtime，ISO 字符串 */
+  mtime: string;
+  /** 10 位权限串，如 `drwxr-xr-x` */
+  mode: string;
+  isDir: boolean;
+  isSymlink: boolean;
+  /** 符号链接目标（仅 isSymlink 时有值） */
+  target?: string;
+}
 export type StackStatus = "running" | "stopped" | "partial" | "error" | "updating";
 export type RestartPolicy = "always" | "unless-stopped" | "on-failure" | "no";
 export type NetworkMode = "bridge" | "host" | "macvlan" | "custom";
@@ -67,6 +83,27 @@ export interface EngineResourceStats {
   netIfaces: NetIfaceStat[];
   /** 宿主机正常运行时间（秒）：读 /proc/uptime，读不到（远程引擎 / 非 Linux）为 0 → 前端显示「—」 */
   hostUptimeSec: number;
+  // ───────── 宿主机库存（仪表盘「系统概览」+ 处理器/内存图标 tooltip） ─────────
+  /** 主机名称：本机读 os.hostname()，远程回退 docker.info.Name */
+  hostName: string;
+  /** 发行版本：本机读 /etc/os-release PRETTY_NAME，远程回退 docker.info.OperatingSystem */
+  osName: string;
+  /** 内核版本：docker.info.KernelVersion（所有引擎可读） */
+  kernelVersion: string;
+  /** 系统类型/架构：本机 os.arch()（x64→x86_64），远程回退 docker.info.Architecture */
+  arch: string;
+  /** 主机地址：本机首个非回环 IPv4，远程为 "" */
+  hostAddress: string;
+  /** 启动时间（秒级时间戳）：本机 = now - uptime，否则 0 */
+  bootTimeSec: number;
+  /** CPU 型号（本机 /proc/cpuinfo，远程为 ""） */
+  cpuModel: string;
+  /** CPU 物理核心数（本机 /proc/cpuinfo，远程为 0） */
+  cpuPhysicalCores: number;
+  /** CPU 逻辑核心数（本机 /proc/cpuinfo，远程 = NCPU） */
+  cpuLogicalCores: number;
+  /** CPU 频率（MHz，本机 /proc/cpuinfo，远程为 0） */
+  cpuMhz: number;
 }
 
 /** 资源时间序列单点（服务端 1s 采样，最多保留 5 分钟） */
@@ -98,6 +135,10 @@ export interface DiskStat {
   writeMBps: number;
   busyPct: number;
   active: boolean;
+  /** 该盘各分区文件系统类型（远程引擎为空数组） */
+  fstypes: string[];
+  /** 整盘温度（℃）：读 sysfs hwmon，无需 root；无传感器 / 缺 drivetemp 模块为 null */
+  tempC: number | null;
 }
 
 /** 单个网口的实时速率（/proc/net/dev 差分；仅本机 socket 引擎有值） */
@@ -563,6 +604,12 @@ export interface UpdateConfig {
 export interface ModalConfig {
   /** 操作结果弹窗自动关闭延迟（秒）；0 = 不自动关闭 */
   autoCloseDelay: number;
+  /**
+   * 容器详情视图样式：
+   * - `drawer` = 半页面（右侧抽屉，覆盖约半屏，列表仍可见；默认）
+   * - `modal`  = 居中弹窗（原有样式）
+   */
+  containerDetailStyle: "drawer" | "modal";
 }
 
 /** 列可见性默认配置 */
@@ -654,7 +701,7 @@ export interface SystemSettings {
   /** Compose 模板（一键填入项） */
   compose: ComposeConfig;
   /**
-   * 安装量 / 活跃度上报开关（系统设置 → 本机设备）。
+   * 安装量 / 活跃度上报开关（系统设置 → 硬件信息）。
    * 默认开启；关闭后不再向远端发送任何数据。仅上报本机设备信息，用于安装数量统计。
    */
   telemetry: TelemetryConfig;
@@ -662,7 +709,7 @@ export interface SystemSettings {
   defaultsVersion?: number;
 }
 
-/** 安装量 / 活跃度上报配置（系统设置 → 本机设备） */
+/** 安装量 / 活跃度上报配置（系统设置 → 硬件信息） */
 export interface TelemetryConfig {
   /** 是否上传安装数量统计（默认 true；关闭后不再向远端发送任何数据） */
   enabled: boolean;

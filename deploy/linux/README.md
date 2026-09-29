@@ -42,16 +42,20 @@ sudo bash install.sh
 安装脚本会：
 
 1. 检测 Docker / Compose：缺失即提示并停止（`--ignore-docker` 可跳过检查）
-2. 创建系统用户 `docker-manager-yanzi`（不可登录）并加入 `docker` 组
-3. 复制二进制到 `/opt/docker-manager-yanzi/`
-4. 创建 `data/ logs/ config/` 子目录
-5. 注册并启动 systemd 服务 `docker-manager-yanzi`
-6. 旧版本自动备份为 `/opt/docker-manager-yanzi.bak.<时间戳>`
+2. **配置磁盘温度传感器**：加载 `drivetemp` 内核模块，并写入 `/etc/modules-load.d/drivetemp.conf`（重启后仍自动加载）。
+   SATA/HDD 的 sysfs hwmon 温度节点要等该模块加载后才存在，应用「系统设置 → 硬件信息 → 温度」正是读它；
+   NVMe 由 nvme 驱动自带 hwmon，不需要该模块。内核未提供模块时**只告警、不中断安装**（`--no-drivetemp` 可跳过）
+3. 创建系统用户 `docker-manager-yanzi`（不可登录）并加入 `docker` 组
+4. 复制二进制到 `/opt/docker-manager-yanzi/`
+5. 创建 `data/ logs/ config/` 子目录
+6. 注册并启动 systemd 服务 `docker-manager-yanzi`
+7. 旧版本自动备份为 `/opt/docker-manager-yanzi.bak.<时间戳>`
 
 可选参数：
 
 ```bash
 sudo bash install.sh --ignore-docker     # 跳过 Docker 检查，仅装应用（容器管理不可用）
+sudo bash install.sh --no-drivetemp      # 不加载 drivetemp、不写 /etc/modules-load.d
 ```
 
 ## 先装 Docker（本包不代装）

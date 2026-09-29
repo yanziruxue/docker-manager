@@ -3,15 +3,21 @@
  *
  * 设计依据《Linux应用安装量与活跃用户统计方案（设备唯一标识+风控校验体系）》：
  *  - 主标识（统计主键）：本机硬件指纹 = 主板 + CPU + 内存 + 硬盘 + 显卡 + 安装的系统（6 维哈希）
- *  - 事件：install（首次安装 / 重装 / 标识文件重建）/ active（进程启动、重启、每 12 小时）
+ *  - 触发：首次安装 / 重装 / 标识文件重建（计为「安装事件」）+ 进程启动、重启、每 12 小时（心跳）
+ *  ★ v1.35.9 起载荷收敛为**单字段** `upapi`（取值 `"install"` / `"heartbeat"`）：
+ *      `"install"`   ＝ 安装 / 重装 → 服务端覆盖设备快照、刷新安装时间；
+ *      `"heartbeat"` ＝ 纯心跳       → 只刷新在线状态。
+ *    一次上报恒定只发 1 条请求 —— 一个字段讲一件事。
+ *    （历史：v1.32.0~v1.35.8 为「事件名固定 `report` + 布尔 `install`」两个字段；
+ *      更早（≤ v1.31.1）为 `install` / `active` 两个事件名。）
  *
  * 文件职责拆分（v1.29.0 起）：
  *  - device.info（标识文件）：deviceId / createdAt(≈安装时间) / virtualized / hardware(安装时快照)
  *    —— **只在创建时写一次**，之后纯只读；仅当「文件被删」或「创建时间与修改时间不一致」时重建。
- *  - telemetry-state.json（运行态）：installReported / lastReportAt / lastActiveAt / lastError
+ *  - telemetry-state.json（运行态）：installReported / lastReportAt / lastRebuildAt / lastError
  *    —— 每次上报后写，**不参与标识文件的完整性校验**（避免「写一次」被自己打破）。
  *
- * 上传开关：系统设置 → 本机设备（`settings.telemetry.enabled`，默认开启），关闭后不发任何请求。
+ * 上传开关：系统设置 → 硬件信息（`settings.telemetry.enabled`，默认开启），关闭后不发任何请求。
  *
  * 容错原则：任何失败（无权限、离线、采集失败）都不得影响主业务。
  */
@@ -24,8 +30,28 @@ import { execFileSync } from "node:child_process";
 import { CONFIG_DIR } from "./paths.js";
 import { getSettings } from "./settings.js";
 
-/** 遥测事件类型 */
-export type TelemetryEvent = "install" | "active";
+/**
+ * 上报类型（载荷单字段 `upapi` 的取值）。
+ * ★ v1.35.9 起把「常量 `event: "report"` + 布尔 `install`」两个字段**合并为单字段** `upapi`：
+ *   - `"install"`   → 安装 / 重装：服务端按安装语义覆盖设备快照 / 刷新安装时间；
+ *   - `"heartbeat"` → 纯心跳：只刷新在线状态。
+ * 信息量与旧模型严格等价，一次上报仍只发 1 条请求。
+ * ⚠️ 服务端需继续兼容历史载荷：`event: "install" | "active"`（≤ v1.31.1）
+ *    与 `event: "report"` + 布尔 `install`（v1.32.0~v1.35.8）。
+ */
+export type TelemetryEvent = "install" | "heartbeat";
+
+/**
+ * 上报**触发源**（v1.35.10 起；v1.35.11 后**不再决定 `upapi` 取值**，只决定「要不要强制发」）：
+ *  - `"startup"`  进程启动 / systemd restart 后的首报（30 秒后）→ 强制发；
+ *  - `"periodic"` 每 12 小时周期上报 → 唯一**不强制**的触发（未到期且无需 install 时零请求）；
+ *  - `"retry"`    可重试失败（网络 / 5xx）后 10 分钟重试 → 强制发；
+ *  - `"manual"`   页面「立即上报」按钮（`POST /api/telemetry/report`）→ 强制发。
+ *
+ * 上报类型改由 `resolveUpapi(state, deviceId)` 决定（`device_uuid` 变了才 `install`）。
+ * 「上传开关切换」不在此列：它是用户显式操作，恒报 `install`（见 `reportOnToggle`）。
+ */
+export type ReportTrigger = "startup" | "periodic" | "retry" | "manual";
 
 /** 本机设备标识的 6 维硬件属性（统计主键 = 这 6 维的哈希，不依赖随机 UUID） */
 export interface DeviceHardware {
@@ -80,12 +106,18 @@ export interface DeviceInfo {
 
 /** 运行态（可随时重写；不进标识文件，故不影响「创建时间 == 修改时间」判据） */
 interface TelemetryState {
-  /** install 事件是否已成功上报 */
+  /** 是否已上报过「安装」事件（首次/重装） */
   installReported: boolean;
-  /** 最近一次**成功**上报时间 */
+  /**
+   * 最近一次**成功**上报的 `device_uuid`（v1.35.11 起）。
+   *
+   * 这是「本次要不要报 `install`」的**唯一判据**：与当前 `device_uuid` 相同 ⇒ 只发 `heartbeat`；
+   * 不同（或缺失 / 从未成功上报过）⇒ 发 `install`。于是 `install` 次数 ≈ 去重后的设备数，
+   * 不受「重启 / 周期 / 重试」次数影响。
+   */
+  lastDeviceId?: string;
+  /** 最近一次**成功**上报时间（12 小时周期判定依据；v1.35.9 起合并掉恒同值的 lastActiveAt） */
   lastReportAt?: string;
-  /** 最近一次**成功**上报 active 的时间（周期判定依据） */
-  lastActiveAt?: string;
   /** 最近一次标识文件重建时间（重建限流依据） */
   lastRebuildAt?: string;
   /** 最近一次上报错误信息 */
@@ -173,8 +205,10 @@ function readState(): TelemetryState {
     const raw = JSON.parse(fs.readFileSync(STATE_FILE, "utf-8"));
     return {
       installReported: !!raw?.installReported,
-      lastReportAt: raw?.lastReportAt,
-      lastActiveAt: raw?.lastActiveAt,
+      // v1.35.11 起：上次成功上报的 device_uuid（缺失 ⇒ 视为「未知」⇒ 由 resolveUpapi 补发一次 install）
+      lastDeviceId: typeof raw?.lastDeviceId === "string" ? raw.lastDeviceId : undefined,
+      // 兼容 ≤ v1.35.8 的运行态文件：旧版把同一个时间同时写进 lastReportAt / lastActiveAt
+      lastReportAt: raw?.lastReportAt ?? raw?.lastActiveAt,
       lastRebuildAt: raw?.lastRebuildAt,
       lastError: raw?.lastError,
     };
@@ -204,6 +238,8 @@ function migrateLegacyState(raw: Record<string, unknown>): void {
   if (raw?.installReported === true) {
     writeState({
       installReported: true,
+      // 标识文件里带 deviceId，顺手迁移成「上次成功上报的 ID」，避免升级后白补一次 install
+      lastDeviceId: typeof raw.deviceId === "string" ? raw.deviceId : undefined,
       lastReportAt: typeof raw.lastReportAt === "string" ? raw.lastReportAt : undefined,
     });
   }
@@ -215,6 +251,10 @@ export interface DeviceInfoResult {
   regenerated: boolean;
   /** 本次重建是否**计为一次重新安装**并上报 install（受 24 小时限流保护） */
   reportInstall: boolean;
+  /**
+   * ⚠️ v1.35.11 起 `reportInstall` **不再参与 `upapi` 取值**（改由 `resolveUpapi` 比对 `device_uuid`），
+   * 仅作为「本次重建是否被限流」的**可观测标记**保留：限流仍会写 `lastRebuildAt` 并打告警日志。
+   */
 }
 
 /**
@@ -594,7 +634,7 @@ const TELEMETRY_ENDPOINT = process.env.TELEMETRY_ENDPOINT || "https://yanzi-api.
 const TELEMETRY_PATH = "/api/yanzi-docker/event";
 
 /**
- * 读取上报配置。`enabled` 取自「系统设置 → 本机设备」的上传开关
+ * 读取上报配置。`enabled` 取自「系统设置 → 硬件信息」的上传开关
  * （`settings.telemetry.enabled`，缺省视为开启）。
  */
 function readConfig(): Required<TelemetryConfigLike> {
@@ -612,14 +652,17 @@ function readConfig(): Required<TelemetryConfigLike> {
  * 构造上报载荷（本机应用安装信息：硬件标识 + 硬件明细 + 系统 + 应用版本；
  * **不含容器 / 镜像 / 堆栈等任何业务数据，也不含账号信息**）
  * @param uploadEnabled 上传开关当前状态（开启/关闭），随每次上报带出，服务端可记录本机最新 opt-in 状态
+ * @param upapi 本次上报类型（`"install"` → 服务端覆盖设备快照；`"heartbeat"` → 纯心跳）
  */
-function buildPayload(event: TelemetryEvent, info: DeviceInfo, collectHw: boolean, uploadEnabled: boolean) {
+function buildPayload(info: DeviceInfo, collectHw: boolean, uploadEnabled: boolean, upapi: TelemetryEvent) {
   return {
     // 统计主键 = 本机硬件指纹（主板+CPU+内存+硬盘+显卡+系统 6 维哈希）
     device_uuid: info.deviceId,
-    // 硬件指纹与统计主键同源，保留以兼容服务端风控字段
-    hw_fingerprint: collectHw ? info.deviceId : "",
-    event,
+    /**
+     * 上报类型（单字段，v1.35.9 起取代「常量 `event` + 布尔 `install`」两个字段）：
+     * `"install"` = 安装 / 重装（服务端覆盖设备快照）；`"heartbeat"` = 纯心跳。
+     */
+    upapi,
     ts: new Date().toISOString(),
     /** 上传开关当前状态（开启/关闭）；不含任何业务数据，仅用于服务端记录本机最新 opt-in 状态 */
     uploadEnabled,
@@ -637,7 +680,7 @@ function buildPayload(event: TelemetryEvent, info: DeviceInfo, collectHw: boolea
     // 6 维设备标识（安装时快照，与 deviceId 同源，服务端可复算校验）—— 对应卡片「主板」等
     hardware: collectHw ? info.hardware : null,
     /**
-     * 富硬件明细（与「本机设备」卡片逐项对应）：
+     * 富硬件明细（与「硬件信息」卡片逐项对应）：
      * cpu{model,cores,threads,freqGHz} / gpu{model,memory} / memory{model,sizeGB} /
      * disk{serial,model,size} / dmi{boardName,productSerial,productUuid}
      */
@@ -645,12 +688,28 @@ function buildPayload(event: TelemetryEvent, info: DeviceInfo, collectHw: boolea
   };
 }
 
-/** 发送单次事件；`fatal=true` 表示鉴权失败（401/403），不做密集重试 */
-async function sendEvent(
-  event: TelemetryEvent,
+/** 上报结果（单字段模型：`sent` 非空即本次已成功发出） */
+export interface ReportResult {
+  /** 本次发出的类型：发出即 `[upapi]`，未发（开关关闭 / 未到周期 / 失败）为空数组 */
+  sent: TelemetryEvent[];
+  /** 本次上报类型（`"install"` → 服务端覆盖设备快照；`"heartbeat"` → 纯心跳）；未发为 `null` */
+  upapi: TelemetryEvent | null;
+  /** 失败原因（成功时不带） */
+  error?: string;
+  /**
+   * 是否**不该重试**：
+   *  - 鉴权失败（401/403）：继续重试无意义，等下一个 12 小时周期；
+   *  - 上传开关关闭（v1.35.9 起）：本次根本没发请求，10 分钟重试只会空转，退回 12 小时周期。
+   */
+  fatal?: boolean;
+}
+
+/** 发送一条上报（唯一出口）；`fatal=true` 表示鉴权失败（401/403），不做密集重试 */
+async function sendReport(
   info: DeviceInfo,
   cfg: Required<TelemetryConfigLike>,
-  uploadEnabled: boolean
+  uploadEnabled: boolean,
+  upapi: TelemetryEvent
 ): Promise<{ ok: true } | { ok: false; error: string; fatal: boolean }> {
   const url = `${cfg.endpoint}${TELEMETRY_PATH}`;
   try {
@@ -661,7 +720,7 @@ async function sendEvent(
         // 鉴权：设备标识（硬件指纹）同时作为 X-Telemetry-Key
         "X-Telemetry-Key": info.deviceId,
       },
-      body: JSON.stringify(buildPayload(event, info, cfg.collectHwFingerprint, uploadEnabled)),
+      body: JSON.stringify(buildPayload(info, cfg.collectHwFingerprint, uploadEnabled, upapi)),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     if (!res.ok) {
@@ -679,96 +738,123 @@ let nextAttemptAt: string | null = null;
 let timer: ReturnType<typeof setTimeout> | null = null;
 let started = false;
 
-/** 距上次**成功**上报 active 是否已满 12 小时周期（从未成功过则视为到期） */
-function dueForActive(state: TelemetryState): boolean {
-  if (!state.lastActiveAt) return true;
-  const t = Date.parse(state.lastActiveAt);
+/** 距上次**成功**上报是否已满 12 小时周期（从未成功过则视为到期） */
+function dueForPeriodic(state: TelemetryState): boolean {
+  if (!state.lastReportAt) return true;
+  const t = Date.parse(state.lastReportAt);
   return !Number.isFinite(t) || Date.now() - t >= REPORT_INTERVAL_MS - DUE_SLACK_MS;
 }
 
 /**
- * 执行一次上报：
- *  - 标识文件被删 / 被改写 → 重新生成标识文件；若距上次重建已满 24 小时，
- *    则视为重装并上报 `install`（附带新的安装时间）；
- *  - 否则若距上次 active 成功已满 12 小时（或从未成功过）→ 上报 `active`；
- *  - `force=true` 忽略周期判断（进程启动/重启首报、页面「立即上报」）。
- * 任何失败都只写运行态 `lastError`，不抛异常、不影响主业务。
+ * **上报类型**的唯一判据（v1.35.11：由 `device_uuid` 是否变化决定，与触发源无关）。
+ *
+ * | 情形 | `upapi` |
+ * | --- | --- |
+ * | 从未成功上报过（＝首次安装） | `install` |
+ * | 当前 `device_uuid` ≠ 上次**成功**上报的 `device_uuid`（重装 / tampered 后身份变了） | `install` |
+ * | `device_uuid` 未变（**含每次进程启动 / systemd restart**） | `heartbeat` |
+ *
+ * 因此 `install` 次数 ≈ **去重后的设备数**，不受重启 / 周期 / 重试次数影响；
+ * 标识文件被反复改写但硬件没变（`device_uuid` 不变）时也不会刷高安装量 ——
+ * 旧版靠 24 小时限流达成的保护，这里由身份判据天然覆盖。
+ *
+ * 两点说明：
+ *  - `lastDeviceId` 缺失（从 ≤ v1.35.10 升级上来）⇒ 无法证明「未变」⇒ 保守补发一次 `install`，
+ *    写入后即回归正常（一次性）。
+ *  - 24 小时限流（`reportInstall`）**不再参与本判据**，仅保留「写 `lastRebuildAt` + 打告警日志」。
  */
-export async function reportOnce(force = false): Promise<{ sent: TelemetryEvent[]; error?: string; fatal?: boolean }> {
-  const cfg = readConfig();
-  if (!cfg.enabled) return { sent: [], error: "上传已关闭" };
-
-  const { info, reportInstall } = getDeviceInfo();
-  const state = readState();
-  const sent: TelemetryEvent[] = [];
-
-  const needInstall = reportInstall || !state.installReported;
-  const needActive = !needInstall && (force || dueForActive(state));
-  const action: TelemetryEvent | null = needInstall ? "install" : needActive ? "active" : null;
-  if (!action) return { sent };
-
-  const r = await sendEvent(action, info, cfg, cfg.enabled);
-  const now = new Date().toISOString();
-  if (!r.ok) {
-    writeState({ lastError: r.error });
-    return { sent, error: r.error, fatal: r.fatal };
-  }
-  // install 同样刷新活跃时间（远端据此判定在线）
-  writeState({
-    installReported: true,
-    lastReportAt: now,
-    lastActiveAt: now,
-    lastError: undefined,
-  });
-  sent.push(action);
-  return { sent };
+function resolveUpapi(state: TelemetryState, deviceId: string): TelemetryEvent {
+  if (!state.installReported) return "install";
+  return state.lastDeviceId === deviceId ? "heartbeat" : "install";
 }
 
 /**
- * 上传开关变更时立即上报（开启或关闭都触发）。
- * - 开启：以 `enabled=true` 走正常载荷，依次上报 `install`（如需）与 `active`。
- * - 关闭：`reportOnce` 会因 `!cfg.enabled` 直接返回「上传已关闭」而不发请求，
+ * 执行一次上报（**恒定只发 1 条请求**）。
+ *
+ * 「**要不要发**」：需要 install（从未成功上报过，或 `device_uuid` 变了）**或** 本次触发强制发送
+ * （`startup` / `retry` / `manual`）**或** 距上次成功已满 12 小时；三者都不满足则不请求。
+ * 「**发哪种**」（`upapi`，v1.35.11 起**只由 `device_uuid` 是否变化决定**，见 `resolveUpapi`）：
+ *  - 首次安装 / `device_uuid` 变化（重装 / tampered 致身份改变）→ `install`；
+ *  - `device_uuid` 未变（**含每次进程启动 / 重启**）/ 12 小时周期 / 失败重试 / 手动上报 → `heartbeat`。
+ * 任何失败都只写运行态 `lastError`，不抛异常、不影响主业务。
+ */
+export async function reportOnce(trigger: ReportTrigger): Promise<ReportResult> {
+  const cfg = readConfig();
+  // 开关关闭：本次不发请求，且标注 fatal ⇒ 调度器不再按 10 分钟重试（否则是纯空转），退回 12 小时周期
+  if (!cfg.enabled) {
+    return { sent: [], upapi: null, error: "上传已关闭", fatal: true };
+  }
+
+  const { info } = getDeviceInfo();
+  const state = readState();
+
+  // 「发哪种」由 device_uuid 判据先算出来（它同时决定「要不要发」：install 必发）
+  const upapi = resolveUpapi(state, info.deviceId);
+  const needInstall = upapi === "install";
+  // 只有 12 小时周期不强制发送；启动首报 / 失败重试 / 手动上报都强制发
+  const force = trigger !== "periodic";
+  const shouldSend = needInstall || force || dueForPeriodic(state);
+  if (!shouldSend) return { sent: [], upapi: null };
+
+  const r = await sendReport(info, cfg, cfg.enabled, upapi);
+  if (!r.ok) {
+    writeState({ lastError: r.error });
+    return { sent: [], upapi, error: r.error, fatal: r.fatal };
+  }
+  const now = new Date().toISOString();
+  // 成功上报刷新周期基准时间（远端据此判定在线），并记下本次的 device_uuid
+  // —— 下次只有「ID 变了」才会再报 install（v1.35.11）
+  writeState({
+    installReported: true,
+    lastDeviceId: info.deviceId,
+    lastReportAt: now,
+    lastError: undefined,
+  });
+  return { sent: [upapi], upapi };
+}
+
+/**
+ * 上传开关变更时立即上报（开启或关闭都触发，**只发 1 条**）。
+ * - 关闭方向：`reportOnce` 会因 `!cfg.enabled` 直接返回「上传已关闭」而不发请求，
  *   这里强制以 `{ ...readConfig(), enabled: true }` 绕过守卫，仍把最新开关状态透出。
- * 不论开启或关闭，都**同时上报 install 与 active**（install 成功必带 active），
- * 载荷携带 `uploadEnabled` 字段（＝本次开关新值），使服务端可记录本机最新 opt-in 状态。
+ * - 载荷携带 `uploadEnabled` 字段（＝本次开关新值），使服务端可记录本机最新 opt-in 状态。
+ * - 上报类型**恒为 `"install"`**：开关切换是**用户显式操作**，与 `device_uuid` 判据解耦
+ *   （用户明确要求保留此例外）。服务端同样可凭载荷 `uploadEnabled` 字段识别真正的 opt-in 状态变化。
  * 任何失败只写运行态 `lastError`，不影响主业务。
  */
-export async function reportOnToggle(enabled: boolean): Promise<{ sent: TelemetryEvent[]; error?: string; fatal?: boolean }> {
+export async function reportOnToggle(enabled: boolean): Promise<ReportResult> {
   const { info } = getDeviceInfo();
   // 强制 enabled:true 以绕过 reportOnce 的「上传已关闭」提前返回；真实开关态走 uploadEnabled 字段
   const cfg = { ...readConfig(), enabled: true };
-  const sent: TelemetryEvent[] = [];
-  let lastError: string | undefined;
-  let fatal = false;
+  const upapi: TelemetryEvent = "install";
 
-  // 先 install 后 active；发 install 必发 active
-  for (const event of ["install", "active"] as TelemetryEvent[]) {
-    const r = await sendEvent(event, info, cfg, enabled);
-    if (!r.ok) {
-      lastError = r.error;
-      fatal = fatal || r.fatal;
-      continue;
-    }
-    sent.push(event);
+  const r = await sendReport(info, cfg, enabled, upapi);
+  if (!r.ok) {
+    writeState({ lastError: r.error });
+    return { sent: [], upapi, error: r.error, fatal: r.fatal };
   }
 
   const now = new Date().toISOString();
-  const patch: Partial<TelemetryState> = { lastReportAt: now, lastActiveAt: now, lastError };
-  if (sent.includes("install")) patch.installReported = true;
-  writeState(patch);
-  return { sent, error: lastError, fatal };
+  // 同样记下 device_uuid：否则下一次启动会因「读不到 lastDeviceId」而多补一条 install
+  writeState({
+    installReported: true,
+    lastDeviceId: info.deviceId,
+    lastReportAt: now,
+    lastError: undefined,
+  });
+  return { sent: [upapi], upapi };
 }
 
-/** 安排下一次上报；`force` 表示这次必须发（启动首报 / 失败重试） */
-function scheduleNext(delayMs: number, force: boolean): void {
+/** 安排下一次上报；`trigger` 决定本次是否强制发送（`periodic` 除外），不再影响 `upapi` 取值 */
+function scheduleNext(delayMs: number, trigger: ReportTrigger): void {
   if (timer) clearTimeout(timer);
   nextAttemptAt = new Date(Date.now() + delayMs).toISOString();
   timer = setTimeout(() => {
     void (async () => {
-      const r = await reportOnce(force);
-      // 可重试错误（网络 / 5xx）10 分钟后再试；鉴权失败（401/403）不密集重试，等下一个周期
+      const r = await reportOnce(trigger);
+      // 可重试错误（网络 / 5xx）10 分钟后再试（按 `retry` 触发）；鉴权失败（401/403）不密集重试，等下一个周期
       const retry = !!r.error && !r.fatal;
-      scheduleNext(retry ? RETRY_INTERVAL_MS : REPORT_INTERVAL_MS, retry);
+      scheduleNext(retry ? RETRY_INTERVAL_MS : REPORT_INTERVAL_MS, retry ? "retry" : "periodic");
     })();
   }, delayMs);
   // 定时器不应阻止进程退出
@@ -776,13 +862,14 @@ function scheduleNext(delayMs: number, force: boolean): void {
 }
 
 /**
- * 启动后台上报：进程启动 / 重启后延迟 30 秒首报（安装或活跃），
- * 之后每 12 小时一次，失败则 10 分钟重试。
+ * 启动后台上报：进程启动 / 重启后延迟 30 秒首报（`startup` 触发 ⇒ 强制发；
+ * `upapi` 由 `device_uuid` 判据决定 —— **ID 未变则为 `heartbeat`，只有 ID 变了才 `install`**），
+ * 之后每 12 小时一次（`periodic`），失败则 10 分钟重试（`retry`）。
  */
 export function startTelemetryHeartbeat(): void {
   if (started) return;
   started = true;
-  scheduleNext(FIRST_REPORT_DELAY_MS, true);
+  scheduleNext(FIRST_REPORT_DELAY_MS, "startup");
 }
 
 // ---------- 状态 ----------
@@ -800,18 +887,16 @@ export interface TelemetryStatus {
   deviceFile: string;
   /** 运行态文件路径 */
   stateFile: string;
-  /** 上传开关（系统设置 → 本机设备） */
+  /** 上传开关（系统设置 → 硬件信息） */
   enabled: boolean;
   /** 上报端点（便于排查） */
   endpoint: string;
   /** 上报周期（小时） */
   reportIntervalHours: number;
-  /** 是否已成功上报过 install */
+  /** 是否已成功上报过「安装」事件 */
   installReported: boolean;
-  /** 最近一次成功上报时间 */
+  /** 最近一次成功上报时间（12 小时周期判定依据） */
   lastReportAt?: string;
-  /** 最近一次成功上报 active 的时间 */
-  lastActiveAt?: string;
   /** 下一次计划上报时间（含失败重试） */
   nextReportAt?: string;
   /** 最近一次上报错误信息 */
@@ -846,7 +931,6 @@ export function getTelemetryStatus(): TelemetryStatus {
     reportIntervalHours: Math.round(REPORT_INTERVAL_MS / 3600000),
     installReported: state.installReported,
     lastReportAt: state.lastReportAt,
-    lastActiveAt: state.lastActiveAt,
     nextReportAt: nextAttemptAt ?? undefined,
     lastError: state.lastError,
     envUnchanged: info.deviceId === currentDeviceId,

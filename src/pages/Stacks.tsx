@@ -45,6 +45,7 @@ import type {
 import { convert, type ConvertResult } from "../lib/compose-convert";
 import { copyText, selectNodeText } from "../lib/clipboard";
 import { normalizeInsert, insertPositionLabel } from "../lib/compose-template";
+import { formatBytes } from "../transforms";
 import {
   createStackApi,
   createStackFromBackupApi,
@@ -2184,7 +2185,7 @@ function CreateStackModal({ onClose, engineId, onRefresh }: { onClose: () => voi
                   <Upload size={14} /> 选择备份文件
                 </button>
                 <span className="text-xs text-slate-500 truncate" title={backupFile?.name}>
-                  {backupFile ? `${backupFile.name}（${(backupFile.size / 1024 / 1024).toFixed(1)} MB）` : "未选择文件"}
+                  {backupFile ? `${backupFile.name}（${formatBytes(backupFile.size)}）` : "未选择文件"}
                 </span>
                 <input
                   ref={backupInputRef}

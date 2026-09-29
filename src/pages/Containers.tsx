@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from "react";
+import React, { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import {
   Play,
   Square,
@@ -25,17 +25,40 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   Columns,
+  Folder,
+  FileText,
+  Upload,
+  Plus,
+  Pencil,
+  KeyRound,
+  ArrowLeft,
+  Save,
+  FilePlus2,
+  FolderPlus,
 } from "lucide-react";
-import type { Container, LogEntry } from "../types";
+import type { Container, LogEntry, ContainerFileEntry } from "../types";
 import { StatusBadge, Tag } from "../components/Badge";
-import { Modal, ConfirmDialog } from "../components/Modal";
+import { Modal, ConfirmDialog, Drawer } from "../components/Modal";
 import { Toggle, ProgressBar, IconButton, EmptyState, SortableTh } from "../components/UI";
 import { TagGroup } from "../components/TagPicker";
 import { LoadingState, ErrorState } from "../components/DataState";
 import { fetchContainerLogs, fetchContainerStats, containerActionApi, removeContainerApi } from "../api";
+import {
+  listContainerFilesApi,
+  readContainerFileApi,
+  writeContainerFileApi,
+  uploadContainerFileApi,
+  downloadContainerFileApi,
+  downloadContainerArchiveApi,
+  createContainerEntryApi,
+  renameContainerPathApi,
+  removeContainerPathApi,
+  chmodContainerPathApi,
+} from "../api";
 import { transformLogs, shortImageRef } from "../transforms";
 import { addOpLog } from "../opLog";
 import { XTermTerminal } from "../components/XTermTerminal";
+import { LineChart, type LineSeries } from "../components/LineChart";
 
 interface ContainersProps {
   containers: Container[];
@@ -45,14 +68,16 @@ interface ContainersProps {
   error?: string | null;
   engineId?: string;
   defaultVisibleColumns?: string[];
+  /** 容器详情展示形式：drawer = 半页面（默认）；modal = 居中弹窗。由系统设置 → 弹窗设置控制 */
+  containerDetailStyle?: "drawer" | "modal";
 }
 
-export function Containers({ containers, onNavigate, onRefresh, loading, error, engineId, defaultVisibleColumns }: ContainersProps) {
+export function Containers({ containers, onNavigate, onRefresh, loading, error, engineId, defaultVisibleColumns, containerDetailStyle = "drawer" }: ContainersProps) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [detailContainer, setDetailContainer] = useState<Container | null>(null);
-  const [detailTab, setDetailTab] = useState<"info" | "logs" | "stats" | "terminal">("info");
+  const [detailTab, setDetailTab] = useState<"info" | "logs" | "stats" | "terminal" | "file">("info");
 
   // 弹窗中始终使用最新的容器数据
   const activeContainer = useMemo(() => {
@@ -531,6 +556,7 @@ export function Containers({ containers, onNavigate, onRefresh, loading, error, 
           onClose={() => setDetailContainer(null)}
           engineId={engineId}
           onRefresh={onRefresh}
+          presentation={containerDetailStyle}
         />
       )}
 
@@ -574,6 +600,69 @@ function ResourceMini({ icon, label, value, percent, color, icon2, icon3 }: any)
 
 // ============ Container Detail Modal ============
 
+// ---- 「资源监控」曲线：轮询采样 + 卡片曲线 ----
+
+/** 采样间隔与保留点数：1s × 300 ⇒ 最近 5 分钟（与仪表盘曲线的采样口径一致） */
+const STATS_SAMPLE_MS = 1000;
+const STATS_MAX_POINTS = 300;
+
+/**
+ * 曲线时长选项（1s 一个点，`points` 即窗口内的点数）。
+ * 与仪表盘 `RANGES` 同一套口径；切换时长只在**本地切片**，不产生额外请求。
+ */
+const STATS_RANGES: { key: string; label: string; points: number }[] = [
+  { key: "10s", label: "10 秒", points: 10 },
+  { key: "30s", label: "30 秒", points: 30 },
+  { key: "1m", label: "1 分钟", points: 60 },
+  { key: "2m", label: "2 分钟", points: 120 },
+  { key: "5m", label: "5 分钟", points: 300 },
+];
+const STATS_RANGE_DEFAULT = "30s";
+const STATS_RANGE_STORAGE_KEY = "dm.container.statsRange";
+
+interface StatsSample {
+  ts: number;
+  cpu: number;
+  mem: number;
+  netIn: number;
+  netOut: number;
+  blkIn: number;
+  blkOut: number;
+}
+
+/**
+ * 累计计数器 → 速率（/s）。
+ * 服务端的 `netInput` / `blockOutput` 等是**自容器启动累计值**，直接画曲线只会是一条单调上升的斜线；
+ * 首采样无基线、以及容器重启导致计数器回卷（`cur < prev`）时都返回 0。
+ */
+function toRate(cur: number, prev: number, dtSec: number): number {
+  if (!(dtSec > 0) || cur < prev) return 0;
+  return (cur - prev) / dtSec;
+}
+
+/** 时间戳 → HH:MM:SS（曲线悬停提示的时间标签，与仪表盘同一口径） */
+function fmtClock(ts: number): string {
+  const d = new Date(ts);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+/** KB/s → 可读速率（与仪表盘同一口径） */
+function fmtKbRate(kbps: number): string {
+  if (!isFinite(kbps) || kbps <= 0) return "0";
+  if (kbps >= 1024) return `${(kbps / 1024).toFixed(1)} MB/s`;
+  return `${Math.round(kbps * 10) / 10} KB/s`;
+}
+
+/** MB → 可读文本（与仪表盘同一口径） */
+function fmtMB(mb: number): string {
+  if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`;
+  return `${Math.round(mb)} MB`;
+}
+
+/** 卡片里的小曲线通用参数：高度 + 半透明网格 */
+const CARD_CHART_HEIGHT = 104;
+
 function ContainerDetailModal({
   container,
   tab,
@@ -581,13 +670,16 @@ function ContainerDetailModal({
   onClose,
   engineId,
   onRefresh,
+  presentation = "drawer",
 }: {
   container: Container;
-  tab: "info" | "logs" | "stats" | "terminal";
-  onTabChange: (tab: "info" | "logs" | "stats" | "terminal") => void;
+  tab: "info" | "logs" | "stats" | "terminal" | "file";
+  onTabChange: (tab: "info" | "logs" | "stats" | "terminal" | "file") => void;
   onClose: () => void;
   engineId?: string;
   onRefresh?: () => void;
+  /** 展示形式：drawer = 半页面（默认）；modal = 居中弹窗 */
+  presentation?: "drawer" | "modal";
 }) {
   const [logs, setLogs] = useState<{ timestamp: string; level: string; message: string }[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
@@ -608,6 +700,28 @@ function ContainerDetailModal({
   } | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
   const [statsError, setStatsError] = useState<string | null>(null);
+  /** 曲线窗口：进入「资源监控」页签后累积的采样点（最多 5 分钟） */
+  const [statsHistory, setStatsHistory] = useState<StatsSample[]>([]);
+  /** 曲线时长（窗口点数由 STATS_RANGES 决定）；默认 30 秒，按 localStorage 持久化 */
+  const [statsRange, setStatsRange] = useState<string>(() => {
+    try {
+      const raw = localStorage.getItem(STATS_RANGE_STORAGE_KEY);
+      return raw && STATS_RANGES.some((r) => r.key === raw) ? raw : STATS_RANGE_DEFAULT;
+    } catch {
+      return STATS_RANGE_DEFAULT;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(STATS_RANGE_STORAGE_KEY, statsRange);
+    } catch {
+      // 忽略：隐私模式 / 禁用存储
+    }
+  }, [statsRange]);
+  const statsPoints = STATS_RANGES.find((r) => r.key === statsRange)?.points ?? 30;
+  const statsRangeLabel = STATS_RANGES.find((r) => r.key === statsRange)?.label ?? "30 秒";
+  /** 上一次的累计计数快照，用于差分出网络/磁盘速率；离开页签时清空以重建基线 */
+  const prevRawRef = useRef<{ ts: number; netIn: number; netOut: number; blkIn: number; blkOut: number } | null>(null);
 
   // 清除操作状态（容器状态变化后）
   useEffect(() => {
@@ -648,27 +762,63 @@ function ContainerDetailModal({
     return () => { cancelled = true; };
   }, [tab, engineId, container.id]);
 
-  // 拉取资源监控
+  // 拉取资源监控：进入「资源监控」页签后按固定间隔轮询，累积窗口用于画曲线。
+  // CPU% / 内存是瞬时值直接采；网络 / 磁盘的原始值是自容器启动累计（KB），须与上次快照差分才是速率。
   useEffect(() => {
     if (tab !== "stats" || !engineId || !container.id) return;
     let cancelled = false;
     setStatsLoading(true);
     setStatsError(null);
-    (async () => {
+
+    /** 防重入：上一轮还没返回就跳过本次（1s 间隔下远端 SSH/TCP 引擎可能来不及） */
+    let inFlight = false;
+    const pull = async () => {
+      if (inFlight) return;
+      inFlight = true;
       try {
         const data = await fetchContainerStats(engineId, container.id);
-        if (!cancelled) {
-          setStats(data);
-        }
+        if (cancelled) return;
+        setStats(data);
+        const ts = Date.now();
+        const prev = prevRawRef.current;
+        const dtSec = prev ? (ts - prev.ts) / 1000 : 0;
+        const sample: StatsSample = {
+          ts,
+          cpu: data.cpuPercent,
+          mem: data.memoryUsage,
+          netIn: prev ? toRate(data.netInput, prev.netIn, dtSec) : 0,
+          netOut: prev ? toRate(data.netOutput, prev.netOut, dtSec) : 0,
+          blkIn: prev ? toRate(data.blockInput, prev.blkIn, dtSec) : 0,
+          blkOut: prev ? toRate(data.blockOutput, prev.blkOut, dtSec) : 0,
+        };
+        prevRawRef.current = {
+          ts,
+          netIn: data.netInput,
+          netOut: data.netOutput,
+          blkIn: data.blockInput,
+          blkOut: data.blockOutput,
+        };
+        setStatsHistory((h) =>
+          h.length >= STATS_MAX_POINTS ? [...h.slice(h.length - STATS_MAX_POINTS + 1), sample] : [...h, sample]
+        );
       } catch (err: any) {
         if (!cancelled) {
           setStatsError(err.message || "获取资源监控失败");
         }
       } finally {
+        inFlight = false;
         if (!cancelled) setStatsLoading(false);
       }
-    })();
-    return () => { cancelled = true; };
+    };
+
+    pull();
+    const timer = window.setInterval(pull, STATS_SAMPLE_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      // 离开页签后重新建立基线，避免下次进来用「几分钟前的快照」差出偏低的平均速率
+      prevRawRef.current = null;
+    };
   }, [tab, engineId, container.id]);
 
   // 「实时滚动」开启时：日志更新后把滚动容器滚到底部，让最新日志可见
@@ -698,13 +848,32 @@ function ContainerDetailModal({
     { key: "logs", label: "日志", icon: <ScrollText size={14} /> },
     { key: "stats", label: "资源监控", icon: <TrendingUp size={14} /> },
     { key: "terminal", label: "终端", icon: <Terminal size={14} /> },
+    { key: "file", label: "文件", icon: <Folder size={14} /> },
   ];
 
   const filteredLogs = logLevel === "all" ? logs : logs.filter((l) => l.level === logLevel);
 
-  return (
-    <Modal open={true} onClose={onClose} size="xl" dismissable>
-      <div className="-mx-6 -my-4">
+  // 「资源监控」曲线：按所选时长在**本地切片**（切换时长不额外发请求），四张卡共用同一窗口
+  const statsWindow = statsHistory.slice(-statsPoints);
+  const statsLabels = statsWindow.map((s) => fmtClock(s.ts));
+  const latestSample = statsWindow.length > 0 ? statsWindow[statsWindow.length - 1] : null;
+  const cpuSeries: LineSeries[] = [
+    { name: "CPU", color: "#3b82f6", values: statsWindow.map((s) => s.cpu), area: true },
+  ];
+  const memSeries: LineSeries[] = [
+    { name: "内存", color: "#a855f7", values: statsWindow.map((s) => s.mem), area: true },
+  ];
+  const netRateSeries: LineSeries[] = [
+    { name: "接收", color: "#ef4444", values: statsWindow.map((s) => s.netIn), area: true },
+    { name: "发送", color: "#f59e0b", values: statsWindow.map((s) => s.netOut), area: true },
+  ];
+  const blkRateSeries: LineSeries[] = [
+    { name: "读取", color: "#3b82f6", values: statsWindow.map((s) => s.blkIn), area: true },
+    { name: "写入", color: "#f59e0b", values: statsWindow.map((s) => s.blkOut), area: true },
+  ];
+
+  const detailInner = (
+    <div className="flex flex-col h-full min-h-0">
         {/* Header */}
         <div className="flex items-center gap-3 px-6 pt-4 pb-3 border-b border-slate-100">
           <div className="w-10 h-10 rounded-lg bg-slate-100 flex items-center justify-center overflow-hidden">
@@ -714,8 +883,6 @@ function ContainerDetailModal({
             <h2 className="text-lg font-semibold text-slate-800">{container.name}</h2>
             <div className="flex items-center gap-2 mt-0.5">
               <StatusBadge status={container.status} />
-              <span className="text-xs text-slate-400 truncate">{container.image}</span>
-              <span className="text-xs text-slate-300">•</span>
               <span className="text-xs text-slate-400">运行 {container.uptime}</span>
             </div>
           </div>
@@ -826,12 +993,12 @@ function ContainerDetailModal({
           ))}
         </div>
 
-        {/* Content */}
-        <div className="px-6 py-4 max-h-[60vh] overflow-y-auto">
+        {/* Content：日志 / 终端页签内部自行撑满（避免下方大片空白），其余页签整体滚动 */}
+        <div className={tab === "logs" || tab === "terminal" ? "flex-1 min-h-0 flex flex-col px-6 py-4" : "flex-1 min-h-0 overflow-y-auto px-6 py-4"}>
           {tab === "info" && <ContainerInfoTab container={container} />}
           {tab === "logs" && (
-            <div>
-              <div className="flex items-center gap-3 mb-3">
+            <div className="flex flex-col h-full min-h-0">
+              <div className="flex items-center gap-3 mb-3 flex-shrink-0">
                 <select value={logLevel} onChange={(e) => setLogLevel(e.target.value)} className="px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg bg-white">
                   <option value="all">全部级别</option>
                   <option value="info">INFO</option>
@@ -856,7 +1023,7 @@ function ContainerDetailModal({
               <div
                   ref={logsScrollRef}
                   onScroll={handleLogsScroll}
-                  className="bg-slate-900 rounded-lg p-4 max-h-[50vh] overflow-y-auto font-mono text-xs"
+                  className="flex-1 min-h-0 bg-slate-900 rounded-lg p-4 overflow-y-auto font-mono text-xs"
                 >
                 {logsLoading && (
                   <div className="flex items-center gap-2 text-slate-500 py-2">
@@ -899,13 +1066,42 @@ function ContainerDetailModal({
                 </div>
               )}
               {!statsLoading && !statsError && stats && (
-                <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-4">
+                  {/* 曲线时长：四张卡共用，默认 30 秒；切换只在本地切片，不重新采样 */}
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <span className="text-xs text-slate-400">
+                      曲线窗口：最近 <b className="font-medium text-slate-500">{statsRangeLabel}</b>
+                      （每 {STATS_SAMPLE_MS / 1000} 秒采样，当前 {statsWindow.length} 个点）
+                    </span>
+                    <select
+                      value={statsRange}
+                      onChange={(e) => setStatsRange(e.target.value)}
+                      title="选择曲线显示的时长"
+                      className="px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg bg-white"
+                    >
+                      {STATS_RANGES.map((r) => (
+                        <option key={r.key} value={r.key}>{r.label}</option>
+                      ))}
+                    </select>
+                  </div>
                   <div className="bg-white rounded-lg border border-slate-200 p-4">
                     <div className="flex items-center justify-between mb-3">
                       <span className="flex items-center gap-2 text-sm text-slate-600"><Cpu size={16} className="text-blue-500" /> CPU 使用率</span>
                       <span className="text-xl font-bold text-slate-800">{stats.cpuPercent}%</span>
                     </div>
                     <ProgressBar value={stats.cpuPercent} color="blue" showLabel />
+                    <div className="mt-3 pt-3 border-t border-slate-100">
+                      <LineChart
+                        series={cpuSeries}
+                        yMax={100}
+                        height={CARD_CHART_HEIGHT}
+                        labels={statsLabels}
+                        formatMax={(v) => `${Math.round(v)}%`}
+                        formatMin={() => "0"}
+                        formatValue={(v) => `${Math.round(v * 10) / 10}%`}
+                        emptyText="正在采样 CPU…"
+                      />
+                    </div>
                   </div>
                   <div className="bg-white rounded-lg border border-slate-200 p-4">
                     <div className="flex items-center justify-between mb-3">
@@ -913,32 +1109,66 @@ function ContainerDetailModal({
                       <span className="text-xl font-bold text-slate-800">{stats.memoryUsage}<span className="text-sm font-normal text-slate-400"> / {stats.memoryLimit} MB</span></span>
                     </div>
                     <ProgressBar value={stats.memoryUsage} max={stats.memoryLimit} color="purple" showLabel />
-                  </div>
-                  <div className="bg-white rounded-lg border border-slate-200 p-4">
-                    <span className="flex items-center gap-2 text-sm text-slate-600 mb-2"><Network size={16} className="text-green-500" /> 网络 I/O</span>
-                    <div className="flex gap-6 mt-2">
-                      <div>
-                        <p className="text-xs text-slate-400">接收</p>
-                        <p className="text-lg font-mono font-semibold text-slate-700">{stats.netInput} KB</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-slate-400">发送</p>
-                        <p className="text-lg font-mono font-semibold text-slate-700">{stats.netOutput} KB</p>
-                      </div>
+                    <div className="mt-3 pt-3 border-t border-slate-100">
+                      <LineChart
+                        series={memSeries}
+                        yMax={stats.memoryLimit > 0 ? stats.memoryLimit : undefined}
+                        height={CARD_CHART_HEIGHT}
+                        labels={statsLabels}
+                        formatMax={fmtMB}
+                        formatMin={() => "0"}
+                        formatValue={(v) => fmtMB(v)}
+                        emptyText="正在采样内存…"
+                      />
                     </div>
                   </div>
                   <div className="bg-white rounded-lg border border-slate-200 p-4">
-                    <span className="flex items-center gap-2 text-sm text-slate-600 mb-2"><TrendingUp size={16} className="text-amber-500" /> 磁盘 I/O</span>
-                    <div className="flex gap-6 mt-2">
-                      <div>
-                        <p className="text-xs text-slate-400">读取</p>
-                        <p className="text-lg font-mono font-semibold text-slate-700">{stats.blockInput} KB</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-slate-400">写入</p>
-                        <p className="text-lg font-mono font-semibold text-slate-700">{stats.blockOutput} KB</p>
-                      </div>
+                    <div className="flex items-center justify-between mb-2 gap-3 flex-wrap">
+                      <span className="flex items-center gap-2 text-sm text-slate-600"><Network size={16} className="text-green-500" /> 网络 I/O</span>
+                      <span className="flex items-center gap-3 text-xs">
+                        <span className="flex items-center gap-1.5 text-slate-500">
+                          <span className="inline-block w-2 h-2 rounded-full" style={{ background: "#ef4444" }} />
+                          接收 <b className="font-mono text-slate-700">{fmtKbRate(latestSample?.netIn ?? 0)}</b>
+                        </span>
+                        <span className="flex items-center gap-1.5 text-slate-500">
+                          <span className="inline-block w-2 h-2 rounded-full" style={{ background: "#f59e0b" }} />
+                          发送 <b className="font-mono text-slate-700">{fmtKbRate(latestSample?.netOut ?? 0)}</b>
+                        </span>
+                      </span>
                     </div>
+                    <LineChart
+                      series={netRateSeries}
+                      height={CARD_CHART_HEIGHT}
+                      labels={statsLabels}
+                      formatMax={fmtKbRate}
+                      formatMin={() => "0"}
+                      formatValue={(v) => fmtKbRate(v)}
+                      emptyText="正在采样网络…"
+                    />
+                  </div>
+                  <div className="bg-white rounded-lg border border-slate-200 p-4">
+                    <div className="flex items-center justify-between mb-2 gap-3 flex-wrap">
+                      <span className="flex items-center gap-2 text-sm text-slate-600"><TrendingUp size={16} className="text-amber-500" /> 磁盘 I/O</span>
+                      <span className="flex items-center gap-3 text-xs">
+                        <span className="flex items-center gap-1.5 text-slate-500">
+                          <span className="inline-block w-2 h-2 rounded-full" style={{ background: "#3b82f6" }} />
+                          读取 <b className="font-mono text-slate-700">{fmtKbRate(latestSample?.blkIn ?? 0)}</b>
+                        </span>
+                        <span className="flex items-center gap-1.5 text-slate-500">
+                          <span className="inline-block w-2 h-2 rounded-full" style={{ background: "#f59e0b" }} />
+                          写入 <b className="font-mono text-slate-700">{fmtKbRate(latestSample?.blkOut ?? 0)}</b>
+                        </span>
+                      </span>
+                    </div>
+                    <LineChart
+                      series={blkRateSeries}
+                      height={CARD_CHART_HEIGHT}
+                      labels={statsLabels}
+                      formatMax={fmtKbRate}
+                      formatMin={() => "0"}
+                      formatValue={(v) => fmtKbRate(v)}
+                      emptyText="正在采样磁盘…"
+                    />
                   </div>
                 </div>
               )}
@@ -952,11 +1182,489 @@ function ContainerDetailModal({
               engineId={engineId}
               containerId={container.id}
               containerName={container.name}
+              fill
+            />
+          )}
+          {tab === "file" && (
+            <ContainerFileTab
+              engineId={engineId}
+              containerId={container.id}
+              containerName={container.name}
+              containerStatus={container.status}
             />
           )}
         </div>
-      </div>
+    </div>
+  );
+
+  // 半页面（右侧抽屉）——1panel 风格；弹窗为原有居中样式
+  if (presentation === "drawer") {
+    return <Drawer open={true} onClose={onClose} resizable>{detailInner}</Drawer>;
+  }
+  return (
+    <Modal open={true} onClose={onClose} size="xl" dismissable bodyClassName="p-0 flex-1 min-h-0 flex flex-col overflow-hidden">
+      {detailInner}
     </Modal>
+  );
+}
+
+// ============ 容器文件管理 Tab（参考 1panel） ============
+
+function fmtFileSize(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return "—";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return `${(n / 1024 / 1024 / 1024).toFixed(1)} GB`;
+}
+
+function ContainerFileTab({
+  engineId,
+  containerId,
+  containerName,
+  containerStatus,
+}: {
+  engineId?: string;
+  containerId: string;
+  containerName: string;
+  containerStatus: Container["status"];
+}) {
+  const [currentPath, setCurrentPath] = useState("/");
+  const [entries, setEntries] = useState<ContainerFileEntry[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+
+  // 编辑器
+  const [editing, setEditing] = useState<ContainerFileEntry | null>(null);
+  const [editIsBinary, setEditIsBinary] = useState(false);
+  const [editText, setEditText] = useState("");
+  const [editLoading, setEditLoading] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  // 对话框状态
+  const [showCreate, setShowCreate] = useState(false);
+  const [createType, setCreateType] = useState<"file" | "dir">("file");
+  const [createName, setCreateName] = useState("");
+  const [showRename, setShowRename] = useState(false);
+  const [renameName, setRenameName] = useState("");
+  const [showChmod, setShowChmod] = useState(false);
+  const [chmodValue, setChmodValue] = useState("644");
+  const [deleteTarget, setDeleteTarget] = useState<ContainerFileEntry | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const loadList = useCallback(async (dir: string) => {
+    if (!engineId) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await listContainerFilesApi(engineId, containerId, dir);
+      const sorted = [...data.entries].sort((a, b) => {
+        if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+      setEntries(sorted);
+    } catch (e: any) {
+      setError(e?.message || "加载目录失败");
+      setEntries([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [engineId, containerId]);
+
+  useEffect(() => {
+    if (containerStatus === "running") loadList(currentPath);
+  }, [currentPath, containerStatus, loadList]);
+
+  if (containerStatus !== "running") {
+    return (
+      <EmptyState
+        icon={<Terminal size={28} />}
+        title="容器未运行"
+        description="文件管理需要运行中的容器，请先启动容器再进行文件浏览与编辑。"
+      />
+    );
+  }
+
+  const segments = currentPath.split("/").filter(Boolean);
+
+  const openDir = (e: ContainerFileEntry) => {
+    setSelectedPath(null);
+    setCurrentPath(e.path);
+  };
+
+  const openFile = async (e: ContainerFileEntry) => {
+    setEditing(e);
+    setEditText("");
+    setEditError(null);
+    setEditLoading(true);
+    try {
+      const data = await readContainerFileApi(engineId!, containerId, e.path);
+      setEditIsBinary(data.isBinary);
+      if (!data.isBinary) setEditText(data.content || "");
+    } catch (err: any) {
+      setEditError(err?.message || "读取文件失败");
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
+  const saveFile = async () => {
+    if (!editing) return;
+    setSaving(true);
+    setEditError(null);
+    try {
+      await writeContainerFileApi(engineId!, containerId, editing.path, editText);
+      setEditing(null);
+      loadList(currentPath);
+    } catch (e: any) {
+      setEditError(e?.message || "保存失败");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const doCreate = async () => {
+    if (!createName.trim()) return;
+    setBusy(true);
+    try {
+      const target = `${currentPath === "/" ? "" : currentPath}/${createName.trim()}`;
+      await createContainerEntryApi(engineId!, containerId, target, createType);
+      setShowCreate(false);
+      setCreateName("");
+      loadList(currentPath);
+    } catch (e: any) {
+      setError(e?.message || "创建失败");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const doRename = async () => {
+    if (!selectedPath || !renameName.trim()) return;
+    setBusy(true);
+    try {
+      const parent = selectedPath.includes("/") ? selectedPath.slice(0, selectedPath.lastIndexOf("/")) : "";
+      const newPath = `${parent || "/"}/${renameName.trim()}`;
+      await renameContainerPathApi(engineId!, containerId, selectedPath, newPath);
+      setShowRename(false);
+      setSelectedPath(null);
+      loadList(currentPath);
+    } catch (e: any) {
+      setError(e?.message || "重命名失败");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const doDelete = async () => {
+    if (!deleteTarget) return;
+    setBusy(true);
+    try {
+      await removeContainerPathApi(engineId!, containerId, deleteTarget.path);
+      setDeleteTarget(null);
+      setSelectedPath(null);
+      loadList(currentPath);
+    } catch (e: any) {
+      setError(e?.message || "删除失败");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const doChmod = async () => {
+    if (!selectedPath) return;
+    setBusy(true);
+    try {
+      await chmodContainerPathApi(engineId!, containerId, selectedPath, chmodValue.trim());
+      setShowChmod(false);
+      setSelectedPath(null);
+      loadList(currentPath);
+    } catch (e: any) {
+      setError(e?.message || "修改权限失败");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onUploadClick = () => fileInputRef.current?.click();
+  const onFilePicked = async (ev: React.ChangeEvent<HTMLInputElement>) => {
+    const file = ev.target.files?.[0];
+    if (!file) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const buf = await file.arrayBuffer();
+      const target = `${currentPath === "/" ? "" : currentPath}/${file.name}`;
+      await uploadContainerFileApi(engineId!, containerId, target, buf);
+      loadList(currentPath);
+    } catch (e: any) {
+      setError(e?.message || "上传失败");
+    } finally {
+      setBusy(false);
+      ev.target.value = "";
+    }
+  };
+
+  const selectedEntry = entries.find((e) => e.path === selectedPath) || null;
+
+  return (
+    <div className="space-y-3">
+      {/* 面包屑 + 工具栏 */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-1 text-sm text-slate-500 flex-wrap min-w-0">
+          <button
+            onClick={() => { setSelectedPath(null); setCurrentPath("/"); }}
+            className="hover:text-blue-600 transition-colors flex items-center gap-1"
+          >
+            <Folder size={14} /> 根目录
+          </button>
+          {segments.map((seg, i) => (
+            <span key={i} className="flex items-center gap-1">
+              <ChevronRight size={12} className="text-slate-300" />
+              <button
+                onClick={() => { setSelectedPath(null); setCurrentPath("/" + segments.slice(0, i + 1).join("/")); }}
+                className="hover:text-blue-600 transition-colors truncate max-w-[160px]"
+              >
+                {seg}
+              </button>
+            </span>
+          ))}
+        </div>
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          <button
+            onClick={() => { setCreateType("file"); setCreateName(""); setShowCreate(true); }}
+            className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
+          >
+            <FilePlus2 size={14} /> 新建文件
+          </button>
+          <button
+            onClick={() => { setCreateType("dir"); setCreateName(""); setShowCreate(true); }}
+            className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
+          >
+            <FolderPlus size={14} /> 新建文件夹
+          </button>
+          <button
+            onClick={onUploadClick}
+            disabled={busy}
+            className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-white bg-blue-500 rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50"
+          >
+            <Upload size={14} /> 上传
+          </button>
+          <input ref={fileInputRef} type="file" className="hidden" onChange={onFilePicked} />
+        </div>
+      </div>
+
+      {error && (
+        <div className="text-sm text-red-500 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{error}</div>
+      )}
+
+      {/* 选中条目操作条 */}
+      {selectedEntry && (
+        <div className="flex items-center gap-2 text-xs text-slate-500 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
+          <span className="font-medium text-slate-700 truncate max-w-[280px]">{selectedEntry.name}</span>
+          <span className="text-slate-300">•</span>
+          <span className="font-mono">{selectedEntry.mode}</span>
+          <div className="flex-1" />
+          {/* 目录走「打包下载」（tar.gz），文件走原样下载 */}
+          <button
+            onClick={() => {
+              setBusy(true);
+              const task = selectedEntry.isDir
+                ? downloadContainerArchiveApi(engineId!, containerId, selectedEntry.path)
+                : downloadContainerFileApi(engineId!, containerId, selectedEntry.path);
+              task.catch((e) => setError(e?.message || "下载失败")).finally(() => setBusy(false));
+            }}
+            disabled={busy}
+            title={selectedEntry.isDir ? "打包为 tar.gz 下载" : "下载文件"}
+            className="flex items-center gap-1 text-blue-600 hover:underline disabled:opacity-50"
+          >
+            <Download size={13} /> {selectedEntry.isDir ? "打包下载" : "下载"}
+          </button>
+          <button onClick={() => { setRenameName(selectedEntry.name); setShowRename(true); }} className="flex items-center gap-1 text-slate-600 hover:underline">
+            <Pencil size={13} /> 重命名
+          </button>
+          <button onClick={() => { setChmodValue("644"); setShowChmod(true); }} className="flex items-center gap-1 text-slate-600 hover:underline">
+            <KeyRound size={13} /> 权限
+          </button>
+          <button onClick={() => setDeleteTarget(selectedEntry)} className="flex items-center gap-1 text-red-600 hover:underline">
+            <Trash2 size={13} /> 删除
+          </button>
+        </div>
+      )}
+
+      {/* 文件列表 */}
+      <div className="border border-slate-200 rounded-lg overflow-hidden">
+        <div className="grid grid-cols-[1fr_auto_auto_auto] gap-3 px-4 py-2 bg-slate-50 text-xs font-medium text-slate-500 border-b border-slate-200">
+          <span>名称</span>
+          <span className="w-24 text-right">大小</span>
+          <span className="w-40">修改时间</span>
+          <span className="w-20 text-right">权限</span>
+        </div>
+        {loading && (
+          <div className="flex items-center gap-2 justify-center py-10 text-slate-400 text-sm">
+            <RefreshCw size={16} className="animate-spin" /> 加载中...
+          </div>
+        )}
+        {!loading && entries.length === 0 && (
+          <div className="py-10 text-center text-slate-400 text-sm">空目录</div>
+        )}
+        {!loading && entries.map((e) => (
+          <div
+            key={e.path}
+            onClick={() => setSelectedPath(e.path)}
+            onDoubleClick={() => (e.isDir ? openDir(e) : openFile(e))}
+            className={`grid grid-cols-[1fr_auto_auto_auto] gap-3 px-4 py-2 items-center border-b border-slate-50 last:border-0 cursor-pointer transition-colors ${
+              selectedPath === e.path ? "bg-blue-50" : "hover:bg-slate-50"
+            }`}
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              {e.isDir ? <Folder size={15} className="text-blue-500 flex-shrink-0" /> : <FileText size={15} className="text-slate-400 flex-shrink-0" />}
+              <span className="truncate text-sm text-slate-700">
+                {e.name}
+                {e.isSymlink && e.target && <span className="text-slate-400 text-xs"> → {e.target}</span>}
+              </span>
+            </div>
+            <span className="w-24 text-right text-xs text-slate-500 font-mono">{e.isDir ? "—" : fmtFileSize(e.size)}</span>
+            <span className="w-40 text-xs text-slate-500">{e.mtime ? new Date(e.mtime).toLocaleString() : "—"}</span>
+            <span className="w-20 text-right text-xs text-slate-500 font-mono">{e.mode}</span>
+          </div>
+        ))}
+      </div>
+
+      <p className="text-xs text-slate-400">双击文件夹进入目录；双击文件查看/编辑；单击选中后可下载（目录会打包为 tar.gz）、重命名、改权限或删除。</p>
+
+      {/* 文件编辑弹窗 */}
+      <Modal open={!!editing} onClose={() => setEditing(null)} title={`编辑文件 · ${editing?.name || ""}`} size="xl">
+        {editing && (
+          <div className="space-y-3">
+            <div className="text-xs text-slate-400 break-all">{editing.path}</div>
+            {editLoading && (
+              <div className="flex items-center gap-2 justify-center py-10 text-slate-400 text-sm">
+                <RefreshCw size={16} className="animate-spin" /> 读取中...
+              </div>
+            )}
+            {!editLoading && (
+              <>
+                {editError && <div className="text-sm text-red-500 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{editError}</div>}
+                {editIsBinary ? (
+                  <div className="text-center py-10">
+                    <p className="text-sm text-slate-500 mb-3">该文件为二进制文件，无法在浏览器内编辑。</p>
+                    <button
+                      onClick={() => downloadContainerFileApi(engineId!, containerId, editing.path).catch((e) => setEditError(e?.message || "下载失败"))}
+                      className="flex items-center gap-1.5 mx-auto px-4 py-2 text-sm text-white bg-blue-500 rounded-lg hover:bg-blue-600"
+                    >
+                      <Download size={14} /> 下载文件
+                    </button>
+                  </div>
+                ) : (
+                  <textarea
+                    value={editText}
+                    onChange={(ev) => setEditText(ev.target.value)}
+                    spellCheck={false}
+                    className="w-full h-80 p-3 text-sm font-mono bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-200 resize-none"
+                  />
+                )}
+              </>
+            )}
+            <div className="flex items-center justify-end gap-2">
+              <button onClick={() => setEditing(null)} className="px-4 py-2 text-sm text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200">取消</button>
+              {!editIsBinary && !editLoading && (
+                <button
+                  onClick={saveFile}
+                  disabled={saving}
+                  className="flex items-center gap-1.5 px-4 py-2 text-sm text-white bg-blue-500 rounded-lg hover:bg-blue-600 disabled:opacity-50"
+                >
+                  <Save size={14} /> {saving ? "保存中..." : "保存"}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* 新建弹窗 */}
+      <Modal open={showCreate} onClose={() => setShowCreate(false)} title={createType === "dir" ? "新建文件夹" : "新建文件"} size="sm">
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <button onClick={() => setCreateType("file")} className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-sm rounded-lg border ${createType === "file" ? "border-blue-300 bg-blue-50 text-blue-600" : "border-slate-200 text-slate-600"}`}>
+              <FilePlus2 size={14} /> 文件
+            </button>
+            <button onClick={() => setCreateType("dir")} className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-sm rounded-lg border ${createType === "dir" ? "border-blue-300 bg-blue-50 text-blue-600" : "border-slate-200 text-slate-600"}`}>
+              <FolderPlus size={14} /> 文件夹
+            </button>
+          </div>
+          <input
+            autoFocus
+            value={createName}
+            onChange={(e) => setCreateName(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && doCreate()}
+            placeholder={createType === "dir" ? "文件夹名称" : "文件名称"}
+            className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-200"
+          />
+          <div className="flex items-center justify-end gap-2">
+            <button onClick={() => setShowCreate(false)} className="px-4 py-2 text-sm text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200">取消</button>
+            <button onClick={doCreate} disabled={busy || !createName.trim()} className="px-4 py-2 text-sm text-white bg-blue-500 rounded-lg hover:bg-blue-600 disabled:opacity-50">
+              {busy ? "创建中..." : "创建"}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* 重命名弹窗 */}
+      <Modal open={showRename} onClose={() => setShowRename(false)} title="重命名" size="sm">
+        <div className="space-y-3">
+          <input
+            autoFocus
+            value={renameName}
+            onChange={(e) => setRenameName(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && doRename()}
+            className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-200"
+          />
+          <div className="flex items-center justify-end gap-2">
+            <button onClick={() => setShowRename(false)} className="px-4 py-2 text-sm text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200">取消</button>
+            <button onClick={doRename} disabled={busy || !renameName.trim()} className="px-4 py-2 text-sm text-white bg-blue-500 rounded-lg hover:bg-blue-600 disabled:opacity-50">
+              {busy ? "处理中..." : "确定"}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* 权限弹窗 */}
+      <Modal open={showChmod} onClose={() => setShowChmod(false)} title="修改权限" size="sm">
+        <div className="space-y-3">
+          <p className="text-xs text-slate-400">输入数字权限（如 644、755）或符号权限（如 u+x）。</p>
+          <input
+            autoFocus
+            value={chmodValue}
+            onChange={(e) => setChmodValue(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && doChmod()}
+            className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-200"
+          />
+          <div className="flex items-center justify-end gap-2">
+            <button onClick={() => setShowChmod(false)} className="px-4 py-2 text-sm text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200">取消</button>
+            <button onClick={doChmod} disabled={busy || !chmodValue.trim()} className="px-4 py-2 text-sm text-white bg-blue-500 rounded-lg hover:bg-blue-600 disabled:opacity-50">
+              {busy ? "处理中..." : "确定"}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* 删除确认 */}
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={doDelete}
+        title="删除确认"
+        message={`确定要删除「${deleteTarget?.name || ""}」吗？该操作不可恢复。`}
+        confirmText="删除"
+        danger
+        loading={busy}
+      />
+    </div>
   );
 }
 
@@ -974,11 +1682,12 @@ function ContainerInfoTab({ container }: { container: Container }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
+      {/* 半页面窄栏下两列会挤压换行，统一单列展示 */}
+      <div className="space-y-0.5">
         {info.map((item) => (
-          <div key={item.label} className="flex items-center gap-3 py-2 border-b border-slate-50">
+          <div key={item.label} className="flex items-start gap-3 py-2 border-b border-slate-50">
             <span className="text-sm text-slate-500 w-24 flex-shrink-0">{item.label}</span>
-            <span className="text-sm text-slate-700 font-mono">{item.value}</span>
+            <span className="text-sm text-slate-700 font-mono break-all min-w-0">{item.value}</span>
           </div>
         ))}
       </div>

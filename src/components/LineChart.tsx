@@ -113,6 +113,15 @@ export function LineChart({
   const hoverRatio = hoverIdx !== null && len > 1 ? hoverIdx / (len - 1) : 0;
   const tipFlip = hoverRatio > 0.55; // 靠右侧时提示框翻到游标左边，避免溢出
 
+  // X 轴时间刻度：取「首 / 中 / 尾」三点（Set 去重，len === 2 时自然退化为两点）。
+  // 只在调用方传了 labels（时间串）时显示，否则不占位 —— 老调用方零回归。
+  const axisTicks =
+    labels && labels.length >= 2 && len >= 2
+      ? Array.from(new Set([0, Math.floor((len - 1) / 2), len - 1])).filter(
+          (i) => i < labels.length && labels[i] !== undefined,
+        )
+      : [];
+
   const handleMove = (clientX: number, el: HTMLElement) => {
     if (len < 2) return;
     const rect = el.getBoundingClientRect();
@@ -123,12 +132,13 @@ export function LineChart({
   };
 
   return (
-    <div
-      className="relative w-full"
-      style={{ height }}
-      onMouseMove={(e) => handleMove(e.clientX, e.currentTarget)}
-      onMouseLeave={() => setHover(null)}
-    >
+    <div className="relative flex w-full flex-col">
+      <div
+        className="relative w-full"
+        style={{ height }}
+        onMouseMove={(e) => handleMove(e.clientX, e.currentTarget)}
+        onMouseLeave={() => setHover(null)}
+      >
       {len < 2 ? (
         <div className="flex h-full items-center justify-center text-xs text-slate-400">{emptyText}</div>
       ) : (
@@ -249,6 +259,21 @@ export function LineChart({
         <span className="absolute right-0 top-0 text-[10px] text-slate-400 bg-white/70 px-0.5">
           {formatMaxRight(maxValRight)}
         </span>
+      )}
+      </div>
+      {/* X 轴时间刻度（首 / 中 / 尾三点）。
+          ⚠️ 必须走 HTML 层，不能画进 SVG —— viewBox 是 preserveAspectRatio="none"
+          横向拉伸的，SVG 里的文字会被连同线宽一起非等比拉变形。
+          flex + justify-between：首尾贴边、中间居中，与数据点位置天然对齐，且永不重叠。
+          图表本体高度仍由 height 决定，标签行额外占位 ⇒ 曲线尺寸不缩水。 */}
+      {axisTicks.length > 0 && (
+        <div className="mt-1 flex justify-between">
+          {axisTicks.map((i) => (
+            <span key={i} className="whitespace-nowrap font-mono text-[10px] leading-none text-slate-400">
+              {labels?.[i] ?? ""}
+            </span>
+          ))}
+        </div>
       )}
     </div>
   );

@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 
 interface ModalProps {
@@ -70,6 +70,133 @@ export function Modal({ open, onClose, title, children, size = "md", bodyClassNa
             {footer}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+interface DrawerProps {
+  open: boolean;
+  onClose: () => void;
+  children: React.ReactNode;
+  /**
+   * 是否允许点击遮罩 / ESC 关闭。
+   * 默认 true：半页面多为「查看类」，点外部关闭不易丢数据。
+   */
+  dismissable?: boolean;
+  /** 面板宽度类：默认覆盖约半屏（小屏占满）。`resizable` 且拖动过宽度后此值失效 */
+  panelClassName?: string;
+  /** 是否允许拖动面板左缘调整宽度（默认否） */
+  resizable?: boolean;
+  /** 拖动时的最小宽度（px） */
+  minWidth?: number;
+  /** 拖动时的最大宽度占视口比例（0~1） */
+  maxWidthRatio?: number;
+}
+
+/**
+ * 半页面抽屉（1panel 风格容器详情）。
+ *
+ * 与 `Modal` 同为遮罩式浮层，区别在于：面板贴合屏幕**右缘**、铺满高度、
+ * 覆盖约半屏（`md:w-1/2`），左侧列表仍可见；内容区自行滚动。
+ *
+ * `resizable` 打开后，面板左缘出现拖拽手柄，可左右拖动改变宽度（双击手柄复位半屏）。
+ */
+export function Drawer({
+  open,
+  onClose,
+  children,
+  dismissable = true,
+  panelClassName = "w-full md:w-1/2",
+  resizable = false,
+  minWidth = 380,
+  maxWidthRatio = 0.92,
+}: DrawerProps) {
+  /** null = 未拖动过，沿用 `panelClassName` 的响应式宽度 */
+  const [width, setWidth] = useState<number | null>(null);
+  const draggingRef = useRef(false);
+  /** 拖动后紧跟的那次 click 若落在遮罩上，会被误判成「点外部关闭」，需吞掉 */
+  const justDraggedRef = useRef(false);
+  const startXRef = useRef(0);
+  const startWidthRef = useRef(0);
+
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && dismissable) onClose();
+    };
+    if (open) {
+      document.addEventListener("keydown", handleEsc);
+      document.body.style.overflow = "hidden";
+    }
+    return () => {
+      document.removeEventListener("keydown", handleEsc);
+      document.body.style.overflow = "";
+    };
+  }, [open, onClose, dismissable]);
+
+  // 拖动改宽：向左拖（clientX 变小）变宽，向右拖变窄
+  useEffect(() => {
+    if (!resizable) return;
+    const onMove = (e: MouseEvent) => {
+      if (!draggingRef.current) return;
+      const maxWidth = window.innerWidth * maxWidthRatio;
+      const next = Math.round(Math.min(maxWidth, Math.max(minWidth, startWidthRef.current - (e.clientX - startXRef.current))));
+      setWidth(next);
+    };
+    const onUp = () => {
+      if (!draggingRef.current) return;
+      draggingRef.current = false;
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+      window.setTimeout(() => { justDraggedRef.current = false; }, 0);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [resizable, minWidth, maxWidthRatio]);
+
+  if (!open) return null;
+
+  const handleDragStart = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!resizable) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const panel = e.currentTarget.parentElement as HTMLElement | null;
+    draggingRef.current = true;
+    justDraggedRef.current = true;
+    startXRef.current = e.clientX;
+    startWidthRef.current = width ?? panel?.getBoundingClientRect().width ?? window.innerWidth / 2;
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "col-resize";
+  };
+
+  return (
+    <div
+      className="modal-overlay fixed inset-0 z-[1000] flex justify-end bg-black/40"
+      onClick={() => {
+        if (justDraggedRef.current) { justDraggedRef.current = false; return; }
+        if (dismissable) onClose();
+      }}
+    >
+      <div
+        className={`drawer-content relative bg-white h-full shadow-2xl flex flex-col overflow-hidden ${width == null ? panelClassName : ""}`}
+        style={width == null ? undefined : { width: `${width}px`, minWidth: `${minWidth}px` }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {resizable && (
+          <div
+            onMouseDown={handleDragStart}
+            onDoubleClick={() => setWidth(null)}
+            title="拖动调整宽度（双击复位）"
+            className="group absolute left-0 top-0 z-20 flex h-full w-2.5 cursor-col-resize items-center justify-center"
+          >
+            <div className="h-10 w-[3px] rounded-full bg-slate-300 transition-colors group-hover:bg-blue-500" />
+          </div>
+        )}
+        {children}
       </div>
     </div>
   );

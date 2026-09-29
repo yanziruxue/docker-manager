@@ -109,6 +109,8 @@ const DEFAULT_SETTINGS = {
    */
   modal: {
     autoCloseDelay: 5,
+    // 容器详情视图：drawer = 半页面（右侧抽屉，默认）；modal = 居中弹窗
+    containerDetailStyle: "drawer",
   },
   /**
    * Compose 模板（系统设置 → Compose 管理 维护）：
@@ -128,8 +130,8 @@ const DEFAULT_SETTINGS = {
     ],
   },
   /**
-   * 安装量 / 活跃度上报开关（系统设置 → 本机设备）。
-   * 默认开启；关闭后不再向远端发送任何数据（本机设备标识卡片仍可正常查看）。
+   * 安装量 / 活跃度上报开关（系统设置 → 硬件信息）。
+   * 默认开启；关闭后不再向远端发送任何数据（硬件信息标识卡片仍可正常查看）。
    * 上报内容仅为本机设备信息（硬件 6 维指纹 + 系统 + 应用版本），用于安装数量统计。
    */
   telemetry: {

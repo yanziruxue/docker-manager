@@ -98,6 +98,15 @@ if [ "$KEEP_DATA" = false ] && [ -d "$DATA_DIR" ]; then
   log "已删除 ${DATA_DIR}"
 fi
 
+# 删除安装脚本写入的 drivetemp 模块配置
+# 只删「带我们标记」的那一份 —— 用户自己写的 /etc/modules-load.d/drivetemp.conf 不能顺手删掉。
+# 已加载的模块**不主动卸载**：可能仍被其它工具/进程依赖，重启后不再自动加载即可。
+DRIVETEMP_CONF="/etc/modules-load.d/drivetemp.conf"
+if [ -f "$DRIVETEMP_CONF" ] && grep -q "^# ${APP_NAME}:" "$DRIVETEMP_CONF" 2>/dev/null; then
+  rm -f "$DRIVETEMP_CONF"
+  log "已删除 ${DRIVETEMP_CONF}（重启后不再自动加载 drivetemp）"
+fi
+
 # 删除 sudoers 授权片段（daemon.json 读写 / 重启 docker）
 if [ -f "/etc/sudoers.d/${APP_NAME}" ]; then
   rm -f "/etc/sudoers.d/${APP_NAME}"

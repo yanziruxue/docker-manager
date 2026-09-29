@@ -700,6 +700,7 @@ export default function App() {
               engineId={activeEngineId}
               onRefresh={() => activeEngineId && loadEngineData(activeEngineId)}
               defaultVisibleColumns={settings?.columnVisibility?.containers}
+              containerDetailStyle={settings?.modal?.containerDetailStyle ?? "drawer"}
             />
           )}
           {page === "stacks" && (

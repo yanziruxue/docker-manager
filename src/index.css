@@ -161,3 +161,18 @@ body {
   width: 50%;
   animation: progressIndeterminate 1.5s ease-in-out infinite;
 }
+
+/* 半页面抽屉：从右侧滑入 */
+@keyframes slideInRight {
+  0% {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+  100% {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+.drawer-content {
+  animation: slideInRight 0.22s ease-out;
+}

@@ -55,6 +55,7 @@ usage() {
 
 选项:
   --ignore-docker             跳过 Docker / Docker Compose 检查（应用可安装，但容器管理不可用）
+  --no-drivetemp              跳过 drivetemp 内核模块配置（不加载、不写 /etc/modules-load.d）
   -h, --help                  显示本帮助
 
 前提: 本脚本不再自动安装 Docker。请先装好 Docker 与 Docker Compose 再执行；
@@ -64,9 +65,12 @@ EOF
 
 # 是否跳过 Docker 依赖检查（默认不跳过：缺失即停止安装）
 IGNORE_DOCKER=0
+# 是否跳过 drivetemp 内核模块配置（默认不跳过：SATA/HDD 温度依赖它，见下方「配置磁盘温度传感器」）
+SKIP_DRIVETEMP=0
 while [ $# -gt 0 ]; do
   case "${1:-}" in
     --ignore-docker|--no-docker|--skip-docker) IGNORE_DOCKER=1 ;;
+    --no-drivetemp|--skip-drivetemp) SKIP_DRIVETEMP=1 ;;
     -h|--help) usage; exit 0 ;;
     *) warn "未知参数：${1:-}（用 -h 查看帮助）" ;;
   esac
@@ -169,6 +173,53 @@ else
 fi
 if [ "$COMPOSE_OK" -eq 0 ]; then
   warn "未检测到 Compose（docker compose / docker-compose），Compose 相关功能不可用"
+fi
+
+# 配置磁盘温度传感器（drivetemp）
+# ============================================
+# 应用读磁盘温度走 sysfs hwmon，**不需要 root、也不需要 smartmontools**；但 SATA/HDD 的
+# hwmon 节点只在 drivetemp 模块加载后才由内核暴露（NVMe 由 nvme 驱动自带，不受影响）。
+# 没加载时「硬件信息 → 温度」那几块 SATA 盘只能显示「—」，用户无从判断是硬件没有传感器
+# 还是模块没加载 —— 所以安装时顺手加载 + 持久化。
+#
+# 等价于用户手动执行：
+#   echo drivetemp | sudo tee /etc/modules-load.d/drivetemp.conf && sudo modprobe drivetemp
+#
+# ★ 本段**尽力而为、绝不阻塞安装**：内核没编该模块 / 已内置进内核 / 无 modprobe / 无 systemd
+#   一律只告警不退出（set -e 下每个可能失败的调用都显式判返回值）。
+title "配置磁盘温度传感器（drivetemp）"
+DRIVETEMP_CONF="/etc/modules-load.d/drivetemp.conf"
+DRIVETEMP_MARK="# ${APP_NAME}: 让 SATA/HDD 暴露 hwmon 温度节点（应用读 sysfs 展示磁盘温度）"
+if [ "$SKIP_DRIVETEMP" -eq 1 ]; then
+  warn "已按 --no-drivetemp 跳过 drivetemp 配置；SATA/HDD 温度可能显示「—」"
+else
+  # 模块不可用有两种情况，都跳过（都不影响其它功能）：
+  #   ① 内核没编 drivetemp（老内核 / 精简内核 / 部分 NAS 系统）
+  #   ② 已编进内核（builtin）—— 此时 hwmon 本来就存在，无需加载
+  # modinfo 本身可能缺失（精简系统没装 kmod），缺了就绕过检查、直接尝试 modprobe。
+  DRIVETEMP_AVAILABLE=1
+  if command -v modinfo &>/dev/null && ! modinfo drivetemp &>/dev/null; then
+    DRIVETEMP_AVAILABLE=0
+  fi
+  if [ "$DRIVETEMP_AVAILABLE" -eq 0 ]; then
+    warn "本机内核未提供 drivetemp 模块（或已内置），跳过；SATA/HDD 温度可能显示「—」"
+  else
+    if ! command -v modprobe &>/dev/null; then
+      warn "未找到 modprobe，跳过加载；SATA/HDD 温度可能显示「—」"
+    elif modprobe drivetemp 2>/dev/null; then
+      log "已加载 drivetemp 模块（SATA/HDD 温度立即可读，无需重启）"
+    else
+      warn "modprobe drivetemp 失败；SATA/HDD 温度可能显示「—」，可手动执行: modprobe drivetemp"
+    fi
+    # 持久化：重启后自动加载。modules-load.d 是 systemd 的机制，非 systemd 系统不写多余文件。
+    if [ -d /etc/modules-load.d ] || command -v systemctl &>/dev/null; then
+      mkdir -p /etc/modules-load.d
+      printf '%s\ndrivetemp\n' "$DRIVETEMP_MARK" > "$DRIVETEMP_CONF"
+      log "已写入 ${DRIVETEMP_CONF}（重启后自动加载）"
+    else
+      warn "本机无 systemd（${DRIVETEMP_CONF} 不生效），未持久化；重启后需手动: modprobe drivetemp"
+    fi
+  fi
 fi
 
 # 停止旧服务

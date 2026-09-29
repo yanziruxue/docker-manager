@@ -7,9 +7,11 @@ interface XTermTerminalProps {
   engineId?: string;
   containerId?: string;
   containerName?: string;
+  /** 撑满父容器高度（父级须为 flex 列布局且有确定高度）；默认用 50vh 固定高度 */
+  fill?: boolean;
 }
 
-export function XTermTerminal({ engineId, containerId, containerName }: XTermTerminalProps) {
+export function XTermTerminal({ engineId, containerId, containerName, fill = false }: XTermTerminalProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -18,7 +20,8 @@ export function XTermTerminal({ engineId, containerId, containerName }: XTermTer
   const [errorMsg, setErrorMsg] = useState<string>("");
 
   useEffect(() => {
-    if (!terminalRef.current || !engineId || !containerId) return;
+    const el = terminalRef.current;
+    if (!el || !engineId || !containerId) return;
 
     const term = new Terminal({
       cursorBlink: true,
@@ -51,7 +54,7 @@ export function XTermTerminal({ engineId, containerId, containerName }: XTermTer
 
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
-    term.open(terminalRef.current);
+    term.open(el);
     fitAddon.fit();
 
     termRef.current = term;
@@ -119,8 +122,24 @@ export function XTermTerminal({ engineId, containerId, containerName }: XTermTer
     };
     window.addEventListener("resize", handleResize);
 
+    // 容器尺寸变化（抽屉拖动改宽 / 页签切换 / 布局变化）时重新 fit，避免终端停在旧列数
+    const resizeObserver = new ResizeObserver(() => {
+      if (el.clientWidth === 0 || el.clientHeight === 0) return;
+      try {
+        fitAddon.fit();
+        const { cols, rows } = term;
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "resize", cols, rows }));
+        }
+      } catch {
+        /* 终端暂时不可见（如页签切走）时忽略 */
+      }
+    });
+    resizeObserver.observe(el);
+
     return () => {
       window.removeEventListener("resize", handleResize);
+      resizeObserver.disconnect();
       ws.close();
       term.dispose();
       termRef.current = null;
@@ -130,7 +149,7 @@ export function XTermTerminal({ engineId, containerId, containerName }: XTermTer
   }, [engineId, containerId, containerName]);
 
   return (
-    <div className="relative">
+    <div className={fill ? "relative flex flex-col h-full min-h-0" : "relative"}>
       {status === "connecting" && (
         <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-slate-900/80 rounded-lg">
           <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mb-3" />
@@ -145,8 +164,8 @@ export function XTermTerminal({ engineId, containerId, containerName }: XTermTer
       )}
       <div
         ref={terminalRef}
-        className="bg-slate-900 rounded-lg p-2"
-        style={{ height: "50vh", minHeight: "300px" }}
+        className={fill ? "bg-slate-900 rounded-lg p-2 flex-1 min-h-0" : "bg-slate-900 rounded-lg p-2"}
+        style={fill ? { minHeight: "220px" } : { height: "50vh", minHeight: "300px" }}
       />
     </div>
   );

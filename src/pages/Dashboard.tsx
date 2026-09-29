@@ -22,6 +22,7 @@ import { NodeCardGrid, FilterChips } from "../components/NodeCardGrid";
 import { StackContainersModal } from "../components/StackContainersModal";
 import { Toast } from "../components/UI";
 import { fetchResourceHistoryApi, fetchNetInterfacesApi } from "../api";
+import { tempTextColor, fmtTemp } from "../lib/thermal";
 import type {
   Container,
   Stack,
@@ -392,6 +393,10 @@ function SystemTile({ stats, engineId }: { stats: EngineResourceStats | null; en
   const time = now.toLocaleTimeString("zh-CN", { hour12: false });
   const date = now.toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric", weekday: "long" }).replace("星期", " 星期");
 
+  // 启动时间：bootTimeSec（秒级）→ 本地可读时间；远程引擎为 0 → 「—」
+  const bootTime =
+    stats && stats.bootTimeSec > 0 ? new Date(stats.bootTimeSec * 1000).toLocaleString("zh-CN", { hour12: false }) : "—";
+
   return (
     <Tile
       id="system"
@@ -404,15 +409,15 @@ function SystemTile({ stats, engineId }: { stats: EngineResourceStats | null; en
 
       {stats ? (
         <dl className="mt-4 pt-4 border-t border-slate-100 grid grid-cols-2 gap-x-4 gap-y-2.5">
-          <InfoItem label="运行容器" value={`${stats.runningContainers} / ${stats.sampledContainers}`} />
-          <InfoItem label="内存总量" value={fmtMB(stats.memInstalledMB || stats.memTotalMB)} />
-          <InfoItem label="镜像占用" value={stats.imageDiskMB > 0 ? fmtMB(stats.imageDiskMB) : "—"} />
-          <InfoItem label="数据卷占用" value={stats.volumeDiskMB > 0 ? fmtMB(stats.volumeDiskMB) : "—"} />
-          <InfoItem label="引擎 ID" value={engineId ? `${engineId.slice(0, 12)}…` : "—"} mono />
-          <InfoItem label="磁盘设备" value={`${stats.disks.length} 块`} />
-          {/* 正常运行时间取宿主机 /proc/uptime（远程引擎读不到 → 「—」），单独占满一行 */}
+          <InfoItem label="主机名称" value={stats.hostName || "—"} mono />
+          <InfoItem label="发行版本" value={stats.osName || "—"} />
+          <InfoItem label="内核版本" value={stats.kernelVersion || "—"} mono />
+          <InfoItem label="系统类型" value={stats.arch || "—"} mono />
+          <InfoItem label="主机地址" value={stats.hostAddress || "—"} mono />
+          <InfoItem label="启动时间" value={bootTime} />
+          {/* 运行时间取宿主机 /proc/uptime（远程引擎读不到 → 「—」），单独占满一行 */}
           <div className="col-span-2">
-            <InfoItem label="正常运行时间" value={fmtUptime(stats.hostUptimeSec)} />
+            <InfoItem label="运行时间" value={fmtUptime(stats.hostUptimeSec)} />
           </div>
         </dl>
       ) : (
@@ -423,13 +428,48 @@ function SystemTile({ stats, engineId }: { stats: EngineResourceStats | null; en
 }
 
 /**
+ * 图标 hover 提示卡（**替代原生 `title`**）：原生提示是单色单行、长型号会被挤成一坨，此处改为
+ * 卡片式圆角 + 阴影，首行加粗标题（CPU 型号 / 内存总量），次行是若干「标签 值」对（标签灰、值等宽）。
+ * 位置钉在图标左下方（`left-0 top-full`），`group-hover` 淡入；`pointer-events-none` 保证不拦截鼠标。
+ */
+function IconTip({
+  icon,
+  title,
+  items,
+}: {
+  icon: React.ReactNode;
+  title: React.ReactNode;
+  items: { label: string; value: React.ReactNode }[];
+}) {
+  return (
+    <span className="group relative inline-flex">
+      <span className="text-slate-400">{icon}</span>
+      <span
+        role="tooltip"
+        className="pointer-events-none absolute left-0 top-full z-30 mt-2 flex w-max max-w-[360px] flex-col gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 opacity-0 shadow-lg transition-opacity duration-150 group-hover:opacity-100"
+      >
+        <span className="text-sm font-semibold leading-snug text-slate-800">{title}</span>
+        <span className="flex flex-wrap gap-x-5 gap-y-1">
+          {items.map((it) => (
+            <span key={it.label} className="flex items-baseline gap-2">
+              <span className="text-xs text-slate-400">{it.label}</span>
+              <span className="text-xs font-mono text-slate-700">{it.value}</span>
+            </span>
+          ))}
+        </span>
+      </span>
+    </span>
+  );
+}
+
+/**
  * 处理器：整体负载横条（**常驻**）+ 各物理核横条（随磁贴折叠）+ 整体负载曲线（**常驻**、自己单独折叠）。
  * 折叠语义：磁贴折叠只收起「各核明细」，整体负载与曲线仍在——曲线可以折叠后单独显示。
  */
 function CpuTile({ stats, history }: { stats: EngineResourceStats | null; history: ResourceSample[] }) {
   const { range, setRange, points } = useChartRange("cpu");
   // 曲线小节独立折叠：与磁贴整体折叠分开，各自持久化
-  const [showChart, setShowChart] = useStoredFlag("dm.tile.cpu.chart", true);
+  const [showChart, setShowChart] = useStoredFlag("dm.tile.cpu.chart", false);
 
   // 「整体负载」口径 = 运行容器 CPU 合计，按 0–100% 展示（不再用 ncpu×100 的总容量口径）
   const overallPct = stats ? clamp(stats.cpuPercent, 0, 100) : 0;
@@ -490,7 +530,21 @@ function CpuTile({ stats, history }: { stats: EngineResourceStats | null; histor
     <Tile
       id="cpu"
       title="处理器"
-      icon={<Cpu size={32} />}
+      icon={
+        <IconTip
+          icon={<Cpu size={32} />}
+          title={stats?.cpuModel || "处理器"}
+          items={
+            stats?.cpuModel
+              ? [
+                  { label: "物理核心", value: stats.cpuPhysicalCores ?? "—" },
+                  { label: "逻辑核心", value: stats.cpuLogicalCores ?? "—" },
+                  { label: "CPU 频率", value: stats.cpuMhz ? `${stats.cpuMhz} MHz` : "—" },
+                ]
+              : [{ label: "逻辑核心", value: stats?.cpuLogicalCores || stats?.ncpu || "—" }]
+          }
+        />
+      }
       subtitle={stats ? `整体负载 ${round1(stats.cpuPercent)}% / 100%` : NO_STATS}
       actions={<RangeSelect value={range} onChange={setRange} />}
       persistent={persistent}
@@ -534,7 +588,22 @@ function MemTile({ stats, history }: { stats: EngineResourceStats | null; histor
     <Tile
       id="memory"
       title="内存"
-      icon={<MemoryStick size={32} />}
+      icon={
+        <IconTip
+          icon={<MemoryStick size={32} />}
+          title={stats ? `内存总量 ${installed > 0 ? fmtMB(installed) : "—"}` : "内存"}
+          items={
+            stats
+              ? [
+                  { label: "已用", value: fmtMB(used) },
+                  { label: "系统占用", value: fmtMB(stats.memSystemMB) },
+                  { label: "Docker 占用", value: fmtMB(stats.memoryUsageMB) },
+                  ...(stats.memFreeMB > 0 ? [{ label: "剩余", value: fmtMB(stats.memFreeMB) }] : []),
+                ]
+              : [{ label: "总量", value: "—" }]
+          }
+        />
+      }
       subtitle={
         stats
           ? `已用 ${fmtMB(used)} / 共 ${installed > 0 ? fmtMB(installed) : "—"}${
@@ -911,7 +980,7 @@ function NetTile({
  */
 function DiskTile({ stats, history }: { stats: EngineResourceStats | null; history: ResourceSample[] }) {
   const { range, setRange, points } = useChartRange("disk");
-  const [showChart, setShowChart] = useStoredFlag("dm.tile.disk.chart", true);
+  const [showChart, setShowChart] = useStoredFlag("dm.tile.disk.chart", false);
   const disks: DiskStat[] = stats?.disks || [];
   const avg = disks.length > 0 ? Math.round(disks.reduce((sum, d) => sum + d.busyPct, 0) / disks.length) : 0;
 
@@ -1012,9 +1081,11 @@ function DiskTile({ stats, history }: { stats: EngineResourceStats | null; histo
               <thead>
                 <tr className="border-b border-slate-100">
                   <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider py-2 pr-4">设备</th>
+                  <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider py-2 pr-4">文件系统</th>
+                  <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider py-2 pr-4">温度</th>
                   <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider py-2 pr-4">状态</th>
                   <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider py-2 pr-4">读写速率</th>
-                  <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider py-2 w-[200px]">利用率</th>
+                  <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider py-2">利用率</th>
                 </tr>
               </thead>
               <tbody>
@@ -1026,6 +1097,18 @@ function DiskTile({ stats, history }: { stats: EngineResourceStats | null; histo
                         {d.name}
                       </span>
                     </td>
+                    <td className="py-2 pr-4 text-xs text-slate-500 whitespace-nowrap">
+                      {d.fstypes && d.fstypes.length > 0 ? d.fstypes.join(" / ") : "—"}
+                    </td>
+                    <td className="py-2 pr-4 text-xs whitespace-nowrap">
+                      {typeof d.tempC === "number" ? (
+                        <span className={`font-mono ${tempTextColor(d.tempC)}`}>{fmtTemp(d.tempC)}</span>
+                      ) : (
+                        <span className="text-slate-400" title="无温度传感器，或 SATA 盘未加载 drivetemp 内核模块">
+                          —
+                        </span>
+                      )}
+                    </td>
                     <td className="py-2 pr-4">
                       <span className="flex items-center gap-1.5 text-xs text-slate-600">
                         <span className={`w-2 h-2 rounded-full ${d.active ? "bg-green-500" : "bg-slate-300"}`} />
@@ -1035,20 +1118,12 @@ function DiskTile({ stats, history }: { stats: EngineResourceStats | null; histo
                     <td className="py-2 pr-4 text-xs text-slate-500 whitespace-nowrap">
                       读 {d.readMBps} MB/s · 写 {d.writeMBps} MB/s
                     </td>
-                    <td className="py-2">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-mono text-slate-600 w-12 text-right">{d.busyPct}%</span>
-                        <Bar percent={d.busyPct} color="#3b82f6" className="flex-1" />
-                      </div>
-                    </td>
+                    <td className="py-2 text-xs font-mono text-slate-600 whitespace-nowrap">{d.busyPct}%</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          <p className="text-[10px] text-slate-400 mt-3">
-            温度 / S.M.A.R.T. 需 root（smartctl），当前版本未提供
-          </p>
         </div>
       )}
     </Tile>

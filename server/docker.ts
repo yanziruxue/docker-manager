@@ -1310,6 +1310,302 @@ export async function loadImageFromStream(
 }
 
 /**
+ * 容器内文件管理（参考 1panel 的容器文件浏览器）。
+ *
+ * 设计约束：
+ * - `docker exec` 必须容器处于 running 状态，因此所有操作前先 assertContainerRunning。
+ * - 三态引擎（socket / tcp / ssh）统一走 `buildEngineDockerCmd` + `spawn`，不依赖 dockerode
+ *   （dockerode 连不上 SSH 引擎）。脚本路径一律作为 `sh -c` 的位置参数 `$1`/`$2` 传入，
+ *   避免把容器路径写进单引号脚本里造成引号冲突。
+ * - 读文件用 `cat` 透传 stdout（二进制安全）；写文件用 `cat > path` 把 Buffer 喂进 stdin。
+ */
+
+export interface ContainerFileEntry {
+  name: string;
+  /** 容器内绝对路径 */
+  path: string;
+  /** 字节数；符号链接取链接本身长度 */
+  size: number;
+  /** mtime，ISO 字符串（由 stat 的 epoch 秒转换） */
+  mtime: string;
+  /** 10 位权限串，如 `drwxr-xr-x` / `-rw-r--r--` */
+  mode: string;
+  isDir: boolean;
+  isSymlink: boolean;
+  /** 符号链接目标（仅 isSymlink 时有值） */
+  target?: string;
+}
+
+interface ExecCaptureOptions {
+  /** 需要写入容器 stdin 的内容（如写文件）；有值会自动加 `-i` 并喂入 */
+  input?: Buffer;
+  timeoutMs?: number;
+  /** 作为 `sh -c <script>` 之后的位置参数传入（脚本内用 `$1`/`$2` 引用） */
+  scriptArgs?: string[];
+  /**
+   * stdout 累计上限（字节）。超限立即 SIGKILL 并 reject。
+   * 打包下载大目录可能产生 GB 级 stdout，全量驻留内存会打爆进程。
+   */
+  maxBytes?: number;
+}
+
+interface ExecCaptureResult {
+  stdout: Buffer;
+  stderr: string;
+  exitCode: number | null;
+}
+
+/**
+ * 在容器内执行一条 `sh -c <script>`（经由 docker exec），收集 stdout（Buffer，二进制安全）/
+ * stderr / 退出码。读取类操作不传 input（自动关闭 stdin 让 shell 拿到 EOF）；写入类传入
+ * input（自动加 `-i`）。脚本里的容器路径一律通过 scriptArgs 以位置参数传入，杜绝引号冲突。
+ */
+function execInContainer(
+  engine: DockerEngine,
+  containerId: string,
+  script: string,
+  opts: ExecCaptureOptions = {},
+): Promise<ExecCaptureResult> {
+  const args = ["exec", ...(opts.input ? ["-i"] : []), containerId, "sh", "-c", script, ...(opts.scriptArgs ?? [])];
+  const inv = buildEngineDockerCmd(engine, args);
+  return new Promise<ExecCaptureResult>((resolve, reject) => {
+    const child = spawn(inv.cmd, inv.args, spawnOptsFor(engine, inv));
+    const chunks: Buffer[] = [];
+    let stderr = "";
+    let totalOut = 0;
+    let overflow = false;
+    child.stdout?.on("data", (c: Buffer) => {
+      if (overflow) return;
+      totalOut += c.length;
+      if (opts.maxBytes && totalOut > opts.maxBytes) {
+        overflow = true;
+        try { child.kill("SIGKILL"); } catch { /* 已退出 */ }
+        return;
+      }
+      chunks.push(c);
+    });
+    child.stderr?.setEncoding("utf-8");
+    child.stderr?.on("data", (c: string) => { stderr = (stderr + c).slice(-4000); });
+    child.on("error", (e) => reject(new Error(`无法启动 docker 命令: ${e.message}`)));
+    // 读取类操作没有 stdin 输入，立即关闭让容器内 shell 收到 EOF，否则会挂起等待输入
+    if (opts.input) {
+      try { child.stdin!.write(opts.input); } catch { /* 已关闭 */ }
+    }
+    try { child.stdin?.end(); } catch { /* 已关闭 */ }
+    const timer = setTimeout(() => { try { child.kill("SIGKILL"); } catch { /* 已退出 */ } }, opts.timeoutMs ?? 20000);
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      inv.cleanup();
+      if (overflow) {
+        const capMB = Math.round((opts.maxBytes ?? 0) / 1024 / 1024);
+        reject(new Error(`打包结果超过 ${capMB} MB 上限已中止，请改用更小的目录，或到容器内直接导出`));
+        return;
+      }
+      resolve({ stdout: Buffer.concat(chunks), stderr: stderr.trim(), exitCode: code });
+    });
+  });
+}
+
+/** 容器文件操作前置：仅运行中容器可用。docker exec 一个 `true`，非 0 退出即视为未运行。 */
+export async function assertContainerRunning(engine: DockerEngine, containerId: string): Promise<void> {
+  const r = await execInContainer(engine, containerId, "true", { timeoutMs: 8000 });
+  if (r.exitCode !== 0) {
+    const msg = r.stderr || `docker exec 退出码 ${r.exitCode}`;
+    if (/not running/i.test(msg)) throw new Error("容器未运行，文件管理需要运行中的容器");
+    throw new Error(`容器未运行或无法执行命令：${msg}`);
+  }
+}
+
+/** 归一化容器内路径：统一 POSIX、解析 `..`、确保以 `/` 开头。容器路径无法逃逸容器本身。 */
+export function normalizeContainerPath(p: string): string {
+  return pathPosix.resolve("/", p || "/");
+}
+
+/**
+ * 解析 `ls`/`stat` 产出的 `权限|大小|epoch|名称|链接目标` 行（每行一条）。
+ * 符号链接的 size 取链接本身长度、target 取 `readlink` 结果。
+ */
+function parseContainerFileList(stdout: string, baseDir: string): ContainerFileEntry[] {
+  const entries: ContainerFileEntry[] = [];
+  for (const raw of stdout.split("\n")) {
+    const line = raw.replace(/\r/g, "");
+    if (!line) continue;
+    const parts = line.split("|");
+    if (parts.length < 5) continue;
+    const [mode, sizeStr, mtimeStr, name, target = ""] = parts;
+    if (!name || name === "." || name === "..") continue;
+    const isSymlink = mode.charAt(0) === "l";
+    const isDir = mode.charAt(0) === "d";
+    const size = Number.parseInt(sizeStr, 10);
+    const mtimeEpoch = Number.parseInt(mtimeStr, 10);
+    entries.push({
+      name,
+      path: pathPosix.join(baseDir, name),
+      size: Number.isFinite(size) ? size : 0,
+      mtime: Number.isFinite(mtimeEpoch) ? new Date(mtimeEpoch * 1000).toISOString() : "",
+      mode: mode || "",
+      isDir,
+      isSymlink,
+      target: isSymlink && target ? target : undefined,
+    });
+  }
+  return entries;
+}
+
+/**
+ * 列出容器内某目录的内容。脚本用 `ls -1a` 取条目、`stat -c` 取每条的权限/大小/mtime、
+ * 符号链接额外 `readlink` 取目标；GNU coreutils 与 busybox 的 stat 均支持该格式。
+ */
+export async function listContainerFiles(
+  engine: DockerEngine,
+  containerId: string,
+  dir: string,
+): Promise<ContainerFileEntry[]> {
+  await assertContainerRunning(engine, containerId);
+  const baseDir = normalizeContainerPath(dir);
+  const script = [
+    `cd "$1" 2>/dev/null || exit 2`,
+    `ls -1a 2>/dev/null | while IFS= read -r n; do`,
+    `  [ "$n" = "." ] && continue`,
+    `  [ "$n" = ".." ] && continue`,
+    `  [ -z "$n" ] && continue`,
+    `  A=$(stat -c '%A' "$n" 2>/dev/null) || continue`,
+    `  S=$(stat -c '%s' "$n" 2>/dev/null)`,
+    `  Y=$(stat -c '%Y' "$n" 2>/dev/null)`,
+    `  if [ -L "$n" ]; then T=$(readlink "$n"); else T=""; fi`,
+    `  printf '%s|%s|%s|%s|%s\\n' "$A" "$S" "$Y" "$n" "$T"`,
+    `done`,
+  ].join("\n");
+  const r = await execInContainer(engine, containerId, script, { scriptArgs: ["_", baseDir], timeoutMs: 20000 });
+  if (r.exitCode === 2) throw new Error(`目录不存在或无权限：${baseDir}`);
+  if (r.exitCode !== 0) throw new Error(`列出目录失败：${r.stderr || "未知错误"}`);
+  return parseContainerFileList(r.stdout.toString("utf-8"), baseDir);
+}
+
+/** 读取容器内文件内容为 Buffer（二进制安全）。查看/下载共用。 */
+export async function readContainerFile(
+  engine: DockerEngine,
+  containerId: string,
+  filePath: string,
+): Promise<Buffer> {
+  await assertContainerRunning(engine, containerId);
+  const p = normalizeContainerPath(filePath);
+  const script = `cat -- "$1"`;
+  const r = await execInContainer(engine, containerId, script, { scriptArgs: ["_", p], timeoutMs: 30000 });
+  if (r.exitCode !== 0) throw new Error(`读取文件失败：${r.stderr || "未知错误"}`);
+  return r.stdout;
+}
+
+/** 打包下载的体积上限（256 MB）：兼顾浏览器下载体验与进程内存 */
+export const ARCHIVE_MAX_BYTES = 256 * 1024 * 1024;
+
+/**
+ * 把容器内路径（目录或文件）打包成 tar.gz，返回完整字节。
+ *
+ * 选 tar.gz 而非 zip：容器镜像里 `tar` 几乎必然存在（busybox / alpine 内置），
+ * 而 `zip` 在新版 busybox 中已被移除、普通镜像也常不装 —— tar 是唯一可靠的选择。
+ * `-C <父目录> <名>` 让归档内只含目标本身（不带父级路径），解压即得同名条目。
+ *
+ * 入参校验放在容器探活**之前**：非法路径（根目录 / 空）当场报错，
+ * 不必先为一次注定失败的请求付一次 docker exec 往返。
+ */
+export async function archiveContainerPath(
+  engine: DockerEngine,
+  containerId: string,
+  targetPath: string,
+): Promise<Buffer> {
+  const abs = normalizeContainerPath(targetPath);
+  if (abs === "/") throw new Error("不能打包容器根目录，请先进入目标目录后再打包");
+  const parent = pathPosix.dirname(abs);
+  const base = pathPosix.basename(abs);
+  if (!base || base === "." || base === "..") throw new Error("路径无效，无法打包");
+  await assertContainerRunning(engine, containerId);
+  const script = `tar czf - -C "$1" "$2"`;
+  const r = await execInContainer(engine, containerId, script, {
+    // 第一个元素是 $0 占位符（与既有调用一致），$1=父目录、$2=目标名
+    scriptArgs: ["_", parent || "/", base],
+    timeoutMs: 120000,
+    maxBytes: ARCHIVE_MAX_BYTES,
+  });
+  if (r.exitCode !== 0) {
+    throw new Error(`打包失败：${r.stderr || `tar 退出码 ${r.exitCode}`}`);
+  }
+  return r.stdout;
+}
+
+/** 把 Buffer 写入容器内文件（覆盖写）。 */
+export async function writeContainerFile(
+  engine: DockerEngine,
+  containerId: string,
+  filePath: string,
+  content: Buffer,
+): Promise<void> {
+  await assertContainerRunning(engine, containerId);
+  const p = normalizeContainerPath(filePath);
+  const script = `cat > "$1"`;
+  const r = await execInContainer(engine, containerId, script, { input: content, scriptArgs: ["_", p], timeoutMs: 30000 });
+  if (r.exitCode !== 0) throw new Error(`写入文件失败：${r.stderr || "未知错误"}`);
+}
+
+/** 在容器内新建空文件或目录。 */
+export async function createContainerEntry(
+  engine: DockerEngine,
+  containerId: string,
+  targetPath: string,
+  type: "file" | "dir",
+): Promise<void> {
+  await assertContainerRunning(engine, containerId);
+  const p = normalizeContainerPath(targetPath);
+  const script = type === "dir" ? `mkdir -p -- "$1"` : `touch -- "$1"`;
+  const r = await execInContainer(engine, containerId, script, { scriptArgs: ["_", p], timeoutMs: 15000 });
+  if (r.exitCode !== 0) throw new Error(`创建${type === "dir" ? "目录" : "文件"}失败：${r.stderr || "未知错误"}`);
+}
+
+/** 重命名/移动容器内路径（oldPath -> newPath，均容器内绝对路径）。 */
+export async function renameContainerPath(
+  engine: DockerEngine,
+  containerId: string,
+  oldPath: string,
+  newPath: string,
+): Promise<void> {
+  await assertContainerRunning(engine, containerId);
+  const a = normalizeContainerPath(oldPath);
+  const b = normalizeContainerPath(newPath);
+  const script = `mv -- "$1" "$2"`;
+  const r = await execInContainer(engine, containerId, script, { scriptArgs: ["_", a, b], timeoutMs: 15000 });
+  if (r.exitCode !== 0) throw new Error(`重命名失败：${r.stderr || "未知错误"}`);
+}
+
+/** 删除容器内路径（递归）。UI 层需二次确认。 */
+export async function removeContainerPath(
+  engine: DockerEngine,
+  containerId: string,
+  targetPath: string,
+): Promise<void> {
+  await assertContainerRunning(engine, containerId);
+  const p = normalizeContainerPath(targetPath);
+  const script = `rm -rf -- "$1"`;
+  const r = await execInContainer(engine, containerId, script, { scriptArgs: ["_", p], timeoutMs: 20000 });
+  if (r.exitCode !== 0) throw new Error(`删除失败：${r.stderr || "未知错误"}`);
+}
+
+/** 修改容器内路径权限（mode 透传，如 `644` / `u+x`）。 */
+export async function chmodContainerPath(
+  engine: DockerEngine,
+  containerId: string,
+  targetPath: string,
+  mode: string,
+): Promise<void> {
+  await assertContainerRunning(engine, containerId);
+  const p = normalizeContainerPath(targetPath);
+  const safeMode = String(mode).replace(/[^0-7ugoa,+-]/g, "");
+  if (!safeMode) throw new Error("权限格式非法");
+  const script = `chmod ${safeMode} -- "$1"`;
+  const r = await execInContainer(engine, containerId, script, { scriptArgs: ["_", p], timeoutMs: 15000 });
+  if (r.exitCode !== 0) throw new Error(`修改权限失败：${r.stderr || "未知错误"}`);
+}
+
+/**
  * 获取数据卷列表
  * Docker API v1.42+ 弃用了 /volumes?size（新版直接报错），UsageData.Size 不再返回，
  * 因此列表本身不查大小，改由 attachVolumeSizes 走 CLI `docker system df -v` 回填。
@@ -2138,7 +2434,10 @@ export async function createStackFromBackup(
   buf: Buffer,
   targetName: string
 ): Promise<{ name: string; path: string }> {
-  if (!Buffer.isBuffer(buf) || buf.length < 1024) {
+  // 阈值只需拦住「请求体完全为空」。小堆栈（仅 compose）的备份 zip 仅约 400B，
+  // 旧值 1024 会把这种合法备份误判为无效（真实故障：几百字节的堆栈备份被拒）。
+  // ZIP 理论最小 22B（空归档 EOCD）；其后仍有 PK 魔数与 extractZip 的结构 / CRC 校验兜底。
+  if (!Buffer.isBuffer(buf) || buf.length < 22) {
     throw new Error("未收到有效的堆栈备份文件");
   }
   if (buf[0] !== 0x50 || buf[1] !== 0x4b) {
@@ -3022,6 +3321,85 @@ function readHostUptimeSec(): number {
   }
 }
 
+/** 宿主机 CPU 型号信息（仅本机 socket 引擎可读 /proc/cpuinfo，否则 null） */
+function readHostCpuInfo(): { model: string; physicalCores: number; logicalCores: number; mhz: number } | null {
+  try {
+    const text = fs.readFileSync("/proc/cpuinfo", "utf8");
+    let model = "";
+    let physicalCores = 0;
+    let mhz = 0;
+    let logical = 0;
+    for (const line of text.split("\n")) {
+      const t = line.trim();
+      if (t.startsWith("processor")) logical++;
+      else if (!model && /^model name\s*:\s*(.+)$/.test(t)) model = t.replace(/^model name\s*:\s*/, "").trim();
+      else if (/^cpu cores\s*:\s*(\d+)$/.test(t)) physicalCores = Number(t.replace(/^cpu cores\s*:\s*/, "").trim()) || 0;
+      else if (/^cpu MHz\s*:\s*([\d.]+)$/.test(t)) {
+        const v = Number(t.replace(/^cpu MHz\s*:\s*/, "").trim());
+        if (!mhz) mhz = Math.round(v);
+      }
+    }
+    if (!logical) return null;
+    return { model: model || "未知", physicalCores: physicalCores || logical, logicalCores: logical, mhz };
+  } catch {
+    return null;
+  }
+}
+
+/** 发行版名称（/etc/os-release 的 PRETTY_NAME；读不到返回 ""） */
+function readOsReleasePretty(): string {
+  try {
+    const text = fs.readFileSync("/etc/os-release", "utf8");
+    const m = text.match(/^PRETTY_NAME="?([^"\n]+)"?/m);
+    return m ? m[1].trim() : "";
+  } catch {
+    return "";
+  }
+}
+
+/** 宿主机首个非回环 IPv4 地址（仅本机引擎；读不到返回 ""） */
+function readHostAddress(): string {
+  try {
+    const ifaces = os.networkInterfaces();
+    for (const name of Object.keys(ifaces)) {
+      for (const ni of ifaces[name] || []) {
+        if (ni.family === "IPv4" && !ni.internal) return ni.address;
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return "";
+}
+
+/**
+ * 各磁盘分区的文件系统类型：解析 /proc/mounts（源形如 /dev/sda1），
+ * 取「设备名去尾部数字」作为整盘键（sda1→sda、nvme0n1p1→nvme0n1），
+ * 汇总该盘所有分区的 fstype。仅本机引擎可读；远程返回空 Map。
+ */
+function readDiskFstypes(): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  try {
+    const text = fs.readFileSync("/proc/mounts", "utf8");
+    for (const line of text.split("\n")) {
+      const parts = line.trim().split(/\s+/);
+      if (parts.length < 3) continue;
+      const src = parts[0];
+      const fstype = parts[2];
+      const m = src.match(/^\/dev\/([a-z]+)(\d+)$/); // sdXn / hdXn / vdXn
+      const m2 = src.match(/^\/dev\/(nvme\d+n\d+)p\d+$/); // nvme0n1pN
+      const base = m ? m[1] : m2 ? m2[1] : null;
+      if (!base) continue;
+      const arr = out.get(base) || [];
+      if (!arr.includes(fstype)) arr.push(fstype);
+      out.set(base, arr);
+    }
+  } catch {
+    /* ignore */
+  }
+  return out;
+}
+
 /** 宿主机磁盘统计（/proc/diskstats 差分算利用率；仅 socket 引擎） */
 export interface DiskStat {
   name: string;
@@ -3029,6 +3407,40 @@ export interface DiskStat {
   writeMBps: number;
   busyPct: number; // 利用率（ms doing I/O / 间隔）
   active: boolean;
+  /** 该盘各分区文件系统类型（解析 /proc/mounts；远程引擎为空数组） */
+  fstypes: string[];
+  /** 整盘温度（℃）：读 sysfs hwmon，**无需 root**；读不到为 null（无传感器 / 缺 drivetemp 模块） */
+  tempC: number | null;
+}
+
+/**
+ * 读整盘温度（℃）——走 sysfs hwmon，**不需要 root**（hwmon 文件是 0444 世界可读）。
+ *  - SATA/HDD：需内核加载 `drivetemp` 模块，节点在 `/sys/block/<dev>/device/hwmon/hwmonN/`；
+ *  - NVMe：nvme 驱动自带 hwmon（`/sys/class/nvme/nvme0/hwmon0/`），无需额外模块；
+ *  - mmcblk / 虚拟盘通常没有温度传感器 ⇒ null（界面显示「—」）。
+ */
+function readDiskTempC(devName: string): number | null {
+  const scan = (dir: string): number | null => {
+    try {
+      for (const entry of fs.readdirSync(dir)) {
+        if (!entry.startsWith("hwmon")) continue;
+        const milli = Number(fs.readFileSync(path.join(dir, entry, "temp1_input"), "utf8").trim());
+        if (Number.isFinite(milli) && milli > 0) return Math.round(milli / 1000);
+      }
+    } catch {
+      /* 目录不存在 / 无权限：静默降级 */
+    }
+    return null;
+  };
+  // ① hwmon 挂在盘设备下（drivetemp / nvme 的常见形态）
+  const underDev = scan(path.join("/sys/block", devName, "device", "hwmon"));
+  if (underDev !== null) return underDev;
+  // ② hwmon 直接在块设备目录下（少数 mmc / 虚拟盘）
+  const underBlk = scan(path.join("/sys/block", devName, "hwmon"));
+  if (underBlk !== null) return underBlk;
+  // ③ NVMe 控制器：nvme0n1 → /sys/class/nvme/nvme0/hwmon0
+  const m = devName.match(/^(nvme\d+)n\d+$/);
+  return m ? scan(path.join("/sys/class/nvme", m[1])) : null;
 }
 interface DiskSnapshot {
   ts: number;
@@ -3082,10 +3494,122 @@ function sampleHostDisks(engineId: string): DiskStat[] {
       writeMBps: Math.round(writeMBps * 10) / 10,
       busyPct: Math.round(busyPct * 10) / 10,
       active: busyPct > 1 || readMBps > 0.05 || writeMBps > 0.05,
+      fstypes: [], // 在 getEngineResourceStats 里按 /proc/mounts 回填
+      tempC: readDiskTempC(name), // sysfs hwmon，无需 root；无传感器为 null
     });
   }
   lastDiskSnapshot.set(engineId, { ts: now, devs: cur });
   return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** 整盘设备名列表（/sys/block 过滤整盘，排除分区 / loop / dm / md） */
+function listWholeDisks(): string[] {
+  try {
+    return fs
+      .readdirSync("/sys/block")
+      .filter((n) => DISK_WHOLE.test(n))
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * CPU 温度（℃）：遍历 /sys/class/hwmon 匹配 CPU 温度芯片（Intel `coretemp` / AMD `k10temp` /
+ * Ryzen 第三方 `zenpower`），读 `temp1_input`（Package / Tctl）。hwmon 是 0444 **无需 root**；
+ * 匹配不到时回退 `/sys/class/thermal` 的 `x86_pkg_temp`。
+ */
+function readCpuTempC(): { source: string; tempC: number } | null {
+  const CPU_CHIPS = ["coretemp", "k10temp", "zenpower", "cpu_thermal", "cpu-thermal"];
+  try {
+    const base = "/sys/class/hwmon";
+    const hits: { prio: number; source: string; tempC: number }[] = [];
+    for (const hn of fs.readdirSync(base)) {
+      if (!hn.startsWith("hwmon")) continue;
+      let chip = "";
+      try {
+        chip = fs.readFileSync(path.join(base, hn, "name"), "utf8").trim();
+      } catch {
+        continue;
+      }
+      const prio = CPU_CHIPS.findIndex((c) => chip === c || chip.startsWith(c));
+      if (prio < 0) continue;
+      try {
+        const milli = Number(fs.readFileSync(path.join(base, hn, "temp1_input"), "utf8").trim());
+        if (!Number.isFinite(milli) || milli <= 0) continue;
+        let label = "";
+        try {
+          label = fs.readFileSync(path.join(base, hn, "temp1_label"), "utf8").trim();
+        } catch {
+          /* 部分芯片无 label */
+        }
+        hits.push({ prio, source: label ? `${chip} ${label}` : chip, tempC: Math.round(milli / 1000) });
+      } catch {
+        /* 该芯片无 temp1_input */
+      }
+    }
+    if (hits.length > 0) {
+      hits.sort((a, b) => a.prio - b.prio);
+      return { source: hits[0].source, tempC: hits[0].tempC };
+    }
+  } catch {
+    /* /sys/class/hwmon 不可读 */
+  }
+  // 回退：thermal zone（x86_pkg_temp / cpu-thermal）
+  try {
+    const base = "/sys/class/thermal";
+    for (const z of fs.readdirSync(base)) {
+      if (!z.startsWith("thermal_zone")) continue;
+      let type = "";
+      try {
+        type = fs.readFileSync(path.join(base, z, "type"), "utf8").trim();
+      } catch {
+        continue;
+      }
+      if (!/x86_pkg_temp|cpu/i.test(type)) continue;
+      const milli = Number(fs.readFileSync(path.join(base, z, "temp"), "utf8").trim());
+      if (Number.isFinite(milli) && milli > 0) return { source: type, tempC: Math.round(milli / 1000) };
+    }
+  } catch {
+    /* 无 /sys/class/thermal */
+  }
+  return null;
+}
+
+/** `drivetemp` 内核模块是否已加载（SATA 盘温度依赖它；NVMe 自带 hwmon 不需要） */
+function isDrivetempLoaded(): boolean {
+  if (fs.existsSync("/sys/module/drivetemp")) return true;
+  try {
+    for (const hn of fs.readdirSync("/sys/class/hwmon")) {
+      if (!hn.startsWith("hwmon")) continue;
+      if (fs.readFileSync(path.join("/sys/class/hwmon", hn, "name"), "utf8").trim() === "drivetemp") return true;
+    }
+  } catch {
+    /* ignore */
+  }
+  return false;
+}
+
+/** 本机温度快照（「硬件信息」页温度卡片用；全部读 sysfs，**无需 root**） */
+export interface ThermalStatus {
+  /** CPU 温度；识别不到传感器为 null */
+  cpu: { source: string; tempC: number } | null;
+  /** 各整盘温度；tempC 为 null 表示该盘无温度传感器 */
+  disks: { name: string; tempC: number | null }[];
+  /** `drivetemp` 内核模块是否已加载 */
+  drivetempLoaded: boolean;
+  /** 没有温度的 SATA 盘（非空 ⇒ 提示加载 drivetemp） */
+  sataWithoutTemp: string[];
+}
+
+export function getThermalStatus(): ThermalStatus {
+  const disks = listWholeDisks().map((name) => ({ name, tempC: readDiskTempC(name) }));
+  return {
+    cpu: readCpuTempC(),
+    disks,
+    drivetempLoaded: isDrivetempLoaded(),
+    sataWithoutTemp: disks.filter((d) => /^sd[a-z]+$/.test(d.name) && d.tempC === null).map((d) => d.name),
+  };
 }
 
 /** 单个网口的实时速率（/proc/net/dev 差分；仅 socket 引擎） */
@@ -3293,6 +3817,41 @@ export async function getEngineResourceStats(engine: DockerEngine): Promise<any>
   // 宿主机正常运行时间：仅本机引擎可读 /proc/uptime
   const hostUptimeSec = isLocal ? readHostUptimeSec() : 0;
 
+  // 宿主机库存信息（名称 / 发行版 / 内核 / 架构 / 地址 / 启动时间 / CPU 型号）
+  // 本机 socket 引擎可读 /proc 与 os.*，远程引擎仅 docker.info 能提供的字段有效
+  let hostName = "";
+  let osName = "";
+  let arch = "";
+  let hostAddress = "";
+  let bootTimeSec = 0;
+  let cpuModel = "";
+  let cpuPhysicalCores = 0;
+  let cpuLogicalCores = 0;
+  let cpuMhz = 0;
+  if (isLocal) {
+    hostName = os.hostname();
+    osName = readOsReleasePretty();
+    arch = os.arch() === "x64" ? "x86_64" : os.arch();
+    hostAddress = readHostAddress();
+    bootTimeSec = hostUptimeSec > 0 ? Math.round((Date.now() - hostUptimeSec * 1000) / 1000) : 0;
+    const ci = readHostCpuInfo();
+    if (ci) {
+      cpuModel = ci.model;
+      cpuPhysicalCores = ci.physicalCores;
+      cpuLogicalCores = ci.logicalCores;
+      cpuMhz = ci.mhz;
+    }
+    if (disks.length > 0) {
+      const fstypes = readDiskFstypes();
+      for (const d of disks) d.fstypes = fstypes.get(d.name) || [];
+    }
+  } else {
+    hostName = info.Name || "";
+    osName = info.OperatingSystem || "";
+    arch = info.Architecture || "";
+    cpuLogicalCores = ncpu;
+  }
+
   const round1 = (n: number) => Math.round(n * 10) / 10;
   // 逐磁盘速率快照：**只搬运上面本帧已算好的 `disks`**，不再读一次 /proc/diskstats
   //（再读一次会写差分快照、把时间基准挪到帧中间 → 下一帧速率虚高）
@@ -3335,6 +3894,17 @@ export async function getEngineResourceStats(engine: DockerEngine): Promise<any>
     netIfaces,
     /** 宿主机正常运行时间（秒）：本机引擎读 /proc/uptime，否则 0 */
     hostUptimeSec,
+    // 宿主机库存（仪表盘「系统概览」+ 处理器/内存图标 tooltip 用）
+    hostName,
+    osName,
+    kernelVersion: info.KernelVersion || "",
+    arch,
+    hostAddress,
+    bootTimeSec,
+    cpuModel,
+    cpuPhysicalCores,
+    cpuLogicalCores,
+    cpuMhz,
     blockReadKB: Math.round(blockReadKB),
     blockWriteKB: Math.round(blockWriteKB),
     serverVersion: info.ServerVersion || "",
