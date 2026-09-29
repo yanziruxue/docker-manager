@@ -2,18 +2,25 @@
 # ============================================================================
 # push-gitea.sh —— 把本工作区源码推到自建 Gitea（yanzi/docker-manager-yanzi）
 #
-# ★ 为什么走 IP:8024：① https://git.ziruxue.top 的证书 SAN **不含该域名**
-#   （openssl 后端报 "no alternative certificate subject name matches target hostname
-#    'git.ziruxue.top'"，schannel 直接握手失败）；② ssh://git@60.205.251.18:8022 端口
-#   Connection refused（未开放）。⇒ 两个「官方」入口都推不了，必须走 IP:8024 直连。
-#   仓库地址 = http://60.205.251.18:8024/yanzi/docker-manager-yanzi.git
+# ★ 入口（2026-09-30 实测更正，旧结论「必须走 IP:8024」**已证伪**）：走**域名** 443
+#   仓库地址 = https://git.ziruxue.top/yanzi/docker-manager-yanzi.git
+#   · 旧的 http://60.205.251.18:8024 直连**已不可用**（本机 curl 报 000 / git 报
+#     502 upstream connect timed out）；
+#   · 而本机 git（openssl SSL 后端）与 Node fetch 走域名均正常 —— 证书 `CN=git.ziruxue.top`
+#     （SAN 含该域 + www）、链完整、443 OPEN。
+#   ⚠️ 本机有 HTTP 代理（http_proxy/https_proxy → 127.0.0.1），且 git 默认 schannel 后端对该站
+#      握手失败 ⇒ 推送**必须**附加：-c http.sslBackend=openssl -c http.proxy= -c https.proxy=
+#      （本脚本已内置；openssl 后端不可用时自动回退默认后端再试一次）
 #
 # ★ 认证：刻意不把令牌写进仓库或脚本（只走 wincred）。令牌 scope 必勾 repository 的「读写」
 #   —— Gitea 1.27.3 把权限拆成细项（activitypub/admin/issue/misc/notification/organization/
 #   package/repository/user），**没有旧版的 repo 复选框**。
-#   本机 wincred 已缓存过一次凭据 ⇒ 通常免输入；要清除用 git credential reject。
+#   凭据按 host 存放：域名 host（git.ziruxue.top）需单独 approve 一次，例如：
+#     TOKEN=$(printf 'protocol=http\nhost=60.205.251.18:8024\n\n' | git credential fill | sed -n 's/^password=//p')
+#     printf 'protocol=https\nhost=git.ziruxue.top\nusername=yanzi\npassword=%s\n\n' "$TOKEN" | git credential approve
+#   要清除用 git credential reject。
 #   令牌获取（本机浏览器打开）：
-#     http://60.205.251.18:8024/user/settings/applications
+#     https://git.ziruxue.top/user/settings/applications
 #     → 「管理访问令牌 / Manage Access Tokens」→ 生成新令牌（scope 见上）
 #     → 复制（**只显示一次**，页面刷新就看不到了）
 #   推送时填：用户名 = yanzi（Gitea 账号）；密码 = 粘贴刚生成的令牌（比登录密码稳）。
@@ -57,12 +64,20 @@ done
 [ -d "$ROOT/.git" ] || die "$ROOT 不是 git 仓库"
 
 # 远端自检：没有就补上（幂等）
+GITEA_URL="https://git.ziruxue.top/yanzi/docker-manager-yanzi.git"
 if ! git remote get-url "$REMOTE" >/dev/null 2>&1; then
   case "$REMOTE" in
-    gitea) git remote add gitea http://60.205.251.18:8024/yanzi/docker-manager-yanzi.git ;;
+    gitea) git remote add gitea "$GITEA_URL" ;;
     *)     die "远端 $REMOTE 不存在，且我不知道它的地址" ;;
   esac
   say "  已补建远端 $REMOTE → $(git remote get-url "$REMOTE")"
+else
+  # 地址自愈：旧的 IP:8024 直连已不可用，统一改成域名入口
+  CUR="$(git remote get-url "$REMOTE")"
+  if [ "$CUR" != "$GITEA_URL" ]; then
+    git remote set-url "$REMOTE" "$GITEA_URL"
+    say "  已更新远端 $REMOTE：$CUR → $GITEA_URL"
+  fi
 fi
 
 [ -n "$BRANCH" ] || BRANCH="$(git branch --show-current)"
@@ -84,24 +99,31 @@ if [ -n "$(git status --porcelain)" ]; then
 fi
 
 say "=== 推送 → $REMOTE/$BRANCH ==="
-say "  Gitea 会问账号密码：用户名 = yanzi；密码 = 访问令牌（见脚本头部注释）。"
+say "  Gitea 若问账号密码：用户名 = yanzi；密码 = 访问令牌（见脚本头部注释）。"
 if [ "$DRY" = 1 ]; then
   say "  [DRY] 跳过推送"
   exit 0
 fi
 
-git push -u "$REMOTE" "$BRANCH"
+# 本机 git 默认 schannel 后端对 git.ziruxue.top 握手失败、且 HTTP 代理会拦该站
+# ⇒ 强制 openssl 后端 + 清空代理；openssl 不可用时回退默认后端再试一次
+git -c http.sslBackend=openssl -c http.proxy= -c https.proxy= push -u "$REMOTE" "$BRANCH"
 rc=$?
+if [ "$rc" -ne 0 ]; then
+  say "  · openssl 后端推送失败，回退默认后端再试一次…"
+  git push -u "$REMOTE" "$BRANCH"
+  rc=$?
+fi
 if [ "$rc" -ne 0 ]; then
   say ""
   say "✗ 推送失败（退出码 $rc）。常见原因："
   say "  · 认证失败 → 密码要用 Gitea **访问令牌**，不是登录密码（该账号可能开了 2FA）"
-  say "  · 令牌权限不足 → 重新生成时勾上 repo（读+写）"
+  say "  · 令牌权限不足 → 重新生成时勾上 repository 的「读写」"
   say "  · 远端非空且历史不同 → 先 git pull --rebase $REMOTE $BRANCH 再推"
-  say "  · 误用域名远端 → 域名证书不含 git.ziruxue.top，改走 gitea（IP:8024）"
+  say "  · 连不上 443 → 需能访问 https://git.ziruxue.top（IP:8024 直连已不可用，勿再改回去）"
   exit "$rc"
 fi
 
 say ""
 say "✓ 已推送 → $(git remote get-url "$REMOTE")  分支 $BRANCH"
-say "  网页：http://60.205.251.18:8024/yanzi/docker-manager-yanzi"
+say "  网页：https://git.ziruxue.top/yanzi/docker-manager-yanzi"
