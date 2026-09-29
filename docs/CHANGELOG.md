@@ -23,12 +23,12 @@
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.35.11**（**已出包 · 未发布** · 2026-09-29）：**`upapi` 改由 `device_uuid` 是否变化决定** —— `resolveUpapi(trigger, reportInstall)` → **`resolveUpapi(state, deviceId)`**：`!installReported \|\| lastDeviceId !== deviceId` ⇒ `install`，否则 `heartbeat`。**每次进程启动 / systemd restart 不再报 `install`**（ID 未变即 `heartbeat`），只有首次安装 / 身份真的变了才 `install` ⇒ **`install` 计数 ≈ 去重设备数**。运行态新增 **`lastDeviceId`**（每次成功上报都写，`reportOnce` 与 `reportOnToggle` 两处）；`ReportTrigger` 降级为「只决定要不要强制发」；24h 限流（`reportInstall` / `lastRebuildAt`）退化为**观测标记**（旧限流防的「同机反复改写刷安装量」现已由身份判据天然覆盖）。**上传开关切换仍恒 `install`**（按用户要求保留的唯一例外）。升级兼容：无 `lastDeviceId` ⇒ 保守补发一次 `install`。涉及客户端 `server/telemetry.ts`、`docs/上报触发与接口及上报内容.md`、`package.json`；**服务端 `yanzi/api` 与 `server/index.ts` 均无需改动**。验证＝前后端 `tsc` 双 0 + `test:gates` exit 0 + 删 `dist/` 重跑 `vite build` + 源码 harness（同 ID 重启 ⇒ `heartbeat`；换 ID ⇒ `install`）+ 真包冒烟。上一版 **v1.35.10**（已出包 · 未发布 · **包自本版起作废**）：**按触发源决定** —— 新增唯一判据 `resolveUpapi(trigger, reportInstall)`：`startup`（进程启动 / systemd restart）⇒ `install`，`periodic`（12h）/ `retry`（失败后 10 分钟）/ `manual`（页面「立即上报」）⇒ `heartbeat`，`reportOnToggle`（开关开↔关点 APPLY）**恒** `install`；`needInstall` 退化为「**只决定要不要发**」。`reportOnce(force = false)` → `reportOnce(trigger: ReportTrigger)`、`scheduleNext(delayMs, force)` → `scheduleNext(delayMs, trigger)`、`startTelemetryHeartbeat()` 传 `"startup"`、`POST /api/telemetry/report` 传 `"manual"`。**根因**＝旧 `upapi = needInstall ? "install" : "heartbeat"`，而 `installReported` **只在 2xx 成功时置位**、端点 NXDOMAIN ⇒ 所有触发退化成 `install`（真包 + 桩远端双向复现：500 ⇒ 全 `install`；200 ⇒ 首报 `install` 后转 `heartbeat`）。涉及客户端 `server/telemetry.ts`、`server/index.ts`、`docs/上报触发与接口及上报内容.md`、`package.json`；**服务端 `yanzi/api` 本次无需改动**（载荷仍是 15 个顶层字段，`resolveEvent` 的 `install`/`heartbeat` 分支不变）。验证＝前后端 `tsc` 双 `exit 0` + `npm run test:gates` exit 0 + 删 `dist/` 重跑 `vite build` + 真包六场景取证。⚠️ **新增语义**：同一设备**每次重启都会收到一条 `install`**，服务端去重请改为 **`device_uuid` upsert ＋ 比对 `installedAt`**。上一版 **v1.35.9**（已出包 · 未发布 · **包自本版起作废** · 2026-09-29）：**上报字段收敛** —— 把「常量 `event` + 布尔 `install`」两个冗余字段合并为单字段 **`upapi: "install" \| "heartbeat"`**（信息量严格等价）；运行态 `lastReportAt` / `lastActiveAt` 合并为 **`lastReportAt`**（`readState` 兼容读旧文件）；`hw_fingerprint` 字段与 DB 列**跨两仓彻底删除**（服务端幂等 `ALTER TABLE telemetry_devices DROP COLUMN hw_fingerprint`）；修掉「关闭上传开关后每 10 分钟空转」（`!cfg.enabled` ⇒ `fatal:true`，退回 12h 周期）。服务端 `resolveEvent` 三代兼容归一（`body.event \|\| body.upapi`，`install`→装 / `active`\|`heartbeat`→心跳 / `report`→看 `body.install`，其余 400）。涉及客户端 `server/telemetry.ts`、`src/api.ts`、`docs/上报触发与接口及上报内容.md`、`docs/上报.json`；服务端 `yanzi/api/src/{telemetry,db,routes}.js`、`yanzi/api/scripts/*`、`yanzi/api/README.md`、`yanzi/backstage/src/app.js`、`yanzi/docs/api-yanzi-docker-event.md`。验证＝服务端回归 `verify-telemetry.mjs` **78/0**（含删列幂等）+ 前后端 `tsc` 双 0 + `test:gates` **exit 0**（hooks 44 + auth 24/0 & 29/0 + restart 18/0 + thermal 15/0 + install 34/0）+ `vite build`（新资产 `assets/index-d-CniirZ.js`，js 内 `"1.35.9"`×1 / `"1.35.8"`×0）。⚠️ **部署顺序＝服务端 `yanzi/api` 必须先上**：现役 ECS1 只认 `event: install\|active`，不认 `upapi`/`heartbeat`/`report`，而 400 在客户端判为非致命（仅 401/403 fatal）⇒ 客户端先上会每 10 分钟无限重试；删列不可逆，执行前备份 `yanzi/api/data/yanzi-admin.db`。上一版 **v1.35.8**（已出包 · 未发布）：累计承接 **v1.35.3**（所有曲线 X 轴时间刻度）→ **v1.35.4**（容器目录打包下载 tar.gz）→ **v1.35.5**（仪表盘改造：系统概览 7 字段 / 磁盘卡片文件系统列 / 曲线默认折叠）→ **v1.35.6**（处理器·内存图标提示改**卡片式自定义 tooltip**）→ **v1.35.8**（温度能力落地：仪表盘磁盘卡片**显示温度**（读 sysfs hwmon **零提权**）+ **「利用率」列去掉进度条**；设置页**新增「温度」卡片**（CPU + 各盘 + `drivetemp` 检测）并把「本机设备」**改名「硬件信息」**；**`install.sh` 安装时自动加载 `drivetemp`**（`modprobe` + 写 `/etc/modules-load.d/drivetemp.conf` 持久化，`--no-drivetemp` 跳过，`uninstall.sh` 按归属标记清理）+ 新增**温度采集门禁** `scripts/check-thermal.mjs` 与**安装脚本门禁** `scripts/check-install-drivetemp.sh`；按用户要求不做 S.M.A.R.T.）。涉及 `src/pages/Dashboard.tsx`、`src/pages/Settings.tsx`、`src/components/ActivityPanel.tsx`、`src/lib/thermal.ts`、`server/docker.ts`、`server/index.ts`、`server/settings.ts`、`server/telemetry.ts`、`server/unit-status.ts`、`src/types.ts`、`src/api.ts`、`scripts/check-thermal.mjs`、`scripts/check-install-drivetemp.sh`、`deploy/linux/install.sh`、`deploy/linux/uninstall.sh`、`deploy/linux/README.md`、`package.json`。验证＝`lint:hooks` PASS（44 文件）+ 前后端 `tsc` 双 0 + `build:frontend`/`vite build` PASS + 路由层 13/13（v1.35.4）+ **`test:gates` 全绿（hooks 44 + auth 24/0 & 29/0 + restart 18/0 + thermal 15/0 + install 34/0）** + agent-browser 组件级实测（v1.35.6：`[role=tooltip]`×2 + hover `opacity 0→1`；v1.35.8 仪表盘：温度表头 6 列 + 阈值配色 + `null`→「—」+ **利用率去进度条**（表内 `<div>` 归零）；v1.35.8 设置页：`h2`=硬件信息 + 卡片标题「温度/硬件信息标识」+ 三场景（缺 drivetemp 提示条 1 条 / 已加载 0 条 / 全无传感器）+ CPU 62℃ 红加粗，均无 console error）。⚠️ **v1.35.6 及更早的包已从 `build-upload/`、`deploy/linux/` 清除，勿部署**；⚠️ 版本号语义：UI / 交互小改动走 **Patch**（`1.35.3 → … → 1.35.9`） |
+| 当前版本 | **v1.35.11**（**已发布 2026-09-30**）：**`upapi` 改由 `device_uuid` 是否变化决定** —— `resolveUpapi(trigger, reportInstall)` → **`resolveUpapi(state, deviceId)`**：`!installReported \|\| lastDeviceId !== deviceId` ⇒ `install`，否则 `heartbeat`。**每次进程启动 / systemd restart 不再报 `install`**（ID 未变即 `heartbeat`），只有首次安装 / 身份真的变了才 `install` ⇒ **`install` 计数 ≈ 去重设备数**。运行态新增 **`lastDeviceId`**（每次成功上报都写，`reportOnce` 与 `reportOnToggle` 两处）；`ReportTrigger` 降级为「只决定要不要强制发」；24h 限流（`reportInstall` / `lastRebuildAt`）退化为**观测标记**（旧限流防的「同机反复改写刷安装量」现已由身份判据天然覆盖）。**上传开关切换仍恒 `install`**（按用户要求保留的唯一例外）。升级兼容：无 `lastDeviceId` ⇒ 保守补发一次 `install`。涉及客户端 `server/telemetry.ts`、`docs/上报触发与接口及上报内容.md`、`package.json`；**服务端 `yanzi/api` 与 `server/index.ts` 均无需改动**。验证＝前后端 `tsc` 双 0 + `test:gates` exit 0 + 删 `dist/` 重跑 `vite build` + 源码 harness（同 ID 重启 ⇒ `heartbeat`；换 ID ⇒ `install`）+ 真包冒烟。上一版 **v1.35.10**（已出包 · 未发布 · **包自本版起作废**）：**按触发源决定** —— 新增唯一判据 `resolveUpapi(trigger, reportInstall)`：`startup`（进程启动 / systemd restart）⇒ `install`，`periodic`（12h）/ `retry`（失败后 10 分钟）/ `manual`（页面「立即上报」）⇒ `heartbeat`，`reportOnToggle`（开关开↔关点 APPLY）**恒** `install`；`needInstall` 退化为「**只决定要不要发**」。`reportOnce(force = false)` → `reportOnce(trigger: ReportTrigger)`、`scheduleNext(delayMs, force)` → `scheduleNext(delayMs, trigger)`、`startTelemetryHeartbeat()` 传 `"startup"`、`POST /api/telemetry/report` 传 `"manual"`。**根因**＝旧 `upapi = needInstall ? "install" : "heartbeat"`，而 `installReported` **只在 2xx 成功时置位**、端点 NXDOMAIN ⇒ 所有触发退化成 `install`（真包 + 桩远端双向复现：500 ⇒ 全 `install`；200 ⇒ 首报 `install` 后转 `heartbeat`）。涉及客户端 `server/telemetry.ts`、`server/index.ts`、`docs/上报触发与接口及上报内容.md`、`package.json`；**服务端 `yanzi/api` 本次无需改动**（载荷仍是 15 个顶层字段，`resolveEvent` 的 `install`/`heartbeat` 分支不变）。验证＝前后端 `tsc` 双 `exit 0` + `npm run test:gates` exit 0 + 删 `dist/` 重跑 `vite build` + 真包六场景取证。⚠️ **新增语义**：同一设备**每次重启都会收到一条 `install`**，服务端去重请改为 **`device_uuid` upsert ＋ 比对 `installedAt`**。上一版 **v1.35.9**（已出包 · 未发布 · **包自本版起作废** · 2026-09-29）：**上报字段收敛** —— 把「常量 `event` + 布尔 `install`」两个冗余字段合并为单字段 **`upapi: "install" \| "heartbeat"`**（信息量严格等价）；运行态 `lastReportAt` / `lastActiveAt` 合并为 **`lastReportAt`**（`readState` 兼容读旧文件）；`hw_fingerprint` 字段与 DB 列**跨两仓彻底删除**（服务端幂等 `ALTER TABLE telemetry_devices DROP COLUMN hw_fingerprint`）；修掉「关闭上传开关后每 10 分钟空转」（`!cfg.enabled` ⇒ `fatal:true`，退回 12h 周期）。服务端 `resolveEvent` 三代兼容归一（`body.event \|\| body.upapi`，`install`→装 / `active`\|`heartbeat`→心跳 / `report`→看 `body.install`，其余 400）。涉及客户端 `server/telemetry.ts`、`src/api.ts`、`docs/上报触发与接口及上报内容.md`、`docs/上报.json`；服务端 `yanzi/api/src/{telemetry,db,routes}.js`、`yanzi/api/scripts/*`、`yanzi/api/README.md`、`yanzi/backstage/src/app.js`、`yanzi/docs/api-yanzi-docker-event.md`。验证＝服务端回归 `verify-telemetry.mjs` **78/0**（含删列幂等）+ 前后端 `tsc` 双 0 + `test:gates` **exit 0**（hooks 44 + auth 24/0 & 29/0 + restart 18/0 + thermal 15/0 + install 34/0）+ `vite build`（新资产 `assets/index-d-CniirZ.js`，js 内 `"1.35.9"`×1 / `"1.35.8"`×0）。⚠️ **部署顺序＝服务端 `yanzi/api` 必须先上**：现役 ECS1 只认 `event: install\|active`，不认 `upapi`/`heartbeat`/`report`，而 400 在客户端判为非致命（仅 401/403 fatal）⇒ 客户端先上会每 10 分钟无限重试；删列不可逆，执行前备份 `yanzi/api/data/yanzi-admin.db`。上一版 **v1.35.8**（已出包 · 未发布）：累计承接 **v1.35.3**（所有曲线 X 轴时间刻度）→ **v1.35.4**（容器目录打包下载 tar.gz）→ **v1.35.5**（仪表盘改造：系统概览 7 字段 / 磁盘卡片文件系统列 / 曲线默认折叠）→ **v1.35.6**（处理器·内存图标提示改**卡片式自定义 tooltip**）→ **v1.35.8**（温度能力落地：仪表盘磁盘卡片**显示温度**（读 sysfs hwmon **零提权**）+ **「利用率」列去掉进度条**；设置页**新增「温度」卡片**（CPU + 各盘 + `drivetemp` 检测）并把「本机设备」**改名「硬件信息」**；**`install.sh` 安装时自动加载 `drivetemp`**（`modprobe` + 写 `/etc/modules-load.d/drivetemp.conf` 持久化，`--no-drivetemp` 跳过，`uninstall.sh` 按归属标记清理）+ 新增**温度采集门禁** `scripts/check-thermal.mjs` 与**安装脚本门禁** `scripts/check-install-drivetemp.sh`；按用户要求不做 S.M.A.R.T.）。涉及 `src/pages/Dashboard.tsx`、`src/pages/Settings.tsx`、`src/components/ActivityPanel.tsx`、`src/lib/thermal.ts`、`server/docker.ts`、`server/index.ts`、`server/settings.ts`、`server/telemetry.ts`、`server/unit-status.ts`、`src/types.ts`、`src/api.ts`、`scripts/check-thermal.mjs`、`scripts/check-install-drivetemp.sh`、`deploy/linux/install.sh`、`deploy/linux/uninstall.sh`、`deploy/linux/README.md`、`package.json`。验证＝`lint:hooks` PASS（44 文件）+ 前后端 `tsc` 双 0 + `build:frontend`/`vite build` PASS + 路由层 13/13（v1.35.4）+ **`test:gates` 全绿（hooks 44 + auth 24/0 & 29/0 + restart 18/0 + thermal 15/0 + install 34/0）** + agent-browser 组件级实测（v1.35.6：`[role=tooltip]`×2 + hover `opacity 0→1`；v1.35.8 仪表盘：温度表头 6 列 + 阈值配色 + `null`→「—」+ **利用率去进度条**（表内 `<div>` 归零）；v1.35.8 设置页：`h2`=硬件信息 + 卡片标题「温度/硬件信息标识」+ 三场景（缺 drivetemp 提示条 1 条 / 已加载 0 条 / 全无传感器）+ CPU 62℃ 红加粗，均无 console error）。⚠️ **v1.35.6 及更早的包已从 `build-upload/`、`deploy/linux/` 清除，勿部署**；⚠️ 版本号语义：UI / 交互小改动走 **Patch**（`1.35.3 → … → 1.35.9`） |
 | 版本号规则 | Major 人工发布；Minor ＝ **新增功能模块 / 新页面**；Patch ＝ 修复/优化/**UI 与交互小改动**（如 `1.35.0 → 1.35.1`）。v1.22.0 因新增「镜像更新→通知中心」与「硬件指纹作主键」两项新能力归为 Minor |
-| 最新 Release | [v1.31.1](https://github.com/yanziruxue/docker-manager/releases/tag/v1.31.1)（**OTA 更新完成后页面自动刷新**（`restart-wait.ts`，判据与状态码解耦）+ Compose 格式化保注释 / 找回码 18~24 位区分大小写 / 升级后强制重走账号初始化 / 仪表盘磁盘读写双轴曲线等；assets：版本化 zip + latest 别名 + `quick-install.sh`；notes 合并 **v1.25.0 → v1.31.1 共 15 个版本段**；⚠️ **升级后需重走一次账号初始化**）；上一版 [v1.24.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.24.0) |
-| 源码分支 | `main`（当前发布点 `841770d1b131a28e3d915d7d40c856424fd2da3d`（v1.31.1，115 文件）；上一版 `9697b7678644ff44d22969595005d3b5c94240ad`（v1.24.0）） |
+| 最新 Release | [v1.35.11](https://github.com/yanziruxue/docker-manager/releases/tag/v1.35.11)（**2026-09-30 发布** · 累积发布 **v1.32.0 → v1.35.11**：容器文件管理 / 温度能力 / 详情页与仪表盘演进 / 遥测 `upapi` 三代迭代；assets＝版本化 zip + latest 别名 + `quick-install.sh`，均 `uploaded`；notes 合并 **v1.32.0 → v1.35.11 共 15 个开发版本**；⚠️ 部署顺序＝**服务端 `yanzi/api` 先上**；⚠️ 本版改了 `install.sh`，启用 drivetemp 自动加载需重跑一次）；上一版 [v1.31.1](https://github.com/yanziruxue/docker-manager/releases/tag/v1.31.1) |
+| 源码分支 | `main`（当前发布点 `7ec0a17894e84dae7f83b58685caa6a7433fa654`（v1.35.11，30 文件 +3510/−330，Git Database API 推送）；上一版 `db1efa48191195b3fd6eb85ad00782fadeb89b81`（v1.31.1）；自建 Gitea 镜像 `yanzi/docker-manager-yanzi` @ `e4a940f`） |
 | 部署注意 | **v1.35.9 ⚠️ 部署顺序＝服务端 `yanzi/api` 必须先上、再发客户端**：现役 ECS1 服务端只认 `event: install\|active`，不认新的 `upapi` / `heartbeat` / `report`；而 400 在客户端被判为**非致命**（仅 401/403 fatal）⇒ 客户端先上会**每 10 分钟无限重试**。服务端升级含 DB 迁移（幂等 `ALTER TABLE … DROP COLUMN hw_fingerprint`，不可逆），执行前备份 `yanzi/api/data/yanzi-admin.db`。**v1.35.10 / v1.35.11 沿用该顺序**（客户端载荷字段集合与 v1.35.9 完全一致，仅 `upapi` **取值语义**变化）。**改过 `deploy/linux/*.service` 的版本，OTA 后必须重跑 `install.sh`**（或在「设置 → 硬件信息」页复制一键修复命令）——OTA 只替换二进制，不更新单元文件。**v1.35.8 另改了 `install.sh`**（新增 `drivetemp` 自动加载）⇒ 老部署升级后若看重磁盘温度，建议重跑一次 `install.sh`，或按「设置 → 硬件信息 → 温度」提示条里的命令手动 `modprobe drivetemp` + 写 `/etc/modules-load.d/drivetemp.conf` |
-| 交付包 | **当前 tip = v1.35.11（已出包 · 未发布）**：`build-upload/docker-manager-yanzi-linux-x64-v1.35.11.zip` **43,032,814 B** / SHA-256 `bfbd557e71ec60c148c6ca068d85f87832f2851db29346e3003ebcf50ffe21ad`（内嵌二进制 **130,092,224 B** / SHA-256 `d68f4ef38cf9db70b335936609f6d9c1ffbbf829832f4cd812ddd68e6d22752e`，ELF `7f454c46` 已校验、`CURRENT_VERSION="1.35.11"`、含 `resolveUpapi` 与 `lastDeviceId`）+ 无版本号 `latest` 别名同字节；前端资产 `assets/index-CDpmlpm-.js`（1,085,357 B）。**上一版 v1.35.10 的包 `build-upload/docker-manager-yanzi-linux-x64-v1.35.10.zip` 43,032,780 B / SHA-256 `7b6f80359a0d3af194908e9dfbf80c5bddc746f6a5442633c35a4b397884eeb7`（内嵌二进制 130,092,224 B / `e4284a6a15e0e48a8a9630dc29d326c4ecd99f209975e5cc27b6ad39a0c20b62`、ELF `7f454c46`、`CURRENT_VERSION="1.35.10"`）自本版起作废并已删除**。更早的 **v1.35.9**（`…-v1.35.9.zip` 43,032,672 B / `0571cb86933268523c26bf909f4d252dee17ef6617a0e976d569949473df36d1`，内嵌二进制 `cc320b778a0a975e46a569acf68a8fded3694f43b6b18b18ef27c23379a864ee`）**已删除**；**v1.35.8**（`…-v1.35.8.zip` 43,032,727 B / `d2f5216362d8c75c73e1bccdadc7205b10e54a4cee512f9ef9b80f6f4ab6bd06`，内嵌二进制 `3800a5d064e69181db122c4f29f014f4a548cd56b5b34a6adab470995ae3d33a`）**已删除**；**v1.35.6**（`…-v1.35.6.zip` 43,027,762 B / `b2de2716…`，内嵌二进制 `90dea067…`）**已作废并删除**。**Windows 交叉构建路径**：`scripts/build-binary.mjs` → 以 `/tmp/sea-build/node-v22.22.2-linux-x64/bin/node`（**Linux node**）为 base 生成 blob → `postject` 注入 → `make-package.py` 打 zip（⚠️ **不要用 `deploy/linux/build.sh`**，那是「在 Linux 上」的构建路径、用本机 `command -v node`，在 Windows 上会拿 Windows node 当 base）。`scripts/` 不在交付包成员内 |
+| 交付包 | **当前 tip = v1.35.11（已发布 2026-09-30）**：`build-upload/docker-manager-yanzi-linux-x64-v1.35.11.zip` **43,032,814 B** / SHA-256 `bfbd557e71ec60c148c6ca068d85f87832f2851db29346e3003ebcf50ffe21ad`（内嵌二进制 **130,092,224 B** / SHA-256 `d68f4ef38cf9db70b335936609f6d9c1ffbbf829832f4cd812ddd68e6d22752e`，ELF `7f454c46` 已校验、`CURRENT_VERSION="1.35.11"`、含 `resolveUpapi` 与 `lastDeviceId`）+ 无版本号 `latest` 别名同字节；前端资产 `assets/index-CDpmlpm-.js`（1,085,357 B）。**上一版 v1.35.10 的包 `build-upload/docker-manager-yanzi-linux-x64-v1.35.10.zip` 43,032,780 B / SHA-256 `7b6f80359a0d3af194908e9dfbf80c5bddc746f6a5442633c35a4b397884eeb7`（内嵌二进制 130,092,224 B / `e4284a6a15e0e48a8a9630dc29d326c4ecd99f209975e5cc27b6ad39a0c20b62`、ELF `7f454c46`、`CURRENT_VERSION="1.35.10"`）自本版起作废并已删除**。更早的 **v1.35.9**（`…-v1.35.9.zip` 43,032,672 B / `0571cb86933268523c26bf909f4d252dee17ef6617a0e976d569949473df36d1`，内嵌二进制 `cc320b778a0a975e46a569acf68a8fded3694f43b6b18b18ef27c23379a864ee`）**已删除**；**v1.35.8**（`…-v1.35.8.zip` 43,032,727 B / `d2f5216362d8c75c73e1bccdadc7205b10e54a4cee512f9ef9b80f6f4ab6bd06`，内嵌二进制 `3800a5d064e69181db122c4f29f014f4a548cd56b5b34a6adab470995ae3d33a`）**已删除**；**v1.35.6**（`…-v1.35.6.zip` 43,027,762 B / `b2de2716…`，内嵌二进制 `90dea067…`）**已作废并删除**。**Windows 交叉构建路径**：`scripts/build-binary.mjs` → 以 `/tmp/sea-build/node-v22.22.2-linux-x64/bin/node`（**Linux node**）为 base 生成 blob → `postject` 注入 → `make-package.py` 打 zip（⚠️ **不要用 `deploy/linux/build.sh`**，那是「在 Linux 上」的构建路径、用本机 `command -v node`，在 Windows 上会拿 Windows node 当 base）。`scripts/` 不在交付包成员内 |
 | 架构 | REST + WS + SSE 三通道；Socket / TCP / SSH 三种引擎 |
 | 目标平台 | Linux x64（SEA 单可执行文件），Unraid / 自托管 NAS |
 
@@ -121,7 +121,7 @@
 
 ---
 
-## v1.35.11 — 2026-09-29（**已出包 · 未发布**）
+## v1.35.11 — 2026-09-29（**已出包 · 已随 v1.35.11 发布**）
 
 **主题：`upapi` 改由 `device_uuid` 是否变化决定 —— `device_uuid` 不变就只发 `heartbeat`（**每次进程启动 / systemd restart 不再报 `install`**），只有首次安装 / 身份真的变了才 `install`。于是 `install` 计数 ≈ 去重设备数。**
 
@@ -161,7 +161,7 @@
 
 ### 下一步
 
-- 发布 v1.35.11：先推源码，再建 GitHub Release（`--merge-from <上一已发布 TAG>`）。
+- ✅ 已发布 v1.35.11（2026-09-30）：源码推 GitHub `main`（`7ec0a17894`）+ 自建 Gitea（`e4a940f`）；Release [v1.35.11](https://github.com/yanziruxue/docker-manager/releases/tag/v1.35.11) 已建、3 个资产均 `uploaded`、三个直链 200。
 - 发布顺序不变：**先服务端 `yanzi/api`（执行前备份 `api/data/yanzi-admin.db`）→ 再发客户端**。
 - 若统计端要严格「`install` = 新设备」，需按载荷 `uploadEnabled` 字段排除「开关切换」这一类 `install`。
 
@@ -169,9 +169,21 @@
 
 - `build-upload/docker-manager-yanzi-linux-x64-v1.35.11.zip` —— **43,032,814 B** / SHA-256 `bfbd557e71ec60c148c6ca068d85f87832f2851db29346e3003ebcf50ffe21ad`（内嵌二进制 **130,092,224 B** / SHA-256 `d68f4ef38cf9db70b335936609f6d9c1ffbbf829832f4cd812ddd68e6d22752e`，ELF `7f454c46` 已校验、`CURRENT_VERSION = true ? "1.35.11" : "0.0.0-dev"`、含 `resolveUpapi` 与 `lastDeviceId`）+ 无版本号 `latest` 别名（`build-upload/docker-manager-yanzi-linux-x64.zip`）同字节。包成员 5 个（二进制 + `install.sh` + `uninstall.sh` + `.service` + `README.md`）。前端内嵌资产 `assets/index-CDpmlpm-.js`（1,085,357 B）。**v1.35.10 的包（`7b6f8035…`）自本版起作废并已删除。**
 
+### 发布记录（2026-09-30）
+
+| 项 | 值 |
+|---|---|
+| Tag / Release | [v1.35.11](https://github.com/yanziruxue/docker-manager/releases/tag/v1.35.11)（`draft=false` / `prerelease=false`） |
+| 源码 commit（GitHub `main`） | `7ec0a17894e84dae7f83b58685caa6a7433fa654`（基线 `db1efa4819`，30 文件，Git Database API 推送） |
+| 自建 Gitea 镜像 | `yanzi/docker-manager-yanzi` @ `e4a940f277239343d619cf5e59c0a5504b343d1c` |
+| 合并区间 | `v1.32.0 → v1.35.11`，共 **15** 个开发版本段 |
+| notes | 613 行 / 45,902 字符（`--merge-from v1.32.0 --intro-file`） |
+| 资产 | `docker-manager-yanzi-linux-x64-v1.35.11.zip`（43,032,814 B）、`docker-manager-yanzi-linux-x64.zip`（同字节）、`quick-install.sh`（9,371 B） |
+| 发布通道 | GitHub REST API |
+| OTA 核验 | `releases/latest` = v1.35.11；三个直链均 **HTTP 200** |
 ---
 
-## v1.35.10 — 2026-09-29（已出包 · 未发布 · **包已被 v1.35.11 取代**）
+## v1.35.10 — 2026-09-29（已出包 · 已随 v1.35.11 发布 · **包已被 v1.35.11 取代**）
 
 **主题：上报类型 `upapi` 改为「按触发源决定」—— 启动 / 安装 / 重装 / 开关切换 ⇒ `install`，12 小时周期 / 失败重试 / 手动 ⇒ `heartbeat`；`needInstall` 退化为「只决定要不要发」。**
 
@@ -228,7 +240,7 @@
 
 ---
 
-## v1.35.9 — 2026-09-29（**已出包 · 未发布**）
+## v1.35.9 — 2026-09-29（**已出包 · 已随 v1.35.11 发布**）
 
 **主题：上报字段收敛 —— 把「常量 `event` + 布尔 `install`」两个冗余字段合并为单字段 `upapi`；跨两仓删除失效的 `hw_fingerprint` 列；修掉「关闭上传开关后每 10 分钟空转」。**
 
@@ -264,7 +276,7 @@
 
 ---
 
-## v1.35.8 — 2026-09-29（已出包 · 未发布）
+## v1.35.8 — 2026-09-29（已出包 · 已随 v1.35.11 发布）
 
 > **版本号说明**：本版由 **v1.35.7 升号**而来（约定「**每次出包都升版本号**」）。v1.35.7 **从未发布**，其两次出包（首版 `951a7420…` 43,030,942 B、重出 `61b721df…` 43,032,580 B）**均已作废** —— 重出时已含 `install.sh` 的 drivetemp 改动与前端提示条文案，语义上就是 v1.35.8。
 
@@ -341,11 +353,11 @@
 - 发布 v1.35.8（GitHub Release + 同步 `build-upload` 包）。
 - ★ **约定：每次出包都升版本号**（Patch 连号），**不要重出同版本包** —— 旧包 SHA 即刻作废、极易与新版混淆（v1.35.7 正因重出而作废了两次，最终整体升为 v1.35.8）。
 
-## v1.35.7 — 2026-09-29（未发布 · **已作废 · 内容并入 v1.35.8**）
+## v1.35.7 — 2026-09-29（已随 v1.35.11 发布 · **已作废 · 内容并入 v1.35.8**）
 
 > 本版**从未发布**，两次出包（首版 `951a7420…` 43,030,942 B、重出 `61b721df…` 43,032,580 B）**均已作废**；全部改动已并入 **v1.35.8**，此处不再重复记录。
 
-## v1.35.6 — 2026-09-29（已出包 · 未发布 · **包已被 v1.35.8 取代**）
+## v1.35.6 — 2026-09-29（已出包 · 已随 v1.35.11 发布 · **包已被 v1.35.8 取代**）
 
 **主题：处理器 / 内存图标提示由原生 `title` 改为卡片式自定义 tooltip（分栏排版，不再拥挤）。**
 
@@ -386,7 +398,7 @@
 
 - 出包 + 发布 v1.35.6（含 v1.35.4 目录打包下载）：v1.35.5 包已出但被本版取代。
 
-## v1.35.5 — 2026-09-29（已出包 · 未发布 · **包已被 v1.35.6 取代**）
+## v1.35.5 — 2026-09-29（已出包 · 已随 v1.35.11 发布 · **包已被 v1.35.6 取代**）
 
 **主题：仪表盘系统概览改 7 字段 + 处理器/内存图标 hover tooltip + 磁盘卡片显示文件系统 + 处理器/磁盘曲线默认折叠。**
 
@@ -431,7 +443,7 @@
 
 - 出包 + 发布 v1.35.5；运行中容器端到端真机验证（本机无 Docker，待环境）。
 
-## v1.35.4 — 2026-09-29（已编译 · 未出包 · 未发布）
+## v1.35.4 — 2026-09-29（已编译 · 未出包 · 已随 v1.35.11 发布）
 
 **主题：容器文件管理支持「目录打包下载（tar.gz）」。**
 
@@ -463,7 +475,7 @@
 
 - 合并进 v1.35.5 一并出包（v1.35.4 仅服务端/前端文件管理增强，未单独出包）。
 
-## v1.35.3 — 2026-09-29（已出包 · 未发布）
+## v1.35.3 — 2026-09-29（已出包 · 已随 v1.35.11 发布）
 
 **主题：所有曲线的 X 轴显示时间刻度。**
 
@@ -501,7 +513,7 @@
 
 - 发布 v1.35.3（GitHub Release + 同步 `build-upload` 包）+ 在运行中的容器上做文件管理端到端验证（列 / 读 / 写 / 上传 / 下载 / 增删改 chmod）。
 
-## v1.35.2 — 2026-09-29（已出包 · 未发布 · **包已被 v1.35.3 取代**）
+## v1.35.2 — 2026-09-29（已出包 · 已随 v1.35.11 发布 · **包已被 v1.35.3 取代**）
 
 > 主题：**「资源监控」曲线时长可设置（默认 30 秒）** —— 四张卡的曲线窗口由固定 2 分钟改为**可选时长**（10 秒 / 30 秒 / 1 分钟 / 2 分钟 / 5 分钟，与仪表盘同一套档位），默认 **30 秒**，选择按 localStorage 持久化；采样间隔同步收紧到 **1 秒**（与仪表盘曲线口径一致），切换时长只在**本地切片**、不产生额外请求。
 
@@ -540,7 +552,7 @@
 
 ---
 
-## v1.35.1 — 2026-09-29（已出包 · 未发布 · **包已被 v1.35.2 取代**）
+## v1.35.1 — 2026-09-29（已出包 · 已随 v1.35.11 发布 · **包已被 v1.35.2 取代**）
 
 > **版本号更正**：本轮内容曾按 `1.35.0` 记为 Minor，按约定更正为 **Patch（`1.35.0` → `1.35.1`）** —— 此类「UI / 交互小改动」走第三位递增，Minor 只留给「新增功能模块 / 新页面」。`1.35.0` 未发布、未交付过，故直接以 `1.35.1` 出包。
 >
@@ -587,7 +599,7 @@
 
 ---
 
-## v1.34.0 — 2026-09-29（已出包 · 未发布 · **包已被 v1.35.1 取代**）
+## v1.34.0 — 2026-09-29（已出包 · 已随 v1.35.11 发布 · **包已被 v1.35.1 取代**）
 
 > 主题：**容器详情「半页面」体验优化** —— ① 半页面支持**左右拖动改变宽度**（拖左缘，双击手柄复位半屏）；② 「基本信息」与「资源监控」改为**单列**展示（半屏窄栏下两列会把长值挤压换行）；③ 「日志」与「终端」**撑满内容区**，修掉输入框 / 日志框下方的大片空白。
 
@@ -630,7 +642,7 @@
 
 ---
 
-## v1.33.0 — 2026-09-28（已出包 · 未发布 · **包已被 v1.34.0 取代**）
+## v1.33.0 — 2026-09-28（已出包 · 已随 v1.35.11 发布 · **包已被 v1.34.0 取代**）
 
 > 主题：**容器详情视图（文件管理 + 半页面/弹窗样式）** —— ① 容器详情新增「文件」标签页，支持浏览 / 查看 / 文本编辑 / 上传 / 下载 / 新建文件与文件夹 / 重命名 / 删除 / 改权限（chmod），仅运行中容器可用（docker exec 必需，未运行显示「请先启动容器」）；② 容器详情支持 **半页面（右侧抽屉，参考 1panel）** 与 **居中弹窗** 两种展示形式，可在「系统设置 → 弹窗设置」切换。
 
@@ -671,7 +683,7 @@
 
 ---
 
-## v1.32.1 — 2026-09-28（已出包 · 未发布）
+## v1.32.1 — 2026-09-28（已出包 · 已随 v1.35.11 发布）
 
 > 主题：**修复「小堆栈备份过小被误判为无效文件」** —— 创建堆栈选「堆栈备份」上传几百字节的合法 zip，前端显示 `0.0 MB` 且后端报红「未收到有效的堆栈备份文件」。
 
