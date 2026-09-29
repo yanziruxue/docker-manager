@@ -2955,6 +2955,9 @@ docker-compose version</code>
                           当前 v{updateInfo.currentVersion} → 最新 v{updateInfo.latestVersion}
                           {updateInfo.assetSize > 0 && `（${(updateInfo.assetSize / 1024 / 1024).toFixed(1)} MB）`}
                         </p>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          更新源：{updateInfo.source === "gitea" ? "自建 Gitea（优先）" : "GitHub Releases（保底）"}
+                        </p>
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
                         <button

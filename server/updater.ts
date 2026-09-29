@@ -130,10 +130,19 @@ export function discardPendingUpload(): void {
   clearPendingUpload();
 }
 
+/**
+ * 更新信息来源：
+ * - gitea：自建 Gitea（首选，国内直连快、不受 GitHub CDN 影响）
+ * - github：GitHub Releases（保底，Gitea 不可用时自动回退）
+ */
+export type UpdateSource = "gitea" | "github";
+
 export interface UpdateInfo {
   currentVersion: string;
   latestVersion: string;
   hasUpdate: boolean;
+  /** 本条信息来自哪个源（决定下载候选与前端展示） */
+  source: UpdateSource;
   releaseName: string;
   releaseNotes: string;
   publishedAt: string;
@@ -227,12 +236,53 @@ function mb(bytes: number): string {
   return (bytes / 1024 / 1024).toFixed(1);
 }
 
-/** GitHub 仓库固定写死（已设为公开仓库，无需 Token、无需在设置里配置） */
+/** GitHub 仓库固定写死（已设为公开仓库，无需 Token、无需在设置里配置）；作为更新的保底源 */
 const UPDATE_REPO = "yanziruxue/docker-manager";
 
 /** 返回固定仓库地址；仓库已公开，检查更新与下载均无需鉴权 */
 function getRepo(): string {
   return UPDATE_REPO;
+}
+
+/**
+ * 自建 Gitea：更新首选源。
+ * 默认站点 https://git.ziruxue.top、仓库 yanzi/docker-manager-yanzi（与 GitHub 双端同步发布）。
+ * 可用环境变量覆盖：
+ *   UPDATE_GITEA_BASE  站点根地址（如 http://192.168.1.10:8024）
+ *   UPDATE_GITEA_REPO  owner/repo
+ */
+const GITEA_BASE_DEFAULT = "https://git.ziruxue.top";
+const GITEA_REPO_DEFAULT = "yanzi/docker-manager-yanzi";
+
+/** 自建 Gitea 站点根地址（去尾斜杠），可用 UPDATE_GITEA_BASE 覆盖 */
+function getGiteaBase(): string {
+  const v = (process.env.UPDATE_GITEA_BASE || "").trim().replace(/\/+$/, "");
+  return v || GITEA_BASE_DEFAULT;
+}
+
+/** 自建 Gitea 仓库 owner/repo，可用 UPDATE_GITEA_REPO 覆盖 */
+function getGiteaRepo(): string {
+  const v = (process.env.UPDATE_GITEA_REPO || "").trim().replace(/^\/+|\/+$/g, "");
+  return v || GITEA_REPO_DEFAULT;
+}
+
+/**
+ * 把 URL 的协议 + 主机改写为 Gitea 站点地址。
+ * Gitea API 返回的 browser_download_url 用的是服务端 ROOT_URL 配置，
+ * 当 UPDATE_GITEA_BASE 指向别的入口（IP:端口 / 内网域名）时必须改写，
+ * 否则下载仍会打到原地址而失败。
+ */
+function rewriteToGiteaBase(url: string, base: string): string {
+  if (!url) return url;
+  try {
+    const u = new URL(url);
+    const b = new URL(base);
+    u.protocol = b.protocol;
+    u.host = b.host;
+    return u.toString();
+  } catch {
+    return url;
+  }
 }
 
 /** 统一的 GitHub 请求头（公开仓库，不带鉴权） */
@@ -253,13 +303,18 @@ const BUILTIN_MIRRORS = [
   "https://gh-proxy.com/",
 ];
 
-/** 生成下载候选地址：直连优先，其次自定义镜像，最后内置镜像 */
-function getDownloadCandidates(downloadUrl: string): string[] {
+/**
+ * 生成下载候选地址：直连优先，其次自定义镜像 UPDATE_MIRROR。
+ * 仅 github 源追加 gh-proxy 等内置镜像（Gitea 为自建源，无需翻墙代理）。
+ */
+function getDownloadCandidates(downloadUrl: string, source: UpdateSource = "github"): string[] {
   const candidates = [downloadUrl];
   const extra = (process.env.UPDATE_MIRROR || "").trim();
   if (extra) candidates.push(extra.replace(/\/+$/, "") + "/" + downloadUrl);
-  for (const m of BUILTIN_MIRRORS) {
-    candidates.push(m.replace(/\/+$/, "") + "/" + downloadUrl);
+  if (source === "github") {
+    for (const m of BUILTIN_MIRRORS) {
+      candidates.push(m.replace(/\/+$/, "") + "/" + downloadUrl);
+    }
   }
   return candidates;
 }
@@ -303,6 +358,7 @@ export async function checkGitHubUpdate(currentVersion: string): Promise<UpdateI
     currentVersion: CURRENT_VERSION,
     latestVersion,
     hasUpdate: !!latestVersion && compareVersion(latestVersion, CURRENT_VERSION) > 0,
+    source: "github",
     releaseName: data.name || tagName || "",
     releaseNotes: String(data.body || "").slice(0, 2000),
     publishedAt: data.published_at || "",
@@ -314,11 +370,83 @@ export async function checkGitHubUpdate(currentVersion: string): Promise<UpdateI
 }
 
 /**
- * 检查更新：查询 GitHub Releases 的最新版本（唯一更新源）。
- * 未认证调用有 60 次/小时的速率限制，个人使用足够。
+ * 检查自建 Gitea Releases 的最新版本（更新首选源）。
+ * 公开仓库匿名调用即可，不鉴权；Gitea 为自有服务，超时给短一些，
+ * 失败即快速回退 GitHub 保底源（避免一次检查卡住 20 秒）。
+ */
+export async function checkGiteaUpdate(currentVersion: string): Promise<UpdateInfo> {
+  const base = getGiteaBase();
+  const repo = getGiteaRepo();
+  const apiUrl = `${base}/api/v1/repos/${repo}/releases/latest`;
+
+  let res: Response;
+  try {
+    res = await fetch(apiUrl, {
+      headers: { Accept: "application/json", "User-Agent": "docker-manager-yanzi" },
+      signal: AbortSignal.timeout(8000),
+    });
+  } catch (e: any) {
+    throw new Error(`无法连接自建 Gitea（${base}）：${e.message}`);
+  }
+  if (!res.ok) throw new Error(`自建 Gitea API 返回 ${res.status}`);
+
+  const data: any = await res.json();
+  const tagName: string = data.tag_name || "";
+  const latestVersion = tagName.replace(/^v/i, "");
+  const assets: any[] = Array.isArray(data.assets) ? data.assets : [];
+  const asset =
+    assets.find((a) => /linux-x64.*\.zip$/i.test(a.name || "")) ||
+    assets.find((a) => /\.zip$/i.test(a.name || "")) ||
+    assets[0];
+
+  return {
+    currentVersion: CURRENT_VERSION,
+    latestVersion,
+    hasUpdate: !!latestVersion && compareVersion(latestVersion, CURRENT_VERSION) > 0,
+    source: "gitea",
+    releaseName: data.name || tagName || "",
+    releaseNotes: String(data.body || "").slice(0, 2000),
+    // Gitea 不同版本的字段略有差异（published_at 为 1.20+ 新增），两者兼容
+    publishedAt: data.published_at || data.created_at || "",
+    assetName: asset?.name || "",
+    assetSize: asset?.size || 0,
+    // 下载直链以配置的站点地址为准（Gitea 返回的是 ROOT_URL，可能不是当前入口）
+    downloadUrl: rewriteToGiteaBase(asset?.browser_download_url || "", base),
+    htmlUrl: data.html_url || `${base}/${repo}/releases/tag/${tagName}`,
+  };
+}
+
+/**
+ * 检查更新：自建 Gitea 优先，失败自动回退 GitHub 保底。
+ * 两个源始终按同一版本号双端发布，故先命中即用，不做交叉比对。
  */
 export async function checkForUpdate(): Promise<UpdateInfo> {
+  try {
+    const info = await checkGiteaUpdate(CURRENT_VERSION);
+    // Gitea 可达但没有可下载资产 ⇒ 视为无效，继续走 GitHub 保底
+    if (info.downloadUrl) return info;
+    console.warn("[updater] 自建 Gitea 未返回可下载资产，回退 GitHub 保底");
+  } catch (e: any) {
+    console.warn(`[updater] 自建 Gitea 检查失败，回退 GitHub 保底：${e.message}`);
+  }
   return await checkGitHubUpdate(CURRENT_VERSION);
+}
+
+/**
+ * GitHub 保底候选：优先源（自建 Gitea）下载失败时调用，
+ * 取 GitHub 最新 Release 的下载地址（直连 + UPDATE_MIRROR + gh-proxy 内置镜像）。
+ * 若 GitHub 版本领先于首选源，一并返回其版本号，避免把新包错标成旧版本号。
+ */
+async function githubFallbackCandidates(): Promise<{ urls: string[]; version?: string }> {
+  try {
+    const gh = await checkGitHubUpdate(CURRENT_VERSION);
+    if (!gh.downloadUrl) return { urls: [] };
+    console.warn(`[updater] 改用 GitHub 保底源下载 v${gh.latestVersion}`);
+    return { urls: getDownloadCandidates(gh.downloadUrl, "github"), version: gh.latestVersion };
+  } catch (e: any) {
+    console.warn(`[updater] GitHub 保底源不可用：${e.message}`);
+    return { urls: [] };
+  }
 }
 
 /**
@@ -350,11 +478,19 @@ export async function performUpdate(): Promise<{ message: string; inProgress?: b
   fs.mkdirSync(updateDir, { recursive: true });
   const zipPath = path.join(updateDir, `${ASSET_APP_NAME}-${info.latestVersion}.zip`);
 
-  // 1. 下载（流式读取，实时上报进度 5% → 40%；直连失败自动回退镜像）
-  setState("downloading", `正在下载 v${info.latestVersion}...`, 5);
-  const candidates = getDownloadCandidates(info.downloadUrl);
+  // 1. 下载（流式读取，实时上报进度 5% → 40%）
+  //    源内候选顺序：直连 → UPDATE_MIRROR（github 源再加 gh-proxy 内置镜像）；
+  //    优先源（自建 Gitea）候选全失败时，按「GitHub 保底」追加候选再跑一轮。
+  const srcLabel = info.source === "gitea" ? "自建 Gitea" : "GitHub";
+  setState("downloading", `正在从 ${srcLabel} 下载 v${info.latestVersion}...`, 5);
+  const candidates = getDownloadCandidates(info.downloadUrl, info.source);
   let lastErr = "";
   let downloaded = false;
+  /** 是否已追加过 GitHub 保底候选（防重复追加） */
+  let crossTried = false;
+  /** 实际下载来源与版本（跨源保底后与 info 可能不同） */
+  let appliedSource: UpdateSource = info.source;
+  let appliedVersion = info.latestVersion;
   for (let ci = 0; ci < candidates.length; ci++) {
     const url = candidates[ci];
     const viaMirror = ci > 0;
@@ -438,9 +574,22 @@ export async function performUpdate(): Promise<{ message: string; inProgress?: b
       break;
     } catch (e: any) {
       lastErr = e.message;
-      if (cancelRequested) break; // 取消优先，不再尝试其它镜像
+      if (cancelRequested) break; // 取消优先，不再尝试其它地址
+      // 优先源（自建 Gitea）候选全部失败 ⇒ 追加 GitHub 保底候选再跑一轮
+      if (ci === candidates.length - 1 && info.source === "gitea" && !crossTried) {
+        crossTried = true;
+        setState("downloading", `自建 Gitea 下载失败（${e.message}），改用 GitHub 保底...`, 5);
+        const fb = await githubFallbackCandidates();
+        if (fb.urls.length) {
+          appliedSource = "github";
+          appliedVersion = fb.version || info.latestVersion;
+          candidates.push(...fb.urls);
+          continue;
+        }
+        lastErr = `${lastErr}；GitHub 保底源不可用`;
+      }
       if (ci < candidates.length - 1) {
-        setState("downloading", `直连失败（${e.message}），尝试镜像...`, 5);
+        setState("downloading", `下载失败（${e.message}），尝试下一个地址...`, 5);
         continue;
       }
     }
@@ -451,7 +600,7 @@ export async function performUpdate(): Promise<{ message: string; inProgress?: b
   }
 
   // 2~5. 解压 → 校验 → 替换 → 重启（与手动上传路径共用同一套逻辑）
-  await applyLocalZip(zipPath, info.latestVersion, "github");
+  await applyLocalZip(zipPath, appliedVersion, appliedSource);
 
   return { message: `已更新到 v${info.latestVersion}，服务即将重启` };
 }
@@ -461,8 +610,9 @@ export async function performUpdate(): Promise<{ message: string; inProgress?: b
  * OTA 下载路径（performUpdate）与手动上传路径（performUpdateFromUpload）共用，避免两套解压/替换逻辑分叉。
  * @param zipPath 已落盘的更新包路径
  * @param label 进度消息里展示的来源标签（OTA 时为版本号，上传时为「本地更新包」）
+ * @param source 来源标记，写入 data/update/last-update.json：gitea / github / local
  */
-async function applyLocalZip(zipPath: string, label: string, source: string): Promise<void> {
+async function applyLocalZip(zipPath: string, label: string, source: UpdateSource | "local"): Promise<void> {
   // 解压
   setState("extracting", "正在解压更新包...", 50);
   const updateDir = getUpdateDir();

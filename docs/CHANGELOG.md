@@ -17,13 +17,13 @@
 
 ## 开发进度总览
 
-> 最后更新：2026-09-29
+> 最后更新：2026-09-30
 
 ### 当前状态
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.35.11**（**已发布 2026-09-30**）：**`upapi` 改由 `device_uuid` 是否变化决定** —— `resolveUpapi(trigger, reportInstall)` → **`resolveUpapi(state, deviceId)`**：`!installReported \|\| lastDeviceId !== deviceId` ⇒ `install`，否则 `heartbeat`。**每次进程启动 / systemd restart 不再报 `install`**（ID 未变即 `heartbeat`），只有首次安装 / 身份真的变了才 `install` ⇒ **`install` 计数 ≈ 去重设备数**。运行态新增 **`lastDeviceId`**（每次成功上报都写，`reportOnce` 与 `reportOnToggle` 两处）；`ReportTrigger` 降级为「只决定要不要强制发」；24h 限流（`reportInstall` / `lastRebuildAt`）退化为**观测标记**（旧限流防的「同机反复改写刷安装量」现已由身份判据天然覆盖）。**上传开关切换仍恒 `install`**（按用户要求保留的唯一例外）。升级兼容：无 `lastDeviceId` ⇒ 保守补发一次 `install`。涉及客户端 `server/telemetry.ts`、`docs/上报触发与接口及上报内容.md`、`package.json`；**服务端 `yanzi/api` 与 `server/index.ts` 均无需改动**。验证＝前后端 `tsc` 双 0 + `test:gates` exit 0 + 删 `dist/` 重跑 `vite build` + 源码 harness（同 ID 重启 ⇒ `heartbeat`；换 ID ⇒ `install`）+ 真包冒烟。上一版 **v1.35.10**（已出包 · 未发布 · **包自本版起作废**）：**按触发源决定** —— 新增唯一判据 `resolveUpapi(trigger, reportInstall)`：`startup`（进程启动 / systemd restart）⇒ `install`，`periodic`（12h）/ `retry`（失败后 10 分钟）/ `manual`（页面「立即上报」）⇒ `heartbeat`，`reportOnToggle`（开关开↔关点 APPLY）**恒** `install`；`needInstall` 退化为「**只决定要不要发**」。`reportOnce(force = false)` → `reportOnce(trigger: ReportTrigger)`、`scheduleNext(delayMs, force)` → `scheduleNext(delayMs, trigger)`、`startTelemetryHeartbeat()` 传 `"startup"`、`POST /api/telemetry/report` 传 `"manual"`。**根因**＝旧 `upapi = needInstall ? "install" : "heartbeat"`，而 `installReported` **只在 2xx 成功时置位**、端点 NXDOMAIN ⇒ 所有触发退化成 `install`（真包 + 桩远端双向复现：500 ⇒ 全 `install`；200 ⇒ 首报 `install` 后转 `heartbeat`）。涉及客户端 `server/telemetry.ts`、`server/index.ts`、`docs/上报触发与接口及上报内容.md`、`package.json`；**服务端 `yanzi/api` 本次无需改动**（载荷仍是 15 个顶层字段，`resolveEvent` 的 `install`/`heartbeat` 分支不变）。验证＝前后端 `tsc` 双 `exit 0` + `npm run test:gates` exit 0 + 删 `dist/` 重跑 `vite build` + 真包六场景取证。⚠️ **新增语义**：同一设备**每次重启都会收到一条 `install`**，服务端去重请改为 **`device_uuid` upsert ＋ 比对 `installedAt`**。上一版 **v1.35.9**（已出包 · 未发布 · **包自本版起作废** · 2026-09-29）：**上报字段收敛** —— 把「常量 `event` + 布尔 `install`」两个冗余字段合并为单字段 **`upapi: "install" \| "heartbeat"`**（信息量严格等价）；运行态 `lastReportAt` / `lastActiveAt` 合并为 **`lastReportAt`**（`readState` 兼容读旧文件）；`hw_fingerprint` 字段与 DB 列**跨两仓彻底删除**（服务端幂等 `ALTER TABLE telemetry_devices DROP COLUMN hw_fingerprint`）；修掉「关闭上传开关后每 10 分钟空转」（`!cfg.enabled` ⇒ `fatal:true`，退回 12h 周期）。服务端 `resolveEvent` 三代兼容归一（`body.event \|\| body.upapi`，`install`→装 / `active`\|`heartbeat`→心跳 / `report`→看 `body.install`，其余 400）。涉及客户端 `server/telemetry.ts`、`src/api.ts`、`docs/上报触发与接口及上报内容.md`、`docs/上报.json`；服务端 `yanzi/api/src/{telemetry,db,routes}.js`、`yanzi/api/scripts/*`、`yanzi/api/README.md`、`yanzi/backstage/src/app.js`、`yanzi/docs/api-yanzi-docker-event.md`。验证＝服务端回归 `verify-telemetry.mjs` **78/0**（含删列幂等）+ 前后端 `tsc` 双 0 + `test:gates` **exit 0**（hooks 44 + auth 24/0 & 29/0 + restart 18/0 + thermal 15/0 + install 34/0）+ `vite build`（新资产 `assets/index-d-CniirZ.js`，js 内 `"1.35.9"`×1 / `"1.35.8"`×0）。⚠️ **部署顺序＝服务端 `yanzi/api` 必须先上**：现役 ECS1 只认 `event: install\|active`，不认 `upapi`/`heartbeat`/`report`，而 400 在客户端判为非致命（仅 401/403 fatal）⇒ 客户端先上会每 10 分钟无限重试；删列不可逆，执行前备份 `yanzi/api/data/yanzi-admin.db`。上一版 **v1.35.8**（已出包 · 未发布）：累计承接 **v1.35.3**（所有曲线 X 轴时间刻度）→ **v1.35.4**（容器目录打包下载 tar.gz）→ **v1.35.5**（仪表盘改造：系统概览 7 字段 / 磁盘卡片文件系统列 / 曲线默认折叠）→ **v1.35.6**（处理器·内存图标提示改**卡片式自定义 tooltip**）→ **v1.35.8**（温度能力落地：仪表盘磁盘卡片**显示温度**（读 sysfs hwmon **零提权**）+ **「利用率」列去掉进度条**；设置页**新增「温度」卡片**（CPU + 各盘 + `drivetemp` 检测）并把「本机设备」**改名「硬件信息」**；**`install.sh` 安装时自动加载 `drivetemp`**（`modprobe` + 写 `/etc/modules-load.d/drivetemp.conf` 持久化，`--no-drivetemp` 跳过，`uninstall.sh` 按归属标记清理）+ 新增**温度采集门禁** `scripts/check-thermal.mjs` 与**安装脚本门禁** `scripts/check-install-drivetemp.sh`；按用户要求不做 S.M.A.R.T.）。涉及 `src/pages/Dashboard.tsx`、`src/pages/Settings.tsx`、`src/components/ActivityPanel.tsx`、`src/lib/thermal.ts`、`server/docker.ts`、`server/index.ts`、`server/settings.ts`、`server/telemetry.ts`、`server/unit-status.ts`、`src/types.ts`、`src/api.ts`、`scripts/check-thermal.mjs`、`scripts/check-install-drivetemp.sh`、`deploy/linux/install.sh`、`deploy/linux/uninstall.sh`、`deploy/linux/README.md`、`package.json`。验证＝`lint:hooks` PASS（44 文件）+ 前后端 `tsc` 双 0 + `build:frontend`/`vite build` PASS + 路由层 13/13（v1.35.4）+ **`test:gates` 全绿（hooks 44 + auth 24/0 & 29/0 + restart 18/0 + thermal 15/0 + install 34/0）** + agent-browser 组件级实测（v1.35.6：`[role=tooltip]`×2 + hover `opacity 0→1`；v1.35.8 仪表盘：温度表头 6 列 + 阈值配色 + `null`→「—」+ **利用率去进度条**（表内 `<div>` 归零）；v1.35.8 设置页：`h2`=硬件信息 + 卡片标题「温度/硬件信息标识」+ 三场景（缺 drivetemp 提示条 1 条 / 已加载 0 条 / 全无传感器）+ CPU 62℃ 红加粗，均无 console error）。⚠️ **v1.35.6 及更早的包已从 `build-upload/`、`deploy/linux/` 清除，勿部署**；⚠️ 版本号语义：UI / 交互小改动走 **Patch**（`1.35.3 → … → 1.35.9`） |
+| 当前版本 | **v1.36.0**（未发布 · 开发中）：**OTA 与一键安装改双源 —— 自建 Gitea 优先、GitHub 保底**。新增 `checkGiteaUpdate()`（8 秒超时、匿名）、`UpdateInfo.source`、**跨源下载保底**（Gitea 候选全失败 ⇒ 自动追加 GitHub 资产再跑一轮）、环境变量 `UPDATE_GITEA_BASE` / `UPDATE_GITEA_REPO` 覆盖；`quick-install.sh` 同步双源（`GITEA_BASE` / `GITEA_REPO`）并修掉「`ASSET_SIZE` 在函数定义前调用 ⇒ 包大小恒 0、进度无百分比」的顺序 bug。**发布规约：每次发布都发两个地方。** 上一已发布版本 **v1.35.11**（**已发布 2026-09-30**）：**`upapi` 改由 `device_uuid` 是否变化决定** —— `resolveUpapi(trigger, reportInstall)` → **`resolveUpapi(state, deviceId)`**：`!installReported \|\| lastDeviceId !== deviceId` ⇒ `install`，否则 `heartbeat`。**每次进程启动 / systemd restart 不再报 `install`**（ID 未变即 `heartbeat`），只有首次安装 / 身份真的变了才 `install` ⇒ **`install` 计数 ≈ 去重设备数**。运行态新增 **`lastDeviceId`**（每次成功上报都写，`reportOnce` 与 `reportOnToggle` 两处）；`ReportTrigger` 降级为「只决定要不要强制发」；24h 限流（`reportInstall` / `lastRebuildAt`）退化为**观测标记**（旧限流防的「同机反复改写刷安装量」现已由身份判据天然覆盖）。**上传开关切换仍恒 `install`**（按用户要求保留的唯一例外）。升级兼容：无 `lastDeviceId` ⇒ 保守补发一次 `install`。涉及客户端 `server/telemetry.ts`、`docs/上报触发与接口及上报内容.md`、`package.json`；**服务端 `yanzi/api` 与 `server/index.ts` 均无需改动**。验证＝前后端 `tsc` 双 0 + `test:gates` exit 0 + 删 `dist/` 重跑 `vite build` + 源码 harness（同 ID 重启 ⇒ `heartbeat`；换 ID ⇒ `install`）+ 真包冒烟。上一版 **v1.35.10**（已出包 · 未发布 · **包自本版起作废**）：**按触发源决定** —— 新增唯一判据 `resolveUpapi(trigger, reportInstall)`：`startup`（进程启动 / systemd restart）⇒ `install`，`periodic`（12h）/ `retry`（失败后 10 分钟）/ `manual`（页面「立即上报」）⇒ `heartbeat`，`reportOnToggle`（开关开↔关点 APPLY）**恒** `install`；`needInstall` 退化为「**只决定要不要发**」。`reportOnce(force = false)` → `reportOnce(trigger: ReportTrigger)`、`scheduleNext(delayMs, force)` → `scheduleNext(delayMs, trigger)`、`startTelemetryHeartbeat()` 传 `"startup"`、`POST /api/telemetry/report` 传 `"manual"`。**根因**＝旧 `upapi = needInstall ? "install" : "heartbeat"`，而 `installReported` **只在 2xx 成功时置位**、端点 NXDOMAIN ⇒ 所有触发退化成 `install`（真包 + 桩远端双向复现：500 ⇒ 全 `install`；200 ⇒ 首报 `install` 后转 `heartbeat`）。涉及客户端 `server/telemetry.ts`、`server/index.ts`、`docs/上报触发与接口及上报内容.md`、`package.json`；**服务端 `yanzi/api` 本次无需改动**（载荷仍是 15 个顶层字段，`resolveEvent` 的 `install`/`heartbeat` 分支不变）。验证＝前后端 `tsc` 双 `exit 0` + `npm run test:gates` exit 0 + 删 `dist/` 重跑 `vite build` + 真包六场景取证。⚠️ **新增语义**：同一设备**每次重启都会收到一条 `install`**，服务端去重请改为 **`device_uuid` upsert ＋ 比对 `installedAt`**。上一版 **v1.35.9**（已出包 · 未发布 · **包自本版起作废** · 2026-09-29）：**上报字段收敛** —— 把「常量 `event` + 布尔 `install`」两个冗余字段合并为单字段 **`upapi: "install" \| "heartbeat"`**（信息量严格等价）；运行态 `lastReportAt` / `lastActiveAt` 合并为 **`lastReportAt`**（`readState` 兼容读旧文件）；`hw_fingerprint` 字段与 DB 列**跨两仓彻底删除**（服务端幂等 `ALTER TABLE telemetry_devices DROP COLUMN hw_fingerprint`）；修掉「关闭上传开关后每 10 分钟空转」（`!cfg.enabled` ⇒ `fatal:true`，退回 12h 周期）。服务端 `resolveEvent` 三代兼容归一（`body.event \|\| body.upapi`，`install`→装 / `active`\|`heartbeat`→心跳 / `report`→看 `body.install`，其余 400）。涉及客户端 `server/telemetry.ts`、`src/api.ts`、`docs/上报触发与接口及上报内容.md`、`docs/上报.json`；服务端 `yanzi/api/src/{telemetry,db,routes}.js`、`yanzi/api/scripts/*`、`yanzi/api/README.md`、`yanzi/backstage/src/app.js`、`yanzi/docs/api-yanzi-docker-event.md`。验证＝服务端回归 `verify-telemetry.mjs` **78/0**（含删列幂等）+ 前后端 `tsc` 双 0 + `test:gates` **exit 0**（hooks 44 + auth 24/0 & 29/0 + restart 18/0 + thermal 15/0 + install 34/0）+ `vite build`（新资产 `assets/index-d-CniirZ.js`，js 内 `"1.35.9"`×1 / `"1.35.8"`×0）。⚠️ **部署顺序＝服务端 `yanzi/api` 必须先上**：现役 ECS1 只认 `event: install\|active`，不认 `upapi`/`heartbeat`/`report`，而 400 在客户端判为非致命（仅 401/403 fatal）⇒ 客户端先上会每 10 分钟无限重试；删列不可逆，执行前备份 `yanzi/api/data/yanzi-admin.db`。上一版 **v1.35.8**（已出包 · 未发布）：累计承接 **v1.35.3**（所有曲线 X 轴时间刻度）→ **v1.35.4**（容器目录打包下载 tar.gz）→ **v1.35.5**（仪表盘改造：系统概览 7 字段 / 磁盘卡片文件系统列 / 曲线默认折叠）→ **v1.35.6**（处理器·内存图标提示改**卡片式自定义 tooltip**）→ **v1.35.8**（温度能力落地：仪表盘磁盘卡片**显示温度**（读 sysfs hwmon **零提权**）+ **「利用率」列去掉进度条**；设置页**新增「温度」卡片**（CPU + 各盘 + `drivetemp` 检测）并把「本机设备」**改名「硬件信息」**；**`install.sh` 安装时自动加载 `drivetemp`**（`modprobe` + 写 `/etc/modules-load.d/drivetemp.conf` 持久化，`--no-drivetemp` 跳过，`uninstall.sh` 按归属标记清理）+ 新增**温度采集门禁** `scripts/check-thermal.mjs` 与**安装脚本门禁** `scripts/check-install-drivetemp.sh`；按用户要求不做 S.M.A.R.T.）。涉及 `src/pages/Dashboard.tsx`、`src/pages/Settings.tsx`、`src/components/ActivityPanel.tsx`、`src/lib/thermal.ts`、`server/docker.ts`、`server/index.ts`、`server/settings.ts`、`server/telemetry.ts`、`server/unit-status.ts`、`src/types.ts`、`src/api.ts`、`scripts/check-thermal.mjs`、`scripts/check-install-drivetemp.sh`、`deploy/linux/install.sh`、`deploy/linux/uninstall.sh`、`deploy/linux/README.md`、`package.json`。验证＝`lint:hooks` PASS（44 文件）+ 前后端 `tsc` 双 0 + `build:frontend`/`vite build` PASS + 路由层 13/13（v1.35.4）+ **`test:gates` 全绿（hooks 44 + auth 24/0 & 29/0 + restart 18/0 + thermal 15/0 + install 34/0）** + agent-browser 组件级实测（v1.35.6：`[role=tooltip]`×2 + hover `opacity 0→1`；v1.35.8 仪表盘：温度表头 6 列 + 阈值配色 + `null`→「—」+ **利用率去进度条**（表内 `<div>` 归零）；v1.35.8 设置页：`h2`=硬件信息 + 卡片标题「温度/硬件信息标识」+ 三场景（缺 drivetemp 提示条 1 条 / 已加载 0 条 / 全无传感器）+ CPU 62℃ 红加粗，均无 console error）。⚠️ **v1.35.6 及更早的包已从 `build-upload/`、`deploy/linux/` 清除，勿部署**；⚠️ 版本号语义：UI / 交互小改动走 **Patch**（`1.35.3 → … → 1.35.9`） |
 | 版本号规则 | Major 人工发布；Minor ＝ **新增功能模块 / 新页面**；Patch ＝ 修复/优化/**UI 与交互小改动**（如 `1.35.0 → 1.35.1`）。v1.22.0 因新增「镜像更新→通知中心」与「硬件指纹作主键」两项新能力归为 Minor |
 | 最新 Release | [v1.35.11](https://github.com/yanziruxue/docker-manager/releases/tag/v1.35.11)（**2026-09-30 发布** · 累积发布 **v1.32.0 → v1.35.11**：容器文件管理 / 温度能力 / 详情页与仪表盘演进 / 遥测 `upapi` 三代迭代；assets＝版本化 zip + latest 别名 + `quick-install.sh`，均 `uploaded`；notes 合并 **v1.32.0 → v1.35.11 共 15 个开发版本**；⚠️ 部署顺序＝**服务端 `yanzi/api` 先上**；⚠️ 本版改了 `install.sh`，启用 drivetemp 自动加载需重跑一次）；上一版 [v1.31.1](https://github.com/yanziruxue/docker-manager/releases/tag/v1.31.1) |
 | 源码分支 | `main`（当前发布点 `7ec0a17894e84dae7f83b58685caa6a7433fa654`（v1.35.11，30 文件 +3510/−330，Git Database API 推送）；上一版 `db1efa48191195b3fd6eb85ad00782fadeb89b81`（v1.31.1）；自建 Gitea 镜像 `yanzi/docker-manager-yanzi` @ `e4a940f`） |
@@ -49,7 +49,7 @@
 | Web 终端 | ✅ | xterm.js + WebSocket + 多 Shell 检测 |
 | 登录鉴权 | ✅ | 单管理员 + scrypt + httpOnly 会话（绝对过期）+ 密码找回码（**18~24 位字母数字、区分大小写、10 分钟限流**；**历史记录按大写哈希者输入小写仍可用**，`legacyUpperVariants` 回退）+ **凭据版本 `credentialVersion`（本版要求 2）**：老记录登录后**强制重走「用户名 / 密码 / 找回码」**（`POST /api/auth/reinit`），期间除白名单外的全部 `/api` 返回 `403 REINIT_REQUIRED`，重设成功即作废该用户**全部会话** |
 | 镜像更新（原更新调度器） | ✅ | 后台定时检查镜像版本（每天 / 每周 / 每月，非 Cron）+ 结果落盘缓存 + 镜像页「检查更新」共用同一份数据 |
-| OTA 自升级 | ✅ | GitHub Releases 单一源，拉取 + 自替换 + systemd 重启，gh-proxy 镜像兜底，**支持中途取消**；**更新完成后自动刷新页面**（v1.31.1 修：判据与状态码解耦 —— `403 REINIT_REQUIRED` 也算「新进程已上线」；实现见 `src/lib/restart-wait.ts`） |
+| OTA 自升级 | ✅ | **双源（v1.36.0 起）：自建 Gitea 优先、GitHub 保底**（Gitea 源不拼 gh-proxy），拉取 + 自替换 + systemd 重启，gh-proxy 镜像兜底（仅 GitHub 源），**支持中途取消**；**更新完成后自动刷新页面**（v1.31.1 修：判据与状态码解耦 —— `403 REINIT_REQUIRED` 也算「新进程已上线」；实现见 `src/lib/restart-wait.ts`） |
 | Linux SEA 部署 | ✅ | 单可执行文件 + systemd + install/uninstall 脚本（**v1.35.8 起安装时自动加载 `drivetemp` 内核模块并持久化，`--no-drivetemp` 可跳过**）；**OTA 后自动自检服务单元是否落后**（含缺失指令与一键修复命令） |
 | Docker 部署 | ✅ | 多阶段 Dockerfile |
 | **操作日志系统** | 🔨 **约 60%** | `server/logger.ts` 已建好但**未接入** `docker.ts`（仍是 `console.log`）；前端仅 localStorage 版 `opLog.ts`（500 条） |
@@ -120,6 +120,70 @@
 - 同一天内的多次改动合并为一个版本，逐条记录在版本下
 
 ---
+
+## v1.36.0 — 2026-09-30（未发布）
+
+**主题：OTA 与一键安装改为双源 —— 自建 Gitea 优先、GitHub 保底；并确立「每次发布都发两个地方」的发布规约。**
+
+### 已完成
+
+- **OTA 双源（`server/updater.ts`）**
+  - 新增 `checkGiteaUpdate()`：查自建 Gitea `GET {base}/api/v1/repos/{repo}/releases/latest`（**8 秒超时、匿名、无需 Token**），解析 `tag_name` / `assets[].browser_download_url` / `published_at`（兼容 `created_at`）；
+  - `checkForUpdate()` 改为 **Gitea 优先**：Gitea 可达且返回了可下载资产即采用；异常或无可下载资产时 `console.warn` 后回退 `checkGitHubUpdate()` 保底；
+  - `UpdateInfo` 新增 **`source: "gitea" | "github"`**（`UpdateSource` 类型），前端据此展示「更新源」；
+  - 下载候选 `getDownloadCandidates(url, source)`：**Gitea 源只走「直连 → `UPDATE_MIRROR`」**（不再拼 gh-proxy —— 该代理只服务 GitHub 域名）；GitHub 源维持「直连 → `UPDATE_MIRROR` → gh-proxy」；
+  - **跨源保底**：Gitea 源候选全部失败时，自动重新解析 GitHub 资产并追加候选再跑一轮（`githubFallbackCandidates()`），`last-update.json` 的 `source` 记 `github`、进度标签用实际下载到的版本号（`appliedVersion`）；
+  - `applyLocalZip()` 的 `source` 参数收敛为 `UpdateSource | "local"`（`gitea` / `github` / `local`）；
+  - 默认站点 `https://git.ziruxue.top`、仓库 `yanzi/docker-manager-yanzi`，可用 **`UPDATE_GITEA_BASE`** / **`UPDATE_GITEA_REPO`** 覆盖（**无需重新打包**）；Gitea 返回的 `browser_download_url` 会按配置入口做**协议 + 主机改写**（`rewriteToGiteaBase()`），避免其 `ROOT_URL` 与实际入口不一致时下载失败。
+- **一键安装脚本双源（`scripts/quick-install.sh`）**
+  - 新增 `resolve_asset_gitea()` / `resolve_asset_github()` 与两源共用的 `extract_asset_url()`；主流程 **Gitea 优先、GitHub 保底**，并在日志里打印「下载源」与「安装包来源」；
+  - Gitea 走**直连** `http_get_direct()`（gh-proxy 不代理非 GitHub 域名）；下载候选按 URL 域决定是否追加 gh-proxy；
+  - **跨源保底**：Gitea 资产下载失败时重新解析 GitHub 资产再试一轮，两源皆不可用才报错退出；
+  - 新增环境变量 **`GITEA_BASE`**（默认 `https://git.ziruxue.top`）/ **`GITEA_REPO`**（默认 `yanzi/docker-manager-yanzi`）；
+  - 🐛 **顺手修 bug**：`ASSET_SIZE` 原先在 `remote_size()` / `fmt_mb()` **定义之前**调用 ⇒ `command not found`（127）被 `|| echo 0` 吞掉 ⇒ **「包大小」恒为 0、下载进度永远没有百分比/总量**；已把该段移到 `# <<< download-helpers` 之后（标记名未动）。
+- **前端（`src/types.ts`、`src/pages/Settings.tsx`）**：`UpdateInfo` 新增可选 `source`；「发现新版本」卡片新增一行「**更新源：自建 Gitea（优先）/ GitHub Releases（保底）**」。
+- **发布规约（用户拍板）**：**每次发布都发两个地方** —— GitHub Release + 自建 Gitea Release，两端资产一致（版本化 zip + `latest` 别名 + `quick-install.sh`）。
+- **文档**：`docs/发布与OTA升级指南.md`（§2 改为「发布到双端」、§4 更新源表 / 使用步骤 / 后端流程 / 端点 / 出网要求 / 取包规则）、`README.md`（安装命令与源顺序）、本文件。
+
+### 验证
+
+- **前后端 `tsc`**：`npx tsc -p server/tsconfig.json --noEmit` → **exit 0**；`npx tsc -p tsconfig.json --noEmit` → **exit 0**；
+- **`npm run test:gates`** → **exit 0**（hooks / auth / restart / thermal / install 五组 `结果: PASS=` 齐全）；
+- **真实 Gitea API 实测**（Node fetch 走域名）：`GET https://git.ziruxue.top/api/v1/repos/yanzi/docker-manager-yanzi/releases/latest` → **HTTP 200**，`tag_name=v1.35.11`、含 `published_at`、3 个资产（版本化 zip / `latest` 别名 / `quick-install.sh`，size 与 GitHub **逐字节一致**）；下载直链 **HTTP 206**、前 2 字节 `504b`（PK）；
+- **安装脚本双源 harness 14/0**（抽取 `quick-install.sh` 真实片段 + 桩掉 `http_get*`）：① Gitea 可用（真实 JSON）⇒ 选源 gitea 且 API 路径 `/releases/latest`、**不请求 GitHub**；② Gitea 不可用 ⇒ 回退 GitHub 并有告警；③ Gitea 可达但无 linux-x64 资产 ⇒ 回退 GitHub；④ 两源皆不可用 ⇒ 打印错误且**退出码 1**；⑤ `VERSION=1.35.11` ⇒ 走 `/releases/tags/v1.35.11`；⑥ Gitea 源下载候选**不含 gh-proxy**；⑦ GitHub 源候选含 `UPDATE_MIRROR` + gh-proxy。
+### 交付包
+
+| 项 | 值 |
+|---|---|
+| 交付包 | `build-upload/docker-manager-yanzi-linux-x64-v1.36.0.zip` **43,034,593 B** / SHA-256 `ae8752213ed928600d843a321b4f64c97e9a0dd76f659b4dfb336d0058b2507e` |
+| latest 别名 | `build-upload/docker-manager-yanzi-linux-x64.zip`（同字节） |
+| 内置二进制 | 130,092,224 B / SHA-256 `e798e940f9bb9b765ea3cb4777f25956ef500860dd8583a5bef16498fc818cad`（ELF `7f454c46` 已校验、`CURRENT_VERSION = "1.36.0"`） |
+| 前端资产 | `dist/assets/index-gKErWW9k.js`（1,085,514 B）、`index-D4ubT5WG.css`（47,237 B） |
+| 包内成员 | 5 个（二进制 + `install.sh` + `uninstall.sh` + `.service` + `README.md`），权限位已校验（二进制与脚本 755） |
+
+**真机链路取证（Windows 开发机侧，Node 环境）**：
+
+| 场景 | 结果 |
+|---|---|
+| 打包后的 `updater.ts` 实打 Gitea API（默认域名） | ✅ `source=gitea`、`latestVersion=1.35.11`、`assetName=docker-manager-yanzi-linux-x64-v1.35.11.zip`、`assetSize=43032814`、`downloadUrl=https://git.ziruxue.top/…`、`publishedAt=2026-09-30T07:22:25+08:00` |
+| `UPDATE_GITEA_REPO` 改成不存在的仓库 | ✅ 抛 `自建 Gitea API 返回 404`（失败可观测，非静默回退） |
+| 优先源不可达 ⇒ `checkForUpdate()` | ✅ **回退 GitHub 保底**：`source=github`、`downloadUrl=https://github.com/…`（保底链真实走通） |
+| 交付包 `bundle.js` 起服务（`:5099`） | ✅ `/` 返回 `index-gKErWW9k.js` / `index-D4ubT5WG.css`，与 `dist/assets/` **逐字一致**（证明内嵌前端是本次构建） |
+| `GET /api/system/update/check`（真实端点） | ✅ `{currentVersion:"1.36.0", hasUpdate:false, source:"gitea", assetName:"…-v1.35.11.zip", assetSize:43032814, downloadUrl:"https://git.ziruxue.top/…"}` |
+| 安装脚本双源 harness | ✅ 14/14（见上「验证」） |
+| `UPDATE_GITEA_BASE=http://60.205.251.18:8024` | ⚠️ **本机 Node 直连该端口 8 秒超时**（本机 curl 是经 HTTP 代理才通）⇒ IP 入口的 host 改写逻辑**未能在本机端到端取证**，留待生产环境验证；默认域名路径已实测通过 |
+
+### 未完成 / 已知限制
+
+- 本次**无服务端（`yanzi/api`）改动** ⇒ 不涉及 DB 迁移、部署顺序不受限（与 v1.35.11 的「服务端先上」无关）；
+- `git.ziruxue.top` 在**本机 curl / git** 下不可达（schannel 握手失败 / 连接重置），但 **Node fetch（OTA 与安装脚本的真实运行环境）完全正常**；本机 CLI 操作 Gitea 仍需走 `http://60.205.251.18:8024`。属本机环境问题，非服务端故障；
+- Gitea 与 GitHub 之间**不做版本号交叉比对**：若某次只发了一端，另一端用户会停在旧版本（发布规约已要求双发，后续可加交叉校验）；
+- 前端「更新源」是**展示项**，不提供切换入口（切换靠服务器环境变量）。
+
+### 下一步
+
+- 出包并**双端发布 v1.36.0**（GitHub + 自建 Gitea，资产一致）；
+- 如需内网 / IP 入口部署，用 `UPDATE_GITEA_BASE=http://<host>:8024` 做一次端到端改写取证。
 
 ## v1.35.11 — 2026-09-29（**已出包 · 已随 v1.35.11 发布**）
 

@@ -89,9 +89,16 @@ python -c "import zipfile; z=zipfile.ZipFile('build-upload/docker-manager-yanzi-
 
 ---
 
-## 2. 发布到 GitHub Releases
+## 2. 发布到双端 Releases（GitHub + 自建 Gitea）
 
-OTA 的「检查更新」依赖 GitHub Releases，取包规则见 §4.5。发布步骤：
+> **发布规约（v1.36.0 起）**：**每次发布都必须发两个地方**。App 的「检查更新」与 `quick-install.sh` 都是**自建 Gitea 优先、GitHub 保底**，只发一端会让另一源的用户拿不到更新。
+>
+> - GitHub Release：`https://github.com/yanziruxue/docker-manager/releases`
+> - 自建 Gitea Release：`https://git.ziruxue.top/yanzi/docker-manager-yanzi/releases`（本机 CLI 若走域名不通，改用 `http://60.205.251.18:8024`）
+> - 两端资产保持一致：版本化 zip + `latest` 别名 + `quick-install.sh`
+> - Gitea 端发布走 REST API：`POST /api/v1/repos/{owner}/{repo}/releases` 建 Release（顺带打 tag）→ `POST …/releases/{id}/assets?name=<文件名>` 传资产。完整命令见 skill `docker-manager-sea-release` §6。
+
+发布步骤（GitHub 端）：
 
 1. 进入仓库 → **Releases → Draft a new release**
 2. **Choose a tag**：填 `vX.Y.Z`（必须带 `v` 前缀，代码会正则去掉 `v` 再比对；必须与 `package.json` 版本号一致）
@@ -125,7 +132,8 @@ npm run release
 - 读 `package.json` 的 `version` → TAG = `vX.Y.Z`
 - 从 `docs/CHANGELOG.md` 提取对应版本段作为 Release notes（自动，无需手填）
 - Release 已存在 → `gh release upload --clobber` 覆盖 asset；不存在 → `gh release create` 发布
-- 默认仓库：`yanziruxue/docker-manager`（已固定写死在 `server/updater.ts` 的 `UPDATE_REPO` 常量，发布脚本与 App 内升级均无需配置）
+- 默认仓库：GitHub `yanziruxue/docker-manager` + 自建 Gitea `yanzi/docker-manager-yanzi`（分别写死在 `server/updater.ts` 的 `UPDATE_REPO` 与 `GITEA_REPO_DEFAULT`，发布脚本与 App 内升级均无需配置）
+- ⚠️ **本脚本只发 GitHub**；自建 Gitea 端需另行发布（`publish-gitea.sh` / skill `docker-manager-sea-release` §6），**不要漏发**
 - 凭据优先级：环境变量 `GITHUB_TOKEN`/`GH_TOKEN` → 项目根 `.env` → `gh auth login` 登录态
 
 可选参数：
@@ -189,18 +197,31 @@ bash build.sh && sudo bash install.sh
 
 ### 4.1 配置（系统设置 → 系统更新）
 
-仓库地址已固定写死为 `yanziruxue/docker-manager`（公开仓库），App 内升级**无需填写仓库、无需 Token**。
+更新源已固定写死，App 内升级**无需填写仓库、无需 Token**（v1.36.0 起为双源）：
+
+| 源 | 地址 | 说明 |
+|------|------|------|
+| 自建 Gitea（**优先**） | `https://git.ziruxue.top` · `yanzi/docker-manager-yanzi` | 公开仓库；国内直连快、不受 GitHub 资源 CDN 影响 |
+| GitHub（**保底**） | `api.github.com/repos/yanziruxue/docker-manager` | 公开仓库；Gitea 不可用 / 无可下载资产时自动回退 |
 
 | 字段 | 说明 |
 |------|------|
-| 更新源 | 只读展示：`yanziruxue/docker-manager`（公开仓库，已固定写死） |
-| 自动检查更新 | 可选开关，启动后自动检查 GitHub Releases |
+| 更新源 | 只读展示：新版本卡片标注本条来自「**自建 Gitea（优先）**」还是「**GitHub Releases（保底）**」 |
+| 自动检查更新 | 可选开关，启动后自动检查 Releases（Gitea 优先 → GitHub 保底） |
 
-> 注：自 v1.2.3 起，仓库地址与 Token 已从「系统更新」卡片移除——仓库固定为公开仓库 `yanziruxue/docker-manager`，检查更新与下载均无需鉴权。
+服务器侧可用环境变量覆盖自建源（**无需重新打包**）：
+
+```bash
+UPDATE_GITEA_BASE=http://192.168.1.10:8024     # Gitea 站点根地址（默认 https://git.ziruxue.top）
+UPDATE_GITEA_REPO=yanzi/docker-manager-yanzi   # Gitea 仓库 owner/repo
+UPDATE_MIRROR=https://my-mirror.com/           # 额外下载镜像前缀（只对 GitHub 源拼接）
+```
+
+> 注：自 v1.2.3 起仓库地址与 Token 已从「系统更新」卡片移除；自 **v1.36.0** 起改为**双源**（自建 Gitea 优先、GitHub 保底），检查更新与下载均无需鉴权。
 
 ### 4.2 使用步骤
 
-1. 点「**检查更新**」→ 调 `GET /api/system/version`（当前版本）+ `GET /api/system/update/check`（查 GitHub 最新 Release）
+1. 点「**检查更新**」→ 调 `GET /api/system/version`（当前版本）+ `GET /api/system/update/check`（**先查自建 Gitea**，失败或无可下载资产则回退 GitHub 最新 Release）
 2. 若当前版本 < 最新 Release，卡片显示新版本号与 Release 说明，出现「**一键升级**」按钮
 3. 点升级 → 调 `POST /api/system/update/apply`，后端开始下载；前端轮询 `GET /api/system/update/status` 显示进度（下载 → 解压 → 替换 → 重启）
 4. 进程退出 → systemd `Restart=always` 自动拉起新二进制 → 刷新页面即新版本
@@ -208,8 +229,10 @@ bash build.sh && sudo bash install.sh
 ### 4.3 后端执行流程（`server/updater.ts`）
 
 ```
-检查(update/check)
-  → 下载 zip(update/apply 触发)
+检查(update/check)：自建 Gitea /api/v1/repos/{o}/{r}/releases/latest
+                   → 异常 / 无可下载资产 ⇒ 回退 GitHub api.github.com/repos/{repo}/releases/latest
+  → 下载 zip(update/apply 触发)：源内候选「直连 → UPDATE_MIRROR」（github 源再追加 gh-proxy）
+                   → Gitea 源候选全失败 ⇒ 重新解析 GitHub 资产追加候选再跑一轮
   → 解压校验(校验包内 docker-manager-yanzi/docker-manager-yanzi 存在)
   → 写 detached 升级脚本(stop → mv 新二进制覆盖 → start)
   → 进程退出
@@ -221,7 +244,7 @@ bash build.sh && sudo bash install.sh
 | 端点 | 方法 | 作用 |
 |------|------|------|
 | `/api/system/version` | GET | 当前运行版本（来自 `__APP_VERSION__`） |
-| `/api/system/update/check` | GET | 查 GitHub 最新 Release（网络依赖） |
+| `/api/system/update/check` | GET | 查最新 Release（**自建 Gitea 优先 → GitHub 保底**，网络依赖） |
 | `/api/system/update/apply` | POST | 触发下载 + 升级 |
 | `/api/system/update/status` | GET | 升级进度轮询 |
 
@@ -229,8 +252,8 @@ bash build.sh && sudo bash install.sh
 
 - **自替换用 `mv` 而非 `cp`**：`mv` 是 rename 语义，进程运行时替换不会触发 `ETXTBSY`；服务以 `docker-manager-yanzi` 用户运行、**无 root、不能 `systemctl`**，靠 `Restart=always` 完成重启
 - **`.service` 权限**：必须含 `ReadWritePaths=/opt/docker-manager-yanzi`，否则二进制无法被替换
-- **出网要求**：检查更新依赖服务器能访问 `api.github.com`；内网环境需放行
-- **取包规则**：`releases/latest`；Tag 去 `v` 前缀比对；Asset 文件名正则 `/linux-x64\.zip$/i`；包内二进制路径 `docker-manager-yanzi/docker-manager-yanzi`
+- **出网要求**：检查更新**优先访问自建 Gitea**（默认 `git.ziruxue.top`，可用 `UPDATE_GITEA_BASE` 改），失败才回退 `api.github.com`；内网环境至少放行其一
+- **取包规则**：两端均取 `releases/latest`；Tag 去 `v` 前缀比对；Asset 文件名正则 `/linux-x64\.zip$/i`；包内二进制路径 `docker-manager-yanzi/docker-manager-yanzi`。**Gitea 返回的 `browser_download_url` 用的是其服务端 `ROOT_URL`** —— 若 `UPDATE_GITEA_BASE` 指向别的入口（IP:端口 / 内网域名），代码会把该 URL 的**协议 + 主机改写**成配置入口后再下载（`rewriteToGiteaBase()`）
 - **错误码**：私有仓库未填 Token → 404（提示确认已填 Token）；Token 无效/权限不足 → 401
 
 ---

@@ -4,22 +4,30 @@
 #
 # 在服务器上执行下面任一命令即可自动下载并安装（无需手动下载 zip）：
 #   curl -fsSL https://github.com/yanziruxue/docker-manager/releases/latest/download/quick-install.sh | sudo bash
+#   curl -fsSL https://git.ziruxue.top/yanzi/docker-manager-yanzi/releases/latest/download/quick-install.sh | sudo bash
 #   sudo bash quick-install.sh                 # 本地已下载本脚本时
 #   VERSION=1.18.2 sudo bash quick-install.sh  # 安装指定版本
 #
+# 下载源顺序：自建 Gitea（优先）→ GitHub Releases（保底）。
+#   两个源始终按同一版本号双端发布，任一可用即可完成安装。
+#
 # 环境变量：
 #   VERSION        目标版本，默认 latest（最新 Release）
+#   GITEA_BASE     自建 Gitea 站点地址，默认 https://git.ziruxue.top
+#   GITEA_REPO     自建 Gitea 仓库（owner/repo），默认 yanzi/docker-manager-yanzi
 #   UPDATE_MIRROR  自定义下载镜像前缀，例如 https://my-mirror.com/
 #                 （用于直连 GitHub 被墙时的回退，脚本已内置 gh-proxy.com 回退）
 #
 # 说明：Release 资产名带版本号（docker-manager-yanzi-linux-x64-vX.Y.Z.zip），
-#       本脚本通过 GitHub API 解析最新资产真实下载地址，不再依赖固定的非版本化文件名。
+#       本脚本通过 Releases API 解析最新资产真实下载地址，不再依赖固定的非版本化文件名。
 # 说明：下载交付包时显示实时进度（已下载 MB / 总 MB · 百分比 · 均速）。
 #       终端（TTY）下单行原地刷新；输出重定向到文件/日志时改为每 10% 输出一行，避免刷屏。
 # ============================================
 set -euo pipefail
 
 REPO="yanziruxue/docker-manager"
+GITEA_BASE="${GITEA_BASE:-https://git.ziruxue.top}"
+GITEA_REPO="${GITEA_REPO:-yanzi/docker-manager-yanzi}"
 APP_NAME="docker-manager-yanzi"
 VERSION="${VERSION:-latest}"
 UPDATE_MIRROR="${UPDATE_MIRROR:-}"
@@ -43,8 +51,20 @@ TMPD="$(mktemp -d)"
 cleanup() { rm -rf "$TMPD"; }
 trap cleanup EXIT
 
+# 取 HTTP(S) 文本内容（仅直连，用于自建 Gitea）
+http_get_direct() {
+  local url="$1" out=""
+  if command -v curl >/dev/null 2>&1; then
+    out="$(curl -fsSL --connect-timeout 8 --max-time 20 "$url" 2>/dev/null)"
+  else
+    out="$(wget -qO- --timeout=20 "$url" 2>/dev/null)"
+  fi
+  if [ -n "$out" ]; then printf '%s' "$out"; return 0; fi
+  return 1
+}
+
 # 取 HTTP(S) 文本内容（直连 → 自定义镜像 → gh-proxy 回退）
-# 用于拉取 GitHub API 的 JSON。
+# 用于拉取 GitHub API 的 JSON（Gitea 不走此函数：gh-proxy 不代理非 GitHub 域名）。
 http_get() {
   local url="$1"
   local -a src=("$url")
@@ -62,39 +82,60 @@ http_get() {
   return 1
 }
 
-# 解析资产下载地址：通过 GitHub API 查找匹配 linux-x64 的 zip 资产
-resolve_asset() {
-  local api
+# 从 Releases API 的 JSON 中提取匹配 linux-x64 的 zip 资产下载地址（首个命中）。
+# Gitea 与 GitHub 的字段名一致（browser_download_url），故两源共用。
+extract_asset_url() {
+  grep -oE '"browser_download_url"\s*:\s*"https?://[^"]*linux-x64[^"]*\.zip"' \
+    | head -1 \
+    | sed -E 's/.*"browser_download_url"\s*:\s*"//; s/"[[:space:]]*$//'
+}
+
+# 解析自建 Gitea 的资产下载地址（优先源）
+resolve_asset_gitea() {
+  local api json
+  if [ "$VERSION" = "latest" ]; then
+    api="${GITEA_BASE%/}/api/v1/repos/${GITEA_REPO}/releases/latest"
+  else
+    api="${GITEA_BASE%/}/api/v1/repos/${GITEA_REPO}/releases/tags/v${VERSION}"
+  fi
+  json="$(http_get_direct "$api")" || return 1
+  printf '%s' "$json" | extract_asset_url
+}
+
+# 解析 GitHub 的资产下载地址（保底源）
+resolve_asset_github() {
+  local api json
   if [ "$VERSION" = "latest" ]; then
     api="https://api.github.com/repos/${REPO}/releases/latest"
   else
     api="https://api.github.com/repos/${REPO}/releases/tags/v${VERSION}"
   fi
-  local json
   json="$(http_get "$api")" || return 1
-  # 提取 browser_download_url 中匹配 linux-x64 的 zip 资产（首个命中）
-  printf '%s' "$json" \
-    | grep -oE '"browser_download_url"\s*:\s*"https://[^"]*linux-x64[^"]*\.zip"' \
-    | head -1 \
-    | sed -E 's/.*"browser_download_url"\s*:\s*"//; s/"[[:space:]]*$//'
+  printf '%s' "$json" | extract_asset_url
 }
 
-ASSET_URL="$(resolve_asset || true)"
+# 解析下载地址：自建 Gitea 优先，失败回退 GitHub 保底
+ASSET_URL=""
+SOURCE=""
+GITEA_ASSET_URL="$(resolve_asset_gitea || true)"
+if [ -n "$GITEA_ASSET_URL" ]; then
+  ASSET_URL="$GITEA_ASSET_URL"
+  SOURCE="gitea"
+  log "下载源: 自建 Gitea（${GITEA_BASE}）"
+else
+  warn "自建 Gitea 未取到资产，回退 GitHub 保底源..."
+  ASSET_URL="$(resolve_asset_github || true)"
+  if [ -n "$ASSET_URL" ]; then
+    SOURCE="github"
+    log "下载源: GitHub Releases"
+  fi
+fi
 if [ -z "$ASSET_URL" ]; then
-  err "无法解析下载地址（GitHub API 可能被墙或速率受限）。请手动下载后解压运行 install.sh：
-  https://github.com/${REPO}/releases/${VERSION}  （找 docker-manager-yanzi-linux-x64-v*.zip）
+  err "无法解析下载地址（自建 Gitea 与 GitHub API 均不可用）。请手动下载后解压运行 install.sh：
+  ${GITEA_BASE}/${GITEA_REPO}/releases  或  https://github.com/${REPO}/releases/${VERSION}
   或指定自定义镜像：UPDATE_MIRROR=https://你的镜像前缀/ sudo bash quick-install.sh"
 fi
 log "下载地址: ${ASSET_URL}"
-
-# 总大小仅用于算百分比；拿不到也不影响下载，进度退化为只显示已下载量
-ASSET_SIZE="$(remote_size "$ASSET_URL" || echo 0)"
-if [ "${ASSET_SIZE:-0}" -gt 0 ]; then
-  log "包大小: $(fmt_mb "$ASSET_SIZE") MB"
-else
-  ASSET_SIZE=0
-  warn "未能获取包大小（HEAD 请求失败或不支持），进度将只显示已下载量"
-fi
 
 # ============================================================================
 # 下载进度基础设施（区块标记供测试脚本抽取，勿改标记名）
@@ -145,6 +186,17 @@ progress_text() {
 }
 
 # <<< download-helpers
+
+# 总大小仅用于算百分比；拿不到也不影响下载，进度退化为只显示已下载量。
+# ⚠️ 必须在 download-helpers 之后调用：remote_size / fmt_mb 在该区块内定义，
+#    定义之前调用会 command not found（静默降级为 0，进度丢失百分比）。
+ASSET_SIZE="$(remote_size "$ASSET_URL" || echo 0)"
+if [ "${ASSET_SIZE:-0}" -gt 0 ]; then
+  log "包大小: $(fmt_mb "$ASSET_SIZE") MB"
+else
+  ASSET_SIZE=0
+  warn "未能获取包大小（HEAD 请求失败或不支持），进度将只显示已下载量"
+fi
 
 # 单次下载（后台下载 + 前台秒级轮询，自绘 MB 进度）。
 # 下载器退出码经全局 DL_RC 传出，避免 set -e 吞码。
@@ -204,12 +256,14 @@ do_download() {
   return 1
 }
 
-# 下载（直连 → 自定义镜像 → gh-proxy 回退）
+# 下载（直连 → 自定义镜像；GitHub 源再追加 gh-proxy 回退）
 download_with_fallback() {
   local url="$1" out="$2"
   local -a tries=("$url")
   [ -n "${UPDATE_MIRROR:-}" ] && tries+=("${UPDATE_MIRROR%/}/${url}")
-  tries+=("https://gh-proxy.com/${url}")
+  case "$url" in
+    *github.com*|*githubusercontent.com*) tries+=("https://gh-proxy.com/${url}") ;;
+  esac
   for u in "${tries[@]}"; do
     log "尝试下载: $u"
     if do_download "$u" "$out" && [ -s "$out" ]; then
@@ -222,8 +276,30 @@ download_with_fallback() {
 
 log "目标版本: ${VERSION}"
 ZIP="$TMPD/docker-manager-yanzi-linux-x64.zip"
-download_with_fallback "$ASSET_URL" "$ZIP" || err "下载失败，请检查网络，或手动下载后运行 install.sh：
+
+DOWN_OK=0
+if download_with_fallback "$ASSET_URL" "$ZIP"; then
+  DOWN_OK=1
+fi
+
+# 跨源保底：自建 Gitea 下载失败 ⇒ 重新解析 GitHub 资产再试一轮
+if [ "$DOWN_OK" -eq 0 ] && [ "$SOURCE" = "gitea" ]; then
+  warn "自建 Gitea 下载失败，回退 GitHub 保底源..."
+  FB_URL="$(resolve_asset_github || true)"
+  if [ -n "$FB_URL" ] && [ "$FB_URL" != "$ASSET_URL" ]; then
+    SOURCE="github"
+    ASSET_URL="$FB_URL"
+    log "回退下载地址: ${ASSET_URL}"
+    if download_with_fallback "$ASSET_URL" "$ZIP"; then
+      DOWN_OK=1
+    fi
+  fi
+fi
+
+[ "$DOWN_OK" -eq 1 ] || err "下载失败（自建 Gitea 与 GitHub 均不可用），请检查网络，或手动下载后运行 install.sh：
   ${ASSET_URL}"
+
+log "安装包来源: $([ "$SOURCE" = "gitea" ] && echo "自建 Gitea（${GITEA_BASE}）" || echo "GitHub Releases")"
 
 # 校验与解压
 command -v unzip >/dev/null 2>&1 || err "需要 unzip（Debian/Ubuntu: apt install unzip；飞牛/OpenWrt: opkg install unzip）"
@@ -238,3 +314,4 @@ log "下载完成，开始安装..."
 
 log "✅ 一键安装完成。访问 http://<本机IP>:5024 查看面板。"
 log "   后续更新可在面板内「系统设置 → 系统更新」一键 OTA 升级。"
+log "   （OTA 优先走自建 Gitea，GitHub Releases 保底）"

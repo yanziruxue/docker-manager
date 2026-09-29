@@ -655,11 +655,16 @@ export interface ComposeConfig {
 /** 更新阶段 */
 export type UpdatePhase = "idle" | "downloading" | "extracting" | "replacing" | "done" | "error";
 
-/** GitHub Releases 检查返回的最新版本信息 */
+/** 更新信息来源：gitea = 自建 Gitea（优先），github = GitHub Releases（保底） */
+export type UpdateSource = "gitea" | "github";
+
+/** 更新检查返回的最新版本信息（自建 Gitea 优先，GitHub 保底） */
 export interface UpdateInfo {
   currentVersion: string;
   latestVersion: string;
   hasUpdate: boolean;
+  /** 本条信息来自哪个源（决定下载候选与展示） */
+  source?: UpdateSource;
   releaseName: string;
   releaseNotes: string;
   publishedAt: string;
