@@ -94,7 +94,12 @@ python -c "import zipfile; z=zipfile.ZipFile('build-upload/docker-manager-yanzi-
 > **发布规约（v1.36.0 起）**：**每次发布都必须发两个地方**。App 的「检查更新」与 `quick-install.sh` 都是**自建 Gitea 优先、GitHub 保底**，只发一端会让另一源的用户拿不到更新。
 >
 > - GitHub Release：`https://github.com/yanziruxue/docker-manager/releases`
-> - 自建 Gitea Release：`https://git.ziruxue.top/yanzi/docker-manager-yanzi/releases`（本机 CLI 若走域名不通，改用 `http://60.205.251.18:8024`）
+> - 自建 Gitea Release：`https://git.ziruxue.top/yanzi/docker-manager-yanzi/releases`（本机 `curl`/`git` 走域名不通时，用 `git -c http.sslBackend=openssl -c http.proxy= -c https.proxy= push`；旧的 `http://60.205.251.18:8024` 直连**已不可用**）
+>
+> **⚠️ 仓库硬约束（2026-09-30 实测）**：App 的「检查更新 / 下载」与 `quick-install.sh` 取包都是**匿名**请求（不带令牌）⇒ Gitea 仓库**必须可匿名读**。
+> - 仓库可见性**受制于 owner 账号的 `visibility`**：owner 账号 visibility 为 `private` 时，仓库被 Gitea **强制**成 `internal`（仅登录用户可见），**API 传 `private:false` / `internal:false` / `visibility:"public"` 都改不动**（4 种写法均返回 200 但仓库仍 `internal:true`），匿名 `releases/latest` 与网页一律 404。
+> - ⇒ 发布仓库要挂在 **`visibility=public` 的账号**下（本实例＝`yanzi`）。换 owner 用 `POST /api/v1/repos/{o}/{r}/transfer`（body `{"new_owner":"yanzi"}`，成功 **202**），转移后匿名即可读。
+> - 令牌 scope：`write:repository` 可推代码 / 建 Release / 改仓库设置；**建仓库还需 `write:user`**（否则 `POST /user/repos` → 403），读用户信息需 `read:user`。（Gitea 1.27.3，细项非旧版 `repo` 复选框）
 > - 两端资产保持一致：版本化 zip + `latest` 别名 + `quick-install.sh`
 > - Gitea 端发布走 REST API：`POST /api/v1/repos/{owner}/{repo}/releases` 建 Release（顺带打 tag）→ `POST …/releases/{id}/assets?name=<文件名>` 传资产。完整命令见 skill `docker-manager-sea-release` §6。
 
@@ -201,7 +206,7 @@ bash build.sh && sudo bash install.sh
 
 | 源 | 地址 | 说明 |
 |------|------|------|
-| 自建 Gitea（**优先**） | `https://git.ziruxue.top` · `yanzi/docker-manager-yanzi` | 公开仓库；国内直连快、不受 GitHub 资源 CDN 影响 |
+| 自建 Gitea（**优先**） | `https://git.ziruxue.top` · `yanzi/docker-manager-yanzi` | **必须公开（匿名可读）** —— owner 账号 `visibility` 须为 public；国内直连快、不受 GitHub 资源 CDN 影响 |
 | GitHub（**保底**） | `api.github.com/repos/yanziruxue/docker-manager` | 公开仓库；Gitea 不可用 / 无可下载资产时自动回退 |
 
 | 字段 | 说明 |
