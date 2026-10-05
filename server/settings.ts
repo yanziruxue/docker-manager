@@ -102,9 +102,19 @@ const DEFAULT_SETTINGS = {
    * 两条都命中时「先到先清」，**永不删除当天文件**（正在写入）。
    */
   logRetention: {
+    /** 顶层三项 ＝ **应用日志**的保留策略，同时是通知 / 操作记录的**默认继承来源** */
     enabled: true,
     maxDays: 30,
     maxTotalMB: 500,
+    /**
+     * 通知日志 / 操作记录的**可选覆盖**（v1.38.0）。
+     * ★ 刻意**不给默认值**：字段缺失即**继承顶层** ⇒ 用户改「应用日志」时三个频道一起跟随；
+     *   只有显式写过的字段才生效（「可单独设置」的语义）。
+     *   若在此处写死默认值，二级合并会先填默认值 ⇒ 顶层改动无法传导（实测踩到，勿加）。
+     *   `server/applogs.ts#getRetentionConfig` 负责 `{ ...顶层, ...该频道 }` 的合并。
+     */
+    notify: {} as { enabled?: boolean; maxDays?: number; maxTotalMB?: number },
+    oplog: {} as { enabled?: boolean; maxDays?: number; maxTotalMB?: number },
   },
   pathFavorites: [
     { id: "p1", name: "应用数据", path: "/mnt/user/appdata" },
@@ -252,8 +262,14 @@ export function getSettings(): any {
           backups: { ...DEFAULT_SETTINGS.mirror.backups, ...(parsed?.mirror?.backups || {}) },
           compose: { ...DEFAULT_SETTINGS.mirror.compose, ...(parsed?.mirror?.compose || {}) },
         },
-        // 日志保留策略：旧配置无此段时继承默认（开启 / 30 天 / 500 MB）
-        logRetention: { ...DEFAULT_SETTINGS.logRetention, ...(parsed?.logRetention || {}) },
+        // 日志保留策略：顶层 ＝ 应用日志；notify / oplog 为**可选覆盖**（缺字段 ⇒ 继承顶层）。
+        // ⚠️ 切勿给子段写死默认值（会让顶层改动无法传导，实测踩到）。
+        logRetention: {
+          ...DEFAULT_SETTINGS.logRetention,
+          ...(parsed?.logRetention || {}),
+          notify: { ...(parsed?.logRetention?.notify || {}) },
+          oplog: { ...(parsed?.logRetention?.oplog || {}) },
+        },
         // 通知配置：二级合并。★ 缺这一段时旧 settings.json 会**整段**取不到新增字段
         // （webhookSecret / emailPassword / emailFrom / emailTo）⇒ 前端拿到 undefined、
         // 输入框失控、且通知模块读不到。events 再多合并一层以兼容将来新增事件键。

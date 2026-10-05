@@ -55,7 +55,7 @@ import {
 } from "lucide-react";
 import type { SystemSettings, BackupMode, DockerEngine, UpdateInfo, UpdateState, ResourceTag, ComposeTemplate, AppInfo, LogListResult, LogTailResult, MirrorRuntimeState, NotifyRuntimeStatus } from "../types";
 // 值导入（不是 type）：密钥「清除」哨兵值
-import { SECRET_CLEAR } from "../types";
+import { SECRET_CLEAR, LOG_CHANNEL_LABELS } from "../types";
 import { Card, FormField, Input, Select, Toggle, IconButton } from "../components/UI";
 import { PasswordInput } from "../components/PasswordInput";
 import { ActivityPanel } from "../components/ActivityPanel";
@@ -280,7 +280,8 @@ function getDefaultSettings(): SystemSettings {
       compose: { enabled: false, target: "" },
     },
     // 应用日志保留策略：默认开启（30 天 / 总上限 500 MB）
-    logRetention: { enabled: true, maxDays: 30, maxTotalMB: 500 },
+      // 顶层三项 ＝ 应用日志，同时是 notify / oplog 的继承来源（子段留空即跟随）
+      logRetention: { enabled: true, maxDays: 30, maxTotalMB: 500, notify: {}, oplog: {} },
     defaultsVersion: 2,
   };
 }
@@ -1514,7 +1515,11 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
   }, []);
 
   useEffect(() => {
-    if (activeSection === "appinfo") void loadAppInfo();
+    // 「目录镜像」已并入本页 ⇒ 一并加载其运行态
+    if (activeSection === "appinfo") {
+      void loadAppInfo();
+      void loadMirror();
+    }
   }, [activeSection, loadAppInfo]);
 
   const copyDirPath = async (key: string, p: string) => {
@@ -1675,7 +1680,8 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
 
   // 进入该分区时加载一次，并每 15 秒刷新运行态（同步结果 / 监听是否掉线）
   useEffect(() => {
-    if (activeSection !== "mirror") return () => {};
+    // 分区已由 "mirror" 并入 "appinfo"（v1.38.0）
+    if (activeSection !== "appinfo") return () => {};
     void loadMirror();
     const t = setInterval(() => void loadMirror(), 15000);
     return () => clearInterval(t);
@@ -1748,9 +1754,8 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
     { key: "scheduler", label: "镜像更新", icon: <Clock size={16} /> },
     { key: "activity", label: "硬件信息", icon: <Activity size={16} /> },
     { key: "update", label: "系统更新", icon: <Download size={16} /> },
-    { key: "appinfo", label: "应用详情", icon: <Info size={16} /> },
+    { key: "appinfo", label: "应用数据", icon: <Info size={16} /> },
     { key: "applogs", label: "应用日志", icon: <FileText size={16} /> },
-    { key: "mirror", label: "目录镜像", icon: <FolderOpen size={16} /> },
   ];
 
   // ============ 标签库（设置 → 标签管理，全局 ResourceTag 列表） ============
@@ -3567,9 +3572,9 @@ docker-compose version</code>
         {activeSection === "appinfo" && (
           <div className="max-w-3xl space-y-5">
             <div>
-              <h2 className="text-lg font-semibold text-slate-800 mb-1">应用详情</h2>
+              <h2 className="text-lg font-semibold text-slate-800 mb-1">应用数据</h2>
               <p className="text-sm text-slate-500">
-                应用运行态与安装位置一览。目录路径可一键复制，便于排障、写脚本或在其它工具里挂载。
+                应用运行态、安装位置与目录一览，以及「目录镜像」配置。目录路径可一键复制，便于排障、写脚本或在其它工具里挂载。
               </p>
             </div>
 
@@ -3655,8 +3660,11 @@ docker-compose version</code>
             <div>
               <h2 className="text-lg font-semibold text-slate-800 mb-1">应用日志</h2>
               <p className="text-sm text-slate-500">
-                应用运行日志（<span className="font-mono">app-YYYY-MM-DD.log</span>，按天分文件）。可查看列表、
-                读取尾部内容、导出为 zip，并按保留策略自动清理。
+                日志按<b>频道</b>分为三类、各自独立文件并<b>可分别设置保留策略</b>：
+                <span className="font-mono">app-</span>（应用运行）、
+                <span className="font-mono">notify-</span>（Webhook / 邮件通知）、
+                <span className="font-mono">oplog-</span>（用户操作记录），均按天分文件。
+                可查看列表、读取尾部内容、导出为 zip，并自动清理。
               </p>
             </div>
 
@@ -3687,21 +3695,75 @@ docker-compose version</code>
                 </div>
 
                 {(data.logRetention?.enabled ?? true) && (
-                  <div className="grid grid-cols-2 gap-4 pl-4 border-l-2 border-slate-100">
-                    <FormField label="保留天数" hint="0 = 不限；超期的最先清理">
-                      <Input
-                        type="number"
-                        value={String(data.logRetention?.maxDays ?? 30)}
-                        onChange={(v) => update("logRetention", "maxDays", Math.max(0, Math.floor(Number(v) || 0)))}
-                      />
-                    </FormField>
-                    <FormField label="日志总大小上限（MB）" hint="0 = 不限；超出后从最旧开始删">
-                      <Input
-                        type="number"
-                        value={String(data.logRetention?.maxTotalMB ?? 500)}
-                        onChange={(v) => update("logRetention", "maxTotalMB", Math.max(0, Math.floor(Number(v) || 0)))}
-                      />
-                    </FormField>
+                  <div className="space-y-5 pl-4 border-l-2 border-slate-100">
+                    {/* 应用日志 ＝ 顶层，同时是另外两类未填时的取值来源 */}
+                    <div>
+                      <div className="text-xs font-medium text-slate-600 mb-2">
+                        {LOG_CHANNEL_LABELS.app} <span className="font-mono text-slate-400">app-*.log</span>
+                        <span className="ml-2 text-[10px] text-slate-400">另外两类未填时跟随这里</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <FormField label="保留天数" hint="0 = 不限；超期的最先清理">
+                          <Input
+                            type="number"
+                            value={String(data.logRetention?.maxDays ?? 30)}
+                            onChange={(v) => update("logRetention", "maxDays", Math.max(0, Math.floor(Number(v) || 0)))}
+                          />
+                        </FormField>
+                        <FormField label="总大小上限（MB）" hint="0 = 不限；超出后从最旧开始删">
+                          <Input
+                            type="number"
+                            value={String(data.logRetention?.maxTotalMB ?? 500)}
+                            onChange={(v) => update("logRetention", "maxTotalMB", Math.max(0, Math.floor(Number(v) || 0)))}
+                          />
+                        </FormField>
+                      </div>
+                    </div>
+
+                    {(["notify", "oplog"] as const).map((ch) => {
+                      const ov = (data.logRetention?.[ch] || {}) as { maxDays?: number; maxTotalMB?: number };
+                      const setOv = (k: "maxDays" | "maxTotalMB", raw: string) => {
+                        const cur = { ...ov };
+                        if (raw.trim() === "") delete cur[k];
+                        else cur[k] = Math.max(0, Math.floor(Number(raw) || 0));
+                        update("logRetention", ch, cur);
+                      };
+                      return (
+                        <div key={ch}>
+                          <div className="text-xs font-medium text-slate-600 mb-2">
+                            {LOG_CHANNEL_LABELS[ch]} <span className="font-mono text-slate-400">{ch}-*.log</span>
+                            <span className="ml-2 text-[10px] text-slate-400">
+                              {ov.maxDays === undefined && ov.maxTotalMB === undefined ? "跟随「应用日志」" : "已单独设置"}
+                            </span>
+                            {(ov.maxDays !== undefined || ov.maxTotalMB !== undefined) && (
+                              <button
+                                type="button"
+                                onClick={() => update("logRetention", ch, {})}
+                                className="ml-2 text-[10px] text-blue-600 hover:underline"
+                              >
+                                恢复跟随
+                              </button>
+                            )}
+                          </div>
+                          <div className="grid grid-cols-2 gap-4">
+                            <FormField label="保留天数" hint={`留空 = 跟随（当前 ${data.logRetention?.maxDays ?? 30} 天）`}>
+                              <Input
+                                type="number"
+                                value={ov.maxDays === undefined ? "" : String(ov.maxDays)}
+                                onChange={(v) => setOv("maxDays", v)}
+                              />
+                            </FormField>
+                            <FormField label="总大小上限（MB）" hint={`留空 = 跟随（当前 ${data.logRetention?.maxTotalMB ?? 500} MB）`}>
+                              <Input
+                                type="number"
+                                value={ov.maxTotalMB === undefined ? "" : String(ov.maxTotalMB)}
+                                onChange={(v) => setOv("maxTotalMB", v)}
+                              />
+                            </FormField>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
 
@@ -3736,6 +3798,7 @@ docker-compose version</code>
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="text-xs text-slate-500 border-b border-slate-100">
+                        <th className="text-left font-medium py-2">频道</th>
                         <th className="text-left font-medium py-2">文件名</th>
                         <th className="text-right font-medium py-2">大小</th>
                         <th className="text-left font-medium py-2 pl-4">最后写入</th>
@@ -3745,6 +3808,11 @@ docker-compose version</code>
                     <tbody>
                       {logsData.files.map((f) => (
                         <tr key={f.name} className="border-b border-slate-50 hover:bg-slate-50/60">
+                          <td className="py-2">
+                            <span className="px-1.5 py-0.5 text-[10px] rounded bg-slate-100 text-slate-600">
+                              {LOG_CHANNEL_LABELS[f.channel] || f.channel}
+                            </span>
+                          </td>
                           <td className="py-2 font-mono text-xs text-slate-700">
                             {f.name}
                             {f.current && (
@@ -3790,7 +3858,7 @@ docker-compose version</code>
           </div>
         )}
 
-        {activeSection === "mirror" && (
+        {activeSection === "appinfo" && (  /* 目录镜像：已并入「应用数据」页 */
           <div className="max-w-3xl space-y-5">
             <div>
               <h2 className="text-lg font-semibold text-slate-800 mb-1">目录镜像</h2>

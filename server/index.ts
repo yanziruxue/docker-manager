@@ -99,6 +99,7 @@ import {
   logsTotalBytes,
   startLogRetention,
 } from "./applogs.js";
+import { LOG_CHANNELS, CHANNEL_LABELS } from "./logger.js";
 import { getMirrorStatus, syncMirrorNow, applyMirrorSettings, startMirror } from "./mirror.js";
 import { sendTestNotify, startContainerWatch, EVENTS_WITHOUT_SOURCE, getSecretSources } from "./notify.js";
 import { WebSocketServer } from "ws";
@@ -210,7 +211,12 @@ try {
   // 用户存储初始化失败不阻断服务启动
 }
 
-const apiLog = createLogger("API");
+/**
+ * 操作记录日志：**用户触发的写操作**（容器启停/删除、镜像拉取/删除/导入导出、卷增删、服务重启…）
+ * 全部经这一个实例写入 ⇒ 改这里一处即把 38 处 API 操作日志整体归入「操作记录」频道
+ * （`logs/oplog-YYYY-MM-DD.log`，可独立设保留策略，见「设置 → 应用日志」）。
+ */
+const apiLog = createLogger("API", "oplog");
 // Node.js SEA 中 __filename/__dirname 不可用，用 process.execPath 替代
 // 注意：BUILD_BINARY 仅在 esbuild 打包时由 define 注入，开发模式（tsx/vite）下不存在，必须做 typeof 保护
 const __filename = typeof BUILD_BINARY !== "undefined" && BUILD_BINARY ? process.execPath : fileURLToPath(import.meta.url);
@@ -1628,9 +1634,27 @@ app.get("/api/system/app-info", (_req, res) => {
 /** 日志文件列表 + 目录总占用 + 当前保留策略 */
 app.get("/api/applogs", (_req, res) => {
   try {
+    const files = listLogFiles();
+    // 按频道汇总（界面按「应用日志 / 通知日志 / 操作记录」分组展示与分别设置策略）
+    const channels = LOG_CHANNELS.map((c) => {
+      const mine = files.filter((f) => f.channel === c);
+      return {
+        channel: c,
+        label: CHANNEL_LABELS[c],
+        retention: getRetentionConfig(c),
+        totalBytes: mine.reduce((n, f) => n + f.sizeBytes, 0),
+        fileCount: mine.length,
+      };
+    });
     res.json({
       success: true,
-      data: { files: listLogFiles(), totalBytes: logsTotalBytes(), retention: getRetentionConfig() },
+      data: {
+        files,
+        totalBytes: files.reduce((n, f) => n + f.sizeBytes, 0),
+        /** 向后兼容：顶层保留策略仍指「应用日志」 */
+        retention: getRetentionConfig("app"),
+        channels,
+      },
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message || "获取日志列表失败" });

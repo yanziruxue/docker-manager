@@ -1,6 +1,6 @@
 {
   "name": "docker-stack-manager",
-  "version": "1.37.0",
+  "version": "1.38.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,11 +10,12 @@
     "lint:hooks": "node scripts/check-hooks.mjs",
     "lint:notify": "node scripts/check-notify-wiring.mjs",
     "test:secrets": "tsx scripts/check-secrets.ts",
+    "test:logs": "tsx scripts/check-log-channels.ts",
     "test:auth": "node scripts/check-auth-render.mjs && node scripts/check-auth-wiring.mjs",
     "test:restart": "node scripts/check-restart-wait.mjs",
     "test:thermal": "node scripts/check-thermal.mjs",
     "test:install": "bash scripts/check-install-drivetemp.sh",
-    "test:gates": "npm run lint:hooks && npm run lint:notify && npm run test:secrets && npm run test:auth && npm run test:restart && npm run test:thermal && npm run test:install",
+    "test:gates": "npm run lint:hooks && npm run lint:notify && npm run test:secrets && npm run test:logs && npm run test:auth && npm run test:restart && npm run test:thermal && npm run test:install",
     "build:frontend": "node scripts/check-hooks.mjs && vite build",
     "build:server": "tsc -p server/tsconfig.json",
     "build:binary": "vite build && node scripts/build-binary.mjs",

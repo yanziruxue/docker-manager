@@ -25,7 +25,8 @@ import { getSettings } from "./settings.js";
 import { CURRENT_VERSION } from "./updater.js";
 import os from "node:os";
 
-const log = createLogger("Notify");
+/** 通知日志：写入 `logs/notify-YYYY-MM-DD.log`（与「应用日志」「操作记录」分文件，可独立设保留策略） */
+const log = createLogger("Notify", "notify");
 
 /** 事件键：与 settings.notifications.events 的键一一对应 */
 export type NotifyEventKey = "containerDown" | "updateAvailable" | "updateComplete" | "buildFailed";

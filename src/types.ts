@@ -793,12 +793,50 @@ export interface MirrorConfig {
 }
 
 /** 应用日志保留策略（系统设置 → 应用日志） */
+/** 日志频道：各自独立文件（`<channel>-YYYY-MM-DD.log`）与独立保留策略 */
+export type LogChannel = "app" | "notify" | "oplog";
+
+/** 频道顺序（即界面展示顺序） */
+export const LOG_CHANNELS: LogChannel[] = ["app", "notify", "oplog"];
+
+/** 频道中文名 */
+export const LOG_CHANNEL_LABELS: Record<LogChannel, string> = {
+  app: "应用日志",
+  notify: "通知日志",
+  oplog: "操作记录",
+};
+
+/**
+ * 单个频道的保留策略**覆盖**（v1.38.0）。
+ * ⚠️ 字段缺失 ⇒ **继承顶层**（顶层三项就是「应用日志」的策略）；显式写过才覆盖。
+ */
+export interface LogRetentionOverride {
+  enabled?: boolean;
+  maxDays?: number;
+  maxTotalMB?: number;
+}
+
 export interface LogRetentionConfig {
+  /** 顶层三项 ＝ 应用日志的策略，同时是通知 / 操作记录的继承来源 */
   enabled: boolean;
   /** 保留天数；0 = 不限 */
   maxDays: number;
   /** 日志目录总大小上限（MB）；0 = 不限 */
   maxTotalMB: number;
+  /** 通知日志的覆盖（缺字段继承顶层） */
+  notify?: LogRetentionOverride;
+  /** 操作记录的覆盖（缺字段继承顶层） */
+  oplog?: LogRetentionOverride;
+}
+
+/** 单个频道的运行态汇总（GET /api/applogs 的 channels[]） */
+export interface LogChannelStat {
+  channel: LogChannel;
+  label: string;
+  /** **已合并**该频道覆盖后的生效策略 */
+  retention: LogRetentionConfig;
+  totalBytes: number;
+  fileCount: number;
 }
 
 /** 应用详情里的单个目录（GET /api/system/app-info） */
@@ -838,6 +876,8 @@ export interface AppInfo {
 /** 日志文件条目（GET /api/applogs） */
 export interface LogFileInfo {
   name: string;
+  /** 所属频道（应用日志 / 通知日志 / 操作记录） */
+  channel: LogChannel;
   sizeBytes: number;
   mtime: string;
   mtimeMs: number;
@@ -849,7 +889,10 @@ export interface LogFileInfo {
 export interface LogListResult {
   files: LogFileInfo[];
   totalBytes: number;
+  /** 向后兼容：顶层仍指「应用日志」的策略 */
   retention: LogRetentionConfig;
+  /** 三分频道的汇总与生效策略（v1.38.0） */
+  channels?: LogChannelStat[];
 }
 
 /** 日志尾部读取结果（GET /api/applogs/:name?tail=N） */

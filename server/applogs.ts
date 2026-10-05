@@ -17,12 +17,12 @@ import path from "node:path";
 import { LOG_DIR } from "./paths.js";
 import { zipDirectory } from "./zip.js";
 import { getSettings } from "./settings.js";
-import { createLogger } from "./logger.js";
+import { createLogger, LOG_CHANNELS, logFileName, type LogChannel } from "./logger.js";
 
 const log = createLogger("Logs");
 
 /** 合法日志文件名（同时是路径穿越防线） */
-const LOG_FILE_RE = /^app-\d{4}-\d{2}-\d{2}\.log$/;
+const LOG_FILE_RE = /^(app|notify|oplog)-\d{4}-\d{2}-\d{2}\.log$/;
 /** 尾部读取默认/最大行数 */
 const DEFAULT_TAIL_LINES = 500;
 const MAX_TAIL_LINES = 5000;
@@ -33,6 +33,8 @@ const EXPORT_MAX_BYTES = 128 * 1024 * 1024;
 
 export interface LogFileInfo {
   name: string;
+  /** 所属频道（应用日志 / 通知日志 / 操作记录） */
+  channel: LogChannel;
   sizeBytes: number;
   mtime: string;
   mtimeMs: number;
@@ -48,17 +50,24 @@ export interface LogRetentionConfig {
   maxTotalMB: number;
 }
 
-/** 读取保留策略（带兜底默认值，配置缺失时不至于失控） */
-export function getRetentionConfig(): LogRetentionConfig {
+/**
+ * 读取**指定频道**的保留策略。
+ *
+ * 配置结构（`settings.logRetention`）：
+ *   - 顶层 `enabled` / `maxDays` / `maxTotalMB` ＝ **应用日志**（沿用旧结构，向后兼容）；
+ *   - `notify` / `oplog` 各有同名字段子段；**未写的字段继承顶层** ⇒ 用户只改想改的那一项即可。
+ */
+export function getRetentionConfig(channel: LogChannel = "app"): LogRetentionConfig {
   let raw: any = null;
   try {
     raw = getSettings()?.logRetention;
   } catch {
     raw = null;
   }
-  const enabled = typeof raw?.enabled === "boolean" ? raw.enabled : true;
-  const maxDays = Number.isFinite(Number(raw?.maxDays)) ? Number(raw.maxDays) : 30;
-  const maxTotalMB = Number.isFinite(Number(raw?.maxTotalMB)) ? Number(raw.maxTotalMB) : 500;
+  const src = channel === "app" ? raw : { ...(raw || {}), ...((raw && raw[channel]) || {}) };
+  const enabled = typeof src?.enabled === "boolean" ? src.enabled : true;
+  const maxDays = Number.isFinite(Number(src?.maxDays)) ? Number(src.maxDays) : 30;
+  const maxTotalMB = Number.isFinite(Number(src?.maxTotalMB)) ? Number(src.maxTotalMB) : 500;
   return {
     enabled,
     maxDays: maxDays > 0 ? maxDays : 0,
@@ -66,8 +75,15 @@ export function getRetentionConfig(): LogRetentionConfig {
   };
 }
 
-function todayName(): string {
-  return `app-${new Date().toISOString().slice(0, 10)}.log`;
+/** 今日该频道的文件名 */
+function todayName(channel: LogChannel = "app"): string {
+  return logFileName(channel);
+}
+
+/** 从文件名解析频道（白名单已保证可解析） */
+function channelOf(name: string): LogChannel {
+  const m = name.match(LOG_FILE_RE);
+  return (m ? (m[1] as LogChannel) : "app");
 }
 
 /**
@@ -84,7 +100,7 @@ export function resolveLogFile(name: string): string | null {
   return abs;
 }
 
-/** 列出所有应用日志文件（按名称倒序 = 日期从新到旧） */
+/** 列出所有日志文件（三个频道合并；按名称倒序 ≈ 日期从新到旧） */
 export function listLogFiles(): LogFileInfo[] {
   let names: string[] = [];
   try {
@@ -94,24 +110,31 @@ export function listLogFiles(): LogFileInfo[] {
   } catch {
     return [];
   }
-  const today = todayName();
   const out: LogFileInfo[] = [];
   for (const name of names) {
     try {
       const st = fs.statSync(path.join(LOG_DIR, name));
       if (!st.isFile()) continue;
+      const channel = channelOf(name);
       out.push({
         name,
+        channel,
         sizeBytes: st.size,
         mtime: st.mtime.toISOString(),
         mtimeMs: st.mtimeMs,
-        current: name === today,
+        current: name === todayName(channel),
       });
     } catch {
       /* 竞态消失，忽略 */
     }
   }
-  out.sort((a, b) => (a.name < b.name ? 1 : a.name > b.name ? -1 : 0));
+  // 先按频道（app → notify → oplog）再按名称倒序，便于界面分频道展示
+  const order: Record<string, number> = { app: 0, notify: 1, oplog: 2 };
+  out.sort((a, b) => {
+    const d = (order[a.channel] ?? 9) - (order[b.channel] ?? 9);
+    if (d !== 0) return d;
+    return a.name < b.name ? 1 : a.name > b.name ? -1 : 0;
+  });
   return out;
 }
 
@@ -277,45 +300,48 @@ export interface PruneResult {
  * 当天文件永不删除。
  */
 export function pruneLogs(): PruneResult {
-  const cfg = getRetentionConfig();
-  if (!cfg.enabled || (cfg.maxDays <= 0 && cfg.maxTotalMB <= 0)) {
-    return { removed: [], freedBytes: 0, skipped: true };
-  }
-
   const files = listLogFiles(); // 新 → 旧
   const removed: string[] = [];
   let freedBytes = 0;
-  const survivors: LogFileInfo[] = [];
+  let anyEnabled = false;
 
-  // ① 期限裁剪
-  const cutoff = cfg.maxDays > 0 ? Date.now() - cfg.maxDays * 24 * 60 * 60 * 1000 : 0;
-  for (const f of files) {
-    if (cfg.maxDays > 0 && !f.current && f.mtimeMs < cutoff) {
-      if (tryRemove(f)) removed.push(f.name);
-    } else {
-      survivors.push(f);
+  for (const channel of LOG_CHANNELS) {
+    const cfg = getRetentionConfig(channel);
+    if (!cfg.enabled || (cfg.maxDays <= 0 && cfg.maxTotalMB <= 0)) continue;
+    anyEnabled = true;
+
+    const mine = files.filter((f) => f.channel === channel);
+
+    // ① 期限裁剪
+    const cutoff = cfg.maxDays > 0 ? Date.now() - cfg.maxDays * 24 * 60 * 60 * 1000 : 0;
+    const survivors: LogFileInfo[] = [];
+    for (const f of mine) {
+      if (cfg.maxDays > 0 && !f.current && f.mtimeMs < cutoff) {
+        if (tryRemove(f)) removed.push(f.name);
+      } else {
+        survivors.push(f);
+      }
     }
-  }
 
-  // ② 容量裁剪（从最旧开始删，直到总量落在上限内）
-  if (cfg.maxTotalMB > 0) {
-    let total = survivors.reduce((n, f) => n + f.sizeBytes, 0);
-    const limit = cfg.maxTotalMB * 1024 * 1024;
-    // 从末尾（最旧）往前删，跳过当天文件
-    for (let i = survivors.length - 1; i >= 0 && total > limit; i--) {
-      const f = survivors[i];
-      if (f.current) continue;
-      if (tryRemove(f)) {
-        total -= f.sizeBytes;
-        removed.push(f.name);
+    // ② 容量裁剪（该频道内从最旧开始删，直到落在上限内；当天文件不删）
+    if (cfg.maxTotalMB > 0) {
+      let total = survivors.reduce((n, f) => n + f.sizeBytes, 0);
+      const limit = cfg.maxTotalMB * 1024 * 1024;
+      for (let i = survivors.length - 1; i >= 0 && total > limit; i--) {
+        const f = survivors[i];
+        if (f.current) continue;
+        if (tryRemove(f)) {
+          total -= f.sizeBytes;
+          removed.push(f.name);
+        }
       }
     }
   }
 
   if (removed.length > 0) {
-    log.info(`日志保留策略已清理 ${removed.length} 个文件，释放 ${freedBytes} 字节（保留 ${cfg.maxDays} 天 / ${cfg.maxTotalMB} MB）`);
+    log.info(`日志保留策略已清理 ${removed.length} 个文件，释放 ${freedBytes} 字节（按频道各自的天数 / 容量上限）`);
   }
-  return { removed, freedBytes, skipped: false };
+  return { removed, freedBytes, skipped: !anyEnabled };
 
   function tryRemove(f: LogFileInfo): boolean {
     const abs = resolveLogFile(f.name);
