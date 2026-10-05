@@ -15,7 +15,7 @@
 
 ---
 
-## v1.38.2 — 2026-10-05（**已就绪 · 未出包 · 未发布**）
+## v1.38.2 — 2026-10-05（**已出包 · 已发布 2026-10-05**）
 
 > **用户指令（逐字）**：「仪表盘曲线要求实时变化」＋「页面右上角铃铛的通知弹窗显示不全需要左右拖动滚动条」
 
@@ -36,6 +36,24 @@
 
 - 前后端 `tsc` **双 exit 0**；`lint:hooks` PASS（45 文件）。
 - 本次无新增门禁（两项均为纯前端展示层改动，无新数据通道 / 无新接口）。
+
+### 交付包
+
+| 项 | 值 |
+|---|---|
+| 交付包 | `build-upload/docker-manager-yanzi-linux-x64-v1.38.2.zip` **43,211,596 B** / SHA-256 `8a2515519178b67079940048b0b70a5964955213e4e21144aedd10e3a31145be` |
+| 内置二进制 | 130,813,120 B / SHA-256 `2516e70e08e1d6abc9b61dad621cd9e8940c7e16f531b9c9dc95fc2a09c107c1`（ELF `7f454c46`、`CURRENT_VERSION = "1.38.2"`） |
+| 包内成员 | 5 个（二进制 + `install.sh` + `uninstall.sh` + `.service` + `README.md`） |
+
+### 发布记录（2026-10-05）
+
+| 项 | 值 |
+|---|---|
+| Tag | `v1.38.2` |
+| GitHub Release | [v1.38.2](https://github.com/yanziruxue/docker-manager/releases/tag/v1.38.2) —— REST API 通道；3 资产（版本化 zip 43,211,596 B / `latest` 别名同字节 / `quick-install.sh` 12,365 B） |
+| 自建 Gitea Release | [v1.38.2](https://git.ziruxue.top/yanzi/docker-manager-yanzi/releases/tag/v1.38.2) —— 同 3 资产且 **size 与 GitHub 逐字节一致**；匿名 `releases/latest` → `v1.38.2` |
+| 源码 commit | GitHub `main` 见推送回执；自建 Gitea `main` `13abb226b6c022649f659136d67b0756b9429f71` |
+| ★ OTA 双源核验 | **6/0** —— 两端匿名 `latest` 均 → `v1.38.2`；首个匹配资产＝版本化 zip；直链 range **206** 且前 2 字节 `504b`；两端 zip 字节数相等 |
 
 ### 已知限制
 
