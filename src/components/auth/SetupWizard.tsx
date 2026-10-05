@@ -24,7 +24,8 @@ interface Props {
 /** 账号设置向导：首次部署创建 / 升级后重新设置（同一套表单，靠 mode 区分文案与校验） */
 export function SetupWizard({ onDone, mode = "create", initialUsername }: Props) {
   const isReinit = mode === "reinit";
-  const [username, setUsername] = useState(initialUsername || "admin");
+  // 初始化不预填用户名（原先默认 "admin"）；reinit 模式仍预填**当前用户名**，那是必要的
+  const [username, setUsername] = useState(initialUsername || "");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [confirm, setConfirm] = useState("");
@@ -110,7 +111,6 @@ export function SetupWizard({ onDone, mode = "create", initialUsername }: Props)
               <Input
                 value={username}
                 onChange={setUsername}
-                placeholder="admin"
                 className="pl-9"
               />
             </div>
@@ -120,7 +120,6 @@ export function SetupWizard({ onDone, mode = "create", initialUsername }: Props)
             <PasswordInput
               value={password}
               onChange={setPassword}
-              placeholder="••••••••"
               visible={showPassword}
               onToggle={() => setShowPassword((v) => !v)}
             />
@@ -130,7 +129,6 @@ export function SetupWizard({ onDone, mode = "create", initialUsername }: Props)
             <PasswordInput
               value={confirm}
               onChange={setConfirm}
-              placeholder="••••••••"
               visible={showConfirm}
               onToggle={() => setShowConfirm((v) => !v)}
             />
