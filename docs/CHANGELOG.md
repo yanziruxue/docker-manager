@@ -15,15 +15,286 @@
 
 ---
 
+## v1.37.0 — 2026-10-05（**已就绪 · 未出包 · 未发布** · 并入 v1.36.1）
+
+> **版本号说明**：v1.36.1（全站曲线平滑）**从未出包、从未发布**，按约定「**同发取最高级**」并入本版 ⇒ 本版同时包含「**全部曲线平滑**」与「**系统设置三个新页面**」两组改动；v1.36.1 段落保留在下方仅供追溯。
+> **版本级别**：Minor（新增功能模块 / 新页面 —— 设置页一次性新增「应用详情 / 应用日志 / 目录镜像」三个页面）。
+
+**主题：系统设置新增三个页面 —— ①「应用详情」（应用安装位置与六个目录的真实路径 / 文件数 / 占用）；②「应用日志」（列表 · 尾部查看 · 单文件下载 · 打包 zip 导出 · 保留策略「天数 + 容量」双上限）；③「目录镜像」（备份目录与 compose 目录**实时另存**到其他路径；语义为**真镜像**，源删 ⇒ 目标同步删）。另并入 v1.36.1 的**全站曲线单调三次平滑（PCHIP，无过冲）**。**
+
+### 已完成
+
+#### 前言：用户原始需求（逐字）
+
+> 「系统设置增加应用详情，应用安装位置，备份和compose目录可以在其他路径另存一份，与原始路径实时同步。可以查看应用日志列表，导出日志，设置日志保存期限时长或者日志大小。」
+
+四项拍板（用户逐字回答）：镜像语义→「**同步删除（真镜像）**」；同步触发→「**watch 实时 + 兜底轮询**」；详情落位→「**在系统设置新增页面命名为应用详情**」；日志覆盖面→「**只做功能，不动日志内容**」。
+
+---
+
+#### 一、应用详情（新增 `server/appinfo.ts`，183 行 · **只读无副作用**）
+
+- **新增接口 `GET /api/system/app-info`** → `getAppInfo()`。
+- **返回运行态**：`version` / `channel`（`typeof __APP_VERSION__ !== "undefined"` ⇒ `sea-linux-x64`，否则 `dev`）/ `nodeVersion` / `platform` / `arch` / `user`（`os.userInfo().username`，容器内无 passwd 条目时降级 `"unknown"`）/ `pid` / `startedAt`（ISO，`Date.now() - process.uptime()*1000`）/ `uptimeSeconds` / `cwd`（生产下即安装目录）/ `engineName` + `engineConnection` + `engineCount`（`getAllEngines()` + `getActiveEngineId()`）。
+- **六个目录**（`AppDirInfo`：`key / label / note / path / exists / files / sizeBytes / truncated`）：`install`（`getInstallDir()`，说明「二进制所在目录（OTA 替换此处文件）」）、`data`（`DATA_DIR`）、`config`（`CONFIG_DIR`，含 settings.json / 用户与凭据）、`logs`（`LOG_DIR`）、`compose`（`COMPOSE_DIR`）、`backups`（`resolveBackupDir()`）—— 每条都写明「哪个环境变量可覆盖」。
+- **受限遍历（防止详情页拖垮服务）**：`MAX_ENTRIES = 200_000` 条目上限（超出置 `truncated: true`，占用值仅代表已统计部分）、`CACHE_TTL_MS = 30_000` 结果缓存（`measureCached()`）、**迭代式栈遍历**（不递归，避免深目录爆栈）、**符号链接一律跳过**（防环）。
+- **前端**：`src/pages/Settings.tsx` 新增「应用详情」分区（图标 `Info`）+ 模块级 `InfoRow` / `fmtSize` / `fmtUptimeCn` 三个小组件；运行态信息表 + 目录占用表（路径一键复制 `copyDirPath`）。
+
+#### 二、应用日志（新增 `server/applogs.ts`，360 行）
+
+- **五条路由**：`GET /api/applogs`（列表 + 目录总占用 + 当前保留策略）、`GET /api/applogs/export`（打包 zip）、`GET /api/applogs/:name`（尾部读取）、`GET /api/applogs/:name/download`、`DELETE /api/applogs/:name`、`POST /api/applogs/prune`（立即清理）。
+- **★ 路由注册顺序陷阱**：`/api/applogs/export` **必须注册在 `/api/applogs/:name` 之前** —— 否则 `"export"` 会被 Express 当成日志文件名匹配到 `:name` 分支。
+- **★ 文件名白名单（路径穿越防线）**：`LOG_FILE_RE = /^app-\d{4}-\d{2}-\d{2}\.log$/`，且 `resolveLogFile()` 内用 `path.resolve` 二次校验**严格落在 `LOG_DIR` 之下**；任一不满足返回 `null` ⇒ 路由层回 400/404。**不存在任何按用户输入拼路径的分支。**
+- **★ 尾部读取（内存与文件大小无关）**：只从文件**末尾**读 `TAIL_READ_BYTES = 2 MB`，再按行取后 N 行；`DEFAULT_TAIL_LINES = 500`、`MAX_TAIL_LINES = 5000`（路由层对 `req.query.tail` 做 `Number.isFinite && > 0` 兜底）。
+  - `headTruncated` **同时反映两种成因**：① 只读了文件末尾一段（`readTruncated`）② 行数超过 `tail` 被截掉（`linesTruncated`）⇒ `readTruncated || linesTruncated`。**这是 harness 抓出的真实缺陷**（首版只反映① ⇒ 150 行文件读末 20 行时不标记截断）。
+  - 只读末尾 ⇒ 若起点落在行中间，丢弃首行残片（`if (readTruncated) all = all.slice(1)`）。
+- **保留策略（天数 + 容量双上限，先到先清）**：`maxDays`（默认 **30** 天，`0` = 不限）+ `maxTotalMB`（默认 **500 MB**，`0` = 不限）。
+  - **★ 永不删除当天文件**（无论天数还是容量裁剪，最后一道保险）—— 正在写入的日志被删会丢当前会话日志。
+  - `startLogRetention()`：进程启动后 **10 秒**跑一次，之后**每 30 分钟**一次；`pruneLogs()` 同时暴露给「立即清理」按钮。
+- **删除保护**：`deleteLogFile()` 对**当天文件**直接拒绝（返回 `false` ⇒ 400），历史文件才允许删。
+- **zip 导出**：`EXPORT_MAX_BYTES = 128 MB` 总量上限（超出置 `partial: true` 并在归档内 `export-manifest.txt` 清单中标明），归档内含清单文件；下载响应结束后 `cleanupExport()` **自动删除临时文件**（`res.download(..., () => cleanupExport(outFile))`，异常分支同样清理）。
+- **★ 异步清理修复（HTTP 冒烟抓出的真实缺陷）**：`cleanupExport()` 原用 **`fs.rmSync(dir, { recursive: true })`** 递归同步删临时目录 —— 该函数挂在 `res.download` 的**完成回调**上，**同步递归删除会阻塞 Node 事件循环**。实测本机一次导出把服务**卡住 21,140 ms**（期间所有请求无响应，冒烟里 `GET /api/auth/init-status` 用了 **21,140ms**）。改为 **`fs.rm(dir, { recursive: true, force: true }, cb)`** 异步删除（清理属尽力而为，删不掉无副作用）。**探针对照证据**（同一台机器、同一目录形态）：
+
+  | 删法 | 调用处阻塞事件循环 | 实际删除完成 |
+  |---|---|---|
+  | `fs.rmSync(recursive)` | **21,301 ms** | 同上（同步） |
+  | `fs.rm(recursive)`（修复后） | **0 ms** | 133 ms 后回调 |
+
+  加固后同一冒烟复跑：慢请求 **1 → 0**，四项断言仍全绿。
+- **前端**：「应用日志」分区（图标 `FileText`）—— 日志列表（文件名 / 大小 / 修改时间）+ **尾部查看 Modal**（行数 500 / 1000 / 2000 / 5000 可选）+ 单文件下载 + 全量 zip 导出 + 「立即清理」+ 保留策略表单（开关 / 天数 / 容量）。
+
+#### 三、目录镜像（新增 `server/mirror.ts`，425 行）
+
+- **★ 语义＝真镜像（按用户拍板「同步删除（真镜像）」）**：目标**严格等于**源 —— 源里被删除的文件 / 目录**会同步从目标删除**。
+- **★ 因此目标路径做了严格校验**（`validateTarget()`，`TargetValidation`）：拒绝 ① 空 / ② 相对路径 / ③ 等于源 / ④ 在源内部（无限递归）/ ⑤ **是源的上级**（源被清空时会连带删掉源 —— 最危险的一种）/ ⑥ 文件系统根 / ⑦ 不可写（**建目录 + 写探针文件 `.dms-mirror-probe`** 实测，而非只看 `access()`）。校验不通过 ⇒ 拒绝启用，并把 `invalidReason` 透出到运行态（前端直接展示原因）。
+- **两个源**：`MirrorKey = "backups" | "compose"`（`LABELS` 分别给中文名），各自独立开关 + 独立目标路径。
+- **★ 同步触发＝watch 实时 + 兜底轮询（按用户拍板）**：`fs.watch(source, { recursive: true })` + **1 秒防抖**（`DEBOUNCE_MS`）；另有 **60 秒全量对账**（`POLL_MS`）兜底 —— 对账**幂等**，多跑无害。
+- **单次同步三步**：① **补目录**（类型冲突先删后建：源是文件而目标是目录等）② **增量复制**（复制后 `utimesSync` **回写 mtime** —— 否则下轮比对判定「变了」⇒ 每轮全量重拷）③ **真镜像删多余**（目标多出的文件/目录同步删除，目录按**深度倒序** `rmdirSync`，否则父目录非空删不掉）。
+- **增量判据**：`size` 相同 **且** `|mtimeMs 差| < 1000 ms` 视为未变（跨文件系统 mtime 精度差异不致误判）。
+- **并发保护**：同步进行中再次触发 ⇒ `schedule()` **排队重试**，不并发跑两轮（避免两个进程互相删对方刚复制的文件）。
+- `WALK_LIMIT = 500_000` 条目上限（`walk()` 返回 `Map<相对路径(POSIX 分隔), {dir,size,mtimeMs,atimeMs}>`，**目录键以 `/` 结尾**，符号链接跳过）。
+- **★ 统计口径**：`sourceFiles` / `targetFiles` **只计文件**（`!e.dir`），目录不计入 —— 首版把目录也计进去 ⇒ harness 报「源 4 / 目标 6」。
+- **两条路由**：`GET /api/mirror/status`（`getMirrorStatus()`）、`POST /api/mirror/sync`（`syncMirrorNow()` 立即全量对账，不等防抖 / 轮询）。
+- **运行态 `MirrorState`**：`key / label / source / enabled / target / valid / invalidReason / watcherActive（递归监听是否生效）/ syncing / lastSyncAt / lastDurationMs / lastError / copied / deleted / sourceFiles / targetFiles`。
+- **前端**：「目录镜像」分区（图标 `FolderOpen`）—— 两个源各一张卡（开关 + 目标路径输入 + 校验提示 + 运行态 + 「立即同步」按钮），**15 秒轮询**刷新运行态。
+
+#### 四、设置持久化与启动接线
+
+- **`server/settings.ts`**：`DEFAULT_SETTINGS` 新增两段 —— `mirror: { backups: { enabled: false, target: "" }, compose: { enabled: false, target: "" } }`（**默认全关**，绝不默认接管用户目录）、`logRetention: { enabled: true, maxDays: 30, maxTotalMB: 500 }`。
+- **二级合并**：`getSettings()` 对 `mirror.backups` / `mirror.compose` **各自**合并、`logRetention` 整体合并 ⇒ 旧配置文件缺这两段时**继承默认且不丢用户已有配置**。
+- **`server/index.ts`**：`PUT /api/settings` 内新增 `applyMirrorSettings()`（应用新配置：开启则建 watcher、关闭则停用；**失败只 `apiLog.warn` 不阻断保存** —— 设置必须能存下去）；`app.listen` 回调内新增 `startMirror()` 与 `startLogRetention()`（各带 try/catch，**任何一侧异常都不影响服务启动**）。
+- **`src/types.ts`**：新增 `MirrorTargetConfig` / `MirrorConfig` / `LogRetentionConfig` / `AppDirInfo` / `AppInfo` / `LogFileInfo` / `LogListResult` / `LogTailResult` / `LogPruneResult` / `MirrorRuntimeState` 共 10 个类型；`SystemSettings` 加 `mirror` / `logRetention`。
+- **`src/api.ts`**：新增 9 个封装 —— `fetchAppInfoApi` / `fetchAppLogsApi` / `fetchAppLogTailApi(name, tail=500)` / `downloadAppLogApi` / `exportAppLogsApi` / `deleteAppLogApi` / `pruneAppLogsApi` / `fetchMirrorStatusApi` / `syncMirrorNowApi`（下载一律走既有 `downloadAsBlob()`，**不用 `<a href="/api/...">` 导航**）。
+
+#### 五、并入 v1.36.1：全站曲线平滑（PCHIP）
+
+- 见下方 v1.36.1 段落（`src/components/LineChart.tsx` 新增 `smoothPathD()` 与 `smooth` 默认 `true`，全站 8 处图表零改动生效，过冲实测 **0.000000 px**）。
+
+#### 六、全站密码框「小眼睛」：显示 / 隐藏明文（9 个框 / 3 个页面）
+
+> **追加指令（逐字）**：「登陆页面输入密码 密码框设置小眼睛可以显示密码。」
+
+- **版本号说明**：本次是 **UI 交互小改动**（按规则本应升 Patch 到 `1.37.1`），但 **v1.37.0 从未出包** ⇒ 不存在「同版本重出包」冲突，故**并入 v1.37.0 一次性发布**，不单独占一个版本号。
+- **第一步只做登录页 3 个框**（用户原始指令只点名登录页）：登录密码 + 重置密码的「新密码 / 确认新密码」（`RecoveryForm` 与登录页同一组件内切换）。
+- **用户随后拍板扩到全部密码框**（两项都选：「首次设置/账号重设向导」+「设置页改密码对话框」）⇒ 最终覆盖 **9 个密码框 / 3 个文件**：
+
+  | 页面 | 文件 | 密码框 | 锁图标 |
+  |---|---|---|---|
+  | 登录页 | `src/components/auth/LoginPage.tsx` | 登录密码 + 新密码 + 确认新密码 = **3** | 有（原有） |
+  | 首次设置 / 账号重设向导 | `src/components/auth/SetupWizard.tsx` | 密码 + 确认密码 = **2** | 有（原有） |
+  | 设置页（改密码对话框 + 找回码重设） | `src/pages/Settings.tsx` | 原密码 + 新密码 + 确认新密码 + 当前密码 = **4** | **无**（原本就没有，见下） |
+
+- **★ 提为跨页共享组件 `src/components/PasswordInput.tsx`（新增）**：第一步它只是 `LoginPage.tsx` 内的局部函数；扩到三个页面时**必须提取**——否则第二个页面就会复制一份，第二份就没人维护（小眼睛可用性会「改一处漏两处」）。左侧锁图标 + 右侧小眼睛，`type={visible ? "text" : "password"}`，图标按状态在 `Eye` / `EyeOff` 间切换（沿用项目既有写法，见 `ActivityPanel.tsx` 的设备标识显示/隐藏）。
+- **`lockIcon` 开关（默认 `true`）**：设置页那 4 个框**原本就没有锁图标**（`<Input type="password">` 裸用），若统一加上会凭空多出 `pl-9` 缩进、改变对话框观感 ⇒ 这 4 处显式传 `lockIcon={false}`，只加小眼睛、**不动既有布局**。
+- **九个显示状态各自独立**：`showPassword` ×3（登录密码 / 向导密码 / 设置页当前密码）、`showNew` ×2、`showConfirm` ×3、`showOld` ×1 —— **初值一律 `false`**（默认掩码，**绝不默认亮明文**）；**同一组件内不共用状态**（否则点一个眼睛会连带影响同框的其它密码框）。
+- **四个必须做对的实现细节**：
+  - ★★ `type="button"` **必须显式给** —— 三个页面都嵌在原生 `<form onSubmit>` 里，按钮默认 `type` 就是 `submit`；漏写的话**点小眼睛等于立刻提交表单**（登录页会在密码还没输完时就发出去）。已列为门禁断言。
+  - ★ `onMouseDown={(e) => e.preventDefault()}` —— 阻止默认行为，避免点击时焦点被按钮抢走，用户可**继续在输入框里打字**（光标位置不丢）。
+  - ★ 右侧留白 `pr-9` —— **明文不会压在小眼睛图标下面**（左侧 `pl-9` 仅在 `lockIcon` 为真时才有）。
+  - ★ `aria-label` / `title` 随 `visible` 在「显示密码 / 隐藏密码」间切换（无障碍 + 悬浮提示）。
+- **门禁加固**（本次把该行为锁进已有门禁，不是新起脚本）：
+  - `scripts/check-auth-render.mjs` 新增 **E 组 11 条**（SSR 渲**真身** `LoginPage` + `SetupWizard` 的 create / reinit 两态）：登录页 1 个 + 向导各 2 个掩码密码框、对应小眼睛按钮数、**全部 5 个按钮都是 `type="button"`**（任一不是即红）、`title` 在位、`pr-9` / `pl-9` 内边距、负向「初始渲染不含『隐藏密码』」。
+  - `scripts/check-auth-wiring.mjs` 新增 **第 12 组 37 条**（AST 源码级，覆盖 SSR 渲不到的 `RecoveryForm` 与整页 `Settings`）：共享组件带 `export`、`type` 由 `visible` 驱动、内边距按 `lockIcon` 分支、**`lockIcon` 默认 `true`**、按钮 `type="button"`、`aria-label` 双态、`onClick → onToggle`、`onMouseDown` 含 `preventDefault`、`EyeOff`/`Eye` 双图标；**跨文件复用契约**（三个文件各自 `import` + 调用点数 3/2/4 = **9**、每点各传 `visible`+`onToggle`、**同一组件内 `visible` 互不相同**、各状态齐备且初值全 `false`）；**负向**「`LoginPage` / `SetupWizard` / 设置页改密码两组件内均无硬编码 `type="password"` 的 `Input`」＋「设置页 4 处显式 `lockIcon={false}`」。
+- 涉及文件：**新增** `src/components/PasswordInput.tsx`；**改** `src/components/auth/LoginPage.tsx`、`src/components/auth/SetupWizard.tsx`、`src/pages/Settings.tsx`、`scripts/check-auth-render.mjs`、`scripts/check-auth-wiring.mjs`。
+
+#### 七、通知真正落地：Webhook + 邮件（补上缺失的消费端）
+
+> **触发提问（逐字）**：「Webhook 通知和邮件通知是真的吗」。
+
+**查证结论：两个都是装饰。** `webhookEnabled`/`webhookUrl` 与 `emailEnabled`/`emailSmtp`/`emailPort`/`emailUser` **只存在于** `server/settings.ts` 默认值、`settings.json` 落盘、`Settings.tsx` 的输入框与保存前校验、`types.ts` —— **后端没有任何一处读取它们去发请求**；`package.json` 无任何邮件依赖；配置结构里**连 `emailPassword` 字段都没有**，UI 上那个密码框是 `value=""` + `onChange={() => {}}` 的**死输入框**。本次把消费端补齐。
+
+- **新增 `server/notify.ts`（约 300 行）** —— 统一入口 `notify(payload)`（**永不抛错**、fire-and-forget，按 `settings.notifications.events.<key>` 过滤，按 `dedupKey` 在 10 分钟 TTL 内去重降噪）：
+  - **Webhook**：`fetch` POST JSON，8 秒超时（`AbortSignal.timeout`）；配了密钥则带 **`x-docker-manager-signature: sha256=…`**（`node:crypto` 内置 HMAC，**零额外依赖**），接收方可验签防伪造。
+  - **邮件**：**nodemailer 10.0.14**（新增依赖）。465 走隐式 TLS，其余端口由 nodemailer 按服务端能力协商 STARTTLS；15 秒连接/问候/套接字超时。
+  - **★ 选型依据**：先验证 **esbuild 能否把它打进 SEA bundle**（`build-binary.mjs` 走 `platform=node` + `format=cjs`）—— 实测 **exit 0、无告警、+约 400 KB**，故选成熟库而非自研 SMTP 客户端（协议边界情况多，且自研无法在本机离线验证）。
+  - **★ 循环依赖的坑**：`docker.ts` 要发「更新完成」通知，而容器巡检又需要 `docker.ts` 的 `getContainers()` ⇒ 直接互相 import 成环。**断开办法**：把取数函数**注入**（`startContainerWatch(fetchTargets)`），由 `index.ts` 组装并传入。
+- **四个事件的触发源**：
+
+  | 事件 | 触发点 | 说明 |
+  |---|---|---|
+  | `containerDown` | **新增** `startContainerWatch()`：启动后 30 秒跑首轮、之后每 60 秒 | ★ **后端原本没有任何容器状态变化检测**，本次新增「快照 diff」：只在「运行中 → 非运行中」转变时通知，首轮只建基线不发；引擎取数失败时**不更新基线**，下轮继续比对；优先巡检活跃引擎、最多 3 个 |
+  | `updateAvailable` | `scheduler.checkEngineImages()` | **只对本次新出现的更新发**（对比上次缓存），否则每天/每小时的重复检查会把同一条更新反复推成骚扰 |
+  | `updateComplete` | `docker.ts` 新增 `finishPullSuccess()` | ★ 本地 CLI / 远程 CLI / dockerode API **三条拉取路径原本各自内联同样的三行**，任何新增路径都可能漏发或重复发 ⇒ **统一收口**到 helper，门禁断言裸写只剩 1 处 |
+  | `buildFailed` | **无触发源** | ★ 本项目**没有镜像构建功能**（`buildImageRef` 只是拼镜像名），开关保留但**显式标注「暂无触发源」**（后端 `EVENTS_WITHOUT_SOURCE` + 前端 UI 说明），不假装可用 |
+
+- **配置字段补齐**（`server/settings.ts`）：新增 `webhookSecret` / `emailPassword` / `emailFrom` / `emailTo`；★ 并给 `notifications` 段**补上二级合并** —— 此前 `getSettings()` 里 `...parsed` 会让旧 `settings.json` **整段取不到新增字段**（前端拿到 `undefined`、输入框失控、通知模块读不到）。
+- **前端修掉历史死输入框**（`src/pages/Settings.tsx`）：SMTP 密码改绑真实 `emailPassword` + 复用 `PasswordInput`（带小眼睛、显式 `type="button"` 不会误提交）；补「发件人 / 收件人 / Webhook 签名密钥」；保存前校验补「密码必填 / 收件人必填」；新增「**发送测试通知**」按钮（★ **先保存再发**，且 `handleSave()` 改为返回 `boolean`，校验没过就中止 —— 否则会拿旧配置去发，表现为「测试失败」但配置其实是对的）；`buildFailed` 行内标注无触发源。
+- **两个新接口**：`POST /api/notify/test`（force，忽略开关与去重）、`GET /api/notify/status`（两通道是否配齐 + 无源事件列表）。
+- **安全取舍（诚实记录）**：SMTP 密码与 Webhook 密钥**明文存于本机 `settings.json`**（本项目不提供密钥加密存储），UI 上已就此给出提示；**密钥绝不进日志**；通知失败只写日志，**绝不影响容器启停 / 镜像拉取等主流程**。
+- 涉及文件：**新增** `server/notify.ts`、`scripts/check-notify-wiring.mjs`；**改** `server/settings.ts`、`server/index.ts`、`server/docker.ts`、`server/scheduler.ts`、`src/types.ts`、`src/api.ts`、`src/pages/Settings.tsx`、`package.json`（新增 `nodemailer` 依赖 + `lint:notify` 门禁并入 `test:gates`）。
+
+#### 八、镜像拉取进度弹窗：完成后自动关闭
+
+> **追加指令（逐字）**：「拉取进度弹窗没有自动关闭，加入自动关闭」。
+
+- **改动**：`src/pages/Images.tsx`。拉取任务进入终态后**倒计时 5 秒自动关闭弹窗**，并刷新镜像列表（此前无论成功失败都必须手点「关闭」）。
+- **★ 失败态刻意不自动关**：`error` 时弹窗里有**失败原因**和**「重试」按钮**，自动关掉等于把用户刚要看的错误收走、还得重新拉一次。规则抽成纯函数 `shouldAutoClosePullModal(status)` 便于断言：
+
+  | 任务状态 | 是否自动关闭 | 理由 |
+  |---|---|---|
+  | `success` 拉取成功 | ✅ 关（5 秒） | 结果不会丢：左侧任务列表仍显示该任务状态，关闭时还会 `onRefresh()` 刷新镜像列表 |
+  | `canceled` 已取消 | ✅ 关（5 秒） | 用户主动取消，没有需要阅读的信息 |
+  | `error` 拉取失败 | ❌ **不关** | 保留失败原因与「重试」入口 |
+  | `pulling` / 空 / 未知 | ❌ 不关 | — |
+
+- **不搞「突然消失」**：关闭前在按钮左侧显示「N 秒后自动关闭」（`tabular-nums` 不抖动），并提供「**立即关闭**」。
+- **手动与自动关闭走同一个 `closePullModal()`**（`useCallback`）——原先关闭逻辑是内联在 `onClick` 里的，现在自动关闭复用同一条路径，避免两处漂移。
+- **★ 用「关闭时刻戳」而非「递减计数器」驱动**：`setAutoCloseLeft((n) => … closePullModal())` 这类写法把副作用放在 `setState` 更新函数里，**React 严格模式下更新函数可能被调用两次** ⇒ 关闭与 `onRefresh` 会重复执行。改为「effect ① 设定 `autoCloseAt` 时间戳 + effect ② 每 500ms 算剩余秒数、归零后关闭」。
+- **★ effect 依赖刻意不含 `autoCloseLeft`**：否则倒计时每跳一次就重建定时器，**永远走不到 0**（这类 bug 表现为「就是不自动关」，很难查）。两个 effect 分别只依赖「是否进入终态」与「关闭时刻」。
+- 涉及文件：`src/pages/Images.tsx`。
+
+#### 九、通知密钥安全加固：加密落盘 + 不回传前端 + env 覆盖
+
+> **触发提问（逐字）**：「SMTP 密码与 Webhook 密钥明文存于本机 settings.json，能加密吗？」
+
+**先说清楚「加密」的能力边界**（已同步写入设置页界面与 `server/secret-store.ts` 文件头）：加密防的是**文件被误传**（误提交 git、被备份/打包带走、被贴进日志或工单），**防不住已经能读本机 `CONFIG_DIR` 的人** —— 主密钥必然与密文在同一台机器上。所以本版按性价比做了四件事，**加密排在最后**。
+
+- **① 堵住 git 泄漏（本次最急的真实风险）**：查证发现 `server/settings.json` 与 `server/config/settings.json` **被 git 跟踪且未被忽略**（来自初始提交，权限 644），而 `.gitignore` 虽已忽略 `.env` / `.env.*` / `_*.json`，**偏偏漏了 `settings.json`** ⇒ 只要在开发机填入真实 SMTP 密码，`git add` 就会提交、并由推送脚本推到 GitHub + Gitea（当前值为空，尚未泄漏）。处理：`git rm --cached` 移除跟踪（**磁盘文件保留**）+ `.gitignore` 增加裸名 `settings.json`（`APP_DIR = process.cwd()`，从仓库根或 `server/` 启动会写不同路径，裸名一次覆盖）+ `saveSettings` 落盘时用 `mode: 0o600` 收紧权限（Windows/NTFS 无 POSIX 权限位，Linux 才真正生效）。
+- **② 密钥不回传前端**：`GET /api/settings` 与 `PUT` 的**响应**统一走新增的 `redactSettings()` —— 两个密钥字段回空串，另给 `emailPasswordSet` / `webhookSecretSet` 布尔标志。前端据此显示「已设置（加密存储）· 留空 = 保持不变」。**密钥从此只写不读**。
+- **③ 密钥三态语义**（新增 `SECRET_CLEAR = "__CLEAR__"` 哨兵，前后端各一份、门禁断言两边一致）：提交时该字段 `""` ⇒ **保持原值**、`__CLEAR__` ⇒ 清除、其它 ⇒ 新明文。界面在「已设置」时多一个「清除」按钮（否则留空无法区分「不改」与「清空」）。
+- **④ AES-256-GCM 加密落盘**（新增 `server/secret-store.ts`）：主密钥 32 字节随机存 `config/secret.key`（`mode: 0o600`），密文格式 `enc:v1:<iv b64>:<tag b64>:<密文 b64>`。
+  - **GCM auth tag 随密文存储** ⇒ 任何篡改都会解密失败（不会被静默接受），实测把密文首字节翻转后 `decryptSecret` 返回空串。
+  - **历史明文向后兼容**：无 `enc:v1:` 前缀的值原样返回 ⇒ 老配置无需迁移，首次保存时自动转为密文。
+  - **幂等**：已加密值不再二次加密（「留空保持」语义依赖这一点）。
+  - **失败降级不崩**：主密钥不可写 ⇒ 加密失败只告警并按明文保存；解密失败（密钥丢失/换机/密文被改）⇒ 返回空串并告警，**保证设置页仍能打开、用户能重新填写**（否则连补救入口都没了）。
+- **⑤ 环境变量覆盖**：`DMS_SMTP_PASSWORD` / `DMS_WEBHOOK_SECRET` **优先于** `settings.json`（沿用项目 `UPDATE_GITEA_BASE` 等 env 覆盖先例）。systemd 可放 `EnvironmentFile=/etc/docker-manager-yanzi/secrets.env`（0600 仅 root 可读）⇒ **密钥根本不落 app 配置目录、也不进备份包**。`/api/notify/status` 新增 `secretSource`（`env`/`file`/`none`）与 `secretsEncrypted`，界面显示「已由环境变量 X 覆盖 —— 这里的设置会被忽略」（只读提示）。
+- **界面**：新增「密钥存储方式」卡片，把上述能力**与边界**如实写进 UI（含「主密钥丢失/换机后密文无法解密，需重填」的提醒）。
+- 涉及文件：**新增** `server/secret-store.ts`、`scripts/check-secrets.ts`；**改** `server/settings.ts`、`server/index.ts`、`server/notify.ts`、`src/types.ts`、`src/pages/Settings.tsx`、`.gitignore`、`package.json`（新增 `test:secrets` 并入 `test:gates`）；**`git rm --cached`** `server/settings.json`、`server/config/settings.json`。
+
+### 验证（全部实测）
+
+- **类型检查**：`npx tsc -p server/tsconfig.json --noEmit` **exit 0**、`npx tsc --noEmit`（前端）**exit 0**。
+- **门禁 `npm run test:gates`**：**exit 0** —— `lint:hooks` + `test:auth`（24/0 & 29/0）+ `test:restart`（18/0）+ `test:thermal`（15/0）+ `test:install`（34/0），合计 **120 项 PASS / FAIL 0**（v1.37.0 未触碰门禁覆盖面，属**无回归**确认）。
+- **★ 真实文件系统 harness（`.tmp-harness.ts`，14 段 / PASS=70 FAIL=0 / exit 0）**：先 `process.env.DATA_DIR / LOG_DIR / CONFIG_DIR` 指向**唯一沙箱目录**再**动态 import** 业务模块（保证模块读到沙箱路径），跑真实 `fs` 而非桩：
+  - §② 镜像目标路径校验：**5 类非法目标**（空 / 相对 / 等于源 / 在源内部 / 是源上级）全部被拒。
+  - §③ 默认状态：两个源 `enabled` 均为 `false`。
+  - §④~⑦ 镜像核心：首次全量同步（`首次复制 4 个文件（实得 4）`）、**幂等**（无变更不重拷）、**增量**（新增 / 修改）、**★ 真镜像删除**（源删 ⇒ 目标同步删，`源删除的文件在目标已删除`）。
+  - §⑧ **真实 `fs.watch` 事件触发**（`await sleep(2500)` 等真实内核事件，非合成调用）。
+  - §⑩~⑭ 日志：**文件名白名单穿越防线**（非法名称一律 `null` / 拒绝）、列表与尾部读取（`tail=20` 恰好 20 行、末行是最新行、`tail` 超总行数返回全部、不存在文件返回 `null`、**短文件整读不标记截断**、150 行文件读末 20 行**正确标记 `headTruncated`**）、**当天文件禁止删除**（历史文件允许、非法名称拒绝）、保留策略**天数裁剪**（删 2 个超期、当天文件未被删、未超期保留）与**容量裁剪**（删 4 个、文件数 5→1、**当天文件在容量裁剪下依然保留**、策略关闭 ⇒ `skipped=true` 且不删任何文件）、**zip 导出**（含 1 个文件、`partial=false`、**PK 魔数 `504b`**、含 `export-manifest.txt` 清单、**导出临时目录已清理**）。
+  - 日志实证（harness 真实输出）：`[Logs] 已删除日志文件：app-2026-09-01.log`、`[Logs] 日志保留策略已清理 2 个文件，释放 2002 字节（保留 30 天 / 0 MB）`、`[Logs] 日志保留策略已清理 4 个文件，释放 15032 字节（保留 0 天 / 0.0001 MB）`。
+- **★ HTTP 层端到端冒烟（`.tmp-route-smoke.mjs`，真实 Express + 真实 HTTP + 唯一沙箱）**：**PASS=60 FAIL=0 · exit 0**（32 个请求，慢请求 0）。这是 harness（模块层）**覆盖不到的路由接线**验证：
+  - §① 服务就绪 + `POST /api/auth/init` 建首个账号并拿到会话 Cookie。
+  - §② 应用详情：`version=0.0.0-dev` / `channel=dev`（开发态未注入 `__APP_VERSION__`）/ `pid` 为正整数 / **六个目录 key 齐全** / `data`·`logs`·`compose`·`backups` 四条路径**逐一比对等于沙箱** / `uptimeSeconds` 为正。
+  - §③④⑤ 日志：列表（1 个文件、`totalBytes=195`、`retention={enabled:true,maxDays:30,maxTotalMB:500}`）。
+  - **§④ ★ 路由注册顺序的区分性断言**：`GET /api/applogs/export` 返回 **zip（PK 魔数 `504b`）** + `Content-Disposition: attachment; filename="docker-manager-logs-2026-10-05-03-15-39.zip"` —— 若被 `/:name` 吞掉会返回 JSON「日志文件不存在或名称非法」，**两者不可能混淆**；同时 `GET /api/applogs/app-1999-01-01.log` 仍是 404「不存在或名称非法」⇒ `:name` 分支未被破坏。
+  - §⑤ 尾部读取与白名单：默认读取成功、`tail=3` ≤3 行、`tail=999999` 不报错（夹到 5000）、`tail=abc` 回退默认；`settings.json` / `app-2026-1-1.log` / `app-2026-01-01.log.bak` / `%2e%2e%2fsettings.json` **四种非法名全部 404**。
+  - §⑥⑦ 删除保护与清理：当天文件 `DELETE` → 400 且磁盘文件仍在；`POST /api/applogs/prune` → `{removed:[],freedBytes:0,skipped:false}` 且当天文件幸存。
+  - §⑧⑨ 镜像：默认 `enabled` 全 false、`key` 顺序 `backups,compose`、源路径等于沙箱；`PUT /api/settings`（**原样落盘**，故回传完整设置对象）后 `enabled=true` / `valid=true` / `watcherActive=true`（`fs.watch` 递归真挂上）/ 文件真被复制；**★ 源删 ⇒ 目标同步删**（走 watch 实时路径）；**★ 把目标设成「源的上级」⇒ `valid=false`** 且原因文案「目标路径不能是源的上级（真镜像会连带删除源）」、源目录安然无恙；关闭后 `watcher=false`；`logRetention` 新值（7 天）持久化并回读一致。
+  - §⑩ 鉴权守卫覆盖 5 条新路由（无会话一律 401）。
+  - 坑：① **tsx 会再 fork 子进程** ⇒ `child.pid` 不是服务进程 pid（首轮据此误报 FAIL，已改为断言「正整数且 ≠ 脚本自身 pid」）；② **`res.download` 会关闭连接** ⇒ 客户端必须 `Connection: close` + 失败重试，否则下一请求 `fetch failed`（首轮即因此中断，`cause` 才暴露真相）。
+- **静态接线审计（防「元素有 UI 但没接事件」）**：10 个处理器（`loadAppInfo` / `copyDirPath` / `loadLogs` / `openTail` / `handleExportLogs` / `handleDownloadLog` / `handleDeleteLog` / `handlePruneLogs` / `loadMirror` / `handleMirrorSyncNow`）**全部既定义又被引用**；9 个 API 封装在 `Settings.tsx` **全部被真实调用**（非仅 import）；定位到 **11 处 JSX 事件挂载点**（含 Modal 内的「重新拉取 / 下载」）。
+- **★ 密码框小眼睛专项**：`npm run test:auth` **exit 0** —— 渲染门禁 **35/0**（原 24/0，**+11**）、接线门禁 **66/0**（原 29/0，**+37**）；`lint:hooks` **45 文件** PASS（新增了 `PasswordInput.tsx`）；前端 `tsc --noEmit` **exit 0**；`dist/` 删掉重建 **VITE_EXIT=0**（当前资产 `assets/index-B99UcHQ-.js` **1,104,010 B** / `index-B87aS4CO.css` 47,666 B；CSS 哈希与上轮**完全一致** ⇒ 样式零变化，符合「只加开关不动观感」的预期；js 内 `"1.37.0"`×1、`显示密码`×2 / `隐藏密码`×2 ⇒ **确证已进包**）。
+  - **★ 负向自检（两道门禁各自独立抓红）**：把共享组件的 `type="button"` 注入回归为 `type="submit"` ⇒ 渲染门禁 **PASS 34 / FAIL 1 · `exit 1`**（回显 `共 5 个，异常 5 个：<button type="submit" aria-label="显示密码" …>`）；单独跑接线门禁 **PASS 65 / FAIL 1 · `exit 1`**（`<<< submit`）—— 证明这两条断言**不是摆设**。`cp` 还原后 `cmp` **逐字节一致**，两门禁回到 **35/0 + 66/0 · `exit 0`**。
+  - **★ 交付物**：`renderToStaticMarkup` 渲**真身组件** + 内联**本次真实构建 CSS** 产出静态快照 `.workbuddy/artifacts/v1.37.0-登录页小眼睛.html`（登录页 + 首次设置向导两屏，8 项自检全过）—— 不是手绘示意图。
+- **★ 通知双通道（Webhook + 邮件）**：
+  - **真实发送 e2e（`.tmp-notify-test.ts`，9 节 / **PASS=43 FAIL=0 · exit 0**）** —— **桩 SMTP 服务器 + 桩 Webhook 接收端，真发真收**：
+    - SMTP 走完 `EHLO → AUTH LOGIN → MAIL FROM → RCPT TO → DATA → QUIT` 真实对话；**用户名 / 密码都真的送到了桩端**；两个收件人都在；发件人用配置的 `emailFrom`。
+    - 邮件主题解码后为 `[更新完成] 镜像已更新：nginx:latest — yanzi14s`（nodemailer 用 **Q 编码 + 折行**，断言前须展开折行并按 RFC 2047 解码）；正文含镜像名；**★ 密码未出现在邮件内容里**（只用于认证）。
+    - Webhook 桩收到 JSON，`event`/`eventLabel`/`title`/`summary` 逐项核对；**★ 签名头用同一密钥重算 HMAC 比对一致**（不是只看有没有这个头）。
+    - 事件开关关闭 ⇒ **两通道都跳过且确实没发出去**；同 `dedupKey` 第二次被去重、不同 key 正常发；缺收件人 / 缺 URL ⇒ 跳过而非报错；Webhook 指向不可达地址 ⇒ **记 failed 但不抛错**。
+    - 容器状态 diff：**首轮只建基线不发**、`running→exited` 触发 1 条、标题含容器名（去掉前导 `/`）、明细含容器 ID 与状态、**状态无变化不再发**。
+  - **新增门禁 `scripts/check-notify-wiring.mjs`（`lint:notify`，已并入 `test:gates`）：34/0** —— 覆盖消费端存在、四个事件各有触发源（`buildFailed` 必须显式标注无源）、三条拉取路径收口（裸写只剩 1 处）、事件开关真被读、**负向「死输入框」**、敏感字段绑真实 state、`notifications` 段二级合并、密钥不进日志、`notify()` 不抛错、测试端点与「先保存再发」。
+  - **★ 负向自检**：把 SMTP 密码框改回历史形态 `<Input value="" onChange={() => {}} …/>` ⇒ 门禁 **31/3 · exit 1**，并回显命中代码。**这次自检还当场暴露了我自己断言的 bug**：负向正则写的是匹配 `value={""}`，而 JSX 实际是 `value=""`（字符串字面量）⇒ **门禁当时漏检**，修正为两种写法都匹配后才真正抓红。还原后 `cmp` 逐字节一致 ⇒ 回到 **34/0**。
+  - **★ 小眼睛门禁反向生效**：全量门禁时它抓到「设置页 4 个密码框」的**硬编码计数漂移**（接入 SMTP 密码后变 5 个）⇒ 说明这类「写死个数」的断言确实在起作用，已更新为 5 并复跑通过（35/0 + 66/0）。
+  - **选型验证**：nodemailer 能否被 SEA 打包**先验证再写码** —— esbuild（`platform=node` + `format=cjs`）**exit 0、无告警、+约 400 KB**，`createTransport` 可用。
+- **★ 密钥存储链路（新增门禁 `npm run test:secrets`，已并入 `test:gates`）：PASS=40 / FAIL=0 · exit 0**（零网络；固定沙箱 `.tmp-secrets-check/`，起步清理避免常驻门禁堆积目录）：
+  - 加解密往返、密文不含明文片段、两次加密结果不同（IV 随机）、**幂等**（已加密不再二次加密）、**历史明文原样返回**（老配置无需迁移）。
+  - **★ GCM 篡改检测**：把密文首字节翻转后 ⇒ `decryptSecret` **不抛错且返回空串**（auth tag 校验失败），格式非法的密文同样返回空串。
+  - **三态语义（走真实 `saveSettings` 落盘）**：落盘文件**不含明文**且含 `enc:v1:`；留空提交 ⇒ **密码/密钥保持原值**；传新值 ⇒ 覆盖且落盘仍无明文；传 `__CLEAR__` ⇒ 清空。
+  - **响应脱敏**：`redactSettings()` 后两个字段为空串、**脱敏对象里不含任何明文密钥**、以 `emailPasswordSet` / `webhookSecretSet` 替代；`saveSettings` 的返回值同样脱敏（PUT 响应不漏）。
+  - 主密钥 32 字节、内容非明文、平台为 Linux 时校验 0600（Windows 跳过并打印原因）。
+  - env 覆盖优先级（设了 env ⇒ 来源 `env`；未设 ⇒ 回落 `file`；都无 ⇒ `none`）。
+  - **跨文件契约**：前端 `SECRET_CLEAR` 与后端 `SECRET_CLEAR` **逐字一致**；`.gitignore` 已忽略 `settings.json`。
+- **★ 密钥链路负向自检（两次注入，各自还原）**：
+  1. **关掉加密**（`saveSettings` 跳过 `encodeSettings`）⇒ 门禁 **36/4 · exit 1**（「落盘无明文」×2、「落盘是密文」、「覆盖后仍无明文」全红）。
+  2. **关掉脱敏**（删掉 `redactSettings` 里把密钥置空的那行）⇒ 门禁 **36/4 · exit 1**（四条 ★★ 关键断言全红）。
+  - ★ **第一次注入脱敏时曾得到「假通过」**：我只改了 `return` 语句、没删「置空」那行 ⇒ 实际并未泄漏明文，门禁不报是**正确行为**。教训：**注入要注入到行为真正退化的那一行**，否则会拿到误导性的「门禁有效」结论。
+- **★ 两处门禁模型漂移（由实现演进而非缺陷引发，均当场抓红）**：① `lint:notify` 里「SMTP 密码直接用 `<PasswordInput … emailPassword>`」的断言在改用 `SecretField` 包装后失效；② `test:auth` 的密码框统计把 `SecretField` 内那个**透传**（`visible`/`onToggle` 来自 props）也算成了「绑定具体状态」。两处都按新结构精确化：**排除 wrapper 透传**（合计 9 个具体状态调用点）+ 新增 3 条专测 `SecretField` 与其 2 个调用点的断言。
+  - **覆盖边界（诚实说明）**：`renderToStaticMarkup` 只渲初始态（永远掩码），**「点一下变明文」这一步无 DOM 环境无法端到端验证**（本机无 jsdom / react-test-renderer / happy-dom，且官方 npm 源不稳）。该链路改由源码级断言覆盖：`visible` → `type` → `onClick → onToggle` → `setShowX(v => !v)` 四环全部被 AST 断言锁住；React 自身的事件派发不属于本仓代码。
+- 涉及文件：**新增** `server/appinfo.ts`、`server/applogs.ts`、`server/mirror.ts`；**改** `server/index.ts`、`server/settings.ts`、`src/types.ts`、`src/api.ts`、`src/pages/Settings.tsx`（3496 → **4116** 行）、`src/components/LineChart.tsx`（并入 v1.36.1）、`package.json`（version → `1.37.0`）、`docs/CHANGELOG.md`。
+
+### 未完成 / 已知限制
+
+- **日志内容一字未动**（按用户拍板「只做功能，不动日志内容」）：本次**只提供「看 / 导出 / 清理」的能力**，不新增、不修改任何日志点。因此——`server/docker.ts`（引擎层，4234 行）**一处日志都没有**；路由层 `server/index.ts` 已有 **38 处** API 日志（容器启停 / 删除、镜像删除 / 拉取 / 导入导出 / 锁定、数据卷创建 / 删除 / 清理、Docker 服务重启、日志级别），**未覆盖的写操作仍有：堆栈、网络、容器文件管理、镜像构建、登录**。
+- **镜像不做冲突合并**：真镜像语义下，目标侧独立新增的内容会被删除（这是「真镜像」的定义，非缺陷）；若想要「双向合并 / 只增不删」，属于另一套语义，需另行确认。
+- **镜像首轮为全量**：目标为空时首次全量复制；备份目录很大时首轮耗时较长（运行态已显示文件数与字节数，但**没有进度条**）。
+- **`fs.watch` 递归在 Linux 依赖 inotify 上限**：超大目录树 + 偏低的 `fs.inotify.max_user_watches` 时，递归监听可能失效 ⇒ **退化为只靠 60 秒轮询兜底**（功能不丢，实时性下降）。运行态 `watcherActive` 已把「递归监听是否生效」透出到界面。
+- **目录占用为抽样值**：`MAX_ENTRIES = 200_000` 上限内统计，超出时 `truncated: true`（界面据此提示「仅统计部分」）；30 秒缓存 ⇒ 刚写入的文件可能未立刻反映。
+- **`mirror.ts` 的类型冲突删除仍是同步的（已知，未改）**：`syncKey()` 在「目标同名项是目录、而源是文件」时用 `fs.rmSync(absTarget, { recursive: true, force: true })` 整棵删。它在 `fs.watch` / 60 秒轮询的后台路径上执行，**不影响用户请求**；触发条件苛刻（同一相对路径上源是文件、目标是目录），且该目录本就不该存在（体积通常极小）。做成异步需把整条已验证的同步流水线改为 async，风险大于收益 ⇒ **本次不动，仅记录**。日志侧同类的 `rmSync` 已改异步（见上文）。
+- **设置页「通知 → SMTP 密码」框未加小眼睛（既存问题，非本次范围）**：`Settings.tsx` 通知卡片里那个「密码」是 `value=""` 硬编码 + `onChange={() => {}}` 的**死字段**（SMTP 密码从未接线，输什么都没用）⇒ 加小眼睛只是装饰一个不工作的输入框，故**保持原样**并在此记录。
+- **通知密钥的防护边界（不是「全好了」）**：SMTP 密码与 Webhook 签名密钥现在**加密落盘**（AES-256-GCM）且**不回传前端**，但这**不等于「密钥安全了」**——加密只防「文件被误传」（误提交 git / 被备份带走 / 被贴进工单），**防不住已经能读本机 `CONFIG_DIR` 的人**：主密钥 `secret.key` 就在同目录。真正的防线是文件权限（已收到 0600，**Linux 生效、Windows/NTFS 无 POSIX 权限位故不生效**）与最小账号权限。
+- **主密钥丢失或换机 ⇒ 密文无法解密**：`config/secret.key` 不在备份包内（也不该进），把 `settings.json` 恢复到另一台机器后这两个密钥会解不开 ⇒ `decryptSecret` 返回空串并告警，需**重新填写**。这是加密的固有代价。
+- **env 覆盖的副作用**：设了 `DMS_SMTP_PASSWORD` / `DMS_WEBHOOK_SECRET` 后，界面上的输入框会被忽略（已显示「已由环境变量 X 覆盖」只读提示），但**不会**阻止用户继续输入 —— 属于提示而非硬约束。
+- **★ `buildFailed` 开关无触发源**：本项目**没有镜像构建功能**，该事件不会触发（后端 `EVENTS_WITHOUT_SOURCE` + 界面行内标注）。保留开关仅为将来兼容，**不假装可用**。
+- **通知去重窗口 10 分钟**：同一 `dedupKey`（如同一容器停止）在 10 分钟内只推一次，避免容器反复重启时把通知刷爆；代价是 10 分钟内的重复事件第二次不推。
+- **容器状态巡检的边界**：每 60 秒拉一次容器列表（最多 3 个引擎，优先活跃引擎），**最短检测延迟约 60 秒**；运行时间极短的容器（< 60 秒）可能完全错过。引擎取数失败时不更新基线，等下轮继续比对（不会误报）。
+- **未出 SEA 包、未发布**（`package.json` 已置 `1.37.0`；`dist/` **已删掉重建**，当前资产 `assets/index-*.js` / `index-*.css`，版本串 `"1.37.0"`×1；**新增 nodemailer 依赖后尚未走过 `scripts/build-binary.mjs` 的完整 SEA 打包与真包冒烟**，出包时需一并验证）。
+
+### 下一步
+
+- 出包前：删 `dist/` 重跑 `vite build`（版本串需重新嵌入），再走 `scripts/build-binary.mjs` 的 SEA 链路。
+- 按「**每次发布都发两个地方**」发布到 GitHub + 自建 Gitea（`yanzi/docker-manager-yanzi`）。
+- 可选（**未拍板**）：给 `server/docker.ts` 引擎层 + 路由层未覆盖的五类写操作补日志点，并接入本次新建的 `app-YYYY-MM-DD.log` 轮转与保留策略（**管道已就位，接上即可**）。
+
+---
+
+## v1.36.1 — 2026-10-05（**已作废 · 内容并入 v1.37.0** · 未单独出包）
+
+**主题：全部曲线由直线折线改为「单调三次平滑」（PCHIP）—— 观感更顺滑，且数学上保证不过冲；曲线仍穿过每一个真实采样点，tooltip 数值、Y 轴量程与面积填充语义均不变。**
+
+### 已完成
+
+- **渲染改造**：`src/components/LineChart.tsx` 新增导出纯函数 **`smoothPathD(pts)`**，把原先的 `M/L` 折线换成**三次贝塞尔**（`C`）路径；新增 **`smooth?: boolean`** 属性（**默认 `true`**），传 `false` 可一键回到旧折线（应急回退开关）。
+- **选型理由（为什么不直接用 Catmull-Rom）**：Catmull-Rom 在尖峰处会**过冲** —— CPU 92% 突降到 30% 时，曲线会先冲到数值并不存在的高度再回落。改用 **PCHIP（Fritsch–Carlson 单调三次插值）**：内部节点取相邻斜率的**加权调和平均**、局部极值 / 平台处**切线置 0**、端点用三点公式并限幅 ⇒ **分段单调**，永不超出相邻两点的取值区间。
+- **顺带加固**：路径构建对 `NaN` / `Infinity`（采样缺口）沿用上一个有效值，避免畸形 `d`；面积路径复用同一条曲线 `d`，与线条几何天然一致。
+- **影响面**：全站 **8 处**图表（`Dashboard.tsx` 4 处 + `Containers.tsx` 4 处）**零改动即生效**（默认开启）；`Stacks.tsx` 中的 `<svg` 是堆栈图标上传校验，与曲线无关。
+- **验证（全部实测）**：
+  - 前后端 `tsc --noEmit` **exit 0**；`npm run test:gates` **exit 0**（24 / 29 / 18 / 15 / 34，FAIL 全 0）。
+  - **纯函数断言 9 / 0**：① 每段一个 `C`、路径无 `NaN` ② **过冲量 `0.000000 px`**（每段采样 200 点） ③ 曲线穿过每个真实点（最大偏差 0.0586 px，即 `.toFixed(1)` 精度） ④ 2 点退化为直线、空数组返回空串、路径纯 ASCII ⑤ **负向对照**：同样数据用普通 Catmull-Rom 生成路径，检测器报 **7.376 px 过冲** ⇒ 证明「过冲检测」不是装饰。
+  - **真实组件渲染断言 14 / 0**（`renderToStaticMarkup` 跑真 `<LineChart>`）：默认（不传 `smooth`）渲染 2 条 path 且折线含 `C`、过冲 0、面积复用同一曲线并闭合；`smooth={false}` 回到纯 `L`（每点一个）；双轴 + 虚线序列（磁盘读写 + 利用率场景）4 条 path 全部无过冲；单点数据不渲染 path、走「正在采样…」占位。
+- 涉及文件：`src/components/LineChart.tsx`、`package.json`、`docs/CHANGELOG.md`。
+
+### 未完成 / 已知限制
+
+- 本次只做**渲染层平滑**（视觉），**未对采样数据做降噪 / 滑动平均** —— 数值、tooltip、Y 轴量程与告警判据全部保持原样。若目标是「数据别那么抖」，需另做数据侧 EMA（会抹平尖峰，口径需另行确认）。
+- **未出 SEA 包、未发布**（版本串 `1.36.1` 已写入 `package.json`，`dist/` 需在出包前重新构建）。
+
+### 下一步
+
+- 出包前：删 `dist/` 重跑 `vite build`（版本串需重新嵌入），再走 `scripts/build-binary.mjs` 的 SEA 链路。
+- 认可观感后：按「**每次发布都发两个地方**」发布到 GitHub + 自建 Gitea（`yanzi/docker-manager-yanzi`）。
+
+---
+
 ## 开发进度总览
 
-> 最后更新：2026-09-30
+> 最后更新：2026-10-05
 
 ### 当前状态
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.36.0**（**已发布 2026-09-30**）：**OTA 与一键安装改双源 —— 自建 Gitea 优先、GitHub 保底**。新增 `checkGiteaUpdate()`（8 秒超时、匿名）、`UpdateInfo.source`、**跨源下载保底**（Gitea 候选全失败 ⇒ 自动追加 GitHub 资产再跑一轮）、环境变量 `UPDATE_GITEA_BASE` / `UPDATE_GITEA_REPO` 覆盖；`quick-install.sh` 同步双源（`GITEA_BASE` / `GITEA_REPO`）并修掉「`ASSET_SIZE` 在函数定义前调用 ⇒ 包大小恒 0、进度无百分比」的顺序 bug。**发布规约：每次发布都发两个地方。** 上一已发布版本 **v1.35.11**（**已发布 2026-09-30**）：**`upapi` 改由 `device_uuid` 是否变化决定** —— `resolveUpapi(trigger, reportInstall)` → **`resolveUpapi(state, deviceId)`**：`!installReported \|\| lastDeviceId !== deviceId` ⇒ `install`，否则 `heartbeat`。**每次进程启动 / systemd restart 不再报 `install`**（ID 未变即 `heartbeat`），只有首次安装 / 身份真的变了才 `install` ⇒ **`install` 计数 ≈ 去重设备数**。运行态新增 **`lastDeviceId`**（每次成功上报都写，`reportOnce` 与 `reportOnToggle` 两处）；`ReportTrigger` 降级为「只决定要不要强制发」；24h 限流（`reportInstall` / `lastRebuildAt`）退化为**观测标记**（旧限流防的「同机反复改写刷安装量」现已由身份判据天然覆盖）。**上传开关切换仍恒 `install`**（按用户要求保留的唯一例外）。升级兼容：无 `lastDeviceId` ⇒ 保守补发一次 `install`。涉及客户端 `server/telemetry.ts`、`docs/上报触发与接口及上报内容.md`、`package.json`；**服务端 `yanzi/api` 与 `server/index.ts` 均无需改动**。验证＝前后端 `tsc` 双 0 + `test:gates` exit 0 + 删 `dist/` 重跑 `vite build` + 源码 harness（同 ID 重启 ⇒ `heartbeat`；换 ID ⇒ `install`）+ 真包冒烟。上一版 **v1.35.10**（已出包 · 未发布 · **包自本版起作废**）：**按触发源决定** —— 新增唯一判据 `resolveUpapi(trigger, reportInstall)`：`startup`（进程启动 / systemd restart）⇒ `install`，`periodic`（12h）/ `retry`（失败后 10 分钟）/ `manual`（页面「立即上报」）⇒ `heartbeat`，`reportOnToggle`（开关开↔关点 APPLY）**恒** `install`；`needInstall` 退化为「**只决定要不要发**」。`reportOnce(force = false)` → `reportOnce(trigger: ReportTrigger)`、`scheduleNext(delayMs, force)` → `scheduleNext(delayMs, trigger)`、`startTelemetryHeartbeat()` 传 `"startup"`、`POST /api/telemetry/report` 传 `"manual"`。**根因**＝旧 `upapi = needInstall ? "install" : "heartbeat"`，而 `installReported` **只在 2xx 成功时置位**、端点 NXDOMAIN ⇒ 所有触发退化成 `install`（真包 + 桩远端双向复现：500 ⇒ 全 `install`；200 ⇒ 首报 `install` 后转 `heartbeat`）。涉及客户端 `server/telemetry.ts`、`server/index.ts`、`docs/上报触发与接口及上报内容.md`、`package.json`；**服务端 `yanzi/api` 本次无需改动**（载荷仍是 15 个顶层字段，`resolveEvent` 的 `install`/`heartbeat` 分支不变）。验证＝前后端 `tsc` 双 `exit 0` + `npm run test:gates` exit 0 + 删 `dist/` 重跑 `vite build` + 真包六场景取证。⚠️ **新增语义**：同一设备**每次重启都会收到一条 `install`**，服务端去重请改为 **`device_uuid` upsert ＋ 比对 `installedAt`**。上一版 **v1.35.9**（已出包 · 未发布 · **包自本版起作废** · 2026-09-29）：**上报字段收敛** —— 把「常量 `event` + 布尔 `install`」两个冗余字段合并为单字段 **`upapi: "install" \| "heartbeat"`**（信息量严格等价）；运行态 `lastReportAt` / `lastActiveAt` 合并为 **`lastReportAt`**（`readState` 兼容读旧文件）；`hw_fingerprint` 字段与 DB 列**跨两仓彻底删除**（服务端幂等 `ALTER TABLE telemetry_devices DROP COLUMN hw_fingerprint`）；修掉「关闭上传开关后每 10 分钟空转」（`!cfg.enabled` ⇒ `fatal:true`，退回 12h 周期）。服务端 `resolveEvent` 三代兼容归一（`body.event \|\| body.upapi`，`install`→装 / `active`\|`heartbeat`→心跳 / `report`→看 `body.install`，其余 400）。涉及客户端 `server/telemetry.ts`、`src/api.ts`、`docs/上报触发与接口及上报内容.md`、`docs/上报.json`；服务端 `yanzi/api/src/{telemetry,db,routes}.js`、`yanzi/api/scripts/*`、`yanzi/api/README.md`、`yanzi/backstage/src/app.js`、`yanzi/docs/api-yanzi-docker-event.md`。验证＝服务端回归 `verify-telemetry.mjs` **78/0**（含删列幂等）+ 前后端 `tsc` 双 0 + `test:gates` **exit 0**（hooks 44 + auth 24/0 & 29/0 + restart 18/0 + thermal 15/0 + install 34/0）+ `vite build`（新资产 `assets/index-d-CniirZ.js`，js 内 `"1.35.9"`×1 / `"1.35.8"`×0）。⚠️ **部署顺序＝服务端 `yanzi/api` 必须先上**：现役 ECS1 只认 `event: install\|active`，不认 `upapi`/`heartbeat`/`report`，而 400 在客户端判为非致命（仅 401/403 fatal）⇒ 客户端先上会每 10 分钟无限重试；删列不可逆，执行前备份 `yanzi/api/data/yanzi-admin.db`。上一版 **v1.35.8**（已出包 · 未发布）：累计承接 **v1.35.3**（所有曲线 X 轴时间刻度）→ **v1.35.4**（容器目录打包下载 tar.gz）→ **v1.35.5**（仪表盘改造：系统概览 7 字段 / 磁盘卡片文件系统列 / 曲线默认折叠）→ **v1.35.6**（处理器·内存图标提示改**卡片式自定义 tooltip**）→ **v1.35.8**（温度能力落地：仪表盘磁盘卡片**显示温度**（读 sysfs hwmon **零提权**）+ **「利用率」列去掉进度条**；设置页**新增「温度」卡片**（CPU + 各盘 + `drivetemp` 检测）并把「本机设备」**改名「硬件信息」**；**`install.sh` 安装时自动加载 `drivetemp`**（`modprobe` + 写 `/etc/modules-load.d/drivetemp.conf` 持久化，`--no-drivetemp` 跳过，`uninstall.sh` 按归属标记清理）+ 新增**温度采集门禁** `scripts/check-thermal.mjs` 与**安装脚本门禁** `scripts/check-install-drivetemp.sh`；按用户要求不做 S.M.A.R.T.）。涉及 `src/pages/Dashboard.tsx`、`src/pages/Settings.tsx`、`src/components/ActivityPanel.tsx`、`src/lib/thermal.ts`、`server/docker.ts`、`server/index.ts`、`server/settings.ts`、`server/telemetry.ts`、`server/unit-status.ts`、`src/types.ts`、`src/api.ts`、`scripts/check-thermal.mjs`、`scripts/check-install-drivetemp.sh`、`deploy/linux/install.sh`、`deploy/linux/uninstall.sh`、`deploy/linux/README.md`、`package.json`。验证＝`lint:hooks` PASS（44 文件）+ 前后端 `tsc` 双 0 + `build:frontend`/`vite build` PASS + 路由层 13/13（v1.35.4）+ **`test:gates` 全绿（hooks 44 + auth 24/0 & 29/0 + restart 18/0 + thermal 15/0 + install 34/0）** + agent-browser 组件级实测（v1.35.6：`[role=tooltip]`×2 + hover `opacity 0→1`；v1.35.8 仪表盘：温度表头 6 列 + 阈值配色 + `null`→「—」+ **利用率去进度条**（表内 `<div>` 归零）；v1.35.8 设置页：`h2`=硬件信息 + 卡片标题「温度/硬件信息标识」+ 三场景（缺 drivetemp 提示条 1 条 / 已加载 0 条 / 全无传感器）+ CPU 62℃ 红加粗，均无 console error）。⚠️ **v1.35.6 及更早的包已从 `build-upload/`、`deploy/linux/` 清除，勿部署**；⚠️ 版本号语义：UI / 交互小改动走 **Patch**（`1.35.3 → … → 1.35.9`） |
+| 当前版本 | **v1.37.0**（**已就绪 · 未出包 · 未发布**）：**系统设置新增三个页面** —— ①「**应用详情**」（新增 `server/appinfo.ts`，183 行；应用安装位置 + 六个目录真实路径 / 文件数 / 占用；受限遍历 `MAX_ENTRIES=200_000` + 30 秒缓存 + 符号链接跳过）②「**应用日志**」（新增 `server/applogs.ts`，360 行；列表 / 尾部查看 / 单文件下载 / zip 导出 / 保留策略「天数 `maxDays` + 容量 `maxTotalMB`」双上限**先到先清**且**永不删当天文件**；文件名白名单 `^app-\d{4}-\d{2}-\d{2}\.log$` + `path.resolve` 双重防穿越；`/api/applogs/export` 必须注册在 `/:name` 之前）③「**目录镜像**」（新增 `server/mirror.ts`，425 行；备份与 compose 目录**实时另存**到其他路径，语义＝**真镜像**「源删 ⇒ 目标同步删」，目标路径严格拒绝 6 类非法值（含**「是源的上级」**）；触发＝`fs.watch`（1 秒防抖）+ **60 秒全量对账**兜底；增量判据 `size` 相同且 `\|mtimeMs 差\| < 1000ms`，复制后 `utimesSync` **回写 mtime**）。合计新增 **9 条路由**（`/api/system/app-info` + 6 条 `/api/applogs*` + 2 条 `/api/mirror*`）、**10 个前端类型**、**9 个 API 封装**；设置持久化新增 `mirror` / `logRetention` 两段（旧配置缺段时继承默认）。验证＝前后端 `tsc` **双 exit 0** + `test:gates` **exit 0**（120 项 PASS / FAIL 0）+ **真实文件系统 harness 14 段 70/0**（含真镜像删除、真实 `fs.watch` 事件触发、日志穿越防线、天数与容量双上限裁剪、zip 的 PK 魔数）+ **HTTP 层端到端冒烟 60/0**（真实 Express + 真实 HTTP；含**路由顺序的区分性断言**——`/api/applogs/export` 返回 zip 而非被 `/:name` 吞掉；并抓出 `cleanupExport` 用 `rmSync` 递归同步删目录**阻塞事件循环 21,140 ms** ⇒ 改 `fs.rm` 异步后复跑**慢请求归零**）+ **静态接线审计**（10 处理器 / 9 封装 / 11 处 JSX 挂载点全部落位）。**另含两组独立加固**：**通知真实现**（Webhook + nodemailer 邮件，真实发送 e2e **43/0**，新增 `lint:notify` 门禁）+ **密钥安全**（AES-256-GCM 加密落盘 / 不回传前端 / env 覆盖 / 堵住 `settings.json` 的 git 泄漏，新增 `test:secrets` 门禁 **40/0**）。全量 `test:gates` **7 组 246 项 PASS / FAIL 0**。**并入 v1.36.1**（**未出包 · 未发布**）：**全部曲线改为单调三次平滑（PCHIP，无过冲）** —— `src/components/LineChart.tsx` 新增 `smoothPathD()` 与 `smooth`（默认 `true`），全站 8 处图表零改动生效；曲线仍穿过每个真实采样点、tooltip 与量程不变。验证＝`tsc` 双 0 + `test:gates` exit 0 + 纯函数断言 **9/0**（含 Catmull-Rom 负向对照 **7.376 px 过冲**）+ 真实组件渲染断言 **14/0**。上一已发布版本 **v1.36.0**（**已发布 2026-09-30**）：**OTA 与一键安装改双源 —— 自建 Gitea 优先、GitHub 保底**。新增 `checkGiteaUpdate()`（8 秒超时、匿名）、`UpdateInfo.source`、**跨源下载保底**（Gitea 候选全失败 ⇒ 自动追加 GitHub 资产再跑一轮）、环境变量 `UPDATE_GITEA_BASE` / `UPDATE_GITEA_REPO` 覆盖；`quick-install.sh` 同步双源（`GITEA_BASE` / `GITEA_REPO`）并修掉「`ASSET_SIZE` 在函数定义前调用 ⇒ 包大小恒 0、进度无百分比」的顺序 bug。**发布规约：每次发布都发两个地方。** 上一已发布版本 **v1.35.11**（**已发布 2026-09-30**）：**`upapi` 改由 `device_uuid` 是否变化决定** —— `resolveUpapi(trigger, reportInstall)` → **`resolveUpapi(state, deviceId)`**：`!installReported \|\| lastDeviceId !== deviceId` ⇒ `install`，否则 `heartbeat`。**每次进程启动 / systemd restart 不再报 `install`**（ID 未变即 `heartbeat`），只有首次安装 / 身份真的变了才 `install` ⇒ **`install` 计数 ≈ 去重设备数**。运行态新增 **`lastDeviceId`**（每次成功上报都写，`reportOnce` 与 `reportOnToggle` 两处）；`ReportTrigger` 降级为「只决定要不要强制发」；24h 限流（`reportInstall` / `lastRebuildAt`）退化为**观测标记**（旧限流防的「同机反复改写刷安装量」现已由身份判据天然覆盖）。**上传开关切换仍恒 `install`**（按用户要求保留的唯一例外）。升级兼容：无 `lastDeviceId` ⇒ 保守补发一次 `install`。涉及客户端 `server/telemetry.ts`、`docs/上报触发与接口及上报内容.md`、`package.json`；**服务端 `yanzi/api` 与 `server/index.ts` 均无需改动**。验证＝前后端 `tsc` 双 0 + `test:gates` exit 0 + 删 `dist/` 重跑 `vite build` + 源码 harness（同 ID 重启 ⇒ `heartbeat`；换 ID ⇒ `install`）+ 真包冒烟。上一版 **v1.35.10**（已出包 · 未发布 · **包自本版起作废**）：**按触发源决定** —— 新增唯一判据 `resolveUpapi(trigger, reportInstall)`：`startup`（进程启动 / systemd restart）⇒ `install`，`periodic`（12h）/ `retry`（失败后 10 分钟）/ `manual`（页面「立即上报」）⇒ `heartbeat`，`reportOnToggle`（开关开↔关点 APPLY）**恒** `install`；`needInstall` 退化为「**只决定要不要发**」。`reportOnce(force = false)` → `reportOnce(trigger: ReportTrigger)`、`scheduleNext(delayMs, force)` → `scheduleNext(delayMs, trigger)`、`startTelemetryHeartbeat()` 传 `"startup"`、`POST /api/telemetry/report` 传 `"manual"`。**根因**＝旧 `upapi = needInstall ? "install" : "heartbeat"`，而 `installReported` **只在 2xx 成功时置位**、端点 NXDOMAIN ⇒ 所有触发退化成 `install`（真包 + 桩远端双向复现：500 ⇒ 全 `install`；200 ⇒ 首报 `install` 后转 `heartbeat`）。涉及客户端 `server/telemetry.ts`、`server/index.ts`、`docs/上报触发与接口及上报内容.md`、`package.json`；**服务端 `yanzi/api` 本次无需改动**（载荷仍是 15 个顶层字段，`resolveEvent` 的 `install`/`heartbeat` 分支不变）。验证＝前后端 `tsc` 双 `exit 0` + `npm run test:gates` exit 0 + 删 `dist/` 重跑 `vite build` + 真包六场景取证。⚠️ **新增语义**：同一设备**每次重启都会收到一条 `install`**，服务端去重请改为 **`device_uuid` upsert ＋ 比对 `installedAt`**。上一版 **v1.35.9**（已出包 · 未发布 · **包自本版起作废** · 2026-09-29）：**上报字段收敛** —— 把「常量 `event` + 布尔 `install`」两个冗余字段合并为单字段 **`upapi: "install" \| "heartbeat"`**（信息量严格等价）；运行态 `lastReportAt` / `lastActiveAt` 合并为 **`lastReportAt`**（`readState` 兼容读旧文件）；`hw_fingerprint` 字段与 DB 列**跨两仓彻底删除**（服务端幂等 `ALTER TABLE telemetry_devices DROP COLUMN hw_fingerprint`）；修掉「关闭上传开关后每 10 分钟空转」（`!cfg.enabled` ⇒ `fatal:true`，退回 12h 周期）。服务端 `resolveEvent` 三代兼容归一（`body.event \|\| body.upapi`，`install`→装 / `active`\|`heartbeat`→心跳 / `report`→看 `body.install`，其余 400）。涉及客户端 `server/telemetry.ts`、`src/api.ts`、`docs/上报触发与接口及上报内容.md`、`docs/上报.json`；服务端 `yanzi/api/src/{telemetry,db,routes}.js`、`yanzi/api/scripts/*`、`yanzi/api/README.md`、`yanzi/backstage/src/app.js`、`yanzi/docs/api-yanzi-docker-event.md`。验证＝服务端回归 `verify-telemetry.mjs` **78/0**（含删列幂等）+ 前后端 `tsc` 双 0 + `test:gates` **exit 0**（hooks 44 + auth 24/0 & 29/0 + restart 18/0 + thermal 15/0 + install 34/0）+ `vite build`（新资产 `assets/index-d-CniirZ.js`，js 内 `"1.35.9"`×1 / `"1.35.8"`×0）。⚠️ **部署顺序＝服务端 `yanzi/api` 必须先上**：现役 ECS1 只认 `event: install\|active`，不认 `upapi`/`heartbeat`/`report`，而 400 在客户端判为非致命（仅 401/403 fatal）⇒ 客户端先上会每 10 分钟无限重试；删列不可逆，执行前备份 `yanzi/api/data/yanzi-admin.db`。上一版 **v1.35.8**（已出包 · 未发布）：累计承接 **v1.35.3**（所有曲线 X 轴时间刻度）→ **v1.35.4**（容器目录打包下载 tar.gz）→ **v1.35.5**（仪表盘改造：系统概览 7 字段 / 磁盘卡片文件系统列 / 曲线默认折叠）→ **v1.35.6**（处理器·内存图标提示改**卡片式自定义 tooltip**）→ **v1.35.8**（温度能力落地：仪表盘磁盘卡片**显示温度**（读 sysfs hwmon **零提权**）+ **「利用率」列去掉进度条**；设置页**新增「温度」卡片**（CPU + 各盘 + `drivetemp` 检测）并把「本机设备」**改名「硬件信息」**；**`install.sh` 安装时自动加载 `drivetemp`**（`modprobe` + 写 `/etc/modules-load.d/drivetemp.conf` 持久化，`--no-drivetemp` 跳过，`uninstall.sh` 按归属标记清理）+ 新增**温度采集门禁** `scripts/check-thermal.mjs` 与**安装脚本门禁** `scripts/check-install-drivetemp.sh`；按用户要求不做 S.M.A.R.T.）。涉及 `src/pages/Dashboard.tsx`、`src/pages/Settings.tsx`、`src/components/ActivityPanel.tsx`、`src/lib/thermal.ts`、`server/docker.ts`、`server/index.ts`、`server/settings.ts`、`server/telemetry.ts`、`server/unit-status.ts`、`src/types.ts`、`src/api.ts`、`scripts/check-thermal.mjs`、`scripts/check-install-drivetemp.sh`、`deploy/linux/install.sh`、`deploy/linux/uninstall.sh`、`deploy/linux/README.md`、`package.json`。验证＝`lint:hooks` PASS（44 文件）+ 前后端 `tsc` 双 0 + `build:frontend`/`vite build` PASS + 路由层 13/13（v1.35.4）+ **`test:gates` 全绿（hooks 44 + auth 24/0 & 29/0 + restart 18/0 + thermal 15/0 + install 34/0）** + agent-browser 组件级实测（v1.35.6：`[role=tooltip]`×2 + hover `opacity 0→1`；v1.35.8 仪表盘：温度表头 6 列 + 阈值配色 + `null`→「—」+ **利用率去进度条**（表内 `<div>` 归零）；v1.35.8 设置页：`h2`=硬件信息 + 卡片标题「温度/硬件信息标识」+ 三场景（缺 drivetemp 提示条 1 条 / 已加载 0 条 / 全无传感器）+ CPU 62℃ 红加粗，均无 console error）。⚠️ **v1.35.6 及更早的包已从 `build-upload/`、`deploy/linux/` 清除，勿部署**；⚠️ 版本号语义：UI / 交互小改动走 **Patch**（`1.35.3 → … → 1.35.9`） |
 | 版本号规则 | Major 人工发布；Minor ＝ **新增功能模块 / 新页面**；Patch ＝ 修复/优化/**UI 与交互小改动**（如 `1.35.0 → 1.35.1`）。v1.22.0 因新增「镜像更新→通知中心」与「硬件指纹作主键」两项新能力归为 Minor |
 | 最新 Release | [v1.36.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.36.0)（**2026-09-30 发布**）＋ **自建 Gitea [v1.36.0](https://git.ziruxue.top/yanzi/docker-manager-yanzi/releases/tag/v1.36.0)**（id=7；两端 3 资产 **size 逐字节一致**）—— 主题＝**OTA / 一键安装改双源（自建 Gitea 优先、GitHub 保底）**，并确立「**每次发布都发两个地方**」的发布规约；上一已发布版本 [v1.35.11](https://github.com/yanziruxue/docker-manager/releases/tag/v1.35.11)（**2026-09-30 发布** · 累积发布 **v1.32.0 → v1.35.11**：容器文件管理 / 温度能力 / 详情页与仪表盘演进 / 遥测 `upapi` 三代迭代；assets＝版本化 zip + latest 别名 + `quick-install.sh`，均 `uploaded`；notes 合并 **v1.32.0 → v1.35.11 共 15 个开发版本**；⚠️ 部署顺序＝**服务端 `yanzi/api` 先上**；⚠️ 本版改了 `install.sh`，启用 drivetemp 自动加载需重跑一次）；上一版 [v1.31.1](https://github.com/yanziruxue/docker-manager/releases/tag/v1.31.1) |
 | 源码分支 | `main`（当前发布点 `8a3dc7ab4eb22fb7ff20e51e7513344704c0667e`（v1.36.0，9 文件，Git Database API 推送）；上一版 `7ec0a17894e84dae7f83b58685caa6a7433fa654`（v1.35.11）；自建 Gitea 镜像 `yanzi/docker-manager-yanzi` @ `73e2063`） |
@@ -45,14 +316,14 @@
 | 备份管理 | ✅ | 手动全量 + 堆栈级备份 / 恢复（含**上传备份文件直接恢复**）/ 导出（**zip** 格式，兼容历史 tar.gz）+ 自动备份调度器（周/月/年/Cron，含保留清理） |
 | 权限诊断与修复 | ✅ | 备份期自愈 `u+r` + 结构化诊断（属主/权限位/一条修复命令）+ `fix-perms` CLI + 启动体检与界面提示 |
 | 通知中心 | ✅ | 未读已读 + localStorage 持久化 |
-| 系统设置 | ✅ | Docker 配置 / Compose 模式 / 通知 / 备份 / **镜像更新**（原「更新调度器」）/ 列显隐 / **硬件信息**（原「本机设备」，v1.35.8 改名）：**温度卡片**（CPU 温度 + 各整盘温度，读 sysfs hwmon **零提权**；缺温度的 SATA 盘给 `drivetemp` 加载提示与一键复制命令；**v1.35.8 起 `install.sh` 安装时已自动加载并持久化**，在线升级不更新安装脚本、老部署需手动跑一次或重跑 `install.sh`）+ 硬件指纹 6 维 + 完整硬件详情卡片（含 **主板型号 / 产品序列号 / 系统UUID**，只读；**「上传安装数量统计」开关默认开启**，关闭后不发任何请求 + 「安装时间」一行） |
+| 系统设置 | ✅ | Docker 配置 / Compose 模式 / 通知 / 备份 / **镜像更新**（原「更新调度器」）/ 列显隐 / **硬件信息**（原「本机设备」，v1.35.8 改名）：**温度卡片**（CPU 温度 + 各整盘温度，读 sysfs hwmon **零提权**；缺温度的 SATA 盘给 `drivetemp` 加载提示与一键复制命令；**v1.35.8 起 `install.sh` 安装时已自动加载并持久化**，在线升级不更新安装脚本、老部署需手动跑一次或重跑 `install.sh`）+ 硬件指纹 6 维 + 完整硬件详情卡片（含 **主板型号 / 产品序列号 / 系统UUID**，只读；**「上传安装数量统计」开关默认开启**，关闭后不发任何请求 + 「安装时间」一行）/ **应用详情**（v1.37.0 新增：应用安装位置 + 六个目录的真实路径 / 文件数 / 占用，只读）/ **应用日志**（v1.37.0 新增：列表 / 尾部查看 / 单文件下载 / zip 导出 / 「立即清理」/ 保留策略表单（开关 + 天数 + 容量））/ **目录镜像**（v1.37.0 新增：备份目录与 compose 目录实时另存，每源一卡：开关 + 目标路径 + 校验提示 + 运行态 + 「立即同步」，15 秒轮询） |
 | Web 终端 | ✅ | xterm.js + WebSocket + 多 Shell 检测 |
 | 登录鉴权 | ✅ | 单管理员 + scrypt + httpOnly 会话（绝对过期）+ 密码找回码（**18~24 位字母数字、区分大小写、10 分钟限流**；**历史记录按大写哈希者输入小写仍可用**，`legacyUpperVariants` 回退）+ **凭据版本 `credentialVersion`（本版要求 2）**：老记录登录后**强制重走「用户名 / 密码 / 找回码」**（`POST /api/auth/reinit`），期间除白名单外的全部 `/api` 返回 `403 REINIT_REQUIRED`，重设成功即作废该用户**全部会话** |
 | 镜像更新（原更新调度器） | ✅ | 后台定时检查镜像版本（每天 / 每周 / 每月，非 Cron）+ 结果落盘缓存 + 镜像页「检查更新」共用同一份数据 |
 | OTA 自升级 | ✅ | **双源（v1.36.0 起）：自建 Gitea 优先、GitHub 保底**（Gitea 源不拼 gh-proxy），拉取 + 自替换 + systemd 重启，gh-proxy 镜像兜底（仅 GitHub 源），**支持中途取消**；**更新完成后自动刷新页面**（v1.31.1 修：判据与状态码解耦 —— `403 REINIT_REQUIRED` 也算「新进程已上线」；实现见 `src/lib/restart-wait.ts`） |
 | Linux SEA 部署 | ✅ | 单可执行文件 + systemd + install/uninstall 脚本（**v1.35.8 起安装时自动加载 `drivetemp` 内核模块并持久化，`--no-drivetemp` 可跳过**）；**OTA 后自动自检服务单元是否落后**（含缺失指令与一键修复命令） |
 | Docker 部署 | ✅ | 多阶段 Dockerfile |
-| **操作日志系统** | 🔨 **约 60%** | `server/logger.ts` 已建好但**未接入** `docker.ts`（仍是 `console.log`）；前端仅 localStorage 版 `opLog.ts`（500 条） |
+| **操作日志系统** | 🔨 **约 60%** | `server/logger.ts` 已建好但**未接入** `docker.ts`（仍是 `console.log`）；前端仅 localStorage 版 `opLog.ts`（500 条）。**v1.37.0 已补齐「日志消费端」**：设置页「应用日志」提供列表 / 尾部查看 / 下载 / zip 导出 / 保留策略（天数 + 容量双上限、永不删当天文件）；但**日志写入点一字未动**（按用户拍板「只做功能，不动日志内容」）⇒ 覆盖率不变：`docker.ts` 引擎层 **0 处**日志，路由层尚有**堆栈 / 网络 / 容器文件管理 / 镜像构建 / 登录**五类写操作未打日志 |
 | 中心统计服务 | ⏸ **暂缓** | 上报端已完成（端点 `https://yanzi-api.ziruxue.top/api/yanzi-docker/event`，鉴权头 `X-Telemetry-Key`，12 小时周期；**v1.35.9 起载荷收敛为单字段 `upapi: "install" \| "heartbeat"`**；**v1.35.11 起 `upapi` 由 `device_uuid` 是否变化决定** —— 首次安装 / 身份变化 ⇒ `install`，**每次重启 / 周期 / 重试 ⇒ `heartbeat`**，故 **`install` 次数 ≈ 去重设备数**；⚠️ **开关切换仍发 `install`**，需按载荷 `uploadEnabled` 字段区分；**该域名当前无 DNS 解析，接口未开放**）；中心服务由独立后端实现，本项目不做 |
 | 堆栈图标本地上传 | ⬜ 未开始 | 目前仅支持图标 URL |
 
@@ -79,10 +350,12 @@
 | 镜像拉取依赖宿主配置 | App 内 `registryMirror` 必须留空，实际走宿主机 `/etc/docker/daemon.json` 的 registry-mirrors |
 | OTA 不含 service 更新 | OTA 不更新 `.service` 文件，老部署需重跑 `install.sh` |
 | 备份文件名秒级粒度 | 同一秒内对同一 `kind+tag` 连续备份会同名覆盖（前端按钮已禁用，正常操作不触发） |
+| 目录镜像「真镜像」不可合并 | v1.37.0 的镜像语义是**真镜像**（用户拍板「同步删除」）：目标严格等于源，**目标侧独立新增的内容会被删除**（定义如此，非缺陷）；首轮为空目标 ⇒ **全量复制**，备份目录很大时耗时较长且**无进度条**；`fs.watch` 递归依赖 Linux inotify 上限，`max_user_watches` 偏低时可能**退化为 60 秒轮询兜底**（功能不丢、实时性下降，运行态 `watcherActive` 已透出） |
+| 应用详情占用为抽样值 | 目录统计有 `MAX_ENTRIES = 200_000` 条目上限（超出 ⇒ `truncated: true`，界面提示「仅统计部分」）与 **30 秒缓存** ⇒ 刚写入的文件可能未立刻反映 |
 
 ### 下一步计划
 
-1. **操作日志收尾**：`docker.ts` 接入 `createLogger("Docker")` 替换 `console.log`；设置页加日志级别 Select（debug/info/warn/error）+ journalctl 查看说明。
+1. **操作日志收尾**：`docker.ts` 接入 `createLogger("Docker")` 替换 `console.log`；设置页加日志级别 Select（debug/info/warn/error）+ journalctl 查看说明。**v1.37.0 已把「消费端」建好**（列表 / 尾部查看 / 下载 / zip 导出 / 保留策略），补齐写入点即可闭环 —— 待补：`docker.ts` 引擎层 + 路由层的**堆栈 / 网络 / 容器文件管理 / 镜像构建 / 登录**五类写操作。
 2. **堆栈图标本地上传**（可选，视需求）。
 3. 视使用情况决定中心统计服务是否自建。
 

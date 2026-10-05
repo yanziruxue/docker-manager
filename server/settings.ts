@@ -1,7 +1,24 @@
 import fs from "node:fs";
+import path from "node:path";
 import { configPath } from "./paths.js";
+import { decryptSecret, encryptSecret, isEncrypted } from "./secret-store.js";
 
 const SETTINGS_FILE = configPath("settings.json");
+
+/** 需要加密落盘、且**绝不回传前端**的密钥字段（都位于 `notifications` 段） */
+export const SECRET_FIELDS = ["emailPassword", "webhookSecret"] as const;
+
+/**
+ * 密钥字段的「清除」哨兵值。
+ *
+ * 契约（提交配置时该字段的三种取值）：
+ *   - `""`（空串）     ⇒ **保持原值不变** —— 前端拿不到明文，留空即「不改」；
+ *   - `SECRET_CLEAR`   ⇒ 清空该密钥；
+ *   - 其它任何字符串   ⇒ 作为新明文写入（落盘前自动加密）。
+ *
+ * ⚠️ 前端 `src/types.ts` 有同名常量，两边必须一致（`scripts/check-secrets.ts` 有跨文件断言）。
+ */
+export const SECRET_CLEAR = "__CLEAR__";
 
 /** 默认值版本号：默认列 / 默认语言等「默认值」变更时 +1，触发一次性迁移覆盖老配置 */
 const DEFAULTS_VERSION = 2;
@@ -35,14 +52,23 @@ const DEFAULT_SETTINGS = {
   notifications: {
     webhookEnabled: false,
     webhookUrl: "",
+    /** 可选：HMAC-SHA256 签名密钥。填写后每次推送带 `x-docker-manager-signature: sha256=…` 头，接收方可验签 */
+    webhookSecret: "",
     emailEnabled: false,
     emailSmtp: "",
     emailPort: 587,
     emailUser: "",
+    /** ⚠️ 明文存于 settings.json（本项目不提供密钥加密存储；仅本机文件可读） */
+    emailPassword: "",
+    /** 发件人；留空则用 emailUser（多数 SMTP 服务要求发件人与账号一致） */
+    emailFrom: "",
+    /** 收件人，多个用逗号或分号分隔 */
+    emailTo: "",
     events: {
       containerDown: true,
       updateAvailable: true,
       updateComplete: false,
+      /** ⚠️ 本项目没有镜像构建功能，此开关暂无触发源（保留仅为将来兼容） */
       buildFailed: true,
     },
   },
@@ -59,6 +85,26 @@ const DEFAULT_SETTINGS = {
     weekly: { enabled: true, day: "Saturday", time: "23:00", retention: 6 },
     monthly: { enabled: true, dayOfMonth: 0, time: "23:00", retention: 8 },
     yearly: { enabled: true, date: "12-31", time: "23:00" },
+  },
+  /**
+   * 目录镜像（系统设置 → 目录镜像）：把「备份目录」「Compose 目录」单向镜像到另一个路径，
+   * 与源目录实时同步（fs.watch 递归监听 + 1 秒防抖，另有 60 秒全量对账兜底）。
+   * 语义为**真镜像**：源里删除的文件 / 目录会同步从目标删除。
+   * 两个目标各自独立开关与路径，target 留空即视为关闭。
+   */
+  mirror: {
+    backups: { enabled: false, target: "" },
+    compose: { enabled: false, target: "" },
+  },
+  /**
+   * 应用日志保留策略（系统设置 → 应用日志）。
+   * maxDays = 保留天数，0 = 不限；maxTotalMB = 日志目录总大小上限，0 = 不限。
+   * 两条都命中时「先到先清」，**永不删除当天文件**（正在写入）。
+   */
+  logRetention: {
+    enabled: true,
+    maxDays: 30,
+    maxTotalMB: 500,
   },
   pathFavorites: [
     { id: "p1", name: "应用数据", path: "/mnt/user/appdata" },
@@ -197,10 +243,25 @@ export function getSettings(): any {
           autoPull: !!old.autoPull,
         };
       }
-      return {
+      return decryptSecrets({
         ...DEFAULT_SETTINGS,
         ...parsed,
         backup: { ...DEFAULT_SETTINGS.backup, ...(parsed?.backup || {}) },
+        // 目录镜像：两个子段各自二级合并，旧配置缺字段时继承默认（关闭）
+        mirror: {
+          backups: { ...DEFAULT_SETTINGS.mirror.backups, ...(parsed?.mirror?.backups || {}) },
+          compose: { ...DEFAULT_SETTINGS.mirror.compose, ...(parsed?.mirror?.compose || {}) },
+        },
+        // 日志保留策略：旧配置无此段时继承默认（开启 / 30 天 / 500 MB）
+        logRetention: { ...DEFAULT_SETTINGS.logRetention, ...(parsed?.logRetention || {}) },
+        // 通知配置：二级合并。★ 缺这一段时旧 settings.json 会**整段**取不到新增字段
+        // （webhookSecret / emailPassword / emailFrom / emailTo）⇒ 前端拿到 undefined、
+        // 输入框失控、且通知模块读不到。events 再多合并一层以兼容将来新增事件键。
+        notifications: {
+          ...DEFAULT_SETTINGS.notifications,
+          ...(parsed?.notifications || {}),
+          events: { ...DEFAULT_SETTINGS.notifications.events, ...(parsed?.notifications?.events || {}) },
+        },
         docker: mergedDocker,
         update: { ...DEFAULT_SETTINGS.update, ...(parsed?.update || {}) },
         modal: { ...DEFAULT_SETTINGS.modal, ...(parsed?.modal || {}) },
@@ -220,15 +281,94 @@ export function getSettings(): any {
         // 上报开关二级合并：旧配置没有 telemetry 段时继承默认值（开启）
         telemetry: { ...DEFAULT_SETTINGS.telemetry, ...(parsed?.telemetry || {}) },
         defaultsVersion: DEFAULTS_VERSION,
-      };
+      });
     }
   } catch {
     // 文件损坏则用默认
   }
-  return DEFAULT_SETTINGS;
+  return decryptSecrets(decodeSettings(DEFAULT_SETTINGS));
+}
+
+/** 落盘前加密密钥字段（幂等：空串保持空串、已加密不再加密） */
+function encodeSettings(s: any): any {
+  const n = { ...(s?.notifications || {}) };
+  for (const k of SECRET_FIELDS) n[k] = encryptSecret(String(n[k] ?? ""));
+  return { ...(s || {}), notifications: n };
+}
+
+/**
+ * 读盘后解密密钥字段。非密文原样返回 ⇒ **历史明文配置无需迁移**。
+ * 解密失败返回空串（不抛错），保证设置页仍能打开、用户能重新填写。
+ */
+function decodeSettings(s: any): any {
+  const n = { ...(s?.notifications || {}) };
+  for (const k of SECRET_FIELDS) n[k] = decryptSecret(String(n[k] ?? ""));
+  return { ...(s || {}), notifications: n };
+}
+
+/** `getSettings()` 出口统一走这里：返回的永远是**明文**（供后端自己用，如发邮件） */
+function decryptSecrets(s: any): any {
+  return decodeSettings(s);
+}
+
+/** 读取磁盘原始配置（不合并默认值、不解密）—— 供「保持原值」语义取回原密文 */
+function readStoredRaw(): any {
+  try {
+    if (fs.existsSync(SETTINGS_FILE)) return JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8"));
+  } catch {
+    /* 损坏则当作空 */
+  }
+  return null;
+}
+
+/**
+ * 脱敏：把密钥换成空串，并附 `emailPasswordSet` / `webhookSecretSet` 标志。
+ * ★ `GET /api/settings` 与 `PUT` 的**响应**都必须走这里 —— 密钥只写不读。
+ * （`getSettings()` 本身返回明文，因为发邮件要用；**不要**把它直接塞进 HTTP 响应。）
+ */
+export function redactSettings(s: any): any {
+  const n = { ...(s?.notifications || {}) };
+  const flags: Record<string, boolean> = {};
+  for (const k of SECRET_FIELDS) {
+    flags[`${k}Set`] = String(n[k] ?? "").length > 0;
+    n[k] = "";
+  }
+  return { ...(s || {}), notifications: { ...n, ...flags } };
+}
+
+/**
+ * 磁盘上的密钥是否**已经是密文**（供状态接口展示，不解密、不碰明文）。
+ * 只要有一个密钥字段是 `enc:v1:` 形态即为 true ⇒ 前端可显示「已加密存储」。
+ */
+export function secretsAreEncrypted(): boolean {
+  const raw = readStoredRaw();
+  const n = raw?.notifications || {};
+  return SECRET_FIELDS.some((k) => isEncrypted(n[k]));
 }
 
 export function saveSettings(settings: any): any {
-  fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), "utf-8");
-  return settings;
+  const prevRaw = readStoredRaw();
+  const next = { ...(settings || {}) };
+  const n = { ...(next.notifications || {}) };
+  // ★ 密钥三态：空串 = 保持磁盘原值、SECRET_CLEAR = 清除、其它 = 新明文
+  for (const k of SECRET_FIELDS) {
+    const incoming = n[k] == null ? "" : String(n[k]);
+    if (incoming === SECRET_CLEAR) n[k] = "";
+    // 保持语义直接把磁盘上的原值（通常是密文）放回去，由 encodeSettings 幂等跳过
+    else if (incoming === "") n[k] = prevRaw?.notifications?.[k] ?? "";
+    else n[k] = incoming;
+  }
+  next.notifications = n;
+
+  const encoded = encodeSettings(next);
+  fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
+  // 0600：settings.json 内含密钥密文，仅服务运行账号可读（Windows/NTFS 上 mode 无效属正常）
+  fs.writeFileSync(SETTINGS_FILE, JSON.stringify(encoded, null, 2), { encoding: "utf-8", mode: 0o600 });
+  try {
+    fs.chmodSync(SETTINGS_FILE, 0o600);
+  } catch {
+    /* Windows 无 POSIX 权限位 */
+  }
+  // 响应前脱敏：明文密钥绝不回传前端
+  return redactSettings(decodeSettings(encoded));
 }

@@ -72,7 +72,7 @@ import {
 } from "./docker.js";
 import { getImageLocks, setImageLock } from "./image-locks.js";
 import { createFullBackup, restoreFullBackup, restoreUploadedBackup, exportConfigArchive, listBackupFiles, deleteBackupFile, backupFilePath, migrateLegacyBackups } from "./backup.js";
-import { getSettings, saveSettings } from "./settings.js";
+import { getSettings, saveSettings, redactSettings, secretsAreEncrypted } from "./settings.js";
 import { startUpdateScheduler, getSchedulerStatus, runSchedulerCheckNow, checkEngineImages, getImageUpdateCache, startBackupScheduler, getBackupSchedulerStatus } from "./scheduler.js";
 import { addPushClient, removePushClient } from "./push.js";
 import { readDaemonConfigInfo, writeDaemonConfig, writeDaemonConfigText, restartDockerService, refreshPrivileges } from "./daemon-config.js";
@@ -86,6 +86,21 @@ import {
 } from "./telemetry.js";
 import { createEmbeddedStatic, type EmbeddedDist } from "./serve-embedded.js";
 import { setLogLevel, getLogLevel, createLogger } from "./logger.js";
+import { getAppInfo } from "./appinfo.js";
+import {
+  listLogFiles,
+  readLogTail,
+  resolveLogFile,
+  deleteLogFile,
+  pruneLogs,
+  exportLogsZip,
+  cleanupExport,
+  getRetentionConfig,
+  logsTotalBytes,
+  startLogRetention,
+} from "./applogs.js";
+import { getMirrorStatus, syncMirrorNow, applyMirrorSettings, startMirror } from "./mirror.js";
+import { sendTestNotify, startContainerWatch, EVENTS_WITHOUT_SOURCE, getSecretSources } from "./notify.js";
 import { WebSocketServer } from "ws";
 import {
   countUsers,
@@ -1516,9 +1531,9 @@ app.get("/api/engines/:id/activity", async (req, res) => {
 
 // ============ 系统设置 API ============
 
-/** 获取系统设置 */
+/** 获取系统设置（★ 脱敏：密钥字段只回传空串 + 「是否已设置」标志，绝不回传明文） */
 app.get("/api/settings", (_req, res) => {
-  res.json({ success: true, data: getSettings() });
+  res.json({ success: true, data: redactSettings(getSettings()) });
 });
 
 /** 保存系统设置 */
@@ -1534,6 +1549,12 @@ app.put("/api/settings", (req, res) => {
     setLogLevel(settings.docker.logLevel);
     apiLog.info(`日志级别已更新: ${settings.docker.logLevel}`);
   }
+  // 目录镜像配置可能变更（开关 / 目标路径）→ 立即重挂监听并做一次对账
+  try {
+    applyMirrorSettings();
+  } catch (err: any) {
+    apiLog.warn(`目录镜像配置应用失败：${err?.message || err}`);
+  }
   // 上传开关（开启/关闭）发生变更 → 异步触发一次上报，把最新开关状态透给远端；不阻塞响应
   const nextEnabled = !!(settings?.telemetry && typeof settings.telemetry.enabled === "boolean" ? settings.telemetry.enabled : true);
   if (nextEnabled !== prevEnabled) {
@@ -1545,6 +1566,164 @@ app.put("/api/settings", (req, res) => {
 /** 获取当前日志级别（运行时） */
 app.get("/api/settings/log-level", (_req, res) => {
   res.json({ success: true, data: { logLevel: getLogLevel() } });
+});
+
+// ============ 通知（Webhook / 邮件） ============
+
+/**
+ * 发送测试通知（设置 → 通知配置 → 「发送测试通知」按钮）。
+ * force：忽略事件开关与去重，直接走一遍两个通道，让用户当场确认是否真的能收到。
+ */
+app.post("/api/notify/test", async (_req, res) => {
+  try {
+    const r = await sendTestNotify();
+    res.json({ success: true, data: r });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || "发送测试通知失败" });
+  }
+});
+
+/** 通知模块自检信息：哪些事件有触发源、两个通道是否配齐、密钥来自哪里 */
+app.get("/api/notify/status", (_req, res) => {
+  try {
+    const s = getSettings() as any;
+    const n = s?.notifications || {};
+    // ★ 注意：判定「是否已配」要看**服务端明文**（getSettings 返回明文），
+    //   但只把布尔值与来源透出，绝不回传密钥本身
+    res.json({
+      success: true,
+      data: {
+        webhookConfigured: !!n.webhookEnabled && !!String(n.webhookUrl || "").trim(),
+        webhookSigned: !!String(n.webhookSecret || "").trim() || !!process.env.DMS_WEBHOOK_SECRET,
+        emailConfigured:
+          !!n.emailEnabled &&
+          !!String(n.emailSmtp || "").trim() &&
+          !!String(n.emailUser || "").trim() &&
+          (!!String(n.emailPassword || "") || !!process.env.DMS_SMTP_PASSWORD) &&
+          String(n.emailTo || "").trim().length > 0,
+        eventsWithoutSource: EVENTS_WITHOUT_SOURCE,
+        secretSource: getSecretSources(),
+        /** 密钥是否已加密落盘（settings.json 内为 enc:v1: 密文） */
+        secretsEncrypted: secretsAreEncrypted(),
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || "获取通知状态失败" });
+  }
+});
+
+// ============ 应用详情（系统设置 → 应用详情） ============
+
+/** 应用详情与安装位置：版本 / 运行态 / 六个目录的路径与占用（只读） */
+app.get("/api/system/app-info", (_req, res) => {
+  try {
+    res.json({ success: true, data: getAppInfo() });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || "获取应用详情失败" });
+  }
+});
+
+// ============ 应用日志（系统设置 → 应用日志） ============
+
+/** 日志文件列表 + 目录总占用 + 当前保留策略 */
+app.get("/api/applogs", (_req, res) => {
+  try {
+    res.json({
+      success: true,
+      data: { files: listLogFiles(), totalBytes: logsTotalBytes(), retention: getRetentionConfig() },
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || "获取日志列表失败" });
+  }
+});
+
+/**
+ * 打包导出全部日志（zip）。
+ * ⚠️ 必须注册在 `/api/applogs/:name` **之前** —— 否则 "export" 会被当成日志文件名。
+ */
+app.get("/api/applogs/export", (_req, res) => {
+  let outFile = "";
+  try {
+    const r = exportLogsZip();
+    outFile = r.outFile;
+    if (r.includedFiles.length === 0) {
+      cleanupExport(outFile);
+      res.status(404).json({ success: false, error: "暂无可导出的日志文件" });
+      return;
+    }
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    res.download(outFile, `docker-manager-logs-${stamp}.zip`, () => cleanupExport(outFile));
+  } catch (err: any) {
+    if (outFile) cleanupExport(outFile);
+    res.status(500).json({ success: false, error: err.message || "导出日志失败" });
+  }
+});
+
+/** 读取单个日志文件的尾部内容（默认 500 行，最多 5000 行） */
+app.get("/api/applogs/:name", (req, res) => {
+  const tail = Number(req.query.tail);
+  const r = readLogTail(req.params.name, Number.isFinite(tail) && tail > 0 ? tail : undefined);
+  if (!r) {
+    res.status(404).json({ success: false, error: "日志文件不存在或名称非法" });
+    return;
+  }
+  res.json({ success: true, data: r });
+});
+
+/** 下载单个日志文件 */
+app.get("/api/applogs/:name/download", (req, res) => {
+  const abs = resolveLogFile(req.params.name);
+  if (!abs) {
+    res.status(400).json({ success: false, error: "日志文件名称非法" });
+    return;
+  }
+  try {
+    res.download(abs, req.params.name);
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || "下载失败" });
+  }
+});
+
+/** 删除单个日志文件（当天正在写入的日志拒绝删除） */
+app.delete("/api/applogs/:name", (req, res) => {
+  const ok = deleteLogFile(req.params.name);
+  if (!ok) {
+    res.status(400).json({
+      success: false,
+      error: "删除失败：文件不存在、名称非法，或为当天正在写入的日志",
+    });
+    return;
+  }
+  res.json({ success: true, data: { message: "已删除" } });
+});
+
+/** 按保留策略立即清理一次（设置页「立即清理」按钮） */
+app.post("/api/applogs/prune", (_req, res) => {
+  try {
+    res.json({ success: true, data: pruneLogs() });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || "清理失败" });
+  }
+});
+
+// ============ 目录镜像（系统设置 → 目录镜像） ============
+
+/** 镜像运行态：两个源的配置 / 目标路径 / 上次同步结果 / 递归监听是否生效 */
+app.get("/api/mirror/status", (_req, res) => {
+  try {
+    res.json({ success: true, data: getMirrorStatus() });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || "获取镜像状态失败" });
+  }
+});
+
+/** 立即全量对账一次（不等 1 秒防抖 / 60 秒轮询） */
+app.post("/api/mirror/sync", (_req, res) => {
+  try {
+    res.json({ success: true, data: syncMirrorNow() });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || "同步失败" });
+  }
 });
 
 /** 更新调度器状态（最后一次检查时间 / 下次检查时间 / 统计） */
@@ -2156,6 +2335,46 @@ const server = app.listen(PORT, () => {
     startBackupScheduler();
   } catch (e: any) {
     console.error("调度器启动失败:", e?.message || e);
+  }
+
+  // 目录镜像引擎：按配置挂 fs.watch 监听 + 60 秒兜底对账（未配置时不启动监听）
+  try {
+    startMirror();
+  } catch (e: any) {
+    console.error("目录镜像启动失败:", e?.message || e);
+  }
+
+  // 应用日志保留守护：启动后延迟跑一次，之后每 30 分钟按保留策略清理
+  try {
+    startLogRetention();
+  } catch (e: any) {
+    console.error("日志保留守护启动失败:", e?.message || e);
+  }
+
+  // 容器状态巡检：为「容器停止/异常」通知提供唯一触发源（后端原本无状态变化检测）
+  // 取数函数在此注入（而非 notify.ts 直接依赖 docker.js）—— 因为 docker.js 本身要发「更新完成」通知，
+  // 直接依赖会形成循环引用
+  try {
+    startContainerWatch(async () => {
+      const connected = getAllEngines().filter((e) => e.status === "connected");
+      // 优先纳入活跃引擎，最多巡检 3 个，避免多引擎时打爆 Docker API
+      const picked = connected.slice(0, 3);
+      const active = connected.find((e) => e.id === getActiveEngineId());
+      if (active && !picked.includes(active)) {
+        picked[2] = active; // 挤掉最后一个，活跃引擎优先
+      }
+      const out = [];
+      for (const e of picked) {
+        try {
+          out.push({ engineId: e.id, engineName: e.name, list: await getContainers(e) });
+        } catch {
+          /* 单个引擎取数失败不影响其它引擎：本轮不更新它的基线 */
+        }
+      }
+      return out;
+    });
+  } catch (e: any) {
+    console.error("容器状态巡检启动失败:", e?.message || e);
   }
 
   // 启动后自动检测所有引擎

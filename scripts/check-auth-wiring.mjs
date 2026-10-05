@@ -88,6 +88,8 @@ const app = parse("src/App.tsx", ts.ScriptKind.TSX);
 const api = parse("src/api.ts", ts.ScriptKind.TS);
 const wizard = parse("src/components/auth/SetupWizard.tsx", ts.ScriptKind.TSX);
 const login = parse("src/components/auth/LoginPage.tsx", ts.ScriptKind.TSX);
+const pwdInput = parse("src/components/PasswordInput.tsx", ts.ScriptKind.TSX);
+const settings = parse("src/pages/Settings.tsx", ts.ScriptKind.TSX);
 const recovery = parse("src/lib/recovery-code.ts", ts.ScriptKind.TS);
 
 // ---------- 1. authState 联合必须恰好是这 5 态 ----------
@@ -272,6 +274,163 @@ try {
   check("LoginPage 重置视图文案", false, String(e && e.message));
 }
 
+// ---------- 12. 密码框「小眼睛」（显示 / 隐藏明文） ----------
+// 为什么单列一组：`renderToStaticMarkup` 只能验初始态（永远掩码），验不到「点一下变明文」。
+// 本组用 AST 断言状态迁移链路 + **跨文件复用契约**，覆盖 SSR 渲不到的组件与全部 9 个调用点：
+//   登录页 3（登录 / 新密码 / 确认新密码）+ 向导 2（密码 / 确认密码）+ 设置页 4（原 / 新 / 确认 / 当前）。
+try {
+  // ---- 12a. 共享组件本体 ----
+  const pwFn = funcDecl(pwdInput, "PasswordInput");
+  check("★ 抽出共享组件 PasswordInput（src/components/PasswordInput.tsx）", !!pwFn);
+  const pwDecl = find(pwdInput, (n) =>
+    ts.isFunctionDeclaration(n) && n.name && n.name.text === "PasswordInput")[0];
+  check("★ 组件带 export 标记（供三个页面 import）",
+    !!pwDecl && (pwDecl.modifiers || []).some((m) => m.kind === ts.SyntaxKind.ExportKeyword));
+
+  // type 必须由 visible 驱动 —— 否则小眼睛点了也不会变
+  const inputEl = pwFn ? find(pwFn, (n) =>
+    (ts.isJsxOpeningElement(n) || ts.isJsxSelfClosingElement(n)) && n.tagName.getText() === "Input")[0] : null;
+  const typeExpr = inputEl ? String(attrValueText(attrOf(inputEl, "type")) || "") : "";
+  check("★★ 密码框 type 由 visible 驱动（visible ? \"text\" : \"password\"）",
+    typeExpr.includes("visible") && typeExpr.includes('"text"') && typeExpr.includes('"password"'), typeExpr);
+  const cls = inputEl ? String(attrValueText(attrOf(inputEl, "className")) || "") : "";
+  check("★ 内边距按 lockIcon 分支（有锁 pl-9 pr-9 / 无锁仅 pr-9）",
+    cls.includes("lockIcon") && cls.includes("pl-9") && cls.includes("pr-9"), cls);
+  // lockIcon 默认值必须为 true（登录页与向导保留锁图标；设置页显式传 false 保持原观感）
+  const lockParam = pwFn && pwFn.parameters[0];
+  const lockEl = lockParam && lockParam.name && lockParam.name.elements
+    ? lockParam.name.elements.find((e) => e.name.getText() === "lockIcon") : null;
+  check("★ lockIcon 默认 true（登录页 / 向导保留锁图标）",
+    !!lockEl && !!lockEl.initializer && lockEl.initializer.getText() === "true",
+    lockEl && lockEl.initializer ? lockEl.initializer.getText() : "(无默认值)");
+
+  // ---- 12b. ★★ 小眼睛按钮必须是 type="button"（表单是原生 <form onSubmit>，默认 submit 会直接提交）----
+  const eyeBtn = pwFn ? find(pwFn, (n) =>
+    ts.isJsxOpeningElement(n) && n.tagName.getText() === "button" &&
+    String(attrValueText(attrOf(n, "aria-label")) || "").includes("密码"))[0] : null;
+  check("★ 小眼睛按钮带 aria-label（无障碍 + 悬浮提示）", !!eyeBtn);
+  check("★★ 小眼睛按钮 type=\"button\"（★ 本项最关键不变量：漏写会一点就提交表单）",
+    !!eyeBtn && attrValueText(attrOf(eyeBtn, "type")) === "button",
+    eyeBtn ? String(attrValueText(attrOf(eyeBtn, "type"))) : "(未找到按钮)");
+  const ariaExpr = eyeBtn ? String(attrValueText(attrOf(eyeBtn, "aria-label")) || "") : "";
+  check("★ aria-label 随 visible 在「显示密码 / 隐藏密码」间切换",
+    ariaExpr.includes("显示密码") && ariaExpr.includes("隐藏密码"), ariaExpr);
+  check("★ 小眼睛按钮 onClick 指向 onToggle", !!eyeBtn && !!attrOf(eyeBtn, "onClick"));
+  check("★★ onMouseDown 阻止默认（点按钮不抢焦点，可继续在输入框打字）",
+    !!pwFn && /onMouseDown[\s\S]{0,80}preventDefault/.test(pwFn.getText()));
+  check("★ 明文态图标切到 EyeOff、掩码态为 Eye",
+    !!pwFn && /EyeOff[\s\S]{0,40}Eye/.test(pwFn.getText()));
+
+  // ---- 12c. ★ 跨文件复用契约：全部调用点走共享组件 ----
+  // ⚠️ 注意 `SecretField`（设置页的密钥行包装组件）内部那一个是**透传**：
+  //    visible/onToggle 来自 props，真正的具体状态在它的调用点上。
+  //    因此统计「绑定了具体状态」的调用点时要把它排除，另用专门断言覆盖它。
+  const isInSecretField = (n) => {
+    let p = n;
+    while (p && !ts.isFunctionDeclaration(p)) p = p.parent;
+    return !!(p && p.name && p.name.getText() === "SecretField");
+  };
+  const usesIn = (src, opts = {}) => find(src, (n) =>
+    (ts.isJsxOpeningElement(n) || ts.isJsxSelfClosingElement(n)) && n.tagName.getText() === "PasswordInput"
+    && !(opts.excludeWrapper && isInSecretField(n)));
+  const importsIt = (src) => /import\s*\{[^}]*\bPasswordInput\b[^}]*\}/.test(src.text);
+  const PLAN = [
+    ["登录页 LoginPage", login, 3, ["showPassword", "showNew", "showConfirm"], {}],
+    ["设置向导 SetupWizard", wizard, 2, ["showPassword", "showConfirm"], {}],
+    // 设置页「绑定具体状态」的 4 个：原密码 / 新密码 / 确认新密码 / 当前密码
+    //（SMTP 密码与 Webhook 密钥走 SecretField，见下方专门断言）
+    ["设置页 Settings", settings, 4, ["showOld", "showNew", "showConfirm", "showPassword"], { excludeWrapper: true }],
+  ];
+  let totalUses = 0;
+  for (const [name, src, want, flags, opts] of PLAN) {
+    const uses = usesIn(src, opts);
+    totalUses += uses.length;
+    check(`★ ${name}：import 了共享组件`, importsIt(src));
+    check(`★ ${name}：${want} 个密码框全部走 PasswordInput（实得 ${uses.length}）`, uses.length === want);
+
+    const vis = uses.map((el) => String(attrValueText(attrOf(el, "visible")) || ""));
+    const tog = uses.map((el) => String(attrValueText(attrOf(el, "onToggle")) || ""));
+    check(`★ ${name}：每个调用点都传 visible 且绑定独立状态`,
+      vis.length === want && vis.every((v) => flags.includes(v)) && new Set(vis).size === want, JSON.stringify(vis));
+    check(`★ ${name}：每个调用点都传 onToggle 且指向对应 setter`,
+      tog.length === want && tog.every((t) => /^(\(\) => )?setShow[A-Z]/.test(t)), JSON.stringify(tog));
+
+    // ⚠️ 本项目写法是 `const [showX, setShowX] = useState(false)` —— 类型实参挂在**调用表达式**上，
+    //    VariableDeclaration.name 是 ArrayBindingPattern 而非 Identifier（同第 1 组的坑），
+    //    必须先按 BindingElement 找名字再上溯两级取 initializer。
+    const flagDecl = (fname) => {
+      const el = find(src, (n) => ts.isBindingElement(n) && n.name && n.name.getText() === fname)[0];
+      return el && el.parent && el.parent.parent; // BindingElement → ArrayBindingPattern → VariableDeclaration
+    };
+    const decls = flags.map(flagDecl);
+    const isFalseState = (d) => d && d.initializer && ts.isCallExpression(d.initializer) &&
+      d.initializer.arguments[0] && d.initializer.arguments[0].kind === ts.SyntaxKind.FalseKeyword;
+    check(`★ ${name}：显示状态 ${flags.join(" / ")} 齐备`, decls.every(Boolean),
+      flags.filter((f, i) => !decls[i]).join(",") || "全部存在");
+    check(`★ ${name}：显示状态初值均为 false（默认掩码，不默认亮明文）`, decls.every(isFalseState),
+      decls.map((d) => (d && d.initializer ? d.initializer.getText() : "(无)")).join(" | "));
+  }
+  check("★★ 三个页面合计 9 个「绑定具体状态」的密码框调用点", totalUses === 9, "实得 " + totalUses);
+
+  // ---- 12c-2. SecretField 包装组件（设置页密钥行）----
+  const secretFn = funcDecl(settings, "SecretField");
+  const wrapperUses = secretFn ? find(secretFn, (n) =>
+    (ts.isJsxOpeningElement(n) || ts.isJsxSelfClosingElement(n)) && n.tagName.getText() === "PasswordInput") : [];
+  check("★ SecretField 内部有且仅有 1 个 PasswordInput 透传", wrapperUses.length === 1, "实得 " + wrapperUses.length);
+  check("★ 该透传的 visible / onToggle 来自 props（由调用点决定具体状态）",
+    wrapperUses.length === 1
+    && attrValueText(attrOf(wrapperUses[0], "visible")) === "visible"
+    && attrValueText(attrOf(wrapperUses[0], "onToggle")) === "onToggle",
+    wrapperUses.length === 1 ? `${attrValueText(attrOf(wrapperUses[0], "visible"))} / ${attrValueText(attrOf(wrapperUses[0], "onToggle"))}` : "");
+  const secretCalls = find(settings, (n) =>
+    (ts.isJsxOpeningElement(n) || ts.isJsxSelfClosingElement(n)) && n.tagName.getText() === "SecretField");
+  const secretVis = secretCalls.map((el) => String(attrValueText(attrOf(el, "visible")) || ""));
+  check("★★ SecretField 的 2 个调用点（Webhook 密钥 / SMTP 密码）各绑独立状态且互不相同",
+    secretCalls.length === 2 && new Set(secretVis).size === 2
+    && secretVis.includes("showWebhookSecret") && secretVis.includes("showEmailPassword"),
+    JSON.stringify(secretVis));
+  // ⚠️ 不能断言「9 个 visible 名字全局唯一」—— 它们是**组件内局部**状态，
+  //    `showPassword` 在 LoginForm / RecoveryForm / SetupWizard 三处同名完全正常。
+  //    真正的风险是「**同一组件内**两个密码框共用一个状态」⇒ 点一个眼睛另一个也跟着变。
+  for (const [name, src] of PLAN) {
+    const groups = new Map();
+    for (const u of usesIn(src)) {
+      let p = u;
+      while (p && !ts.isFunctionDeclaration(p)) p = p.parent; // 上溯到最近的组件函数
+      const key = p && p.name ? p.name.getText() : "(顶层)";
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(String(attrValueText(attrOf(u, "visible")) || ""));
+    }
+    const bad = [...groups.entries()].filter(([, v]) => new Set(v).size !== v.length);
+    check(`★ ${name}：同一组件内各密码框的 visible 状态互不相同（否则点一个眼睛连带影响其它框）`,
+      bad.length === 0, bad.map(([k, v]) => `${k}→${v.join("/")}`).join("; ") || `${groups.size} 个组件均无冲突`);
+  }
+
+  // ---- 12d. ★ 负向：目标组件内不得再有硬编码 type="password" 的 Input（漏改的密码框会没有小眼睛）----
+  const hardIn = (src, fnNames) => {
+    const out = [];
+    for (const fnName of fnNames) {
+      const fn = funcDecl(src, fnName) || arrowFn(src, fnName);
+      if (!fn) continue;
+      out.push(...find(fn, (n) =>
+        (ts.isJsxOpeningElement(n) || ts.isJsxSelfClosingElement(n)) &&
+        n.tagName.getText() === "Input" && attrValueText(attrOf(n, "type")) === "password"));
+    }
+    return out;
+  };
+  check("★ 负向：LoginPage 内无硬编码 type=\"password\" 的 Input", hardIn(login, ["LoginPage", "LoginForm", "RecoveryForm"]).length === 0);
+  check("★ 负向：SetupWizard 内无硬编码 type=\"password\" 的 Input", hardIn(wizard, ["SetupWizard"]).length === 0);
+  check("★ 负向：设置页改密码 / 找回码重设两组件内无硬编码 type=\"password\" 的 Input",
+    hardIn(settings, ["ChangePasswordForm", "RecoveryCodeForm"]).length === 0,
+    "实得 " + hardIn(settings, ["ChangePasswordForm", "RecoveryCodeForm"]).length);
+  check("★ 设置页全部 PasswordInput（4 个具体字段 + SecretField 内 1 个透传）都显式传 lockIcon={false}",
+    usesIn(settings).length === 5 && usesIn(settings).every((el) => attrValueText(attrOf(el, "lockIcon")) === "false"),
+    `共 ${usesIn(settings).length} 处，其中 lockIcon={false} 的 ` + usesIn(settings).filter((el) => attrValueText(attrOf(el, "lockIcon")) === "false").length + " 处");
+} catch (e) {
+  check("密码框小眼睛接线", false, String(e && e.message));
+}
+
 console.log("\n结果: PASS=" + pass + " FAIL=" + fail);
 console.log("说明：第 11 组为源码级断言（RecoveryForm 未导出，无法 SSR 渲染到），强度低于前 10 组");
+console.log("说明：第 12 组同样是源码级断言 —— 小眼睛的「切态」需真实浏览器点击才能端到端验证（无 DOM 环境）");
 process.exit(fail === 0 ? 0 : 1);

@@ -6,6 +6,7 @@ import { createLogger } from "./logger.js";
 import { dataPath } from "./paths.js";
 import { createFullBackup, pruneBackups } from "./backup.js";
 import { broadcastPush } from "./push.js";
+import { notify } from "./notify.js";
 
 const log = createLogger("Scheduler");
 
@@ -309,12 +310,37 @@ export async function checkEngineImages(engineId: string, onlyRef?: string): Pro
   const engine = getEngine(engineId);
   if (!engine) throw new Error("引擎不存在");
   if (engine.status !== "connected") throw new Error(`引擎「${engine.name}」未连接，无法检查更新`);
+  const prevEntry = getImageUpdateCache(engineId);
   const sum = await checkAllImageUpdates(engine, onlyRef);
   if (onlyRef && sum.checked === 0) throw new Error(`镜像「${onlyRef}」不可检查（本地构建镜像或标签不匹配）`);
   const entry = saveImageCache(engineId, sum, !!onlyRef);
   log.info(
     `镜像更新检查完成（${engine.name}${onlyRef ? ` · ${onlyRef}` : ""}）：检查 ${sum.checked} 个，发现 ${sum.updates} 个有可用更新`
   );
+  // 「检测到可用更新」通知：只对**本次新出现**的更新发（上次检查里还没有的）。
+  // 否则每天/每小时重复检查会把同一条更新反复推一遍，直接变成骚扰。
+  try {
+    const prevHas = new Set((prevEntry?.details || []).filter((d) => d.hasUpdate).map((d) => d.image));
+    const fresh = entry.details.filter((d) => d.hasUpdate && !prevHas.has(d.image));
+    if (fresh.length) {
+      const names = fresh.map((d) => d.image);
+      notify({
+        event: "updateAvailable",
+        title: names.length === 1 ? `镜像有可用更新：${names[0]}` : `${names.length} 个镜像有可用更新`,
+        summary:
+          names.length === 1
+            ? `镜像 ${names[0]} 检测到新版本。`
+            : `本次检查发现 ${names.length} 个镜像有新版本：${names.slice(0, 5).join("、")}${names.length > 5 ? " 等" : ""}`,
+        lines: fresh
+          .slice(0, 10)
+          .map((d) => `${d.image}：${String(d.currentSha).slice(0, 12)} → ${String(d.latestSha).slice(0, 12)}`),
+        level: "info",
+        dedupKey: `imgupd:${engineId}:${[...names].sort().join(",")}`,
+      });
+    }
+  } catch (e: any) {
+    log.warn(`镜像更新通知触发失败：${e?.message || e}`);
+  }
   return entry;
 }
 

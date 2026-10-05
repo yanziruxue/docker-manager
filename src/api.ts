@@ -1,4 +1,4 @@
-import type { DockerEngine, EngineResourceStats, ResourceSample, SystemSettings, SchedulerStatus, SchedulerLastResult, ImageUpdateSummaryView, DockerNetwork, NetworkCreateOptions, NetInterfaceOption, ContainerFileEntry } from "./types";
+import type { DockerEngine, EngineResourceStats, ResourceSample, SystemSettings, SchedulerStatus, SchedulerLastResult, ImageUpdateSummaryView, DockerNetwork, NetworkCreateOptions, NetInterfaceOption, ContainerFileEntry, AppInfo, LogListResult, LogTailResult, LogPruneResult, MirrorRuntimeState, NotifyRuntimeStatus, NotifyTestResult } from "./types";
 
 const BASE = "/api";
 
@@ -1292,4 +1292,61 @@ export function applyLocalUpdateApi(): Promise<{ message: string }> {
 /** 主动丢弃已上传、待应用的本地更新包（手动「丢弃」或倒计时归零时调用） */
 export function discardPendingUploadApi(): Promise<{ message: string }> {
   return request<{ message: string }>("/system/update/local", { method: "DELETE" });
+}
+
+// ============ 应用详情 / 应用日志 / 目录镜像（系统设置） ============
+
+/** 应用详情与安装位置：版本 / 运行态 / 各目录路径与占用（只读） */
+export function fetchAppInfoApi(): Promise<AppInfo> {
+  return request<AppInfo>("/system/app-info");
+}
+
+/** 应用日志：文件列表 + 日志目录总占用 + 当前保留策略 */
+export function fetchAppLogsApi(): Promise<LogListResult> {
+  return request<LogListResult>("/applogs");
+}
+
+/** 读取单个日志文件的尾部内容（默认 500 行，最多 5000 行） */
+export function fetchAppLogTailApi(name: string, tail = 500): Promise<LogTailResult> {
+  return request<LogTailResult>(`/applogs/${encodeURIComponent(name)}?tail=${tail}`);
+}
+
+/** 下载单个日志文件（返回实际文件名） */
+export function downloadAppLogApi(name: string): Promise<string> {
+  return downloadAsBlob(`/applogs/${encodeURIComponent(name)}/download`);
+}
+
+/** 打包导出全部日志为 zip（返回实际文件名） */
+export function exportAppLogsApi(): Promise<string> {
+  return downloadAsBlob("/applogs/export");
+}
+
+/** 删除单个日志文件（当天正在写入的日志后端会拒绝） */
+export function deleteAppLogApi(name: string): Promise<{ message: string }> {
+  return request<{ message: string }>(`/applogs/${encodeURIComponent(name)}`, { method: "DELETE" });
+}
+
+/** 按保留策略立即清理一次日志 */
+export function pruneAppLogsApi(): Promise<LogPruneResult> {
+  return request<LogPruneResult>("/applogs/prune", { method: "POST" });
+}
+
+/** 目录镜像运行态（两个源的配置 / 目标 / 上次同步结果 / 监听是否生效） */
+export function fetchMirrorStatusApi(): Promise<MirrorRuntimeState[]> {
+  return request<MirrorRuntimeState[]>("/mirror/status");
+}
+
+/** 立即全量同步一次目录镜像（不等 1 秒防抖 / 60 秒轮询） */
+export function syncMirrorNowApi(): Promise<MirrorRuntimeState[]> {
+  return request<MirrorRuntimeState[]>("/mirror/sync", { method: "POST" });
+}
+
+/** 通知自检状态：两个通道是否配齐、哪些事件开关没有触发源 */
+export function fetchNotifyStatusApi(): Promise<NotifyRuntimeStatus> {
+  return request<NotifyRuntimeStatus>("/notify/status");
+}
+
+/** 发送测试通知（忽略事件开关与去重，直接走一遍 Webhook / 邮件） */
+export function testNotifyApi(): Promise<NotifyTestResult> {
+  return request<NotifyTestResult>("/notify/test", { method: "POST" });
 }

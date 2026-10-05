@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from "react";
+import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import {
   Search,
   Trash2,
@@ -155,6 +155,33 @@ function calcPullProgress(layers: PullTask["layers"]) {
   }
   const pct = total > 0 ? Math.min(100, Math.round((current / total) * 100)) : 0;
   return { current, total, pct, completed, count: layers.length };
+}
+
+/**
+ * 拉取进度弹窗的**自动关闭倒计时**（秒）。
+ *
+ * 何时自动关闭：
+ *  - `success`（拉取成功）与 `canceled`（已取消）⇒ 倒计时结束自动关闭，并刷新镜像列表；
+ *  - `error`（拉取失败）⇒ **不自动关闭** —— 弹窗里有「重试」按钮和失败原因，
+ *    自动关掉等于把用户刚要看的错误信息收走、还得重新拉一次；
+ *  - `pulling` ⇒ 不关。
+ *
+ * 关闭前会显示剩余秒数并提供「立即关闭」，不做「突然消失」。
+ */
+const PULL_AUTO_CLOSE_SECONDS = 5;
+
+/**
+ * 该任务状态是否应当自动关闭拉取弹窗。
+ *
+ * 规则（抽成纯函数便于断言，避免埋在 effect 条件里悄悄改掉）：
+ *  - `success`  拉取成功 ⇒ 关。结果不会丢：左侧任务列表仍显示该任务状态，关闭时还会刷新镜像列表。
+ *  - `canceled` 已取消   ⇒ 关。用户是主动取消的，没有需要阅读的信息。
+ *  - `error`    拉取失败 ⇒ **不关**。弹窗里有失败原因和「重试」按钮，
+ *               自动关掉等于把用户刚要看的错误收走、还得重新拉一次。
+ *  - `pulling` / 空     ⇒ 不关。
+ */
+export function shouldAutoClosePullModal(status?: string | null): boolean {
+  return status === "success" || status === "canceled";
 }
 
 /**
@@ -608,6 +635,48 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
     () => pullTasks.find((t) => t.id === activePullTaskId) || null,
     [pullTasks, activePullTaskId],
   );
+
+  // ============ 拉取完成 → 自动关闭弹窗 ============
+  // 设计：用「关闭时刻戳」而非「递减计数器」驱动，避免在 setState 更新函数里做副作用
+  //（React 严格模式下更新函数可能被调用两次 ⇒ 关闭/onRefresh 会重复执行）。
+  const [autoCloseAt, setAutoCloseAt] = useState<number | null>(null);
+  const [autoCloseLeft, setAutoCloseLeft] = useState(0);
+
+  /** 关闭拉取弹窗：清状态 + 刷新镜像列表（手动关闭与自动关闭共用同一条路径） */
+  const closePullModal = useCallback(() => {
+    setShowPullModal(false);
+    setActivePullTaskId(null);
+    setAutoCloseAt(null);
+    setAutoCloseLeft(0);
+    onRefresh?.();
+  }, [onRefresh]);
+
+  // ① 进入终态（成功 / 已取消）时设定关闭时刻；拉取中或失败则撤销倒计时
+  useEffect(() => {
+    if (!showPullModal || !shouldAutoClosePullModal(activePullTask?.status)) {
+      setAutoCloseAt(null);
+      setAutoCloseLeft(0);
+      return;
+    }
+    setAutoCloseLeft(PULL_AUTO_CLOSE_SECONDS);
+    setAutoCloseAt(Date.now() + PULL_AUTO_CLOSE_SECONDS * 1000);
+    // ⚠️ 依赖只放「是否进入终态」相关的值：刻意不放 autoCloseLeft / closePullModal，
+    //    否则倒计时每跳一次就会重建定时器，永远走不到 0。
+  }, [showPullModal, activePullTask?.id, activePullTask?.status]);
+
+  // ② 每 500ms 刷新剩余秒数，归零后自动关闭
+  useEffect(() => {
+    if (autoCloseAt === null) return;
+    const timer = setInterval(() => {
+      const left = Math.max(0, Math.ceil((autoCloseAt - Date.now()) / 1000));
+      setAutoCloseLeft(left);
+      if (left <= 0) {
+        clearInterval(timer);
+        closePullModal();
+      }
+    }, 500);
+    return () => clearInterval(timer);
+  }, [autoCloseAt, closePullModal]);
 
   /**
    * 发起拉取：调 API 创建任务，成功后切换到进度视图。
@@ -1419,23 +1488,41 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
 
             <PullOutputPanel task={activePullTask} />
 
-            <div className="flex items-center justify-end gap-2 pt-2">
-              {activePullTask.status === "error" && (
-                <button
-                  onClick={() => retryPull(activePullTask.image)}
-                  disabled={pullStarting}
-                  className="flex items-center gap-1.5 px-4 py-2 text-sm text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {pullStarting ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
-                  {pullStarting ? "重试中..." : "重试"}
-                </button>
+            <div className="flex items-center justify-between gap-2 pt-2">
+              {/* 自动关闭提示：只在成功 / 已取消时出现；失败时保留弹窗让人看清原因并重试 */}
+              {autoCloseLeft > 0 ? (
+                <span className="text-[11px] text-slate-500 tabular-nums">
+                  {autoCloseLeft} 秒后自动关闭
+                </span>
+              ) : (
+                <span />
               )}
-              <button
-                onClick={() => { setShowPullModal(false); setActivePullTaskId(null); onRefresh?.(); }}
-                className="px-4 py-2 text-sm text-white bg-blue-500 rounded-lg hover:bg-blue-600"
-              >
-                关闭
-              </button>
+              <div className="flex items-center gap-2">
+                {activePullTask.status === "error" && (
+                  <button
+                    onClick={() => retryPull(activePullTask.image)}
+                    disabled={pullStarting}
+                    className="flex items-center gap-1.5 px-4 py-2 text-sm text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {pullStarting ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
+                    {pullStarting ? "重试中..." : "重试"}
+                  </button>
+                )}
+                {autoCloseLeft > 0 && (
+                  <button
+                    onClick={closePullModal}
+                    className="px-3 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50"
+                  >
+                    立即关闭
+                  </button>
+                )}
+                <button
+                  onClick={closePullModal}
+                  className="px-4 py-2 text-sm text-white bg-blue-500 rounded-lg hover:bg-blue-600"
+                >
+                  关闭
+                </button>
+              </div>
             </div>
           </div>
         )}

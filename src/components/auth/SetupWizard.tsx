@@ -1,6 +1,7 @@
 import React, { useState } from "react";
-import { User, Lock, ShieldCheck, Loader2, KeyRound } from "lucide-react";
+import { User, ShieldCheck, Loader2, KeyRound } from "lucide-react";
 import { Input, FormField } from "../UI";
+import { PasswordInput } from "../PasswordInput";
 import { initAccount, reinitAccount, type AuthUser } from "../../api";
 import {
   sanitizeRecoveryInput,
@@ -25,7 +26,9 @@ export function SetupWizard({ onDone, mode = "create", initialUsername }: Props)
   const isReinit = mode === "reinit";
   const [username, setUsername] = useState(initialUsername || "admin");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [confirm, setConfirm] = useState("");
+  const [showConfirm, setShowConfirm] = useState(false);
   const [recovery, setRecovery] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -114,29 +117,23 @@ export function SetupWizard({ onDone, mode = "create", initialUsername }: Props)
           </FormField>
 
           <FormField label="密码" required hint="至少 6 位">
-            <div className="relative">
-              <Lock size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <Input
-                value={password}
-                onChange={setPassword}
-                type="password"
-                placeholder="••••••••"
-                className="pl-9"
-              />
-            </div>
+            <PasswordInput
+              value={password}
+              onChange={setPassword}
+              placeholder="••••••••"
+              visible={showPassword}
+              onToggle={() => setShowPassword((v) => !v)}
+            />
           </FormField>
 
           <FormField label="确认密码" required>
-            <div className="relative">
-              <Lock size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <Input
-                value={confirm}
-                onChange={setConfirm}
-                type="password"
-                placeholder="••••••••"
-                className="pl-9"
-              />
-            </div>
+            <PasswordInput
+              value={confirm}
+              onChange={setConfirm}
+              placeholder="••••••••"
+              visible={showConfirm}
+              onToggle={() => setShowConfirm((v) => !v)}
+            />
           </FormField>
 
           <FormField

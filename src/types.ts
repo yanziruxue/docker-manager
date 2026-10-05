@@ -474,19 +474,69 @@ export interface RegistryConfig {
   isMirror: boolean;
 }
 
+/**
+ * 密钥字段的「清除」哨兵值 —— ⚠️ 必须与后端 `server/settings.ts` 的 `SECRET_CLEAR` 完全一致
+ *（`scripts/check-secrets.ts` 有跨文件断言）。
+ *
+ * 契约（提交设置时该字段的三种取值）：
+ *   - `""`            ⇒ 保持原值不变（前端拿不到明文，留空即「不改」）
+ *   - `SECRET_CLEAR`  ⇒ 清空该密钥
+ *   - 其它字符串      ⇒ 作为新明文提交（后端落盘前会用 AES-256-GCM 加密）
+ */
+export const SECRET_CLEAR = "__CLEAR__";
+
 export interface NotificationConfig {
   webhookEnabled: boolean;
   webhookUrl: string;
+  /**
+   * ⚠️ HMAC-SHA256 签名密钥。**只写不读**：`GET /api/settings` 永远返回空串，
+   * 是否已设置看 `webhookSecretSet`。
+   */
+  webhookSecret: string;
+  /** 服务端是否已存有该密钥（脱敏响应里给出） */
+  webhookSecretSet?: boolean;
   emailEnabled: boolean;
   emailSmtp: string;
   emailPort: number;
   emailUser: string;
+  /** ⚠️ SMTP 密码。同样**只写不读**，落盘为 AES-256-GCM 密文；是否已设置看 `emailPasswordSet` */
+  emailPassword: string;
+  /** 服务端是否已存有该密码（脱敏响应里给出） */
+  emailPasswordSet?: boolean;
+  /** 发件人；留空则用 emailUser */
+  emailFrom: string;
+  /** 收件人，多个用逗号或分号分隔 */
+  emailTo: string;
   events: {
     containerDown: boolean;
     updateAvailable: boolean;
     updateComplete: boolean;
+    /** ⚠️ 本项目没有镜像构建功能，此开关暂无触发源 */
     buildFailed: boolean;
   };
+}
+
+/** 密钥来源：环境变量 / 配置文件 / 未设置 */
+export type SecretSource = "env" | "file" | "none";
+
+/** 通知自检状态（GET /api/notify/status） */
+export interface NotifyRuntimeStatus {
+  webhookConfigured: boolean;
+  webhookSigned: boolean;
+  emailConfigured: boolean;
+  /** 有开关但无触发源的事件键 */
+  eventsWithoutSource: string[];
+  /** 密钥各自来自哪里（`env` 表示被环境变量覆盖，界面上应显示为只读） */
+  secretSource: { smtpPassword: SecretSource; webhookSecret: SecretSource };
+  /** 磁盘上的密钥是否已是密文（AES-256-GCM） */
+  secretsEncrypted: boolean;
+}
+
+/** 发送测试通知的结果（POST /api/notify/test） */
+export interface NotifyTestResult {
+  webhook: "skipped" | "sent" | "failed";
+  email: "skipped" | "sent" | "failed";
+  errors: string[];
 }
 
 // ============ 备份配置 ============
@@ -710,6 +760,10 @@ export interface SystemSettings {
    * 默认开启；关闭后不再向远端发送任何数据。仅上报本机设备信息，用于安装数量统计。
    */
   telemetry: TelemetryConfig;
+  /** 目录镜像（系统设置 → 目录镜像）：备份 / Compose 目录单向真镜像到另一个路径 */
+  mirror: MirrorConfig;
+  /** 应用日志保留策略（系统设置 → 应用日志） */
+  logRetention: LogRetentionConfig;
   /** 默认值版本号：服务端据此判断是否需要把老配置重置为新默认值 */
   defaultsVersion?: number;
 }
@@ -718,6 +772,126 @@ export interface SystemSettings {
 export interface TelemetryConfig {
   /** 是否上传安装数量统计（默认 true；关闭后不再向远端发送任何数据） */
   enabled: boolean;
+}
+
+// ============ 应用详情 / 应用日志 / 目录镜像 ============
+
+/** 目录镜像的单个目标（备份 或 Compose） */
+export interface MirrorTargetConfig {
+  enabled: boolean;
+  /** 目标根路径（**绝对路径**）；留空即视为关闭 */
+  target: string;
+}
+
+/**
+ * 目录镜像配置（系统设置 → 目录镜像）。
+ * 语义为**真镜像**：源目录里删除的文件 / 目录会同步从目标删除。
+ */
+export interface MirrorConfig {
+  backups: MirrorTargetConfig;
+  compose: MirrorTargetConfig;
+}
+
+/** 应用日志保留策略（系统设置 → 应用日志） */
+export interface LogRetentionConfig {
+  enabled: boolean;
+  /** 保留天数；0 = 不限 */
+  maxDays: number;
+  /** 日志目录总大小上限（MB）；0 = 不限 */
+  maxTotalMB: number;
+}
+
+/** 应用详情里的单个目录（GET /api/system/app-info） */
+export interface AppDirInfo {
+  key: string;
+  label: string;
+  /** 该目录来源说明（哪个环境变量可覆盖等） */
+  note: string;
+  path: string;
+  exists: boolean;
+  files: number;
+  sizeBytes: number;
+  /** 条目超过统计上限被截断（占用值仅代表已统计部分） */
+  truncated: boolean;
+}
+
+/** 应用详情（GET /api/system/app-info） */
+export interface AppInfo {
+  version: string;
+  /** 运行形态：sea-linux-x64 / dev */
+  channel: string;
+  nodeVersion: string;
+  platform: string;
+  arch: string;
+  /** 运行用户 */
+  user: string;
+  pid: number;
+  startedAt: string;
+  uptimeSeconds: number;
+  cwd: string;
+  engineName: string;
+  engineConnection: string;
+  engineCount: number;
+  dirs: AppDirInfo[];
+}
+
+/** 日志文件条目（GET /api/applogs） */
+export interface LogFileInfo {
+  name: string;
+  sizeBytes: number;
+  mtime: string;
+  mtimeMs: number;
+  /** 是否为「今天」的日志（正在被写入，不可删除） */
+  current: boolean;
+}
+
+/** 日志列表响应 */
+export interface LogListResult {
+  files: LogFileInfo[];
+  totalBytes: number;
+  retention: LogRetentionConfig;
+}
+
+/** 日志尾部读取结果（GET /api/applogs/:name?tail=N） */
+export interface LogTailResult {
+  name: string;
+  sizeBytes: number;
+  mtime: string;
+  lines: string[];
+  /** 只读了文件末尾一段，前面还有内容未包含 */
+  headTruncated: boolean;
+}
+
+/** 日志清理结果（POST /api/applogs/prune） */
+export interface LogPruneResult {
+  removed: string[];
+  freedBytes: number;
+  skipped: boolean;
+}
+
+/** 镜像运行态（GET /api/mirror/status） */
+export interface MirrorRuntimeState {
+  key: "backups" | "compose";
+  label: string;
+  /** 源目录（权威来源） */
+  source: string;
+  /** 配置里是否开启 */
+  enabled: boolean;
+  /** 目标路径（空 = 未配置） */
+  target: string;
+  /** 目标路径是否合法可写 */
+  valid: boolean;
+  invalidReason: string;
+  /** 递归目录监听是否生效（false ⇒ 仅靠 60 秒轮询兜底） */
+  watcherActive: boolean;
+  syncing: boolean;
+  lastSyncAt: string | null;
+  lastDurationMs: number;
+  lastError: string | null;
+  copied: number;
+  deleted: number;
+  sourceFiles: number;
+  targetFiles: number;
 }
 
 // ============ UI 类型 ============

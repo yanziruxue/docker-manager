@@ -1,6 +1,7 @@
 import React, { useState } from "react";
-import { User, Lock, LogIn, Loader2, KeyRound, ArrowLeft, CheckCircle2 } from "lucide-react";
+import { User, LogIn, Loader2, KeyRound, ArrowLeft, CheckCircle2 } from "lucide-react";
 import { Input, FormField } from "../UI";
+import { PasswordInput } from "../PasswordInput";
 import { login, resetPasswordByRecovery, type AuthUser } from "../../api";
 import {
   sanitizeRecoveryInput,
@@ -56,6 +57,7 @@ function LoginForm({
 }) {
   const [username, setUsername] = useState(initialUsername);
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -110,16 +112,13 @@ function LoginForm({
           </FormField>
 
           <FormField label="密码">
-            <div className="relative">
-              <Lock size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <Input
-                value={password}
-                onChange={setPassword}
-                type="password"
-                placeholder="请输入密码"
-                className="pl-9"
-              />
-            </div>
+            <PasswordInput
+              value={password}
+              onChange={setPassword}
+              placeholder="请输入密码"
+              visible={showPassword}
+              onToggle={() => setShowPassword((v) => !v)}
+            />
           </FormField>
 
           {error && (
@@ -167,7 +166,9 @@ function RecoveryForm({
   const [username, setUsername] = useState(initialUsername);
   const [code, setCode] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [showNew, setShowNew] = useState(false);
   const [confirm, setConfirm] = useState("");
+  const [showConfirm, setShowConfirm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -271,29 +272,23 @@ function RecoveryForm({
               </FormField>
 
               <FormField label="新密码" required hint="至少 6 位">
-                <div className="relative">
-                  <Lock size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <Input
-                    value={newPassword}
-                    onChange={setNewPassword}
-                    type="password"
-                    placeholder="••••••••"
-                    className="pl-9"
-                  />
-                </div>
+                <PasswordInput
+                  value={newPassword}
+                  onChange={setNewPassword}
+                  placeholder="••••••••"
+                  visible={showNew}
+                  onToggle={() => setShowNew((v) => !v)}
+                />
               </FormField>
 
               <FormField label="确认新密码" required>
-                <div className="relative">
-                  <Lock size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <Input
-                    value={confirm}
-                    onChange={setConfirm}
-                    type="password"
-                    placeholder="••••••••"
-                    className="pl-9"
-                  />
-                </div>
+                <PasswordInput
+                  value={confirm}
+                  onChange={setConfirm}
+                  placeholder="••••••••"
+                  visible={showConfirm}
+                  onToggle={() => setShowConfirm((v) => !v)}
+                />
               </FormField>
 
               {error && (

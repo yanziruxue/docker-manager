@@ -50,11 +50,85 @@ interface LineChartProps {
   grid?: boolean;
   /** 线宽（非缩放，始终为屏幕像素） */
   strokeWidth?: number;
+  /**
+   * 是否用平滑曲线（单调三次插值）代替折线。默认 `true`。
+   * 曲线仍穿过每个真实数据点，且不超出相邻点取值区间（无过冲）；
+   * 传 `false` 可回到原来的直线折线。
+   */
+  smooth?: boolean;
 }
 
 const VB_W = 600;
 const VB_H = 170;
 
+/**
+ * 单调三次插值（PCHIP / Fritsch–Carlson）→ SVG 三次贝塞尔路径字符串。
+ *
+ * 为什么不用常见的 Catmull-Rom：它在尖峰处会**过冲**（CPU 92% 突降到 30% 时，曲线会先冲到
+ * 不存在的更高值再回落）。本实现用 PCHIP：
+ *   · 内部节点取相邻斜率的**加权调和平均**；
+ *   · 局部极值 / 平台处切线**置 0**（符号变化即判极值）；
+ *   · 端点用三点公式并做限幅。
+ * 由此保证**分段单调** ⇒ 曲线穿过每一个真实数据点，且永不超出相邻两点的取值区间。
+ * （tooltip 与圆点仍取原始值，数值语义零变化。）
+ */
+export function smoothPathD(pts: Array<[number, number]>): string {
+  const n = pts.length;
+  if (n === 0) return "";
+  if (n < 3) {
+    return pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(" ");
+  }
+
+  // 段宽 h 与一阶差商 del
+  const h: number[] = [];
+  const del: number[] = [];
+  for (let i = 0; i < n - 1; i++) {
+    const dh = pts[i + 1][0] - pts[i][0];
+    h.push(dh);
+    del.push(dh === 0 ? 0 : (pts[i + 1][1] - pts[i][1]) / dh);
+  }
+
+  const m: number[] = new Array(n).fill(0);
+
+  // 内部节点：符号变化（局部极值 / 平台）⇒ 切线 0；否则加权调和平均
+  for (let i = 1; i < n - 1; i++) {
+    if (del[i - 1] * del[i] > 0) {
+      const w1 = 2 * h[i] + h[i - 1];
+      const w2 = h[i] + 2 * h[i - 1];
+      m[i] = (w1 + w2) / (w1 / del[i - 1] + w2 / del[i]);
+    } else {
+      m[i] = 0;
+    }
+  }
+
+  // 端点：三点公式 + 限幅（sign 不一致归零；越界压到 3 倍差商）
+  const edge = (d1: number, d2: number, h1: number, h2: number): number => {
+    let t = ((2 * h1 + h2) * d1 - h1 * d2) / (h1 + h2);
+    const sgn = (v: number) => (v > 0 ? 1 : v < 0 ? -1 : 0);
+    if (sgn(t) !== sgn(d1)) {
+      t = 0;
+    } else if (sgn(d1) !== sgn(d2) && Math.abs(t) > Math.abs(3 * d1)) {
+      t = 3 * d1;
+    }
+    return t;
+  };
+  m[0] = edge(del[0], del[1], h[0], h[1]);
+  m[n - 1] = edge(del[n - 2], del[n - 3], h[n - 2], h[n - 3]);
+
+  let d = `M ${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
+  for (let i = 0; i < n - 1; i++) {
+    const x0 = pts[i][0];
+    const y0 = pts[i][1];
+    const x1 = pts[i + 1][0];
+    const y1 = pts[i + 1][1];
+    const h3 = (x1 - x0) / 3; // 控制点落在横向 1/3 处
+    d +=
+      ` C ${(x0 + h3).toFixed(1)} ${(y0 + m[i] * h3).toFixed(1)}` +
+      ` ${(x1 - h3).toFixed(1)} ${(y1 - m[i + 1] * h3).toFixed(1)}` +
+      ` ${x1.toFixed(1)} ${y1.toFixed(1)}`;
+  }
+  return d;
+}
 /**
  * 零依赖 SVG 折线图（多序列 + 可选面积填充 + 自动量程）。
  * 用 preserveAspectRatio="none" 横向铺满父容器，配合 vectorEffect="non-scaling-stroke"
@@ -73,6 +147,7 @@ export function LineChart({
   emptyText = "正在采样…",
   grid = true,
   strokeWidth = 2,
+  smooth = true,
 }: LineChartProps) {
   const len = Math.max(0, ...series.map((s) => s.values.length));
 
@@ -158,11 +233,19 @@ export function LineChart({
             ))}
           {series.map((s) => {
             if (s.values.length < 2) return null;
-            const d = s.values
-              .map((v, i) => `${i === 0 ? "M" : "L"} ${x(i).toFixed(1)} ${y(s, v).toFixed(1)}`)
-              .join(" ");
+            // 非有限值（采样缺口）沿用上一个有效值，避免 NaN 进入路径
+            let last = 0;
+            const pts = s.values.map((v, i) => {
+              last = Number.isFinite(v) ? v : last;
+              return [x(i), y(s, last)] as [number, number];
+            });
+            const d = smooth
+              ? smoothPathD(pts)
+              : pts
+                  .map((p, i) => `${i === 0 ? "M" : "L"} ${p[0].toFixed(1)} ${p[1].toFixed(1)}`)
+                  .join(" ");
             const baseY = (padTop + innerH).toFixed(1);
-            const areaD = `${d} L ${x(s.values.length - 1).toFixed(1)} ${baseY} L ${x(0).toFixed(1)} ${baseY} Z`;
+            const areaD = `${d} L ${x(pts.length - 1).toFixed(1)} ${baseY} L ${x(0).toFixed(1)} ${baseY} Z`;
             return (
               <g key={s.name}>
                 {s.area && <path d={areaD} fill={s.color} opacity={0.12} />}

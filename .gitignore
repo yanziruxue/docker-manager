@@ -3,6 +3,11 @@
 .env.*
 !.env.example
 
+# 运行时配置：含 SMTP 密码 / Webhook 密钥（v1.37.0 起还会是 AES-256-GCM 密文，但同样绝不入库）。
+# 用裸名匹配任意层级，因为 APP_DIR = process.cwd() ⇒ 从仓库根跑会写 ./config/settings.json、
+# 从 server/ 跑会写 ./server/config/settings.json（历史上这两个都曾被误提交）。
+settings.json
+
 # ===== 构建产物 =====
 dist/
 dist_stale/
@@ -23,6 +28,9 @@ _*.mjs
 _*.cjs
 _*.txt
 _*.json
+# 临时**目录**（如冒烟/验证用的 _smoke-root/）：上面的 `_*.xxx` 只覆盖文件，目录需单独忽略，
+# 否则里面的 secret.key 之类会被当源码推上 main（2026-10-05 出包实测踩到）。
+_*/
 
 # ===== 依赖与运行时数据 =====
 node_modules/
@@ -35,8 +43,9 @@ logs/
 # ===== SEA 临时构建产物 =====
 deploy/linux/sea-prep.blob
 
-# ===== 临时测试目录 =====
+# ===== 临时测试目录与文件（.tmp-* 同时覆盖目录与文件）=====
 .tmp-*/
+.tmp-*
 
 # ===== 第三方 UI 参考快照（不入库）=====
 # Unraid WebGUI 的「另存完整网页」快照，仅作仪表盘改版的设计参考。

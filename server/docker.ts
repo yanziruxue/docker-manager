@@ -10,6 +10,7 @@ import type { DockerEngine } from "./engines.js";
 import { COMPOSE_DIR } from "./paths.js";
 import { getSettings } from "./settings.js";
 import { getImageLocks, isImageLocked, pruneStaleLocks, normalizeId, type ImageLock } from "./image-locks.js";
+import { notify } from "./notify.js";
 import { resolveBackupDir, backupFilePath, runTar, copyTree } from "./backup.js";
 import { zipDirectory, extractZip } from "./zip.js";
 
@@ -692,6 +693,32 @@ export function rewriteOne(image: string, mirror: string): string {
  * CLI 输出按 \r/\n 分行解析，恢复层状态与字节进度（与 API 路径的
  * PullLayerInfo 结构一致，前端无感知差异）。
  */
+/**
+ * 拉取成功统一收尾：置成功状态 + 输出进度 + 发「更新完成」通知。
+ *
+ * ★ 三条拉取路径（本地 CLI / 远程 CLI / dockerode API）原本各自内联同样的三行，
+ *   任何新增路径都可能漏发通知或重复发 ⇒ 统一收口到本函数。
+ *   通知是旁路：try/catch 吞掉异常，绝不影响拉取结果。
+ */
+function finishPullSuccess(task: PullTaskInternal, engine: DockerEngine, originalImage: string): void {
+  task.status = "success";
+  task.endedAt = Date.now();
+  pushOutput(task, `✓ 拉取完成: ${originalImage}`);
+  try {
+    notify({
+      event: "updateComplete",
+      title: `镜像已更新：${originalImage}`,
+      summary: `镜像 ${originalImage} 拉取完成，本地已是最新版本。`,
+      lines: [`引擎：${engine.name}`],
+      level: "info",
+      // 同一镜像 10 分钟内重复拉取只通知一次
+      dedupKey: `pull:${engine.id}:${originalImage}`,
+    });
+  } catch {
+    /* 通知失败不影响拉取结果 */
+  }
+}
+
 function startCliPull(task: PullTaskInternal, engine: DockerEngine, candidates: string[], originalImage: string): void {
   if (candidates.length === 0) {
     task.status = "error";
@@ -750,9 +777,7 @@ function startCliPull(task: PullTaskInternal, engine: DockerEngine, candidates: 
     task.child = null;
     if (task.status === "canceled") return; // 已被用户取消
     if (code === 0) {
-      task.status = "success";
-      task.endedAt = Date.now();
-      pushOutput(task, `✓ 拉取完成: ${originalImage}`);
+      finishPullSuccess(task, engine, originalImage);
     } else {
       const errText = stderrLines.join(" ") || `docker pull 异常退出（code=${code ?? signal}）`;
       if (rest.length > 0) {
@@ -883,9 +908,7 @@ function startRemoteCliPull(task: PullTaskInternal, engine: DockerEngine, candid
     cleanup();
     if (task.status === "canceled") return; // 已被用户取消
     if (code === 0) {
-      task.status = "success";
-      task.endedAt = Date.now();
-      pushOutput(task, `✓ 拉取完成: ${originalImage}`);
+      finishPullSuccess(task, engine, originalImage);
     } else {
       const errText = stderrLines.join(" ") || `远程 docker pull 异常退出（code=${code ?? signal}）`;
       if (rest.length > 0) {
@@ -988,9 +1011,7 @@ function startApiPull(task: PullTaskInternal, engine: DockerEngine, pullImage: s
           task.error = errMsg;
           pushOutput(task, `✗ 拉取失败: ${task.error}`);
         } else {
-          task.status = "success";
-          task.endedAt = Date.now();
-          pushOutput(task, `✓ 拉取完成: ${originalImage}`);
+          finishPullSuccess(task, engine, originalImage);
         }
       },
       // 进度回调：evt = { id, status, progress, progressDetail: { current, total } }

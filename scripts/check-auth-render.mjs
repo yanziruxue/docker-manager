@@ -145,6 +145,42 @@ try {
 
   // ---------- D. 渲染期零网络 ----------
   check("★ 渲染期零网络请求", r.fetchCalls === 0, "fetchCalls=" + r.fetchCalls);
+
+  // ---------- E. 密码框「小眼睛」：显示 / 隐藏明文 ----------
+  // 初始态恒为掩码 ⇒ 只需断言初始渲染；「切态」由 check-auth-wiring.mjs 的源码级断言兜底。
+  // 覆盖三处：登录页（1 个）+ 首次设置/账号重设向导（reinit / create 各 2 个）。
+  {
+    const EYE = /<button[^>]*aria-label="显示密码"[^>]*>/g;
+    const eyeTags = (html) => html.match(EYE) || [];
+    // 只匹配 **开标签**，按钮文案「重置密码 / 修改密码」在标签内部，不会被误认成小眼睛
+    const pwdTags = (html) => (html.match(/<input[^>]*type="password"[^>]*>/g) || []);
+
+    // —— 登录页：1 个密码框 ——
+    check("★ 登录页密码框初始为掩码 type=\"password\"（1 个）", pwdTags(r.loginPlain).length === 1,
+      "实得 " + pwdTags(r.loginPlain).length);
+    check("★ 登录页小眼睛按钮 1 个", eyeTags(r.loginPlain).length === 1, "实得 " + eyeTags(r.loginPlain).length);
+    check("★ 登录页密码框留出右侧 pr-9（明文不会压在小眼睛下）", /<input[^>]*type="password"[^>]*pr-9/.test(r.loginPlain));
+    check("★ 负向：登录页初始渲染【不含】「隐藏密码」（默认确为掩码，没被写死成明文）",
+      !r.loginPlain.includes('aria-label="隐藏密码"'));
+
+    // —— 向导：reinit 与 create 各 2 个密码框（密码 / 确认密码）——
+    for (const [name, html] of [["mode=reinit", r.reinit], ["mode 缺省（create）", r.create]]) {
+      check(`★ ${name} 掩码密码框 2 个（密码 / 确认密码）`, pwdTags(html).length === 2, "实得 " + pwdTags(html).length);
+      check(`★ ${name} 小眼睛按钮 2 个`, eyeTags(html).length === 2, "实得 " + eyeTags(html).length);
+    }
+
+    // —— ★★ 全站共 5 个小眼睛按钮，每一个都必须是 type="button" ——
+    // 表单是原生 <form onSubmit>，按钮默认 type 就是 submit；漏写则「点小眼睛 = 立刻提交表单」。
+    const allEye = [...eyeTags(r.loginPlain), ...eyeTags(r.reinit), ...eyeTags(r.create)];
+    const badType = allEye.filter((b) => !/type="button"/.test(b));
+    check("★★ 全部 5 个小眼睛按钮 type=\"button\"（漏成 submit 会直接提交表单）",
+      allEye.length === 5 && badType.length === 0,
+      "共 " + allEye.length + " 个，异常 " + badType.length + " 个" + (badType[0] ? "：" + badType[0] : ""));
+    check("★ 全部小眼睛按钮都带 title 悬浮提示",
+      allEye.every((b) => /title="(显示|隐藏)密码"/.test(b)));
+    check("★ 负向：向导初始渲染同样【不含】「隐藏密码」",
+      !r.reinit.includes('aria-label="隐藏密码"') && !r.create.includes('aria-label="隐藏密码"'));
+  }
 } catch (e) {
   fail++;
   console.log("  FAIL  渲染断言执行异常  <<< " + (e && e.message ? e.message : String(e)));

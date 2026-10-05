@@ -48,9 +48,16 @@ import {
   Copy as CopyIcon,
   Send,
   Undo2,
+  Info,
+  FileText,
+  FolderOpen,
+  Eye,
 } from "lucide-react";
-import type { SystemSettings, BackupMode, DockerEngine, UpdateInfo, UpdateState, ResourceTag, ComposeTemplate } from "../types";
+import type { SystemSettings, BackupMode, DockerEngine, UpdateInfo, UpdateState, ResourceTag, ComposeTemplate, AppInfo, LogListResult, LogTailResult, MirrorRuntimeState, NotifyRuntimeStatus } from "../types";
+// 值导入（不是 type）：密钥「清除」哨兵值
+import { SECRET_CLEAR } from "../types";
 import { Card, FormField, Input, Select, Toggle, IconButton } from "../components/UI";
+import { PasswordInput } from "../components/PasswordInput";
 import { ActivityPanel } from "../components/ActivityPanel";
 import type { SchedulerStatus } from "../types";
 import { COMPOSE_INSERT_OPTIONS, normalizeInsert } from "../lib/compose-template";
@@ -110,6 +117,17 @@ import {
   type TelemetryStatus,
   getSchedulerStatusApi,
   runSchedulerCheckApi,
+  fetchAppInfoApi,
+  fetchAppLogsApi,
+  fetchAppLogTailApi,
+  downloadAppLogApi,
+  exportAppLogsApi,
+  deleteAppLogApi,
+  pruneAppLogsApi,
+  fetchMirrorStatusApi,
+  syncMirrorNowApi,
+  testNotifyApi,
+  fetchNotifyStatusApi,
 } from "../api";
 import { copyText, selectNodeText } from "../lib/clipboard";
 
@@ -159,6 +177,36 @@ function deriveDaemonText(info: DaemonConfigInfo, mirrors: string[]): string {
   return '{\n  "registry-mirrors": []\n}\n';
 }
 
+/** 「标签 : 值」一行（应用详情卡片用） */
+function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex items-baseline gap-2 text-sm">
+      <span className="text-slate-500 flex-shrink-0 w-20">{label}</span>
+      <span className="text-slate-800 break-all">{value}</span>
+    </div>
+  );
+}
+
+/** 字节数 -> 人类可读（应用详情 / 应用日志页用） */
+function fmtSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
+  return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
+}
+
+/** 秒 -> 中文时长（应用详情「已运行」用） */
+function fmtUptimeCn(sec: number): string {
+  if (!Number.isFinite(sec) || sec < 0) return "—";
+  const d = Math.floor(sec / 86400);
+  const h = Math.floor((sec % 86400) / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  if (d > 0) return `${d} 天 ${h} 小时`;
+  if (h > 0) return `${h} 小时 ${m} 分`;
+  if (m > 0) return `${m} 分`;
+  return `${Math.round(sec)} 秒`;
+}
+
 function getDefaultSettings(): SystemSettings {
   return {
     docker: {
@@ -180,10 +228,14 @@ function getDefaultSettings(): SystemSettings {
     notifications: {
       webhookEnabled: false,
       webhookUrl: "",
+      webhookSecret: "",
       emailEnabled: false,
       emailSmtp: "",
       emailPort: 587,
       emailUser: "",
+      emailPassword: "",
+      emailFrom: "",
+      emailTo: "",
       events: { containerDown: true, updateAvailable: true, updateComplete: false, buildFailed: true },
     },
     backup: {
@@ -222,6 +274,13 @@ function getDefaultSettings(): SystemSettings {
     },
     // 默认开启上传安装数量统计（系统设置 → 硬件信息 可关闭）
     telemetry: { enabled: true },
+    // 目录镜像：默认关闭，目标路径留空（用户按需开启）
+    mirror: {
+      backups: { enabled: false, target: "" },
+      compose: { enabled: false, target: "" },
+    },
+    // 应用日志保留策略：默认开启（30 天 / 总上限 500 MB）
+    logRetention: { enabled: true, maxDays: 30, maxTotalMB: 500 },
     defaultsVersion: 2,
   };
 }
@@ -242,10 +301,79 @@ interface SettingsProps {
 }
 
 /** 「用户」区块：修改当前登录账户密码（单管理员，需校验原密码） */
+/**
+ * 密钥输入行（Webhook 签名密钥 / SMTP 密码）。
+ *
+ * ★ 密钥**只写不读**：服务端 `GET /api/settings` 永远返回空串，靠 `isSet` 标志告诉界面
+ *   「已设置」。因此：
+ *   - 留空 ⇒ 后端保持原值不变（不会把已存的密钥清掉）；
+ *   - 要清空必须点「清除」，它会写入哨兵值 `SECRET_CLEAR`；
+ *   - 若该密钥被环境变量覆盖（`envVar` 非空），界面提示「只读」——因为 env 优先级更高，
+ *     在这里改什么都不会生效。
+ */
+function SecretField({
+  label,
+  hint,
+  value,
+  placeholder,
+  visible,
+  onToggle,
+  onChange,
+  onClear,
+  isSet,
+  envVar,
+}: {
+  label: string;
+  hint?: string;
+  value: string;
+  placeholder?: string;
+  visible: boolean;
+  onToggle: () => void;
+  onChange: (v: string) => void;
+  onClear: () => void;
+  isSet?: boolean;
+  envVar?: string;
+}) {
+  const fromEnv = !!envVar;
+  const effectiveHint = fromEnv
+    ? `已由环境变量 ${envVar} 覆盖 —— 这里的设置会被忽略`
+    : isSet
+      ? "已设置（加密存储）· 留空 = 保持不变"
+      : hint;
+  return (
+    <FormField label={label} hint={effectiveHint}>
+      <div className="flex items-center gap-2">
+        <div className="flex-1 min-w-0">
+          <PasswordInput
+            value={value}
+            onChange={onChange}
+            placeholder={fromEnv ? "（来自环境变量）" : isSet ? "••••••••（留空 = 不变）" : placeholder}
+            visible={visible}
+            onToggle={onToggle}
+            lockIcon={false}
+          />
+        </div>
+        {isSet && !fromEnv && (
+          <button
+            type="button"
+            onClick={onClear}
+            className="flex-shrink-0 px-2.5 py-2 text-xs text-red-600 border border-red-200 rounded-lg hover:bg-red-50"
+          >
+            清除
+          </button>
+        )}
+      </div>
+    </FormField>
+  );
+}
+
 function ChangePasswordForm({ username }: { username?: string }) {
   const [oldPassword, setOldPassword] = useState("");
+  const [showOld, setShowOld] = useState(false);
   const [newPassword, setNewPassword] = useState("");
+  const [showNew, setShowNew] = useState(false);
   const [confirm, setConfirm] = useState("");
+  const [showConfirm, setShowConfirm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -283,13 +411,34 @@ function ChangePasswordForm({ username }: { username?: string }) {
     <div className="space-y-4">
       <div className="grid grid-cols-3 gap-4">
         <FormField label="原密码" required>
-          <Input value={oldPassword} onChange={setOldPassword} type="password" placeholder="••••••••" />
+          <PasswordInput
+            value={oldPassword}
+            onChange={setOldPassword}
+            placeholder="••••••••"
+            visible={showOld}
+            onToggle={() => setShowOld((v) => !v)}
+            lockIcon={false}
+          />
         </FormField>
         <FormField label="新密码" required hint="至少 6 位">
-          <Input value={newPassword} onChange={setNewPassword} type="password" placeholder="••••••••" />
+          <PasswordInput
+            value={newPassword}
+            onChange={setNewPassword}
+            placeholder="••••••••"
+            visible={showNew}
+            onToggle={() => setShowNew((v) => !v)}
+            lockIcon={false}
+          />
         </FormField>
         <FormField label="确认新密码" required>
-          <Input value={confirm} onChange={setConfirm} type="password" placeholder="••••••••" />
+          <PasswordInput
+            value={confirm}
+            onChange={setConfirm}
+            placeholder="••••••••"
+            visible={showConfirm}
+            onToggle={() => setShowConfirm((v) => !v)}
+            lockIcon={false}
+          />
         </FormField>
       </div>
 
@@ -320,6 +469,7 @@ function RecoveryCodeForm() {
   const [status, setStatus] = useState<RecoveryStatus | null>(null);
   const [code, setCode] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -416,11 +566,13 @@ function RecoveryCodeForm() {
           </div>
         </FormField>
         <FormField label="当前密码" required hint="敏感操作，需二次验证">
-          <Input
+          <PasswordInput
             value={password}
             onChange={setPassword}
-            type="password"
             placeholder="••••••••"
+            visible={showPassword}
+            onToggle={() => setShowPassword((v) => !v)}
+            lockIcon={false}
           />
         </FormField>
       </div>
@@ -1269,7 +1421,8 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
 
   // ============ 保存设置 ============
 
-  const handleSave = async () => {
+  /** 返回是否真正落盘成功（校验失败 / 保存失败均返回 false）——「发送测试通知」据此判断能否继续 */
+  const handleSave = async (): Promise<boolean> => {
     const errors: string[] = [];
 
     // 引擎配置校验
@@ -1292,6 +1445,9 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
     if (data.notifications.emailEnabled) {
       if (!data.notifications.emailSmtp.trim()) errors.push("通知配置：SMTP 服务器不能为空");
       if (!data.notifications.emailUser.trim()) errors.push("通知配置：邮箱用户名不能为空");
+      // 此前密码框是死输入框（value="" + 空 onChange），密码连保存都没保存 ⇒ 补上必填校验
+      if (!data.notifications.emailPassword) errors.push("通知配置：邮箱密码不能为空");
+      if (!data.notifications.emailTo.trim()) errors.push("通知配置：收件人不能为空");
     }
 
     // 备份配置：备份目录留空 / 相对路径表示使用默认 <data>/backups，无需校验（绝对路径才生效）
@@ -1313,7 +1469,7 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
       else if (firstError.includes("标签")) setActiveSection("tags");
       else if (firstError.includes("通知")) setActiveSection("notifications");
       else if (firstError.includes("备份")) setActiveSection("backup");
-      return;
+      return false;
     }
 
     // 保存到后端
@@ -1326,7 +1482,7 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
       setToast({ type: "success", message: "设置已保存" });
     } catch {
       setToast({ type: "error", message: "保存失败：服务器错误" });
-      return;
+      return false;
     }
 
     // 镜像加速源改由「daemon.json 编辑器」直接管理：若编辑器里有未保存的改动，
@@ -1334,6 +1490,249 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
     // 避免用户以为 APPLY 已经写盘而丢失编辑内容。失败原因由该入口自行提示。
     if (daemonDirtyRef.current) {
       await writeDaemonFromEditor({ quietNoChange: true });
+    }
+    return true;
+  };
+
+  // ============ 应用详情（系统设置 → 应用详情） ============
+  const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
+  const [appInfoLoading, setAppInfoLoading] = useState(false);
+  const [appInfoError, setAppInfoError] = useState<string | null>(null);
+  /** 刚复制成功的目录 key（2 秒后复原为「复制」） */
+  const [copiedDirKey, setCopiedDirKey] = useState<string | null>(null);
+
+  const loadAppInfo = useCallback(async () => {
+    setAppInfoLoading(true);
+    setAppInfoError(null);
+    try {
+      setAppInfo(await fetchAppInfoApi());
+    } catch (e: any) {
+      setAppInfoError(e?.message || "获取应用详情失败");
+    } finally {
+      setAppInfoLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeSection === "appinfo") void loadAppInfo();
+  }, [activeSection, loadAppInfo]);
+
+  const copyDirPath = async (key: string, p: string) => {
+    const ok = await copyText(p);
+    if (!ok) {
+      setToast({ type: "error", message: "复制失败，请手动选中路径复制" });
+      return;
+    }
+    setCopiedDirKey(key);
+    setTimeout(() => setCopiedDirKey((k) => (k === key ? null : k)), 2000);
+  };
+
+  // ============ 应用日志（系统设置 → 应用日志） ============
+  const [logsData, setLogsData] = useState<LogListResult | null>(null);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [logsError, setLogsError] = useState<string | null>(null);
+  /** 正在查看尾部的文件名（非空即打开弹窗） */
+  const [tailName, setTailName] = useState<string | null>(null);
+  const [tailData, setTailData] = useState<LogTailResult | null>(null);
+  const [tailLoading, setTailLoading] = useState(false);
+  const [tailLines, setTailLines] = useState(500);
+  const [exportingLogs, setExportingLogs] = useState(false);
+  const [downloadingLog, setDownloadingLog] = useState<string | null>(null);
+  const [deletingLog, setDeletingLog] = useState<string | null>(null);
+  const [pruningLogs, setPruningLogs] = useState(false);
+
+  const loadLogs = useCallback(async () => {
+    setLogsLoading(true);
+    setLogsError(null);
+    try {
+      setLogsData(await fetchAppLogsApi());
+    } catch (e: any) {
+      setLogsError(e?.message || "获取日志列表失败");
+    } finally {
+      setLogsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeSection === "applogs") void loadLogs();
+  }, [activeSection, loadLogs]);
+
+  const openTail = async (name: string, lines = tailLines) => {
+    setTailName(name);
+    setTailLoading(true);
+    try {
+      setTailData(await fetchAppLogTailApi(name, lines));
+    } catch (e: any) {
+      setTailData(null);
+      setToast({ type: "error", message: e?.message || "读取日志失败" });
+    } finally {
+      setTailLoading(false);
+    }
+  };
+
+  const handleExportLogs = async () => {
+    setExportingLogs(true);
+    try {
+      const name = await exportAppLogsApi();
+      setToast({ type: "success", message: `已导出 ${name}` });
+    } catch (e: any) {
+      setToast({ type: "error", message: e?.message || "导出失败" });
+    } finally {
+      setExportingLogs(false);
+    }
+  };
+
+  const handleDownloadLog = async (name: string) => {
+    setDownloadingLog(name);
+    try {
+      await downloadAppLogApi(name);
+    } catch (e: any) {
+      setToast({ type: "error", message: e?.message || "下载失败" });
+    } finally {
+      setDownloadingLog(null);
+    }
+  };
+
+  const handleDeleteLog = async (name: string) => {
+    setDeletingLog(name);
+    try {
+      await deleteAppLogApi(name);
+      setToast({ type: "success", message: `已删除 ${name}` });
+      if (tailName === name) {
+        setTailName(null);
+        setTailData(null);
+      }
+      await loadLogs();
+    } catch (e: any) {
+      setToast({ type: "error", message: e?.message || "删除失败" });
+    } finally {
+      setDeletingLog(null);
+    }
+  };
+
+  const handlePruneLogs = async () => {
+    setPruningLogs(true);
+    try {
+      const r = await pruneAppLogsApi();
+      if (r.skipped) {
+        setToast({ type: "success", message: "保留策略未启用（或两条上限均为 0），未做清理" });
+      } else if (r.removed.length === 0) {
+        setToast({ type: "success", message: "没有需要清理的日志" });
+      } else {
+        setToast({ type: "success", message: `已清理 ${r.removed.length} 个文件，释放 ${fmtSize(r.freedBytes)}` });
+      }
+      await loadLogs();
+    } catch (e: any) {
+      setToast({ type: "error", message: e?.message || "清理失败" });
+    } finally {
+      setPruningLogs(false);
+    }
+  };
+
+  // ============ 目录镜像（系统设置 → 目录镜像） ============
+  const [mirrorStates, setMirrorStates] = useState<MirrorRuntimeState[]>([]);
+  const [mirrorLoading, setMirrorLoading] = useState(false);
+  const [mirrorError, setMirrorError] = useState<string | null>(null);
+  const [mirrorSyncing, setMirrorSyncing] = useState(false);
+  // 通知测试（设置 → 通知配置 → 「发送测试通知」）
+  const [notifTesting, setNotifTesting] = useState(false);
+  const [notifTestResult, setNotifTestResult] = useState<string | null>(null);
+  // SMTP 密码小眼睛（设置页原本无锁图标，故 lockIcon={false}）
+  const [showEmailPassword, setShowEmailPassword] = useState(false);
+  // Webhook 签名密钥小眼睛
+  const [showWebhookSecret, setShowWebhookSecret] = useState(false);
+  /** 通知自检状态：密钥来源（env / 配置 / 未设）与是否已加密落盘 */
+  const [notifyStatus, setNotifyStatus] = useState<NotifyRuntimeStatus | null>(null);
+
+  // 进入「通知配置」时拉一次自检状态（密钥来源、加密状态、无源事件）
+  useEffect(() => {
+    if (activeSection !== "notifications") return;
+    let alive = true;
+    void (async () => {
+      try {
+        const st = await fetchNotifyStatusApi();
+        if (alive) setNotifyStatus(st);
+      } catch {
+        /* 自检失败不阻塞设置页（只是少了「来自环境变量」这类提示） */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [activeSection]);
+
+  const loadMirror = useCallback(async () => {
+    setMirrorLoading(true);
+    setMirrorError(null);
+    try {
+      setMirrorStates(await fetchMirrorStatusApi());
+    } catch (e: any) {
+      setMirrorError(e?.message || "获取镜像状态失败");
+    } finally {
+      setMirrorLoading(false);
+    }
+  }, []);
+
+  // 进入该分区时加载一次，并每 15 秒刷新运行态（同步结果 / 监听是否掉线）
+  useEffect(() => {
+    if (activeSection !== "mirror") return () => {};
+    void loadMirror();
+    const t = setInterval(() => void loadMirror(), 15000);
+    return () => clearInterval(t);
+  }, [activeSection, loadMirror]);
+
+  const handleMirrorSyncNow = async () => {
+    setMirrorSyncing(true);
+    try {
+      const r = await syncMirrorNowApi();
+      setMirrorStates(r);
+      const bad = r.filter((s) => s.enabled && !s.valid);
+      if (bad.length > 0) {
+        setToast({ type: "error", message: `同步失败：${bad[0].invalidReason || "目标路径不可用"}` });
+      } else {
+        setToast({ type: "success", message: "已立即同步" });
+      }
+    } catch (e: any) {
+      setToast({ type: "error", message: e?.message || "同步失败" });
+    } finally {
+      setMirrorSyncing(false);
+    }
+  };
+
+  /**
+   * 发送测试通知。
+   * ★ 必须**先保存再发**：后端读的是 settings.json，页面上刚填的 URL / 密码还没落盘时
+   *   直接发会拿旧（空）配置去发，表现为「测试失败」但其实配置是对的 —— 极易误判。
+   */
+  const handleTestNotify = async () => {
+    setNotifTesting(true);
+    setNotifTestResult(null);
+    try {
+      const saved = await handleSave();
+      if (!saved) {
+        setNotifTestResult("配置未通过校验或未能落盘，已中止发送（否则会拿旧配置去发）。");
+        return;
+      }
+      const r = await testNotifyApi();
+      const parts: string[] = [];
+      parts.push(r.webhook === "sent" ? "Webhook 已发送" : r.webhook === "failed" ? "Webhook 失败" : "Webhook 未配置（跳过）");
+      parts.push(r.email === "sent" ? "邮件已发送" : r.email === "failed" ? "邮件失败" : "邮件未配置完整（跳过）");
+      const msg = parts.join("；");
+      if (r.errors.length) {
+        setNotifTestResult(`${msg}\n失败原因：${r.errors.join("；")}`);
+        setToast({ type: "error", message: msg });
+      } else {
+        // 两个通道都是「跳过」＝ 什么都没发出去 ⇒ 用 error 色调提示用户去补配置
+        const nothing = r.webhook === "skipped" && r.email === "skipped";
+        const msg2 = nothing ? "两个通道都未配置完整，什么都没发出去" : msg;
+        setNotifTestResult(nothing ? `${msg2}。请检查上方 Webhook URL / SMTP、收件人是否填全。` : msg2);
+        setToast({ type: nothing ? "error" : "success", message: msg2 });
+      }
+    } catch (e: any) {
+      setNotifTestResult(`发送失败：${e?.message || e}`);
+      setToast({ type: "error", message: e?.message || "发送测试通知失败" });
+    } finally {
+      setNotifTesting(false);
     }
   };
 
@@ -1349,6 +1748,9 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
     { key: "scheduler", label: "镜像更新", icon: <Clock size={16} /> },
     { key: "activity", label: "硬件信息", icon: <Activity size={16} /> },
     { key: "update", label: "系统更新", icon: <Download size={16} /> },
+    { key: "appinfo", label: "应用详情", icon: <Info size={16} /> },
+    { key: "applogs", label: "应用日志", icon: <FileText size={16} /> },
+    { key: "mirror", label: "目录镜像", icon: <FolderOpen size={16} /> },
   ];
 
   // ============ 标签库（设置 → 标签管理，全局 ResourceTag 列表） ============
@@ -2177,7 +2579,7 @@ docker-compose version</code>
           <div className="max-w-2xl space-y-5">
             <div>
               <h2 className="text-lg font-semibold text-slate-800 mb-1">通知配置</h2>
-              <p className="text-sm text-slate-500">容器异常、更新完成等事件推送通知</p>
+              <p className="text-sm text-slate-500">容器异常、更新完成等事件推送到 Webhook / 邮箱</p>
             </div>
 
             <Card title="Webhook 通知" icon={<Webhook size={16} />}>
@@ -2187,9 +2589,23 @@ docker-compose version</code>
                   <Toggle active={data.notifications.webhookEnabled} onChange={(val) => update("notifications", "webhookEnabled", val)} />
                 </div>
                 {data.notifications.webhookEnabled && (
-                  <FormField label="Webhook URL">
-                    <Input value={data.notifications.webhookUrl} onChange={(val) => update("notifications", "webhookUrl", val)} placeholder="https://hooks.slack.com/..." />
-                  </FormField>
+                  <>
+                    <FormField label="Webhook URL" hint="支持钉钉 / 企业微信 / Slack / 飞书等机器人 Webhook">
+                      <Input value={data.notifications.webhookUrl} onChange={(val) => update("notifications", "webhookUrl", val)} placeholder="https://oapi.dingtalk.com/robot/send?access_token=..." />
+                    </FormField>
+                    <SecretField
+                      label="签名密钥（可选）"
+                      hint="填写后每次推送带 x-docker-manager-signature: sha256=… 头，接收方可验签防伪造"
+                      value={data.notifications.webhookSecret}
+                      onChange={(val) => update("notifications", "webhookSecret", val)}
+                      onClear={() => update("notifications", "webhookSecret", SECRET_CLEAR)}
+                      placeholder="留空 = 不签名"
+                      visible={showWebhookSecret}
+                      onToggle={() => setShowWebhookSecret((v) => !v)}
+                      isSet={data.notifications.webhookSecretSet}
+                      envVar={notifyStatus?.secretSource?.webhookSecret === "env" ? "DMS_WEBHOOK_SECRET" : undefined}
+                    />
+                  </>
                 )}
               </div>
             </Card>
@@ -2201,34 +2617,88 @@ docker-compose version</code>
                   <Toggle active={data.notifications.emailEnabled} onChange={(val) => update("notifications", "emailEnabled", val)} />
                 </div>
                 {data.notifications.emailEnabled && (
-                  <div className="grid grid-cols-2 gap-4">
-                    <FormField label="SMTP 服务器">
-                      <Input value={data.notifications.emailSmtp} onChange={(val) => update("notifications", "emailSmtp", val)} placeholder="smtp.gmail.com" />
-                    </FormField>
-                    <FormField label="端口">
-                      <Input value={String(data.notifications.emailPort)} onChange={(val) => update("notifications", "emailPort", parseInt(val) || 587)} type="number" />
-                    </FormField>
-                    <FormField label="用户名">
-                      <Input value={data.notifications.emailUser} onChange={(val) => update("notifications", "emailUser", val)} />
-                    </FormField>
-                    <FormField label="密码">
-                      <Input value="" onChange={() => {}} type="password" placeholder="••••••••" />
-                    </FormField>
-                  </div>
+                  <>
+                    <div className="grid grid-cols-2 gap-4">
+                      <FormField label="SMTP 服务器">
+                        <Input value={data.notifications.emailSmtp} onChange={(val) => update("notifications", "emailSmtp", val)} placeholder="smtp.gmail.com" />
+                      </FormField>
+                      <FormField label="端口" hint="465 = 隐式 TLS；587 = STARTTLS">
+                        <Input value={String(data.notifications.emailPort)} onChange={(val) => update("notifications", "emailPort", parseInt(val) || 587)} type="number" />
+                      </FormField>
+                      <FormField label="用户名">
+                        <Input value={data.notifications.emailUser} onChange={(val) => update("notifications", "emailUser", val)} />
+                      </FormField>
+                      <SecretField
+                        label="密码"
+                        hint="多数云邮箱需用「授权码」而非登录密码"
+                        value={data.notifications.emailPassword}
+                        onChange={(val) => update("notifications", "emailPassword", val)}
+                        onClear={() => update("notifications", "emailPassword", SECRET_CLEAR)}
+                        placeholder="••••••••"
+                        visible={showEmailPassword}
+                        onToggle={() => setShowEmailPassword((v) => !v)}
+                        isSet={data.notifications.emailPasswordSet}
+                        envVar={notifyStatus?.secretSource?.smtpPassword === "env" ? "DMS_SMTP_PASSWORD" : undefined}
+                      />
+                      <FormField label="发件人" hint="留空 = 用用户名">
+                        <Input value={data.notifications.emailFrom} onChange={(val) => update("notifications", "emailFrom", val)} placeholder="bot@example.com" />
+                      </FormField>
+                      <FormField label="收件人" hint="多个用逗号或分号分隔">
+                        <Input value={data.notifications.emailTo} onChange={(val) => update("notifications", "emailTo", val)} placeholder="me@example.com" />
+                      </FormField>
+                    </div>
+                    <p className="text-[11px] text-amber-600 bg-amber-50 border border-amber-100 rounded px-2.5 py-2 leading-relaxed">
+                      部分云邮箱需先在邮箱设置里开启「SMTP 服务」并使用「授权码」而非登录密码；本工具不做 OAuth 登录。
+                    </p>                  </>
                 )}
+              </div>
+            </Card>
+
+            <Card title="密钥存储方式" icon={<ShieldCheck size={16} />}>
+              <div className="space-y-2 text-xs leading-relaxed text-slate-600">
+                <p>
+                  <span className="font-medium text-slate-700">加密落盘：</span>
+                  SMTP 密码与 Webhook 签名密钥在写入 <code className="bg-slate-100 px-1 rounded">settings.json</code> 前用
+                  <span className="font-medium"> AES-256-GCM </span>加密（格式 <code className="bg-slate-100 px-1 rounded">enc:v1:…</code>），
+                  主密钥存在同目录的 <code className="bg-slate-100 px-1 rounded">secret.key</code>（权限 0600）。
+                  {notifyStatus?.secretsEncrypted === false && (
+                    <span className="text-amber-600">当前尚未加密（可能因主密钥文件不可写而退化为明文）。</span>
+                  )}
+                </p>
+                <p>
+                  <span className="font-medium text-slate-700">只写不读：</span>
+                  密钥<b>不会回传浏览器</b> —— 界面只显示「已设置」，留空即保持不变，要清空请点「清除」。
+                </p>
+                <p>
+                  <span className="font-medium text-slate-700">环境变量优先：</span>
+                  可设 <code className="bg-slate-100 px-1 rounded">DMS_SMTP_PASSWORD</code> /
+                  <code className="bg-slate-100 px-1 rounded"> DMS_WEBHOOK_SECRET</code> 覆盖配置值（systemd 可用
+                  <code className="bg-slate-100 px-1 rounded"> EnvironmentFile</code> 承载，权限 0600）⇒ 密钥根本不落配置目录。
+                </p>
+                <p className="text-amber-600 bg-amber-50 border border-amber-100 rounded px-2.5 py-2">
+                  <span className="font-medium">边界说明：</span>
+                  加密防的是「文件被误传」—— 误提交 git、被备份/打包带走、被贴进日志或工单。
+                  它<b>防不住已经能读本机配置目录的人</b>（主密钥就在同目录），那种情况下真正的防线是文件权限与最小账号权限。
+                  另外：主密钥丢失或换机后密文将无法解密，需要重新填写这两个密钥。
+                </p>
               </div>
             </Card>
 
             <Card title="通知事件" icon={<Bell size={16} />}>
               <div className="space-y-3">
                 {[
-                  { key: "containerDown", label: "容器停止/异常" },
-                  { key: "updateAvailable", label: "检测到可用更新" },
-                  { key: "updateComplete", label: "更新完成" },
-                  { key: "buildFailed", label: "构建失败" },
+                  { key: "containerDown", label: "容器停止/异常", noSource: false },
+                  { key: "updateAvailable", label: "检测到可用更新", noSource: false },
+                  { key: "updateComplete", label: "更新完成（镜像拉取成功）", noSource: false },
+                  { key: "buildFailed", label: "构建失败", noSource: true },
                 ].map((evt) => (
                   <div key={evt.key} className="flex items-center justify-between">
-                    <span className="text-sm text-slate-600">{evt.label}</span>
+                    <span className="text-sm text-slate-600">
+                      {evt.label}
+                      {evt.noSource && (
+                        <span className="ml-2 text-[11px] text-slate-400">（本版本无镜像构建功能，暂无触发源）</span>
+                      )}
+                    </span>
                     <Toggle
                       active={data.notifications.events[evt.key as keyof typeof data.notifications.events]}
                       onChange={(val) => update("notifications", "events", { ...data.notifications.events, [evt.key]: val })}
@@ -2236,6 +2706,29 @@ docker-compose version</code>
                     />
                   </div>
                 ))}
+              </div>
+            </Card>
+
+            <Card title="测试" icon={<Send size={16} />}>
+              <div className="space-y-3">
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  点「发送测试通知」会<strong className="text-slate-700">先保存当前配置</strong>，再向两个通道各发一条测试消息。
+                  两个通道都是「配置完整才发」，没配的那路会显示「跳过」。
+                </p>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => void handleTestNotify()}
+                    disabled={notifTesting}
+                    className="flex items-center gap-1.5 px-3.5 py-2 text-sm font-medium text-white bg-blue-500 rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-60"
+                  >
+                    {notifTesting && <Loader2 size={14} className="animate-spin" />}
+                    发送测试通知
+                  </button>
+                </div>
+                {notifTestResult && (
+                  <pre className="text-[11px] leading-relaxed whitespace-pre-wrap bg-slate-50 border border-slate-200 rounded px-2.5 py-2 text-slate-700">{notifTestResult}</pre>
+                )}
               </div>
             </Card>
           </div>
@@ -3071,6 +3564,333 @@ docker-compose version</code>
           </div>
         )}
 
+        {activeSection === "appinfo" && (
+          <div className="max-w-3xl space-y-5">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-800 mb-1">应用详情</h2>
+              <p className="text-sm text-slate-500">
+                应用运行态与安装位置一览。目录路径可一键复制，便于排障、写脚本或在其它工具里挂载。
+              </p>
+            </div>
+
+            <Card
+              title="应用信息"
+              icon={<Info size={16} />}
+              actions={
+                <IconButton
+                  icon={<RefreshCw size={14} className={appInfoLoading ? "animate-spin" : ""} />}
+                  onClick={() => void loadAppInfo()}
+                  title="刷新"
+                  disabled={appInfoLoading}
+                />
+              }
+            >
+              {appInfoError && <p className="text-xs text-red-500 mb-3">{appInfoError}</p>}
+              {!appInfo ? (
+                <p className="text-sm text-slate-400">{appInfoLoading ? "加载中…" : "暂无数据"}</p>
+              ) : (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-3">
+                    <span className="text-3xl font-bold text-blue-600 font-mono">v{appInfo.version}</span>
+                    <span className="px-2 py-0.5 text-[11px] rounded-full bg-slate-100 text-slate-600 font-mono">
+                      {appInfo.channel}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+                    <InfoRow label="运行用户" value={appInfo.user} />
+                    <InfoRow label="进程 PID" value={appInfo.pid} />
+                    <InfoRow label="Node" value={appInfo.nodeVersion} />
+                    <InfoRow label="平台" value={`${appInfo.platform} / ${appInfo.arch}`} />
+                    <InfoRow label="启动时间" value={new Date(appInfo.startedAt).toLocaleString()} />
+                    <InfoRow label="已运行" value={fmtUptimeCn(appInfo.uptimeSeconds)} />
+                    <InfoRow label="活跃引擎" value={`${appInfo.engineName}（${appInfo.engineConnection}）`} />
+                    <InfoRow label="引擎数量" value={`${appInfo.engineCount} 个`} />
+                  </div>
+                </div>
+              )}
+            </Card>
+
+            <Card title="安装位置与目录" icon={<FolderOpen size={16} />}>
+              {!appInfo ? (
+                <p className="text-sm text-slate-400">{appInfoLoading ? "加载中…" : "暂无数据"}</p>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  {appInfo.dirs.map((d) => (
+                    <div key={d.key} className="py-2.5 flex items-start gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-medium text-slate-700">{d.label}</span>
+                          {!d.exists && (
+                            <span className="px-1.5 py-0.5 text-[10px] rounded bg-amber-50 text-amber-600 border border-amber-200">
+                              不存在
+                            </span>
+                          )}
+                          {d.exists && (
+                            <span className="text-[11px] text-slate-400">
+                              {d.files} 个文件 · {d.truncated ? "≥ " : ""}
+                              {fmtSize(d.sizeBytes)}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-500 font-mono break-all mt-0.5">{d.path}</p>
+                        <p className="text-[11px] text-slate-400 mt-0.5">{d.note}</p>
+                      </div>
+                      <button
+                        onClick={() => void copyDirPath(d.key, d.path)}
+                        className="flex-shrink-0 flex items-center gap-1 px-2 py-1 text-[11px] text-slate-600 border border-slate-200 rounded hover:bg-slate-50"
+                      >
+                        {copiedDirKey === d.key ? <Check size={12} className="text-green-600" /> : <CopyIcon size={12} />}
+                        {copiedDirKey === d.key ? "已复制" : "复制"}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Card>
+          </div>
+        )}
+
+        {activeSection === "applogs" && (
+          <div className="max-w-3xl space-y-5">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-800 mb-1">应用日志</h2>
+              <p className="text-sm text-slate-500">
+                应用运行日志（<span className="font-mono">app-YYYY-MM-DD.log</span>，按天分文件）。可查看列表、
+                读取尾部内容、导出为 zip，并按保留策略自动清理。
+              </p>
+            </div>
+
+            <Card
+              title="保留策略"
+              icon={<Timer size={16} />}
+              actions={
+                <IconButton
+                  icon={<RefreshCw size={14} className={logsLoading ? "animate-spin" : ""} />}
+                  onClick={() => void loadLogs()}
+                  title="刷新"
+                  disabled={logsLoading}
+                />
+              }
+            >
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-sm text-slate-600">启用自动清理</span>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      关闭后日志永久保留、不再自动删除（当天的日志文件始终不会删）
+                    </p>
+                  </div>
+                  <Toggle
+                    active={data.logRetention?.enabled ?? true}
+                    onChange={(v) => update("logRetention", "enabled", v)}
+                  />
+                </div>
+
+                {(data.logRetention?.enabled ?? true) && (
+                  <div className="grid grid-cols-2 gap-4 pl-4 border-l-2 border-slate-100">
+                    <FormField label="保留天数" hint="0 = 不限；超期的最先清理">
+                      <Input
+                        type="number"
+                        value={String(data.logRetention?.maxDays ?? 30)}
+                        onChange={(v) => update("logRetention", "maxDays", Math.max(0, Math.floor(Number(v) || 0)))}
+                      />
+                    </FormField>
+                    <FormField label="日志总大小上限（MB）" hint="0 = 不限；超出后从最旧开始删">
+                      <Input
+                        type="number"
+                        value={String(data.logRetention?.maxTotalMB ?? 500)}
+                        onChange={(v) => update("logRetention", "maxTotalMB", Math.max(0, Math.floor(Number(v) || 0)))}
+                      />
+                    </FormField>
+                  </div>
+                )}
+
+                <div className="flex items-center gap-2 flex-wrap pt-1">
+                  <button
+                    onClick={handlePruneLogs}
+                    disabled={pruningLogs}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    <Trash2 size={13} /> {pruningLogs ? "清理中…" : "立即清理"}
+                  </button>
+                  <button
+                    onClick={handleExportLogs}
+                    disabled={exportingLogs || !logsData || logsData.files.length === 0}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-white bg-blue-500 rounded-lg hover:bg-blue-600 disabled:opacity-50"
+                  >
+                    <Archive size={13} /> {exportingLogs ? "导出中…" : "导出全部（zip）"}
+                  </button>
+                  <span className="text-[11px] text-slate-400">
+                    当前 {logsData?.files.length ?? 0} 个文件 · 合计 {fmtSize(logsData?.totalBytes ?? 0)}
+                  </span>
+                </div>
+              </div>
+            </Card>
+
+            <Card title="日志文件" icon={<FileText size={16} />}>
+              {logsError && <p className="text-xs text-red-500 mb-3">{logsError}</p>}
+              {!logsData || logsData.files.length === 0 ? (
+                <p className="text-sm text-slate-400">{logsLoading ? "加载中…" : "暂无日志文件"}</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-xs text-slate-500 border-b border-slate-100">
+                        <th className="text-left font-medium py-2">文件名</th>
+                        <th className="text-right font-medium py-2">大小</th>
+                        <th className="text-left font-medium py-2 pl-4">最后写入</th>
+                        <th className="text-right font-medium py-2">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {logsData.files.map((f) => (
+                        <tr key={f.name} className="border-b border-slate-50 hover:bg-slate-50/60">
+                          <td className="py-2 font-mono text-xs text-slate-700">
+                            {f.name}
+                            {f.current && (
+                              <span className="ml-2 px-1.5 py-0.5 text-[10px] rounded bg-green-50 text-green-600 border border-green-200">
+                                写入中
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-2 text-right text-xs text-slate-600 tabular-nums">{fmtSize(f.sizeBytes)}</td>
+                          <td className="py-2 pl-4 text-xs text-slate-500">{new Date(f.mtime).toLocaleString()}</td>
+                          <td className="py-2">
+                            <div className="flex items-center justify-end gap-1">
+                              <IconButton
+                                size="sm"
+                                icon={<Eye size={13} />}
+                                title="查看尾部内容"
+                                onClick={() => void openTail(f.name)}
+                              />
+                              <IconButton
+                                size="sm"
+                                icon={<Download size={13} />}
+                                title="下载该文件"
+                                onClick={() => void handleDownloadLog(f.name)}
+                                disabled={downloadingLog === f.name}
+                              />
+                              <IconButton
+                                size="sm"
+                                variant="danger"
+                                icon={<Trash2 size={13} />}
+                                title={f.current ? "当天日志正在写入，不可删除" : "删除该文件"}
+                                onClick={() => void handleDeleteLog(f.name)}
+                                disabled={f.current || deletingLog === f.name}
+                              />
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Card>
+          </div>
+        )}
+
+        {activeSection === "mirror" && (
+          <div className="max-w-3xl space-y-5">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-800 mb-1">目录镜像</h2>
+              <p className="text-sm text-slate-500">
+                把「备份目录」或「Compose 目录」在<b>另一个路径</b>再存一份，与原始目录实时同步。
+                变更由文件监听即时触发（1 秒防抖合并），另有每 60 秒全量对账兜底。
+              </p>
+              <p className="text-xs text-amber-600 mt-1">
+                ⚠️ 语义为<b>真镜像</b>：源目录里删除的文件 / 目录会同步从目标删除。因此目标路径不允许是源目录的上级或子目录。
+              </p>
+            </div>
+
+            {mirrorError && <p className="text-xs text-red-500">{mirrorError}</p>}
+
+            {mirrorStates.length === 0 && (
+              <p className="text-sm text-slate-400">{mirrorLoading ? "加载中…" : "暂无镜像状态"}</p>
+            )}
+
+            {mirrorStates.map((s) => (
+              <Card
+                key={s.key}
+                title={s.label}
+                icon={<FolderOpen size={16} />}
+                actions={
+                  <Toggle
+                    active={data.mirror?.[s.key]?.enabled ?? false}
+                    onChange={(v) =>
+                      update("mirror", s.key, { ...(data.mirror?.[s.key] ?? { target: "" }), enabled: v })
+                    }
+                  />
+                }
+              >
+                <div className="space-y-3">
+                  <div className="flex items-start gap-2 text-xs">
+                    <span className="text-slate-400 flex-shrink-0 pt-0.5">源目录</span>
+                    <span className="font-mono text-slate-600 break-all">{s.source}</span>
+                  </div>
+
+                  <FormField
+                    label="目标路径（绝对路径）"
+                    hint="留空 = 关闭该项镜像。示例：/mnt/user/backup-mirror/backups"
+                  >
+                    <Input
+                      value={data.mirror?.[s.key]?.target ?? ""}
+                      onChange={(v) =>
+                        update("mirror", s.key, { ...(data.mirror?.[s.key] ?? { enabled: false }), target: v })
+                      }
+                      placeholder="/mnt/user/backup-mirror"
+                    />
+                  </FormField>
+
+                  {(data.mirror?.[s.key]?.enabled ?? false) && (data.mirror?.[s.key]?.target ?? "").trim() !== "" && (
+                    <div className="rounded-lg bg-slate-50 border border-slate-100 p-3 space-y-1.5">
+                      {!s.valid ? (
+                        <p className="text-xs text-red-600">目标路径不可用：{s.invalidReason}</p>
+                      ) : (
+                        <>
+                          <div className="flex items-center gap-4 text-xs flex-wrap">
+                            <span
+                              className={`inline-flex items-center gap-1 ${
+                                s.watcherActive ? "text-green-600" : "text-amber-600"
+                              }`}
+                            >
+                              <span
+                                className={`w-1.5 h-1.5 rounded-full ${
+                                  s.watcherActive ? "bg-green-500" : "bg-amber-500"
+                                }`}
+                              />
+                              {s.watcherActive ? "文件监听已生效（实时同步）" : "递归监听不可用，仅 60 秒轮询兜底"}
+                            </span>
+                            {s.syncing && <span className="text-blue-600">同步中…</span>}
+                          </div>
+                          <div className="text-xs text-slate-500">
+                            上次同步：{s.lastSyncAt ? new Date(s.lastSyncAt).toLocaleString() : "尚未同步"} · 耗时{" "}
+                            {s.lastDurationMs} ms · 源 {s.sourceFiles} 个文件 / 目标 {s.targetFiles} 个文件 · 上次复制{" "}
+                            {s.copied} 个{s.deleted > 0 ? ` / 删除 ${s.deleted} 个` : ""}
+                          </div>
+                          {s.lastError && <p className="text-xs text-red-600">最近错误：{s.lastError}</p>}
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </Card>
+            ))}
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleMirrorSyncNow}
+                disabled={mirrorSyncing}
+                className="flex items-center gap-1.5 px-4 py-2 text-sm text-white bg-blue-500 rounded-lg hover:bg-blue-600 disabled:opacity-50"
+              >
+                <RefreshCw size={14} className={mirrorSyncing ? "animate-spin" : ""} />
+                {mirrorSyncing ? "同步中…" : "立即同步"}
+              </button>
+              <span className="text-xs text-slate-400">开关与路径需点 APPLY 保存后生效</span>
+            </div>
+          </div>
+        )}
+
         {activeSection === "compose" && (
           <div className="max-w-3xl space-y-5">
             <div>
@@ -3467,6 +4287,67 @@ docker-compose version</code>
 
         {/* 重启 Docker 的命令输出（tail 文本） */}
         <CmdOutputModal data={cmdOutput} onClose={closeOutput} />
+
+        {/* 应用日志：尾部内容查看（只读） */}
+        <Modal
+          open={!!tailName}
+          onClose={() => {
+            setTailName(null);
+            setTailData(null);
+          }}
+          title={tailName ? `日志内容 · ${tailName}` : "日志内容"}
+          size="lg"
+          dismissable
+          footer={
+            <div className="flex items-center gap-2">
+              <div className="w-40">
+                <Select
+                  value={String(tailLines)}
+                  onChange={(v) => {
+                    const n = Number(v);
+                    setTailLines(n);
+                    if (tailName) void openTail(tailName, n);
+                  }}
+                  options={[
+                    { value: "200", label: "末 200 行" },
+                    { value: "500", label: "末 500 行" },
+                    { value: "2000", label: "末 2000 行" },
+                    { value: "5000", label: "末 5000 行" },
+                  ]}
+                />
+              </div>
+              <button
+                onClick={() => tailName && void openTail(tailName)}
+                className="px-3 py-1.5 text-xs text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50"
+              >
+                刷新
+              </button>
+              <button
+                onClick={() => tailName && void handleDownloadLog(tailName)}
+                className="px-3 py-1.5 text-xs text-white bg-blue-500 rounded-lg hover:bg-blue-600"
+              >
+                下载该文件
+              </button>
+            </div>
+          }
+        >
+          {tailLoading ? (
+            <p className="text-sm text-slate-400">加载中…</p>
+          ) : !tailData ? (
+            <p className="text-sm text-slate-400">暂无内容</p>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-xs text-slate-400">
+                {tailData.headTruncated ? "仅显示文件末尾片段；" : ""}共 {tailData.lines.length} 行 · 文件大小{" "}
+                {fmtSize(tailData.sizeBytes)}
+              </p>
+              <pre className="max-h-[60vh] overflow-auto rounded-lg bg-slate-900 text-slate-100 text-[11px] leading-relaxed p-3 font-mono whitespace-pre-wrap break-all">
+                {tailData.lines.join("\n")}
+              </pre>
+            </div>
+          )}
+        </Modal>
+
 
         </div>
 
