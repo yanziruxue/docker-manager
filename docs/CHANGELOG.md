@@ -15,7 +15,7 @@
 
 ---
 
-## v1.38.3 — 2026-10-05（**已就绪 · 未出包 · 未发布**）
+## v1.38.3 — 2026-10-05（**已出包 · 已发布 2026-10-05**）
 
 > **用户指令（逐字）**：「初始化时，用户名密码取消默认显示的内容」
 
@@ -43,6 +43,24 @@
 
 - 前后端 `tsc` **双 exit 0**；`lint:hooks` PASS（45 文件）。
 - 无新增门禁（纯展示层文案/默认值改动）。
+
+### 交付包
+
+| 项 | 值 |
+|---|---|
+| 交付包 | `build-upload/docker-manager-yanzi-linux-x64-v1.38.3.zip` **43,211,523 B** / SHA-256 `ec72570582917602bd2efb6d2bfb084d6697b00d8bb3de781a7225f98ed0b299` |
+| 内置二进制 | 130,813,120 B / SHA-256 `6da6613b3b99774a9003892d86fce9a58d55c064a552ddde0c0037ad0d24c590`（ELF `7f454c46`、`CURRENT_VERSION = "1.38.3"`） |
+| 包内成员 | 5 个（二进制 + `install.sh` + `uninstall.sh` + `.service` + `README.md`） |
+
+### 发布记录（2026-10-05）
+
+| 项 | 值 |
+|---|---|
+| Tag | `v1.38.3` |
+| GitHub Release | [v1.38.3](https://github.com/yanziruxue/docker-manager/releases/tag/v1.38.3) —— REST API 通道；3 资产（版本化 zip 43,211,523 B / `latest` 别名同字节 / `quick-install.sh` 12,365 B） |
+| 自建 Gitea Release | [v1.38.3](https://git.ziruxue.top/yanzi/docker-manager-yanzi/releases/tag/v1.38.3) —— 同 3 资产且 **size 与 GitHub 逐字节一致**；匿名 `releases/latest` → `v1.38.3` |
+| 源码 commit | GitHub `main` `66559d60e0e82bec16b311dc4172ed7875258ec7`（3 文件）；自建 Gitea `main` 已推 |
+| ★ OTA 双源核验 | **6/0** —— 两端匿名 `latest` 均 → `v1.38.3`；首个匹配资产＝版本化 zip；直链 range **206** 且前 2 字节 `504b`；两端 zip 字节数相等 |
 
 ### 已知限制
 
