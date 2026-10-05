@@ -15,7 +15,7 @@
 
 ---
 
-## v1.38.0 — 2026-10-05（**已就绪 · 未出包 · 未发布**）
+## v1.38.0 — 2026-10-05（**已出包 · 已发布 2026-10-05**）
 
 > **用户指令（逐字）**：「目录镜像放到应用详情页面里面,应用详情改成应用数据。应用日志，设置保留策略，通知和操作记录也记录到日志里，新建通知和操作记录日志文件。应用日志，设置保留策略，通知和操作记录可单独设置。」
 
@@ -47,7 +47,24 @@
 - **★ `notify` / `oplog` 子段刻意不给默认值**（`settings.ts` 注释已写明「切勿给子段写死默认值」）：首版在 `DEFAULT_SETTINGS` 里写了 `notify:{maxTotalMB:200}`，而二级合并**先填默认值** ⇒ 用户改顶层「应用日志」时子频道**不跟随**，与「可单独设置」的语义正相反。改成子段默认 `{}` + `getRetentionConfig()` 做 `{...顶层, ...该频道}` 合并后才正确。**这是本项目第二次栽在「二级合并的默认值顺序」上**（前一次是 `notifications` 缺子段导致整段取不到新增字段）。
 - **操作记录只覆盖路由层**：`apiLog`（38 处）已归入 `oplog`；`backup.ts` / `mirror.ts` / `scheduler.ts` 的后台任务日志仍在 `app` 频道（属后台调度，非用户直接操作）。
 - **频道不可自定义**：目前固定三类，未做「新增频道」能力。
-- **未出包 · 未发布**（`package.json` 已置 `1.38.0`；`dist/` 需删掉重建以嵌入新版本号）。
+### 交付包
+
+| 项 | 值 |
+|---|---|
+| 交付包 | `build-upload/docker-manager-yanzi-linux-x64-v1.38.0.zip` **43,214,327 B** / SHA-256 `3a2728bc1e5bb8f74e5a08ec965f9ce0e20a6b284a8599a629d2054ed88d6e3b` |
+| 内置二进制 | 130,813,120 B / SHA-256 `1122285405105167b50072cec07ffcd16e6f40959c66f53b02f3aa48ffefa973`（ELF `7f454c46` 已校验、`CURRENT_VERSION = 1.38.0`） |
+| 包内成员 | 5 个（二进制 + `install.sh` + `uninstall.sh` + `.service` + `README.md`） |
+
+### 发布记录（2026-10-05）
+
+| 项 | 值 |
+|---|---|
+| Tag | `v1.38.0` |
+| GitHub Release | [v1.38.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.38.0) —— REST API 通道（`gh` 不可用自动回退）；3 资产（版本化 zip 43,214,327 B / `latest` 别名同字节 / `quick-install.sh` 12,365 B） |
+| 自建 Gitea Release | [v1.38.0](https://git.ziruxue.top/yanzi/docker-manager-yanzi/releases/tag/v1.38.0) —— 同 3 资产且 **size 与 GitHub 逐字节一致**；匿名 `releases/latest` → `v1.38.0` |
+| 源码 commit | GitHub `main` `965dd189725f4940d270cfae2f8e13db234534ba`（**10 文件，用「未跟踪 ∪ 已修改」完整清单**）；自建 Gitea `main` `79a634b57f6de45d90821728b5f040229f4bce3b` |
+| notes | 329 行 / 31,278 字符（`--merge-from v1.37.0`，仅含本版） |
+| ★ OTA 双源核验 | **6/0** —— 两端匿名 `releases/latest` 均 → `v1.38.0`；首个匹配 `/linux-x64.*\.zip$/i` 的资产＝版本化 zip；直链 range **206** 且前 2 字节 `504b`；两端 zip 字节数相等 |
 
 ## v1.37.0 — 2026-10-05（**已出包 · 已发布 2026-10-05** · 并入 v1.36.1）
 
