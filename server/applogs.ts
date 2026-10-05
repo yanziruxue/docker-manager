@@ -66,8 +66,8 @@ export function getRetentionConfig(channel: LogChannel = "app"): LogRetentionCon
   }
   const src = channel === "app" ? raw : { ...(raw || {}), ...((raw && raw[channel]) || {}) };
   const enabled = typeof src?.enabled === "boolean" ? src.enabled : true;
-  const maxDays = Number.isFinite(Number(src?.maxDays)) ? Number(src.maxDays) : 30;
-  const maxTotalMB = Number.isFinite(Number(src?.maxTotalMB)) ? Number(src.maxTotalMB) : 500;
+  const maxDays = Number.isFinite(Number(src?.maxDays)) ? Number(src.maxDays) : 365;
+  const maxTotalMB = Number.isFinite(Number(src?.maxTotalMB)) ? Number(src.maxTotalMB) : 1024;
   return {
     enabled,
     maxDays: maxDays > 0 ? maxDays : 0,

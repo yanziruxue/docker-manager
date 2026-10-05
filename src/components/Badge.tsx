@@ -19,7 +19,7 @@ const statusConfig: Record<string, { color: string; label: string; dot: string }
 export function StatusBadge({ status }: BadgeProps) {
   const config = statusConfig[status] || statusConfig.stopped;
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium border ${config.color}`}>
+    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium border whitespace-nowrap ${config.color}`}>
       <span className={`w-1.5 h-1.5 rounded-full ${config.dot} ${status === "running" || status === "updating" || status === "restarting" || status === "operating" ? "animate-pulse" : ""}`} />
       {config.label}
     </span>

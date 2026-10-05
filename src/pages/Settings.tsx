@@ -253,13 +253,8 @@ function getDefaultSettings(): SystemSettings {
     updateScheduler: { enabled: true, mode: "daily", hour: 1, minute: 0, dayOfWeek: 1, dayOfMonth: 1, autoPull: false },
     user: { sessionTimeout: 30 },
     update: { autoCheck: false, autoUpdate: false, ignoredVersion: "" },
-    columnVisibility: {
-      containers: ["icon","name","status","tags","ports","actions"],
-      images: ["repository","tag","id","size","createdAt","associatedContainers","actions"],
-      volumes: ["name","mountpoint","size","createdAt","associatedContainers","actions"],
-      stacks: ["name","status","network","ip","ports","update"],
-      stackList: ["icon","name","status","tags","containers","uptime","update"],
-    },
+    // 列显隐不再由系统设置控制（v1.38.1）：空对象 ⇒ 各表格回落为「全部列可见」
+    columnVisibility: {},
     tags: [],
     modal: {
       autoCloseDelay: 5,
@@ -281,7 +276,7 @@ function getDefaultSettings(): SystemSettings {
     },
     // 应用日志保留策略：默认开启（30 天 / 总上限 500 MB）
       // 顶层三项 ＝ 应用日志，同时是 notify / oplog 的继承来源（子段留空即跟随）
-      logRetention: { enabled: true, maxDays: 30, maxTotalMB: 500, notify: {}, oplog: {} },
+      logRetention: { enabled: true, maxDays: 365, maxTotalMB: 1024, notify: {}, oplog: {} },
     defaultsVersion: 2,
   };
 }
@@ -1745,17 +1740,16 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
   const sections = [
     { key: "docker", label: "引擎配置", icon: <Container size={16} /> },
     { key: "user", label: "用户", icon: <User size={16} /> },
-    { key: "columns", label: "列显隐默认值", icon: <Columns size={16} /> },
     { key: "tags", label: "标签管理", icon: <TagsIcon size={16} /> },
     { key: "compose", label: "Compose 管理", icon: <FileCode2 size={16} /> },
     { key: "modal", label: "弹窗设置", icon: <Timer size={16} /> },
-    { key: "notifications", label: "通知配置", icon: <Bell size={16} /> },
+    { key: "notifications", label: "通知", icon: <Bell size={16} /> },
     { key: "backup", label: "备份管理", icon: <Package size={16} /> },
     { key: "scheduler", label: "镜像更新", icon: <Clock size={16} /> },
     { key: "activity", label: "硬件信息", icon: <Activity size={16} /> },
     { key: "update", label: "系统更新", icon: <Download size={16} /> },
     { key: "appinfo", label: "应用数据", icon: <Info size={16} /> },
-    { key: "applogs", label: "应用日志", icon: <FileText size={16} /> },
+    { key: "applogs", label: "日志", icon: <FileText size={16} /> },
   ];
 
   // ============ 标签库（设置 → 标签管理，全局 ResourceTag 列表） ============
@@ -2472,118 +2466,10 @@ docker-compose version</code>
           </div>
         )}
 
-        {activeSection === "columns" && (
-          <div className="max-w-2xl space-y-5">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-800 mb-1">列显隐默认值</h2>
-              <p className="text-sm text-slate-500">设置各页面表格的默认可见列</p>
-            </div>
-
-            {(["containers", "images", "volumes", "stackList", "stacks"] as const).map((page) => {
-              const allColumns: Record<string, { key: string; label: string }[]> = {
-                containers: [
-                  { key: "icon", label: "图标" },
-                  { key: "name", label: "容器名称" },
-                  { key: "status", label: "状态" },
-                  { key: "tags", label: "标签" },
-                  { key: "image", label: "镜像" },
-                  { key: "ports", label: "端口映射" },
-                  { key: "uptime", label: "运行时长" },
-                  { key: "restartPolicy", label: "重启策略" },
-                  { key: "actions", label: "操作" },
-                ],
-                images: [
-                  { key: "repository", label: "仓库名" },
-                  { key: "tag", label: "标签" },
-                  { key: "id", label: "镜像 ID" },
-                  { key: "size", label: "大小" },
-                  { key: "createdAt", label: "创建时间" },
-                  { key: "associatedContainers", label: "关联容器" },
-                  { key: "sha256", label: "SHA-256" },
-                  { key: "actions", label: "操作" },
-                ],
-                volumes: [
-                  { key: "name", label: "卷名称" },
-                  { key: "driver", label: "驱动" },
-                  { key: "mountpoint", label: "挂载点" },
-                  { key: "size", label: "大小" },
-                  { key: "createdAt", label: "创建时间" },
-                  { key: "associatedContainers", label: "关联容器" },
-                  { key: "actions", label: "操作" },
-                ],
-                stackList: [
-                  { key: "icon", label: "图标" },
-                  { key: "name", label: "堆栈名称" },
-                  { key: "status", label: "状态" },
-                  { key: "tags", label: "标签" },
-                  { key: "containers", label: "容器" },
-                  { key: "uptime", label: "运行时长" },
-                  { key: "update", label: "更新" },
-                ],
-                stacks: [
-                  { key: "name", label: "容器名称" },
-                  { key: "image", label: "镜像" },
-                  { key: "status", label: "状态" },
-                  { key: "network", label: "网络" },
-                  { key: "ip", label: "容器 IP" },
-                  { key: "ports", label: "端口" },
-                  { key: "update", label: "更新" },
-                ],
-              };
-
-              const pageLabel: Record<string, string> = { containers: "容器管理", images: "镜像管理", volumes: "数据卷管理", stackList: "堆栈管理", stacks: "容器子表" };
-              const current = data.columnVisibility?.[page] || allColumns[page].map(c => c.key);
-
-              const toggleCol = (key: string) => {
-                const next = current.includes(key)
-                  ? current.filter((k: string) => k !== key)
-                  : [...current, key];
-                setData({
-                  ...data,
-                  columnVisibility: { ...data.columnVisibility, [page]: next },
-                });
-              };
-
-              return (
-                <Card key={page} title={pageLabel[page]} icon={<Columns size={16} />}>
-                  <div className="grid grid-cols-4 gap-2">
-                    {allColumns[page].map((col) => {
-                      const checked = current.includes(col.key);
-                      return (
-                        <label
-                          key={col.key}
-                          className={`relative flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer select-none transition-colors ${
-                            checked
-                              ? "bg-blue-50 border-blue-200 text-blue-700"
-                              : "bg-white border-slate-200 text-slate-500 hover:border-slate-300"
-                          }`}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => toggleCol(col.key)}
-                            className="sr-only"
-                          />
-                          <div className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 transition-colors ${
-                            checked ? "bg-blue-500 border-blue-500" : "border-slate-300"
-                          }`}>
-                            {checked && <Check size={10} className="text-white" />}
-                          </div>
-                          <span className="text-sm">{col.label}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </Card>
-              );
-            })}
-          </div>
-        )}
-
         {activeSection === "notifications" && (
           <div className="max-w-2xl space-y-5">
             <div>
-              <h2 className="text-lg font-semibold text-slate-800 mb-1">通知配置</h2>
+              <h2 className="text-lg font-semibold text-slate-800 mb-1">通知</h2>
               <p className="text-sm text-slate-500">容器异常、更新完成等事件推送到 Webhook / 邮箱</p>
             </div>
 
@@ -2656,36 +2542,6 @@ docker-compose version</code>
                       部分云邮箱需先在邮箱设置里开启「SMTP 服务」并使用「授权码」而非登录密码；本工具不做 OAuth 登录。
                     </p>                  </>
                 )}
-              </div>
-            </Card>
-
-            <Card title="密钥存储方式" icon={<ShieldCheck size={16} />}>
-              <div className="space-y-2 text-xs leading-relaxed text-slate-600">
-                <p>
-                  <span className="font-medium text-slate-700">加密落盘：</span>
-                  SMTP 密码与 Webhook 签名密钥在写入 <code className="bg-slate-100 px-1 rounded">settings.json</code> 前用
-                  <span className="font-medium"> AES-256-GCM </span>加密（格式 <code className="bg-slate-100 px-1 rounded">enc:v1:…</code>），
-                  主密钥存在同目录的 <code className="bg-slate-100 px-1 rounded">secret.key</code>（权限 0600）。
-                  {notifyStatus?.secretsEncrypted === false && (
-                    <span className="text-amber-600">当前尚未加密（可能因主密钥文件不可写而退化为明文）。</span>
-                  )}
-                </p>
-                <p>
-                  <span className="font-medium text-slate-700">只写不读：</span>
-                  密钥<b>不会回传浏览器</b> —— 界面只显示「已设置」，留空即保持不变，要清空请点「清除」。
-                </p>
-                <p>
-                  <span className="font-medium text-slate-700">环境变量优先：</span>
-                  可设 <code className="bg-slate-100 px-1 rounded">DMS_SMTP_PASSWORD</code> /
-                  <code className="bg-slate-100 px-1 rounded"> DMS_WEBHOOK_SECRET</code> 覆盖配置值（systemd 可用
-                  <code className="bg-slate-100 px-1 rounded"> EnvironmentFile</code> 承载，权限 0600）⇒ 密钥根本不落配置目录。
-                </p>
-                <p className="text-amber-600 bg-amber-50 border border-amber-100 rounded px-2.5 py-2">
-                  <span className="font-medium">边界说明：</span>
-                  加密防的是「文件被误传」—— 误提交 git、被备份/打包带走、被贴进日志或工单。
-                  它<b>防不住已经能读本机配置目录的人</b>（主密钥就在同目录），那种情况下真正的防线是文件权限与最小账号权限。
-                  另外：主密钥丢失或换机后密文将无法解密，需要重新填写这两个密钥。
-                </p>
               </div>
             </Card>
 
@@ -3658,7 +3514,7 @@ docker-compose version</code>
         {activeSection === "applogs" && (
           <div className="max-w-3xl space-y-5">
             <div>
-              <h2 className="text-lg font-semibold text-slate-800 mb-1">应用日志</h2>
+              <h2 className="text-lg font-semibold text-slate-800 mb-1">日志</h2>
               <p className="text-sm text-slate-500">
                 日志按<b>频道</b>分为三类、各自独立文件并<b>可分别设置保留策略</b>：
                 <span className="font-mono">app-</span>（应用运行）、
@@ -3706,14 +3562,14 @@ docker-compose version</code>
                         <FormField label="保留天数" hint="0 = 不限；超期的最先清理">
                           <Input
                             type="number"
-                            value={String(data.logRetention?.maxDays ?? 30)}
+                            value={String(data.logRetention?.maxDays ?? 365)}
                             onChange={(v) => update("logRetention", "maxDays", Math.max(0, Math.floor(Number(v) || 0)))}
                           />
                         </FormField>
                         <FormField label="总大小上限（MB）" hint="0 = 不限；超出后从最旧开始删">
                           <Input
                             type="number"
-                            value={String(data.logRetention?.maxTotalMB ?? 500)}
+                            value={String(data.logRetention?.maxTotalMB ?? 1024)}
                             onChange={(v) => update("logRetention", "maxTotalMB", Math.max(0, Math.floor(Number(v) || 0)))}
                           />
                         </FormField>
@@ -3746,14 +3602,14 @@ docker-compose version</code>
                             )}
                           </div>
                           <div className="grid grid-cols-2 gap-4">
-                            <FormField label="保留天数" hint={`留空 = 跟随（当前 ${data.logRetention?.maxDays ?? 30} 天）`}>
+                            <FormField label="保留天数" hint={`留空 = 跟随（当前 ${data.logRetention?.maxDays ?? 365} 天）`}>
                               <Input
                                 type="number"
                                 value={ov.maxDays === undefined ? "" : String(ov.maxDays)}
                                 onChange={(v) => setOv("maxDays", v)}
                               />
                             </FormField>
-                            <FormField label="总大小上限（MB）" hint={`留空 = 跟随（当前 ${data.logRetention?.maxTotalMB ?? 500} MB）`}>
+                            <FormField label="总大小上限（MB）" hint={`留空 = 跟随（当前 ${data.logRetention?.maxTotalMB ?? 1024} MB）`}>
                               <Input
                                 type="number"
                                 value={ov.maxTotalMB === undefined ? "" : String(ov.maxTotalMB)}

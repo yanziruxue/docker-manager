@@ -152,7 +152,7 @@ export function StackContainersModal({
                       </td>
                     )}
                     {has("status") && (
-                      <td className="px-3 py-2.5">
+                      <td className="px-3 py-2.5 whitespace-nowrap">
                         <StatusBadge
                           status={operatingNames?.has(container.name) ? "operating" : container.status}
                         />

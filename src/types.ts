@@ -663,12 +663,18 @@ export interface ModalConfig {
 }
 
 /** 列可见性默认配置 */
+/**
+ * 列显隐默认值。
+ * ★ v1.38.1 起**不再由系统设置控制**：默认全为空 ⇒ 各表格回落为「**全部列可见**」；
+ *   各页面/弹窗自带的列控件仍可手动勾选（如容器页、容器子表弹窗）。
+ * 字段全部可选 —— 缺省即该表格显示全部列。
+ */
 export interface ColumnVisibility {
-  containers: string[];  // 容器管理页面默认可见列
-  images: string[];      // 镜像管理页面默认可见列
-  volumes: string[];     // 数据卷管理页面默认可见列
-  stackList: string[];   // 堆栈管理页面（主表格）默认可见列
-  stacks: string[];      // 容器子表默认可见列（与 stackList 完全独立）
+  containers?: string[]; // 容器管理页面可见列
+  images?: string[];     // 镜像管理页面可见列
+  volumes?: string[];    // 数据卷管理页面可见列
+  stackList?: string[];  // 堆栈管理页面（主表格）可见列
+  stacks?: string[];     // 容器子表可见列（与 stackList 完全独立）
 }
 
 /** Compose 一键填入模板项 */

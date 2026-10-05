@@ -74,14 +74,14 @@ try {
   const cn = applogs.getRetentionConfig("notify");
   const cl = applogs.getRetentionConfig("oplog");
   const ca = applogs.getRetentionConfig("app");
-  ok("★ app 用顶层（500MB）", ca.maxTotalMB === 500 && ca.maxDays === 30, JSON.stringify(ca));
-  ok("★ notify 默认**继承顶层**（500MB，不是写死默认）", cn.maxTotalMB === 500 && cn.maxDays === 30, JSON.stringify(cn));
-  ok("★ oplog 默认**继承顶层**（500MB）", cl.maxTotalMB === 500, JSON.stringify(cl));
+  ok("★ app 用顶层（1024MB / 365 天，v1.39.0 新默认）", ca.maxTotalMB === 1024 && ca.maxDays === 365, JSON.stringify(ca));
+  ok("★ notify 默认**继承顶层**（1024MB，不是写死默认）", cn.maxTotalMB === 1024 && cn.maxDays === 365, JSON.stringify(cn));
+  ok("★ oplog 默认**继承顶层**（1024MB）", cl.maxTotalMB === 1024, JSON.stringify(cl));
   // 独立覆盖：只改 notify 的 maxDays，其余字段继承
   settings.saveSettings({ ...settings.getSettings(), logRetention: { ...base, notify: { maxDays: 7 } } });
   const cn2 = applogs.getRetentionConfig("notify");
   ok("★ notify.maxDays 覆盖为 7", cn2.maxDays === 7, JSON.stringify(cn2));
-  ok("★★ 只写 maxDays ⇒ 其余字段继承顶层（maxTotalMB=500）", cn2.maxTotalMB === 500, JSON.stringify(cn2));
+  ok("★★ 只写 maxDays ⇒ 其余字段继承顶层（maxTotalMB=1024）", cn2.maxTotalMB === 1024, JSON.stringify(cn2));
 
   sec("⑥ 分频道裁剪：永不删当天、按各自上限裁");
   // 造旧文件：notify 超期(2 天前) / oplog 超期 / app 未超期
@@ -94,7 +94,7 @@ try {
   mk("app-2020-01-01.log", 10);
   mk("notify-2020-01-01.log", 10);
   mk("oplog-2020-01-01.log", 10);
-  settings.saveSettings({ ...settings.getSettings(), logRetention: { enabled: true, maxDays: 30, maxTotalMB: 500, notify: { enabled: true, maxDays: 3, maxTotalMB: 200 }, oplog: { enabled: false, maxDays: 3, maxTotalMB: 300 } } });
+  settings.saveSettings({ ...settings.getSettings(), logRetention: { enabled: true, maxDays: 30, maxTotalMB: 1024, notify: { enabled: true, maxDays: 3, maxTotalMB: 1024 }, oplog: { enabled: false, maxDays: 3, maxTotalMB: 1024 } } });
   const r = applogs.pruneLogs();
   ok("★ 通知日志（3 天）超期的被删", !fs.existsSync(path.join(LOGS, "notify-2020-01-01.log")) && r.removed.includes("notify-2020-01-01.log"), JSON.stringify(r.removed));
   ok("★ 操作记录已**禁用**保留策略 ⇒ 不删", fs.existsSync(path.join(LOGS, "oplog-2020-01-01.log")), JSON.stringify(r.removed));

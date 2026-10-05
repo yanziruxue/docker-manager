@@ -104,8 +104,8 @@ const DEFAULT_SETTINGS = {
   logRetention: {
     /** 顶层三项 ＝ **应用日志**的保留策略，同时是通知 / 操作记录的**默认继承来源** */
     enabled: true,
-    maxDays: 30,
-    maxTotalMB: 500,
+    maxDays: 365,
+    maxTotalMB: 1024,
     /**
      * 通知日志 / 操作记录的**可选覆盖**（v1.38.0）。
      * ★ 刻意**不给默认值**：字段缺失即**继承顶层** ⇒ 用户改「应用日志」时三个频道一起跟随；
@@ -149,13 +149,11 @@ const DEFAULT_SETTINGS = {
    * v1.9.2 收敛默认显示项：容器隐藏 镜像/运行时长/重启策略，镜像隐藏 SHA-256，
    * 数据卷隐藏 驱动；堆栈子表新增列控制，默认隐藏「镜像」。
    */
-  columnVisibility: {
-    containers: ["icon","name","status","tags","ports","actions"],
-    images: ["repository","tag","id","size","createdAt","associatedContainers","actions"],
-    volumes: ["name","mountpoint","size","createdAt","associatedContainers","actions"],
-    stackList: ["icon","name","status","tags","containers","uptime","update"],
-    stacks: ["name","status","network","ip","ports","update"],
-  },
+  /**
+   * 列显隐（v1.38.1 起**不再由系统设置控制**）：默认空对象 ⇒ 各表格统一回落为「**全部列可见**」。
+   * 各页面/弹窗自带的列控件（如容器页、容器子表弹窗）仍可手动勾选，只是不再有「系统级默认值」。
+   */
+  columnVisibility: {},
   /** 全局彩色标签库（设置页「标签管理」维护，可挂到堆栈 LABELS 服务条目） */
   tags: [],
   /**
@@ -224,8 +222,11 @@ export function getSettings(): any {
       if (typeof mergedDocker.rewriteImageNames !== "boolean") {
         mergedDocker.rewriteImageNames = mergedDocker.registryMirrors.length > 0;
       }
-      // 迁移：容器列默认值补入「标签」列（旧配置无此列时插到「状态」之后）
       let mergedColumns = { ...DEFAULT_SETTINGS.columnVisibility, ...(parsed?.columnVisibility || {}) };
+      // 迁移（v1.38.1）：列显隐不再由系统设置控制 ⇒ **清空已存配置**，各表格统一回落为「全部列可见」。
+      // 必须清空而非仅改默认：分区已从界面移除，残留旧值会让用户看到隐藏列却无处可改。
+      if (Object.keys(mergedColumns).length > 0) mergedColumns = {};
+      // 迁移：容器列默认值补入「标签」列（旧配置无此列时插到「状态」之后）
       if (Array.isArray(mergedColumns.containers) && !mergedColumns.containers.includes("tags")) {
         const arr = [...mergedColumns.containers];
         const statusIdx = arr.indexOf("status");
