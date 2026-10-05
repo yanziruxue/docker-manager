@@ -91,7 +91,7 @@ export function TopBar({ title, breadcrumb, onRefresh, refreshing = false, onNav
           {showNotifications && (
             <>
               <div className="fixed inset-0 z-10" onClick={() => setShowNotifications(false)} />
-              <div className="absolute right-0 top-full mt-1 w-80 bg-white rounded-xl shadow-lg border border-slate-200 z-20">
+              <div className="absolute right-0 top-full mt-1 w-[min(24rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] bg-white rounded-xl shadow-lg border border-slate-200 z-20">
                 <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
                   <span className="text-sm font-semibold text-slate-700">
                     通知
@@ -116,7 +116,7 @@ export function TopBar({ title, breadcrumb, onRefresh, refreshing = false, onNav
                     暂无通知
                   </div>
                 ) : (
-                  <div className="max-h-80 overflow-y-auto">
+                  <div className="max-h-80 overflow-y-auto overflow-x-hidden">
                     {recentNotifications.map((item) => (
                       <div
                         key={item.id}
@@ -126,7 +126,7 @@ export function TopBar({ title, breadcrumb, onRefresh, refreshing = false, onNav
                           {levelIcon[item.type]}
                         </div>
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm text-slate-700 leading-relaxed">{item.message}</p>
+                          <p className="text-sm text-slate-700 leading-relaxed break-words [overflow-wrap:anywhere]">{item.message}</p>
                           <p className="text-xs text-slate-400 mt-0.5">{item.timestamp}</p>
                         </div>
                       </div>

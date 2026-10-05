@@ -16,6 +16,32 @@ import {
 import { Tile, useStoredFlag } from "../components/Tile";
 import { TileGrid, useMinWidth } from "../components/TileGrid";
 import { LineChart, type LineSeries } from "../components/LineChart";
+import type { EngineResourceStats as EngineStats } from "../types";
+
+/** 本地保留的实时曲线点上限（1 秒 1 点 ⇒ 约 1 分钟），更早的交给 3 秒轮询的历史段 */
+const LIVE_SAMPLE_LIMIT = 60;
+
+/**
+ * 把 SSE 推来的「当前值」(`EngineResourceStats`) 转成一个曲线点 (`ResourceSample`)。
+ * 两套结构字段名不同（`memoryUsageMB`→`memDockerMB`、`netIfaces[]`→按名索引的 Record），
+ * 磁盘同理（`readMBps/writeMBps/busyPct`→`read/write/busy`）；远程引擎这两项为空 ⇒ 缺省不写。
+ */
+function statsToSample(st: EngineStats): ResourceSample {
+  const netIfaces: Record<string, { rx: number; tx: number }> = {};
+  for (const n of st.netIfaces || []) netIfaces[n.name] = { rx: n.rxKBps, tx: n.txKBps };
+  const disks: Record<string, { read: number; write: number; busy: number }> = {};
+  for (const d of st.disks || []) disks[d.name] = { read: d.readMBps, write: d.writeMBps, busy: d.busyPct };
+  return {
+    ts: Date.now(),
+    memSystemMB: st.memSystemMB,
+    memDockerMB: st.memoryUsageMB,
+    netRxKBps: st.netRxKBps,
+    netTxKBps: st.netTxKBps,
+    cpuPercent: st.cpuPercent,
+    ...(Object.keys(netIfaces).length ? { netIfaces } : {}),
+    ...(Object.keys(disks).length ? { disks } : {}),
+  };
+}
 import { LoadingState, ErrorState } from "../components/DataState";
 import { NodeCard } from "../components/NodeCard";
 import { NodeCardGrid, FilterChips } from "../components/NodeCardGrid";
@@ -147,6 +173,32 @@ export function Dashboard({
     };
   }, [engineId]);
 
+  /**
+   * ★ 曲线「实时」的关键一步（v1.39.0）：
+   * `history` 是每 3 秒轮询来的历史段，而 SSE 每秒就推一次当前值（`resourceStats`）——
+   * 此前只把 SSE 用在「数字」上，曲线因此比数字慢 3 倍。
+   * 这里把每次 SSE 样本按时间戳追加为曲线点（**复用已有流，后端请求量零增加**），
+   * 再与历史段按时间戳去重合并 ⇒ 曲线秒级前进；3 秒轮询继续用于补齐 / 校正历史。
+   */
+  const [liveSamples, setLiveSamples] = useState<ResourceSample[]>([]);
+  useEffect(() => {
+    if (!resourceStats) return;
+    const s = statsToSample(resourceStats);
+    setLiveSamples((prev) => {
+      const last = prev[prev.length - 1];
+      // 与上一个点间隔不足 ~0.9s ⇒ 视为同一批推流，跳过（防重复点 / 抖动）
+      if (last && s.ts - last.ts < 900) return prev;
+      return [...prev, s].slice(-LIVE_SAMPLE_LIMIT);
+    });
+  }, [resourceStats]);
+
+  /** 历史段（去重后）＋ 实时段 —— 供各磁贴画曲线 */
+  const series = useMemo(() => {
+    if (liveSamples.length === 0) return history;
+    const cutoff = liveSamples[0].ts;
+    return [...history.filter((h) => h.ts < cutoff), ...liveSamples];
+  }, [history, liveSamples]);
+
   // 栅格断点：`lg`(1024) 起 2 列、`3xl`(1800) 起 3 列，再窄单列（见 `TileGrid`）。
   // **列元素个数不能超过当前列数**：2 列档塞 3 个列元素会让第 3 列换行到第 2 行第 1 格，
   // 而栅格**行高 = 该行最高单元**——折叠上方磁贴只让本列变矮，第 2 行纹丝不动，
@@ -173,9 +225,9 @@ export function Dashboard({
           /* 第 1 列 · 系统（2 列档并入存储） */
           <>
             <SystemTile stats={resourceStats} engineId={engineId} />
-            <CpuTile stats={resourceStats} history={history} />
-            <MemTile stats={resourceStats} history={history} />
-            {mergeIo && <DiskTile stats={resourceStats} history={history} />}
+            <CpuTile stats={resourceStats} history={series} />
+            <MemTile stats={resourceStats} history={series} />
+            {mergeIo && <DiskTile stats={resourceStats} history={series} />}
           </>,
           /* 第 2 列 · 应用（2 列档并入网络） */
           <>
@@ -187,15 +239,15 @@ export function Dashboard({
               dangling={danglingImages}
               onNavigate={onNavigate}
             />
-            {mergeIo && <NetTile stats={resourceStats} history={history} engineId={engineId} />}
+            {mergeIo && <NetTile stats={resourceStats} history={series} engineId={engineId} />}
           </>,
           ...(mergeIo
             ? []
             : [
                 /* 第 3 列 · 网络与存储（单列档堆在末尾还原顺序，3 列档独占一列） */
                 <>
-                  <NetTile stats={resourceStats} history={history} engineId={engineId} />
-                  <DiskTile stats={resourceStats} history={history} />
+                  <NetTile stats={resourceStats} history={series} engineId={engineId} />
+                  <DiskTile stats={resourceStats} history={series} />
                 </>,
               ]),
         ]}
