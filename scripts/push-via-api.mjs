@@ -86,22 +86,38 @@ async function main() {
   //    ⚠️ `--files-from <path>`：受限环境下 node 的 child_process 会 **EBUSY**（连 git 都 spawn 不了），
   //    改为从外部生成的清单文件读取，生成方式：
   //      git -c core.quotePath=false ls-files --others --exclude-standard > filelist.txt
-  let files;
+  // 枚举待提交文件：未跟踪 ∪ 已修改（排除删除）；删除单独走 sha:null 树条目
+  // ⚠️ 修正历史缺陷：只枚举未跟踪文件会让远端已修改文件保持旧内容（见 MEMORY「发布流程缺陷」）
+  let addFiles, delFiles;
   if (args.filesFrom) {
-    files = fs
+    addFiles = fs
       .readFileSync(args.filesFrom, "utf-8")
       .split("\n")
       .map((s) => s.trim())
       .filter(Boolean);
+    delFiles = [];
   } else {
     try {
-      files = execSync("git -c core.quotePath=false ls-files --others --exclude-standard", {
-        cwd: ROOT,
-        encoding: "utf-8",
-      })
-        .split("\n")
-        .map((s) => s.trim())
-        .filter(Boolean);
+      const untracked = execSync(
+        "git -c core.quotePath=false ls-files --others --exclude-standard",
+        { cwd: ROOT, encoding: "utf-8" }
+      );
+      const modified = execSync(
+        "git -c core.quotePath=false diff --name-only --diff-filter=d HEAD",
+        { cwd: ROOT, encoding: "utf-8" }
+      );
+      const deleted = execSync(
+        "git -c core.quotePath=false diff --name-only --diff-filter=D HEAD",
+        { cwd: ROOT, encoding: "utf-8" }
+      );
+      addFiles = [
+        ...new Set(
+          [...untracked.split("\n"), ...modified.split("\n")]
+            .map((s) => s.trim())
+            .filter(Boolean)
+        ),
+      ];
+      delFiles = deleted.split("\n").map((s) => s.trim()).filter(Boolean);
     } catch (e) {
       console.error(
         "[ERROR] 无法执行 git 枚举文件（受限环境请改用 --files-from）：" + (e?.message || e)
@@ -109,15 +125,15 @@ async function main() {
       process.exit(1);
     }
   }
-  if (files.length === 0) {
+  if (addFiles.length === 0 && delFiles.length === 0) {
     console.log("没有需要提交的文件");
     return;
   }
-  console.log(`待上传文件: ${files.length}`);
+  console.log(`待上传文件: 新增/修改 ${addFiles.length} 个，删除 ${delFiles.length} 个`);
 
   // 3. 上传 blob
   const treeEntries = [];
-  for (const f of files) {
+  for (const f of addFiles) {
     const buf = fs.readFileSync(path.join(ROOT, f));
     const content = buf.toString("base64");
     const r = await api("POST", `/repos/${repo}/git/blobs`, {
@@ -128,6 +144,11 @@ async function main() {
     process.stdout.write(".");
   }
   console.log("");
+  // 删除的文件：树条目 sha 置 null（Git Database API 语义），使远端同步删除
+  for (const f of delFiles) {
+    treeEntries.push({ path: f, mode: "100644", type: "blob", sha: null });
+    console.log(`  · 删除（远端）: ${f}`);
+  }
 
   // 4. 创建 tree（base_tree 自动保留远端独有文件）
   const tree = await api("POST", `/repos/${repo}/git/trees`, {
@@ -136,9 +157,8 @@ async function main() {
   });
 
   // 5. 创建 commit
-  const msg =
-    args.msg ||
-    `chore: sync source (v1.6.0) — README, quick-install.sh, daemon-config`;
+  const pkgVer = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf-8")).version;
+  const msg = args.msg || `chore: sync source (v${pkgVer})`;
   const commit = await api("POST", `/repos/${repo}/git/commits`, {
     message: msg,
     tree: tree.sha,

@@ -541,20 +541,15 @@ export interface NotifyTestResult {
 
 // ============ 备份配置 ============
 
-/** 备份模式：1 = 三级备份策略（周/月/年），2 = 简单备份 */
-export type BackupMode = 1 | 2;
-
 /** 周备份配置 */
 export interface WeeklyBackupConfig {
-  enabled: boolean;
-  day: string; // 星期几，如 "Saturday"
-  time: string; // 执行时间，如 "23:00"
+  day: string; // 星期几，如 "Sunday"
+  time: string; // 执行时间，如 "23:10"
   retention: number; // 保留份数，4-8
 }
 
 /** 月备份配置 */
 export interface MonthlyBackupConfig {
-  enabled: boolean;
   dayOfMonth: number; // 每月几号执行，0 = 最后一天
   time: string;
   retention: number; // 保留份数，6-12
@@ -562,24 +557,19 @@ export interface MonthlyBackupConfig {
 
 /** 年备份配置（永久保存） */
 export interface YearlyBackupConfig {
-  enabled: boolean;
   date: string; // 日期，如 "12-31"
   time: string;
   // 年备份永久保存，不自动删除
 }
 
 export interface BackupConfig {
-  mode: BackupMode;
   autoBackupEnabled: boolean;
   /** @deprecated v1.18.2 起备份目录固定为 `<data>/backups`，此项不再生效（保留仅为兼容旧配置） */
   backupPath?: string;
   lastBackup: string;
   /** 备份遇 EACCES 时自动补属主读位后重试（只补 u+r，不改动其他权限位与归属） */
   autoFixReadPerm?: boolean;
-  // 模式 2：简单备份
-  simpleFrequency: string; // cron 表达式
-  simpleRetentionCount: number;
-  // 模式 1：三级备份策略
+  // 三级备份策略（周 / 月 / 年），由 autoBackupEnabled 总开关统一控制
   weekly: WeeklyBackupConfig;
   monthly: MonthlyBackupConfig;
   yearly: YearlyBackupConfig;

@@ -346,8 +346,8 @@ export async function checkEngineImages(engineId: string, onlyRef?: string): Pro
 
 // ============ 自动备份调度器 ============
 //
-// 读取 settings.backup（mode 1：weekly/monthly/yearly 三档；mode 2：simpleFrequency 五段 cron），
-// 到期后创建全量备份（server/backup.ts），并按各档 retention 清理同前缀历史包。
+// 读取 settings.backup（三级备份策略：weekly/monthly/yearly 三档，由 autoBackupEnabled 总开关统一控制），
+// 到期后创建全量备份（server/backup.ts），并按各档 retention 清理同前缀历史包（年备除外，永久保存、不自动删除）。
 // 备份包命名：auto-<key>_<timestamp>.zip（key ∈ weekly/monthly/yearly/simple）。
 
 export interface BackupScheduleView {
@@ -439,71 +439,12 @@ function nextYearly(nowMs: number, date: string, time: string): number {
   return Infinity;
 }
 
-/** 解析单段 cron 字段：支持通配、单值、列表（a,b）、区间（a-b）、步长写法（斜杠 N） */
-function parseCronField(field: string, min: number, max: number): Set<number> {
-  const out = new Set<number>();
-  for (const part of String(field ?? "").split(",")) {
-    const p = part.trim();
-    if (!p) continue;
-    let step = 1;
-    let range = p;
-    const slash = p.split("/");
-    if (slash.length === 2) {
-      range = slash[0];
-      step = Math.max(1, parseInt(slash[1], 10) || 1);
-    }
-    let start = min;
-    let end = max;
-    if (range !== "*") {
-      const dash = range.split("-");
-      if (dash.length === 2) {
-        start = parseInt(dash[0], 10);
-        end = parseInt(dash[1], 10);
-      } else {
-        const v = parseInt(range, 10);
-        if (Number.isNaN(v)) continue;
-        start = end = v;
-      }
-    }
-    if (Number.isNaN(start) || Number.isNaN(end)) continue;
-    start = Math.max(min, start);
-    end = Math.min(max, end);
-    for (let v = start; v <= end; v += step) out.add(v);
-  }
-  if (out.size === 0) for (let v = min; v <= max; v++) out.add(v);
-  return out;
-}
-
-/** 下一次满足五段 cron 的时间（分钟级扫描，最多往前找 400 天） */
-function nextCron(nowMs: number, expr: string): number {
-  const parts = String(expr || "").trim().split(/\s+/);
-  if (parts.length !== 5) return Infinity;
-  const mins = parseCronField(parts[0], 0, 59);
-  const hrs = parseCronField(parts[1], 0, 23);
-  const doms = parseCronField(parts[2], 1, 31);
-  const mons = parseCronField(parts[3], 1, 12);
-  const dows = parseCronField(parts[4], 0, 6);
-  const d = new Date(nowMs);
-  d.setSeconds(0, 0);
-  d.setMinutes(d.getMinutes() + 1);
-  const cap = nowMs + 400 * 864e5;
-  while (d.getTime() <= cap) {
-    if (mins.has(d.getMinutes()) && hrs.has(d.getHours()) && mons.has(d.getMonth() + 1) && dows.has(d.getDay()) && doms.has(d.getDate())) {
-      return d.getTime();
-    }
-    d.setMinutes(d.getMinutes() + 1);
-  }
-  return Infinity;
-}
 
 interface BackupConfigView {
   enabled: boolean;
-  mode: number;
-  simpleFrequency: string;
-  simpleRetentionCount: number;
-  weekly: { enabled: boolean; day: string; time: string; retention: number };
-  monthly: { enabled: boolean; dayOfMonth: number; time: string; retention: number };
-  yearly: { enabled: boolean; date: string; time: string };
+  weekly: { day: string; time: string; retention: number };
+  monthly: { dayOfMonth: number; time: string; retention: number };
+  yearly: { date: string; time: string };
 }
 
 function readBackupConfig(): BackupConfigView {
@@ -511,23 +452,17 @@ function readBackupConfig(): BackupConfigView {
   const clampRetention = (v: any, dft: number) => Math.max(1, Math.min(60, parseInt(v, 10) || dft));
   return {
     enabled: !!b.autoBackupEnabled,
-    mode: b.mode === 2 ? 2 : 1,
-    simpleFrequency: String(b.simpleFrequency || "0 3 * * 0"),
-    simpleRetentionCount: clampRetention(b.simpleRetentionCount, 5),
     weekly: {
-      enabled: !!b.weekly?.enabled,
-      day: b.weekly?.day || "Saturday",
+      day: b.weekly?.day || "Sunday",
       time: b.weekly?.time || "23:00",
       retention: clampRetention(b.weekly?.retention, 6),
     },
     monthly: {
-      enabled: !!b.monthly?.enabled,
       dayOfMonth: parseInt(b.monthly?.dayOfMonth, 10) || 0,
       time: b.monthly?.time || "23:00",
       retention: clampRetention(b.monthly?.retention, 8),
     },
     yearly: {
-      enabled: !!b.yearly?.enabled,
       date: b.yearly?.date || "12-31",
       time: b.yearly?.time || "23:00",
     },
@@ -537,23 +472,17 @@ function readBackupConfig(): BackupConfigView {
 function computeBackupSchedules(nowMs: number): Array<{ key: string; label: string; retention: number; nextAt: number }> {
   const c = readBackupConfig();
   const list: Array<{ key: string; label: string; retention: number; nextAt: number }> = [];
-  if (c.mode === 2) {
-    list.push({ key: "simple", label: `Cron: ${c.simpleFrequency}`, retention: c.simpleRetentionCount, nextAt: nextCron(nowMs, c.simpleFrequency) });
-  } else {
-    if (c.weekly.enabled) {
-      list.push({ key: "weekly", label: `每周 ${c.weekly.day} ${c.weekly.time}`, retention: c.weekly.retention, nextAt: nextWeekly(nowMs, c.weekly.day, c.weekly.time) });
-    }
-    if (c.monthly.enabled) {
-      list.push({
-        key: "monthly",
-        label: `每月 ${c.monthly.dayOfMonth <= 0 ? "最后一天" : c.monthly.dayOfMonth + " 日"} ${c.monthly.time}`,
-        retention: c.monthly.retention,
-        nextAt: nextMonthly(nowMs, c.monthly.dayOfMonth, c.monthly.time),
-      });
-    }
-    if (c.yearly.enabled) {
-      list.push({ key: "yearly", label: `每年 ${c.yearly.date} ${c.yearly.time}`, retention: 12, nextAt: nextYearly(nowMs, c.yearly.date, c.yearly.time) });
-    }
+  // 三级备份策略：由总开关（autoBackupEnabled）统一控制三档启停，无单独模式选择
+  if (c.enabled) {
+    list.push({ key: "weekly", label: `每周 ${c.weekly.day} ${c.weekly.time}`, retention: c.weekly.retention, nextAt: nextWeekly(nowMs, c.weekly.day, c.weekly.time) });
+    list.push({
+      key: "monthly",
+      label: `每月 ${c.monthly.dayOfMonth <= 0 ? "最后一天" : c.monthly.dayOfMonth + " 日"} ${c.monthly.time}`,
+      retention: c.monthly.retention,
+      nextAt: nextMonthly(nowMs, c.monthly.dayOfMonth, c.monthly.time),
+    });
+    // 年备长期归档、永久保存，不自动删除（retention = 0 仅作展示标记）
+    list.push({ key: "yearly", label: `每年 ${c.yearly.date} ${c.yearly.time}`, retention: 0, nextAt: nextYearly(nowMs, c.yearly.date, c.yearly.time) });
   }
   return list;
 }
@@ -583,7 +512,7 @@ function refreshBackupView(): void {
   const c = readBackupConfig();
   const schedules = computeBackupSchedules(lastBackupRunAt || Date.now());
   backupStatus.enabled = c.enabled;
-  backupStatus.mode = c.mode;
+  backupStatus.mode = 1; // 三级备份策略为唯一模式（模式2已移除）
   const earliest = schedules.reduce((min, s) => Math.min(min, Number.isFinite(s.nextAt) ? s.nextAt : Infinity), Infinity);
   backupStatus.nextRun = Number.isFinite(earliest) ? new Date(earliest).toISOString() : null;
   backupStatus.schedules = schedules.map((s) => ({
@@ -600,7 +529,8 @@ async function runBackup(key: string, retention: number): Promise<void> {
   backupStatus.running = true;
   try {
     const r = createFullBackup("auto", key);
-    const removed = pruneBackups(`auto-${key}_`, retention);
+    // 年备长期归档、永久保存：不执行滚动清理
+    const removed = key === "yearly" ? 0 : pruneBackups(`auto-${key}_`, retention);
     lastBackupRunAt = Date.now();
     backupStatus.lastRun = new Date(lastBackupRunAt).toISOString();
     persistBackupStatus();

@@ -53,7 +53,7 @@ import {
   FolderOpen,
   Eye,
 } from "lucide-react";
-import type { SystemSettings, BackupMode, DockerEngine, UpdateInfo, UpdateState, ResourceTag, ComposeTemplate, AppInfo, LogListResult, LogTailResult, MirrorRuntimeState, NotifyRuntimeStatus } from "../types";
+import type { SystemSettings, DockerEngine, UpdateInfo, UpdateState, ResourceTag, ComposeTemplate, AppInfo, LogListResult, LogTailResult, MirrorRuntimeState, NotifyRuntimeStatus } from "../types";
 // 值导入（不是 type）：密钥「清除」哨兵值
 import { SECRET_CLEAR, LOG_CHANNEL_LABELS } from "../types";
 import { Card, FormField, Input, Select, Toggle, IconButton } from "../components/UI";
@@ -76,7 +76,6 @@ import {
   RECOVERY_MAX_LENGTH,
 } from "../lib/recovery-code";
 import { waitForRestartAndReload } from "../lib/restart-wait";
-import { Tag } from "../components/Badge";
 import { TAG_PALETTE, TagChip, normalizeTagColor, hexWithAlpha, randomTagColor, hexToRgb, rgbToHex } from "../components/TagPicker";
 import { Modal, ConfirmDialog } from "../components/Modal";
 import { JsonEditor } from "../components/JsonEditor";
@@ -239,15 +238,12 @@ function getDefaultSettings(): SystemSettings {
       events: { containerDown: true, updateAvailable: true, updateComplete: false, buildFailed: true },
     },
     backup: {
-      mode: 1,
       autoBackupEnabled: false,
       lastBackup: "",
       autoFixReadPerm: true,
-      simpleFrequency: "0 3 * * 0",
-      simpleRetentionCount: 5,
-      weekly: { enabled: true, day: "Saturday", time: "23:00", retention: 6 },
-      monthly: { enabled: true, dayOfMonth: 0, time: "23:00", retention: 8 },
-      yearly: { enabled: true, date: "12-31", time: "23:00" },
+      weekly: { day: "Sunday", time: "23:10", retention: 6 },
+      monthly: { dayOfMonth: 0, time: "23:20", retention: 12 },
+      yearly: { date: "12-31", time: "23:30" },
     },
     pathFavorites: [],
     updateScheduler: { enabled: true, mode: "daily", hour: 1, minute: 0, dayOfWeek: 1, dayOfMonth: 1, autoPull: false },
@@ -619,6 +615,55 @@ function RecoveryCodeForm() {
     </div>
   );
 }
+
+
+// ============ 系统设置 → 列显隐（集中页） ============
+// 与 App.tsx 读取 settings.columnVisibility.{containers,stackList,images,volumes} 完全一致：
+// 数组为「可见列 key 列表」，留空（[] 或 undefined）⇒ 该表全部列可见。固定列（图标 / 操作）始终显示。
+interface ColVisPageDef {
+  key: "containers" | "stackList" | "images" | "volumes";
+  label: string;
+  fixed: string[];
+  cols: Array<[string, string]>;
+}
+const COLVIS_PAGES: ColVisPageDef[] = [
+  {
+    key: "containers",
+    label: "容器管理",
+    fixed: ["icon", "actions"],
+    cols: [
+      ["name", "容器名称"], ["status", "状态"], ["tags", "标签"], ["image", "镜像"],
+      ["ports", "端口映射"], ["network", "网络模式"], ["uptime", "运行时长"], ["restartPolicy", "重启策略"],
+    ],
+  },
+  {
+    key: "stackList",
+    label: "堆栈管理",
+    fixed: ["icon", "actions"],
+    cols: [
+      ["name", "堆栈名称"], ["status", "状态"], ["tags", "标签"], ["containers", "容器"],
+      ["uptime", "运行时长"], ["update", "更新"],
+    ],
+  },
+  {
+    key: "images",
+    label: "镜像管理",
+    fixed: ["actions"],
+    cols: [
+      ["repository", "仓库名"], ["tag", "标签"], ["id", "镜像ID"], ["size", "大小"],
+      ["createdAt", "创建时间"], ["updateStatus", "更新状态"], ["associatedContainers", "关联容器"], ["sha256", "SHA-256"],
+    ],
+  },
+  {
+    key: "volumes",
+    label: "数据卷管理",
+    fixed: ["actions"],
+    cols: [
+      ["name", "卷名称"], ["driver", "驱动"], ["mountpoint", "挂载点"], ["size", "大小"],
+      ["associatedContainers", "关联容器"], ["createdAt", "创建时间"],
+    ],
+  },
+];
 
 export function Settings({ settings, activeEngineId, engines, onActiveEngineChange, onEnginesChange, onSaveSettings, updateInfo, onUpdateInfoChange, currentUser }: SettingsProps) {
   const [activeSection, setActiveSection] = useState("docker");
@@ -1511,7 +1556,7 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
 
   useEffect(() => {
     // 「目录镜像」已并入本页 ⇒ 一并加载其运行态
-    if (activeSection === "appinfo") {
+    if (activeSection === "backup") {
       void loadAppInfo();
       void loadMirror();
     }
@@ -1676,7 +1721,7 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
   // 进入该分区时加载一次，并每 15 秒刷新运行态（同步结果 / 监听是否掉线）
   useEffect(() => {
     // 分区已由 "mirror" 并入 "appinfo"（v1.38.0）
-    if (activeSection !== "appinfo") return () => {};
+    if (activeSection !== "backup") return () => {};
     void loadMirror();
     const t = setInterval(() => void loadMirror(), 15000);
     return () => clearInterval(t);
@@ -1748,8 +1793,8 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
     { key: "scheduler", label: "镜像更新", icon: <Clock size={16} /> },
     { key: "activity", label: "硬件信息", icon: <Activity size={16} /> },
     { key: "update", label: "系统更新", icon: <Download size={16} /> },
-    { key: "appinfo", label: "应用数据", icon: <Info size={16} /> },
     { key: "applogs", label: "日志", icon: <FileText size={16} /> },
+    { key: "colvis", label: "列显隐", icon: <Columns size={16} /> },
   ];
 
   // ============ 标签库（设置 → 标签管理，全局 ResourceTag 列表） ============
@@ -2602,45 +2647,193 @@ docker-compose version</code>
               <p className="text-sm text-slate-500">堆栈配置与数据卷的备份与恢复，支持三级备份策略</p>
             </div>
 
-            {/* 备份模式选择 */}
-            <Card title="备份模式" icon={<Archive size={16} />}>
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  onClick={() => update("backup", "mode", 1)}
-                  className={`flex items-start gap-3 p-4 rounded-lg border-2 text-left transition-all ${
-                    data.backup.mode === 1 ? "border-blue-500 bg-blue-50" : "border-slate-200 hover:border-slate-300"
-                  }`}
-                >
-                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${data.backup.mode === 1 ? "bg-blue-500 text-white" : "bg-slate-100 text-slate-500"}`}>
-                    <Archive size={20} />
+            <div>
+              <h2 className="text-lg font-semibold text-slate-800 mb-1">应用数据</h2>
+              <p className="text-sm text-slate-500">
+                应用运行态、安装位置与目录一览，以及「目录镜像」配置。目录路径可一键复制，便于排障、写脚本或在其它工具里挂载。
+              </p>
+            </div>
+
+            <Card
+              title="应用信息"
+              icon={<Info size={16} />}
+              actions={
+                <IconButton
+                  icon={<RefreshCw size={14} className={appInfoLoading ? "animate-spin" : ""} />}
+                  onClick={() => void loadAppInfo()}
+                  title="刷新"
+                  disabled={appInfoLoading}
+                />
+              }
+            >
+              {appInfoError && <p className="text-xs text-red-500 mb-3">{appInfoError}</p>}
+              {!appInfo ? (
+                <p className="text-sm text-slate-400">{appInfoLoading ? "加载中…" : "暂无数据"}</p>
+              ) : (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-3">
+                    <span className="text-3xl font-bold text-blue-600 font-mono">v{appInfo.version}</span>
+                    <span className="px-2 py-0.5 text-[11px] rounded-full bg-slate-100 text-slate-600 font-mono">
+                      {appInfo.channel}
+                    </span>
                   </div>
-                  <div>
-                    <p className="text-sm font-medium text-slate-700">模式 1：三级备份策略</p>
-                    <p className="text-xs text-slate-400 mt-0.5">周备 + 月备 + 年备，全量备份</p>
+                  <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+                    <InfoRow label="运行用户" value={appInfo.user} />
+                    <InfoRow label="进程 PID" value={appInfo.pid} />
+                    <InfoRow label="Node" value={appInfo.nodeVersion} />
+                    <InfoRow label="平台" value={`${appInfo.platform} / ${appInfo.arch}`} />
+                    <InfoRow label="启动时间" value={new Date(appInfo.startedAt).toLocaleString()} />
+                    <InfoRow label="已运行" value={fmtUptimeCn(appInfo.uptimeSeconds)} />
+                    <InfoRow label="活跃引擎" value={`${appInfo.engineName}（${appInfo.engineConnection}）`} />
+                    <InfoRow label="引擎数量" value={`${appInfo.engineCount} 个`} />
                   </div>
-                </button>
-                <button
-                  onClick={() => update("backup", "mode", 2)}
-                  className={`flex items-start gap-3 p-4 rounded-lg border-2 text-left transition-all ${
-                    data.backup.mode === 2 ? "border-blue-500 bg-blue-50" : "border-slate-200 hover:border-slate-300"
-                  }`}
-                >
-                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${data.backup.mode === 2 ? "bg-blue-500 text-white" : "bg-slate-100 text-slate-500"}`}>
-                    <Clock size={20} />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-slate-700">模式 2：简单备份</p>
-                    <p className="text-xs text-slate-400 mt-0.5">按 Cron 定时，固定保留份数</p>
-                  </div>
-                </button>
-              </div>
+                </div>
+              )}
             </Card>
+
+            <Card title="安装位置与目录" icon={<FolderOpen size={16} />}>
+              {!appInfo ? (
+                <p className="text-sm text-slate-400">{appInfoLoading ? "加载中…" : "暂无数据"}</p>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  {appInfo.dirs.map((d) => (
+                    <div key={d.key} className="py-2.5 flex items-start gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-medium text-slate-700">{d.label}</span>
+                          {!d.exists && (
+                            <span className="px-1.5 py-0.5 text-[10px] rounded bg-amber-50 text-amber-600 border border-amber-200">
+                              不存在
+                            </span>
+                          )}
+                          {d.exists && (
+                            <span className="text-[11px] text-slate-400">
+                              {d.files} 个文件 · {d.truncated ? "≥ " : ""}
+                              {fmtSize(d.sizeBytes)}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-500 font-mono break-all mt-0.5">{d.path}</p>
+                        <p className="text-[11px] text-slate-400 mt-0.5">{d.note}</p>
+                      </div>
+                      <button
+                        onClick={() => void copyDirPath(d.key, d.path)}
+                        className="flex-shrink-0 flex items-center gap-1 px-2 py-1 text-[11px] text-slate-600 border border-slate-200 rounded hover:bg-slate-50"
+                      >
+                        {copiedDirKey === d.key ? <Check size={12} className="text-green-600" /> : <CopyIcon size={12} />}
+                        {copiedDirKey === d.key ? "已复制" : "复制"}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Card>
+          
+
+
+            <div>
+              <h2 className="text-lg font-semibold text-slate-800 mb-1">目录镜像</h2>
+              <p className="text-sm text-slate-500">
+                把「备份目录」或「Compose 目录」在<b>另一个路径</b>再存一份，与原始目录实时同步。
+                变更由文件监听即时触发（1 秒防抖合并），另有每 60 秒全量对账兜底。
+              </p>
+              <p className="text-xs text-amber-600 mt-1">
+                ⚠️ 语义为<b>真镜像</b>：源目录里删除的文件 / 目录会同步从目标删除。因此目标路径不允许是源目录的上级或子目录。
+              </p>
+            </div>
+
+            {mirrorError && <p className="text-xs text-red-500">{mirrorError}</p>}
+
+            {mirrorStates.length === 0 && (
+              <p className="text-sm text-slate-400">{mirrorLoading ? "加载中…" : "暂无镜像状态"}</p>
+            )}
+
+            {mirrorStates.map((s) => (
+              <Card
+                key={s.key}
+                title={s.label}
+                icon={<FolderOpen size={16} />}
+                actions={
+                  <Toggle
+                    active={data.mirror?.[s.key]?.enabled ?? false}
+                    onChange={(v) =>
+                      update("mirror", s.key, { ...(data.mirror?.[s.key] ?? { target: "" }), enabled: v })
+                    }
+                  />
+                }
+              >
+                <div className="space-y-3">
+                  <div className="flex items-start gap-2 text-xs">
+                    <span className="text-slate-400 flex-shrink-0 pt-0.5">源目录</span>
+                    <span className="font-mono text-slate-600 break-all">{s.source}</span>
+                  </div>
+
+                  <FormField
+                    label="目标路径（绝对路径）"
+                    hint="留空 = 关闭该项镜像。示例：/mnt/user/backup-mirror/backups"
+                  >
+                    <Input
+                      value={data.mirror?.[s.key]?.target ?? ""}
+                      onChange={(v) =>
+                        update("mirror", s.key, { ...(data.mirror?.[s.key] ?? { enabled: false }), target: v })
+                      }
+                      placeholder="/mnt/user/backup-mirror"
+                    />
+                  </FormField>
+
+                  {(data.mirror?.[s.key]?.enabled ?? false) && (data.mirror?.[s.key]?.target ?? "").trim() !== "" && (
+                    <div className="rounded-lg bg-slate-50 border border-slate-100 p-3 space-y-1.5">
+                      {!s.valid ? (
+                        <p className="text-xs text-red-600">目标路径不可用：{s.invalidReason}</p>
+                      ) : (
+                        <>
+                          <div className="flex items-center gap-4 text-xs flex-wrap">
+                            <span
+                              className={`inline-flex items-center gap-1 ${
+                                s.watcherActive ? "text-green-600" : "text-amber-600"
+                              }`}
+                            >
+                              <span
+                                className={`w-1.5 h-1.5 rounded-full ${
+                                  s.watcherActive ? "bg-green-500" : "bg-amber-500"
+                                }`}
+                              />
+                              {s.watcherActive ? "文件监听已生效（实时同步）" : "递归监听不可用，仅 60 秒轮询兜底"}
+                            </span>
+                            {s.syncing && <span className="text-blue-600">同步中…</span>}
+                          </div>
+                          <div className="text-xs text-slate-500">
+                            上次同步：{s.lastSyncAt ? new Date(s.lastSyncAt).toLocaleString() : "尚未同步"} · 耗时{" "}
+                            {s.lastDurationMs} ms · 源 {s.sourceFiles} 个文件 / 目标 {s.targetFiles} 个文件 · 上次复制{" "}
+                            {s.copied} 个{s.deleted > 0 ? ` / 删除 ${s.deleted} 个` : ""}
+                          </div>
+                          {s.lastError && <p className="text-xs text-red-600">最近错误：{s.lastError}</p>}
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </Card>
+            ))}
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleMirrorSyncNow}
+                disabled={mirrorSyncing}
+                className="flex items-center gap-1.5 px-4 py-2 text-sm text-white bg-blue-500 rounded-lg hover:bg-blue-600 disabled:opacity-50"
+              >
+                <RefreshCw size={14} className={mirrorSyncing ? "animate-spin" : ""} />
+                {mirrorSyncing ? "同步中…" : "立即同步"}
+              </button>
+              <span className="text-xs text-slate-400">开关与路径需点 APPLY 保存后生效</span>
+            </div>
+          
 
             {/* 备份路径与开关 */}
             <Card title="备份设置" icon={<HardDrive size={16} />}>
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <span className="text-sm text-slate-600">启用定时自动备份</span>
+                  <span className="text-sm text-slate-600">启用三级备份策略（周 / 月 / 年）</span>
                   <Toggle active={data.backup.autoBackupEnabled} onChange={(val) => update("backup", "autoBackupEnabled", val)} />
                 </div>
                 <div className="flex items-center gap-2 p-3 bg-slate-50 rounded-lg">
@@ -2664,176 +2857,44 @@ docker-compose version</code>
               </div>
             </Card>
 
-            {/* 模式 1：三级备份策略 */}
-            {data.backup.mode === 1 && (
-              <>
-                <Card title="三级备份策略（周 / 月 / 年）" icon={<Calendar size={16} />}>
-                  {/* 周备 */}
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <Calendar size={14} className="text-blue-500 flex-shrink-0" />
-                      <span className="text-sm font-medium text-slate-700">每周备份</span>
-                      <Tag text={data.backup.weekly.enabled ? `保留 ${data.backup.weekly.retention} 份` : "未启用"} color="blue" />
-                    </div>
-                    <Toggle active={data.backup.weekly.enabled} onChange={(val) => update("backup", "weekly", { ...data.backup.weekly, enabled: val })} size="sm" />
+            {/* 三级备份策略（周 / 月 / 年）：只读列出，由总开关统一控制 */}
+            <Card title="三级备份策略（周 / 月 / 年）" icon={<Calendar size={16} />}>
+              <div className="space-y-3">
+                <div className="flex items-start gap-3 p-3 rounded-lg bg-blue-50/60">
+                  <Calendar size={16} className="text-blue-500 mt-0.5 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-slate-700">每周备份</p>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      每周 <b>{({ Sunday: "周日", Monday: "周一", Tuesday: "周二", Wednesday: "周三", Thursday: "周四", Friday: "周五", Saturday: "周六" } as Record<string, string>)[data.backup.weekly.day] ?? data.backup.weekly.day}</b>{" "}
+                      {data.backup.weekly.time} 执行 1 次全量备份，保留 <b>{data.backup.weekly.retention}</b> 份，滚动式清理。
+                    </p>
                   </div>
-                  {data.backup.weekly.enabled && (
-                    <div className="space-y-4 mt-3">
-                      <p className="text-xs text-slate-500">
-                        每周执行 1 次全量备份，用于近期数据误删、修改回滚。保留 {data.backup.weekly.retention} 份，到期自动清理。
-                      </p>
-                      <div className="grid grid-cols-3 gap-4">
-                        <FormField label="执行日期">
-                          <Select
-                            value={data.backup.weekly.day}
-                            onChange={(val) => update("backup", "weekly", { ...data.backup.weekly, day: val })}
-                            options={[
-                              { value: "Monday", label: "周一" },
-                              { value: "Tuesday", label: "周二" },
-                              { value: "Wednesday", label: "周三" },
-                              { value: "Thursday", label: "周四" },
-                              { value: "Friday", label: "周五" },
-                              { value: "Saturday", label: "周六" },
-                              { value: "Sunday", label: "周日" },
-                            ]}
-                          />
-                        </FormField>
-                        <FormField label="执行时间">
-                          <Input value={data.backup.weekly.time} onChange={(val) => update("backup", "weekly", { ...data.backup.weekly, time: val })} placeholder="23:00" className="font-mono" />
-                        </FormField>
-                        <FormField label="保留份数" hint="4 ~ 8 份">
-                          <Input
-                            value={String(data.backup.weekly.retention)}
-                            onChange={(val) => update("backup", "weekly", { ...data.backup.weekly, retention: Math.min(Math.max(parseInt(val) || 6, 4), 8) })}
-                            type="number"
-                            className="font-mono"
-                          />
-                        </FormField>
-                      </div>
-                    </div>
-                  )}
-                  <div className="my-4 border-t border-slate-100" />
-
-                  {/* 月备 */}
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <Calendar size={14} className="text-amber-500 flex-shrink-0" />
-                      <span className="text-sm font-medium text-slate-700">每月备份</span>
-                      <Tag text={data.backup.monthly.enabled ? `保留 ${data.backup.monthly.retention} 份` : "未启用"} color="amber" />
-                    </div>
-                    <Toggle active={data.backup.monthly.enabled} onChange={(val) => update("backup", "monthly", { ...data.backup.monthly, enabled: val })} size="sm" />
+                </div>
+                <div className="flex items-start gap-3 p-3 rounded-lg bg-amber-50/60">
+                  <Calendar size={16} className="text-amber-500 mt-0.5 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-slate-700">每月备份</p>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      {data.backup.monthly.dayOfMonth <= 0 ? "每月最后一天" : `每月 ${data.backup.monthly.dayOfMonth} 日`}{" "}
+                      {data.backup.monthly.time} 执行 1 次全量备份，保留 <b>{data.backup.monthly.retention}</b> 份，滚动式清理。
+                    </p>
                   </div>
-                  {data.backup.monthly.enabled && (
-                    <div className="space-y-4 mt-3">
-                      <p className="text-xs text-slate-500">
-                        每月执行 1 次全量备份，跨月份数据恢复基准。保留 {data.backup.monthly.retention} 份。
-                        <span className="font-medium text-amber-600">当月执行月备当天，自动跳过当周周备。</span>
-                      </p>
-                      <div className="grid grid-cols-3 gap-4">
-                        <FormField label="执行日期" hint="0 = 每月最后一天">
-                          <Input
-                            value={String(data.backup.monthly.dayOfMonth)}
-                            onChange={(val) => update("backup", "monthly", { ...data.backup.monthly, dayOfMonth: parseInt(val) || 0 })}
-                            type="number"
-                            className="font-mono"
-                          />
-                        </FormField>
-                        <FormField label="执行时间">
-                          <Input value={data.backup.monthly.time} onChange={(val) => update("backup", "monthly", { ...data.backup.monthly, time: val })} placeholder="23:00" className="font-mono" />
-                        </FormField>
-                        <FormField label="保留份数" hint="6 ~ 12 份">
-                          <Input
-                            value={String(data.backup.monthly.retention)}
-                            onChange={(val) => update("backup", "monthly", { ...data.backup.monthly, retention: Math.min(Math.max(parseInt(val) || 8, 6), 12) })}
-                            type="number"
-                            className="font-mono"
-                          />
-                        </FormField>
-                      </div>
-                    </div>
-                  )}
-                  <div className="my-4 border-t border-slate-100" />
-
-                  {/* 年备 */}
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <InfinityIcon size={14} className="text-green-500 flex-shrink-0" />
-                      <span className="text-sm font-medium text-slate-700">每年备份</span>
-                      <Tag text={data.backup.yearly.enabled ? "永久保存" : "未启用"} color="green" />
-                    </div>
-                    <Toggle active={data.backup.yearly.enabled} onChange={(val) => update("backup", "yearly", { ...data.backup.yearly, enabled: val })} size="sm" />
+                </div>
+                <div className="flex items-start gap-3 p-3 rounded-lg bg-green-50/60">
+                  <InfinityIcon size={16} className="text-green-500 mt-0.5 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-slate-700">每年备份</p>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      {data.backup.yearly.date === "12-31" ? "每年最后一天" : `每年 ${data.backup.yearly.date}`}{" "}
+                      {data.backup.yearly.time} 执行 1 次全量备份，长期归档、<b>永久保存，不自动删除</b>。
+                    </p>
                   </div>
-                  {data.backup.yearly.enabled && (
-                    <div className="space-y-4 mt-3">
-                      <p className="text-xs text-slate-500">
-                        每年执行 1 次全量备份，长期归档。
-                        <span className="font-medium text-green-600">永久保存，不自动删除。</span>
-                        <span className="text-slate-500">执行年备当天，自动跳过当月月备。</span>
-                      </p>
-                      <div className="grid grid-cols-2 gap-4">
-                        <FormField label="执行日期" hint="月-日格式，默认 12-31">
-                          <Input value={data.backup.yearly.date} onChange={(val) => update("backup", "yearly", { ...data.backup.yearly, date: val })} placeholder="12-31" className="font-mono" />
-                        </FormField>
-                        <FormField label="执行时间">
-                          <Input value={data.backup.yearly.time} onChange={(val) => update("backup", "yearly", { ...data.backup.yearly, time: val })} placeholder="23:00" className="font-mono" />
-                        </FormField>
-                      </div>
-                    </div>
-                  )}
-                  <div className="my-4 border-t border-slate-100" />
-
-                  {/* 执行时序总览 */}
-                  <div className="flex items-center gap-1.5">
-                    <Clock size={13} className="text-slate-400" />
-                    <span className="text-xs font-medium text-slate-500">执行时序总览</span>
-                  </div>
-                  <div className="mt-2 grid grid-cols-3 gap-2">
-                    <div className={`p-2.5 rounded-lg ${data.backup.weekly.enabled ? "bg-blue-50" : "bg-slate-50"}`}>
-                      <p className={`text-xs font-medium ${data.backup.weekly.enabled ? "text-slate-700" : "text-slate-400"}`}>周备份</p>
-                      <p className="text-[11px] mt-0.5 text-slate-500 truncate">
-                        {data.backup.weekly.enabled
-                          ? `每周${data.backup.weekly.day === "Saturday" ? "六" : data.backup.weekly.day === "Sunday" ? "日" : data.backup.weekly.day} ${data.backup.weekly.time}`
-                          : "未启用"}
-                      </p>
-                    </div>
-                    <div className={`p-2.5 rounded-lg ${data.backup.monthly.enabled ? "bg-amber-50" : "bg-slate-50"}`}>
-                      <p className={`text-xs font-medium ${data.backup.monthly.enabled ? "text-slate-700" : "text-slate-400"}`}>月备份</p>
-                      <p className="text-[11px] mt-0.5 text-slate-500 truncate">
-                        {data.backup.monthly.enabled
-                          ? `每月${data.backup.monthly.dayOfMonth === 0 ? "最后一天" : data.backup.monthly.dayOfMonth + "日"} ${data.backup.monthly.time}`
-                          : "未启用"}
-                      </p>
-                    </div>
-                    <div className={`p-2.5 rounded-lg ${data.backup.yearly.enabled ? "bg-green-50" : "bg-slate-50"}`}>
-                      <p className={`text-xs font-medium ${data.backup.yearly.enabled ? "text-slate-700" : "text-slate-400"}`}>年备份</p>
-                      <p className="text-[11px] mt-0.5 text-slate-500 truncate">
-                        {data.backup.yearly.enabled ? `每年 ${data.backup.yearly.date} ${data.backup.yearly.time}` : "未启用"}
-                      </p>
-                    </div>
-                  </div>
-                  <p className="mt-2 text-xs text-slate-500">
-                    全量备份模式。当月备与周备冲突时，跳过当周周备；年备与月备冲突时，跳过当月月备，避免重复备份。
-                  </p>
-                </Card>
-              </>
-            )}
-
-            {/* 模式 2：简单备份 */}
-            {data.backup.mode === 2 && (
-              <Card title="简单备份配置" icon={<Clock size={16} />}>
-                {data.backup.autoBackupEnabled && (
-                  <div className="grid grid-cols-2 gap-4">
-                    <FormField label="备份频率" hint="Cron 表达式">
-                      <Input value={data.backup.simpleFrequency} onChange={(val) => update("backup", "simpleFrequency", val)} placeholder="0 3 * * 0" className="font-mono" />
-                    </FormField>
-                    <FormField label="保留份数">
-                      <Input value={String(data.backup.simpleRetentionCount)} onChange={(val) => update("backup", "simpleRetentionCount", parseInt(val) || 5)} type="number" className="font-mono" />
-                    </FormField>
-                  </div>
-                )}
-                {!data.backup.autoBackupEnabled && <p className="text-sm text-slate-400 py-2">自动备份已关闭</p>}
-              </Card>
-            )}
+                </div>
+              </div>
+              <p className="mt-3 text-xs text-slate-500">
+                由上方「启用三级备份策略」总开关统一控制三档的开启与关闭。
+              </p>
+            </Card>
 
             <Card
               title="备份历史"
@@ -3425,92 +3486,6 @@ docker-compose version</code>
           </div>
         )}
 
-        {activeSection === "appinfo" && (
-          <div className="max-w-3xl space-y-5">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-800 mb-1">应用数据</h2>
-              <p className="text-sm text-slate-500">
-                应用运行态、安装位置与目录一览，以及「目录镜像」配置。目录路径可一键复制，便于排障、写脚本或在其它工具里挂载。
-              </p>
-            </div>
-
-            <Card
-              title="应用信息"
-              icon={<Info size={16} />}
-              actions={
-                <IconButton
-                  icon={<RefreshCw size={14} className={appInfoLoading ? "animate-spin" : ""} />}
-                  onClick={() => void loadAppInfo()}
-                  title="刷新"
-                  disabled={appInfoLoading}
-                />
-              }
-            >
-              {appInfoError && <p className="text-xs text-red-500 mb-3">{appInfoError}</p>}
-              {!appInfo ? (
-                <p className="text-sm text-slate-400">{appInfoLoading ? "加载中…" : "暂无数据"}</p>
-              ) : (
-                <div className="space-y-3">
-                  <div className="flex items-center gap-3">
-                    <span className="text-3xl font-bold text-blue-600 font-mono">v{appInfo.version}</span>
-                    <span className="px-2 py-0.5 text-[11px] rounded-full bg-slate-100 text-slate-600 font-mono">
-                      {appInfo.channel}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-x-6 gap-y-2">
-                    <InfoRow label="运行用户" value={appInfo.user} />
-                    <InfoRow label="进程 PID" value={appInfo.pid} />
-                    <InfoRow label="Node" value={appInfo.nodeVersion} />
-                    <InfoRow label="平台" value={`${appInfo.platform} / ${appInfo.arch}`} />
-                    <InfoRow label="启动时间" value={new Date(appInfo.startedAt).toLocaleString()} />
-                    <InfoRow label="已运行" value={fmtUptimeCn(appInfo.uptimeSeconds)} />
-                    <InfoRow label="活跃引擎" value={`${appInfo.engineName}（${appInfo.engineConnection}）`} />
-                    <InfoRow label="引擎数量" value={`${appInfo.engineCount} 个`} />
-                  </div>
-                </div>
-              )}
-            </Card>
-
-            <Card title="安装位置与目录" icon={<FolderOpen size={16} />}>
-              {!appInfo ? (
-                <p className="text-sm text-slate-400">{appInfoLoading ? "加载中…" : "暂无数据"}</p>
-              ) : (
-                <div className="divide-y divide-slate-100">
-                  {appInfo.dirs.map((d) => (
-                    <div key={d.key} className="py-2.5 flex items-start gap-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-sm font-medium text-slate-700">{d.label}</span>
-                          {!d.exists && (
-                            <span className="px-1.5 py-0.5 text-[10px] rounded bg-amber-50 text-amber-600 border border-amber-200">
-                              不存在
-                            </span>
-                          )}
-                          {d.exists && (
-                            <span className="text-[11px] text-slate-400">
-                              {d.files} 个文件 · {d.truncated ? "≥ " : ""}
-                              {fmtSize(d.sizeBytes)}
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-xs text-slate-500 font-mono break-all mt-0.5">{d.path}</p>
-                        <p className="text-[11px] text-slate-400 mt-0.5">{d.note}</p>
-                      </div>
-                      <button
-                        onClick={() => void copyDirPath(d.key, d.path)}
-                        className="flex-shrink-0 flex items-center gap-1 px-2 py-1 text-[11px] text-slate-600 border border-slate-200 rounded hover:bg-slate-50"
-                      >
-                        {copiedDirKey === d.key ? <Check size={12} className="text-green-600" /> : <CopyIcon size={12} />}
-                        {copiedDirKey === d.key ? "已复制" : "复制"}
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </Card>
-          </div>
-        )}
-
         {activeSection === "applogs" && (
           <div className="max-w-3xl space-y-5">
             <div>
@@ -3714,104 +3689,66 @@ docker-compose version</code>
           </div>
         )}
 
-        {activeSection === "appinfo" && (  /* 目录镜像：已并入「应用数据」页 */
+        {activeSection === "colvis" && (
           <div className="max-w-3xl space-y-5">
             <div>
-              <h2 className="text-lg font-semibold text-slate-800 mb-1">目录镜像</h2>
+              <h2 className="text-lg font-semibold text-slate-800 mb-1">列显隐</h2>
               <p className="text-sm text-slate-500">
-                把「备份目录」或「Compose 目录」在<b>另一个路径</b>再存一份，与原始目录实时同步。
-                变更由文件监听即时触发（1 秒防抖合并），另有每 60 秒全量对账兜底。
-              </p>
-              <p className="text-xs text-amber-600 mt-1">
-                ⚠️ 语义为<b>真镜像</b>：源目录里删除的文件 / 目录会同步从目标删除。因此目标路径不允许是源目录的上级或子目录。
+                集中设置各列表的显示列。固定列（图标 / 操作）始终显示、不可隐藏；其余列可自由勾选。
+                全部取消勾选时仅保留固定列。修改后点击页面底部「保存设置」生效，各页面会在重新进入时回落。
               </p>
             </div>
 
-            {mirrorError && <p className="text-xs text-red-500">{mirrorError}</p>}
-
-            {mirrorStates.length === 0 && (
-              <p className="text-sm text-slate-400">{mirrorLoading ? "加载中…" : "暂无镜像状态"}</p>
-            )}
-
-            {mirrorStates.map((s) => (
-              <Card
-                key={s.key}
-                title={s.label}
-                icon={<FolderOpen size={16} />}
-                actions={
-                  <Toggle
-                    active={data.mirror?.[s.key]?.enabled ?? false}
-                    onChange={(v) =>
-                      update("mirror", s.key, { ...(data.mirror?.[s.key] ?? { target: "" }), enabled: v })
-                    }
-                  />
-                }
-              >
-                <div className="space-y-3">
-                  <div className="flex items-start gap-2 text-xs">
-                    <span className="text-slate-400 flex-shrink-0 pt-0.5">源目录</span>
-                    <span className="font-mono text-slate-600 break-all">{s.source}</span>
-                  </div>
-
-                  <FormField
-                    label="目标路径（绝对路径）"
-                    hint="留空 = 关闭该项镜像。示例：/mnt/user/backup-mirror/backups"
-                  >
-                    <Input
-                      value={data.mirror?.[s.key]?.target ?? ""}
-                      onChange={(v) =>
-                        update("mirror", s.key, { ...(data.mirror?.[s.key] ?? { enabled: false }), target: v })
-                      }
-                      placeholder="/mnt/user/backup-mirror"
-                    />
-                  </FormField>
-
-                  {(data.mirror?.[s.key]?.enabled ?? false) && (data.mirror?.[s.key]?.target ?? "").trim() !== "" && (
-                    <div className="rounded-lg bg-slate-50 border border-slate-100 p-3 space-y-1.5">
-                      {!s.valid ? (
-                        <p className="text-xs text-red-600">目标路径不可用：{s.invalidReason}</p>
-                      ) : (
-                        <>
-                          <div className="flex items-center gap-4 text-xs flex-wrap">
-                            <span
-                              className={`inline-flex items-center gap-1 ${
-                                s.watcherActive ? "text-green-600" : "text-amber-600"
-                              }`}
-                            >
-                              <span
-                                className={`w-1.5 h-1.5 rounded-full ${
-                                  s.watcherActive ? "bg-green-500" : "bg-amber-500"
-                                }`}
-                              />
-                              {s.watcherActive ? "文件监听已生效（实时同步）" : "递归监听不可用，仅 60 秒轮询兜底"}
-                            </span>
-                            {s.syncing && <span className="text-blue-600">同步中…</span>}
-                          </div>
-                          <div className="text-xs text-slate-500">
-                            上次同步：{s.lastSyncAt ? new Date(s.lastSyncAt).toLocaleString() : "尚未同步"} · 耗时{" "}
-                            {s.lastDurationMs} ms · 源 {s.sourceFiles} 个文件 / 目标 {s.targetFiles} 个文件 · 上次复制{" "}
-                            {s.copied} 个{s.deleted > 0 ? ` / 删除 ${s.deleted} 个` : ""}
-                          </div>
-                          {s.lastError && <p className="text-xs text-red-600">最近错误：{s.lastError}</p>}
-                        </>
-                      )}
+            {COLVIS_PAGES.map((page) => {
+              const stored = (data.columnVisibility as any)?.[page.key] as string[] | undefined;
+              const allKeys = [...page.fixed, ...page.cols.map((c) => c[0])];
+              const visibleSet = stored && stored.length > 0 ? new Set(stored) : new Set(allKeys);
+              const setVisible = (keys: string[]) => update("columnVisibility", page.key, keys);
+              const toggleCol = (key: string, checked: boolean) => {
+                const next = new Set(visibleSet);
+                if (checked) next.add(key); else next.delete(key);
+                setVisible([...page.fixed, ...page.cols.map((c) => c[0]).filter((k) => next.has(k))]);
+              };
+              const selectAll = () => setVisible([...allKeys]);
+              const resetPage = () => setVisible([]);
+              return (
+                <Card
+                  key={page.key}
+                  title={page.label}
+                  icon={<Columns size={16} />}
+                  actions={
+                    <div className="flex items-center gap-3">
+                      <button type="button" onClick={selectAll} className="text-xs text-blue-600 hover:underline">全选</button>
+                      <button type="button" onClick={resetPage} className="text-xs text-slate-500 hover:underline">重置</button>
                     </div>
-                  )}
-                </div>
-              </Card>
-            ))}
-
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handleMirrorSyncNow}
-                disabled={mirrorSyncing}
-                className="flex items-center gap-1.5 px-4 py-2 text-sm text-white bg-blue-500 rounded-lg hover:bg-blue-600 disabled:opacity-50"
-              >
-                <RefreshCw size={14} className={mirrorSyncing ? "animate-spin" : ""} />
-                {mirrorSyncing ? "同步中…" : "立即同步"}
-              </button>
-              <span className="text-xs text-slate-400">开关与路径需点 APPLY 保存后生效</span>
-            </div>
+                  }
+                >
+                  <div className="space-y-3">
+                    <p className="text-xs text-slate-400">
+                      固定列（始终显示）：
+                      {page.fixed.map((f) => (
+                        <span key={f} className="ml-1 px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">
+                          {f === "icon" ? "图标" : f === "actions" ? "操作" : f}
+                        </span>
+                      ))}
+                    </p>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                      {page.cols.map(([key, label]) => (
+                        <label key={key} className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={visibleSet.has(key)}
+                            onChange={(e) => toggleCol(key, e.target.checked)}
+                            className="rounded border-slate-300 text-blue-500 focus:ring-blue-500/20"
+                          />
+                          {label}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                </Card>
+              );
+            })}
           </div>
         )}
 

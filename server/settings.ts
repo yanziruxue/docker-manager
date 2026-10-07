@@ -73,18 +73,15 @@ const DEFAULT_SETTINGS = {
     },
   },
   backup: {
-    mode: 1,
     autoBackupEnabled: false,
     /** @deprecated v1.18.2 起备份目录固定为 `<data>/backups`，此项不再生效（保留仅为兼容旧 settings.json） */
     backupPath: "",
     lastBackup: "",
     /** 备份遇 EACCES 时，对「属主是自己」的文件自动补属主读位后重试（只补 u+r，不扩大暴露面） */
     autoFixReadPerm: true,
-    simpleFrequency: "0 3 * * 0",
-    simpleRetentionCount: 5,
-    weekly: { enabled: true, day: "Saturday", time: "23:00", retention: 6 },
-    monthly: { enabled: true, dayOfMonth: 0, time: "23:00", retention: 8 },
-    yearly: { enabled: true, date: "12-31", time: "23:00" },
+    weekly: { day: "Sunday", time: "23:10", retention: 6 },
+    monthly: { dayOfMonth: 0, time: "23:20", retention: 12 },
+    yearly: { date: "12-31", time: "23:30" },
   },
   /**
    * 目录镜像（系统设置 → 目录镜像）：把「备份目录」「Compose 目录」单向镜像到另一个路径，

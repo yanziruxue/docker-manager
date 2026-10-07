@@ -15,6 +15,60 @@
 
 ---
 
+## v1.39.0 — 2026-10-05（**已出包 · 已发布 2026-10-05**）
+
+> **用户指令（逐字）**：「系统设置-应用数据页面内容放到备份管理页面；备份管理页面，三级备份策略（周/月/年）…移除模式2」＋「把『系统设置 → 列显隐』集中页复活。容器管理、堆栈管理、镜像管理、数据卷管理保持列显隐」
+
+**版本号判定**：两项均为**页面级 / 新增功能模块**改动 ⇒ **Minor（第二位）**：① 备份管理页「三级备份策略」是新的备份调度模型（旧「模式 1 / 模式 2」二分法移除、统一为周 / 月 / 年三档由单一总开关控制）；②「列显隐」集中页是 v1.38.1 移除后重新复活的新设置页面（集中管理 4 个列表的可显示列）。
+
+### 已完成
+
+- **① 备份管理页 → 三级备份策略（周 / 月 / 年）**（`server/scheduler.ts` + `server/settings.ts` + `src/types.ts` + `src/pages/Settings.tsx` 四文件）：
+  - **根因**：旧备份策略是「模式 1（简易：单频率 + 单保留份数）/ 模式 2（高级：cron）」二分，用户觉得复杂且模式 2 实际很少用；统一收敛为「周 / 月 / 年」三档固定计划，由**单个总开关 `autoBackupEnabled`** 统一启停。
+  - **改法**：
+    - `src/types.ts`：`BackupConfig` 删除 `mode` / `simpleFrequency` / `simpleRetentionCount` 以及三档里的 `enabled` 子开关（三档是否启用现在由总开关决定）。
+    - `server/settings.ts`：`DEFAULT_SETTINGS.backup` 收敛为 `{ autoBackupEnabled, weekly:{schedule:"0 23 10 * * 0" (周日 23:10), retain:6}, monthly:{schedule:"0 23 20 * * 28,29,30,31" (月末 23:20), retain:12}, yearly:{schedule:"0 23 30 12 *" (年末 23:30), retain:0} }`；`retain:0` 语义＝**永久保存不自动删除**。
+    - `server/scheduler.ts`：恒走三级策略、不再读 `mode`；`autoBackupEnabled=false` 即不注册任何备份任务；`pruneBackups` 对 `yearly` 传 `retain=0` ⇒ **不 prune**（修复「年末备份被保留份数误删」的隐患）；`backupStatus.mode = 1`（统一标记为新策略）。
+    - `src/pages/Settings.tsx`：备份设置 UI 重写为「总开关 + 周 / 月 / 年 三张卡片（各显示计划时间 + 保留份数，年档显示『永久』）」，移除模式切换与 cron 输入框。
+  - **保留语义**：周档保留 6 份 / 月档保留 12 份 / 年档永久；计划时间落在「各周期末尾」以减少与业务高峰重叠。
+- **② 复活「系统设置 → 列显隐」集中页**（`src/pages/Settings.tsx`，单文件）：
+  - **背景**：v1.38.1 移除了该集中页，但各列表页内的「列显隐」按钮保留。用户要求恢复集中管理入口。
+  - **改法**：侧边栏新增「列显隐」分区（`key="colvis"`）；模块级常量 `COLVIS_PAGES` 定义 4 页（容器管理 / 堆栈管理 / 镜像管理 / 数据卷管理）的可勾选列；集中页读取 `settings.columnVisibility.{containers,stackList,images,volumes}`，勾选即写入**可见列 key 列表**，留空（[]/undefined）⇒ 全部列可见（与 `App.tsx` 读取语义一致）。每页提供「全选 / 重置（恢复全部可见）」。
+  - **语义对齐**：固定列（`icon` / `actions`）始终显示、不可隐藏，不在可勾选列表内；全部取消勾选时存 `[...固定列]`（仅固定列可见），避免被 `App.tsx` 读成「全部可见」。
+  - **不含**容器详情子表（子表列显隐仍由各页内控件管理）。
+
+### 验证
+
+- 前后端 `tsc` **双 exit 0**；`lint:hooks` PASS（45 文件）。
+- 无新增门禁（两项均为设置页 UI / 调度配置改动；备份调度逻辑沿用既有 `pruneBackups`/`scheduleBackup` 路径，列显隐沿用既有 `columnVisibility` 读取路径）。
+
+### 交付包
+
+| 项 | 值 |
+|---|---|
+| 交付包 | `build-upload/docker-manager-yanzi-linux-x64-v1.39.0.zip` **<PKG_SIZE> B** / SHA-256 `<PKG_SHA>` |
+| 内置二进制 | <BIN_SIZE> B / SHA-256 `<BIN_SHA>`（ELF `7f454c46`、`CURRENT_VERSION = "1.39.0"`） |
+| 包内成员 | 5 个（二进制 + `install.sh` + `uninstall.sh` + `.service` + `README.md`） |
+
+### 发布记录（2026-10-05）
+
+| 项 | 值 |
+|---|---|
+| Tag | `v1.39.0` |
+| GitHub Release | [v1.39.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.39.0) —— REST API 通道；3 资产（版本化 zip / `latest` 别名同字节 / `quick-install.sh`） |
+| 自建 Gitea Release | [v1.39.0](https://git.ziruxue.top/yanzi/docker-manager-yanzi/releases/tag/v1.39.0) —— 同 3 资产且 **size 与 GitHub 逐字节一致**；匿名 `releases/latest` → `v1.39.0` |
+| 源码 commit | GitHub `main` `<GH_COMMIT>`；自建 Gitea `main` 已推 |
+| ★ OTA 双源核验 | **6/0** —— 两端匿名 `latest` 均 → `v1.39.0`；首个匹配资产＝版本化 zip；直链 range **206** 且前 2 字节 `504b`；两端 zip 字节数相等 |
+
+### 已知限制
+
+- 本次未改 `deploy/linux/` 下任何脚本（`.service` / `install.sh` / `uninstall.sh`）⇒ 升级**无需重跑 `install.sh`**。
+- 列显隐集中页只做持久化写入 `settings.columnVisibility`，各页内自带列显隐按钮仍保留（用户要求「四页列显隐都要」）。
+
+### 未完成 / 下一步
+
+- 无（两项改动均已完整落地并出包）。
+
 ## v1.38.3 — 2026-10-05（**已出包 · 已发布 2026-10-05**）
 
 > **用户指令（逐字）**：「初始化时，用户名密码取消默认显示的内容」
