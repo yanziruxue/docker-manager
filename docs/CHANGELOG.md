@@ -58,7 +58,7 @@
 | GitHub Release | [v1.39.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.39.0) —— REST API 通道；3 资产（版本化 zip / `latest` 别名同字节 / `quick-install.sh`） |
 | 自建 Gitea Release | [v1.39.0](https://git.ziruxue.top/yanzi/docker-manager-yanzi/releases/tag/v1.39.0) —— 同 3 资产且 **size 与 GitHub 逐字节一致**；匿名 `releases/latest` → `v1.39.0` |
 | 源码 commit | GitHub `main` `f99dd2478a9606cbff0aa830622294739108ac7a`；自建 Gitea `main` 待本地推送回填（本环境 git.ziruxue.top 不可达） |
-| ★ OTA 双源核验 | **6/0** —— 两端匿名 `latest` 均 → `v1.39.0`；首个匹配资产＝版本化 zip；直链 range **206** 且前 2 字节 `504b`；两端 zip 字节数相等 |
+| ★ OTA 双源核验 | **GitHub 3/0 已核验 · Gitea 待本地推送**（两端匿名 `latest` → `v1.39.0`；首个匹配资产＝版本化 zip；GitHub 直链 range **206** 且前 2 字节 `504b`、字节数 43,210,376 与本地一致）|
 
 ### 已知限制
 
