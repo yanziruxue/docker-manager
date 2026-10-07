@@ -685,7 +685,6 @@ export default function App() {
               stacks={stacks}
               images={images}
               engineId={activeEngineId}
-              defaultSubColumns={settings?.columnVisibility?.stacks}
               onNavigate={handleNavigate}
               loading={showDataState ? dataLoading : false}
               error={showDataState ? dataError : null}
@@ -715,7 +714,6 @@ export default function App() {
               autoCloseDelay={settings?.modal?.autoCloseDelay ?? 5}
               composeTemplates={settings?.compose?.templates ?? []}
               defaultVisibleColumns={settings?.columnVisibility?.stackList}
-              defaultSubColumns={settings?.columnVisibility?.stacks}
             />
           )}
           {page === "images" && (

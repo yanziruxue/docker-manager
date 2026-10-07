@@ -219,10 +219,11 @@ export function getSettings(): any {
       if (typeof mergedDocker.rewriteImageNames !== "boolean") {
         mergedDocker.rewriteImageNames = mergedDocker.registryMirrors.length > 0;
       }
+      // v1.39.0 复活「列显隐」集中页：列显隐配置需持久化并正确回读。
+      // 旧 v1.38.1~v1.38.3 曾在此**无条件清空**已存列显隐（当时该分区已从界面移除），
+      // 但该清空逻辑每次 GET 都执行，导致复活后保存的修改刷新即丢失。现改为仅在配置版本不符时
+      // （见下方 defaultsVersion 分支 L236）做一次迁移性清空，正常配置保持原值。
       let mergedColumns = { ...DEFAULT_SETTINGS.columnVisibility, ...(parsed?.columnVisibility || {}) };
-      // 迁移（v1.38.1）：列显隐不再由系统设置控制 ⇒ **清空已存配置**，各表格统一回落为「全部列可见」。
-      // 必须清空而非仅改默认：分区已从界面移除，残留旧值会让用户看到隐藏列却无处可改。
-      if (Object.keys(mergedColumns).length > 0) mergedColumns = {};
       // 迁移：容器列默认值补入「标签」列（旧配置无此列时插到「状态」之后）
       if (Array.isArray(mergedColumns.containers) && !mergedColumns.containers.includes("tags")) {
         const arr = [...mergedColumns.containers];
@@ -363,6 +364,9 @@ export function secretsAreEncrypted(): boolean {
 export function saveSettings(settings: any): any {
   const prevRaw = readStoredRaw();
   const next = { ...(settings || {}) };
+  // ★ 每次保存都打当前版本戳：否则全新安装（DEFAULT_SETTINGS 无 defaultsVersion 字段）
+  // 首次保存后磁盘里 defaultsVersion 为 undefined，回读时误判为「旧版」触发迁移清空列显隐。
+  next.defaultsVersion = DEFAULTS_VERSION;
   const n = { ...(next.notifications || {}) };
   // ★ 密钥三态：空串 = 保持磁盘原值、SECRET_CLEAR = 清除、其它 = 新明文
   for (const k of SECRET_FIELDS) {
