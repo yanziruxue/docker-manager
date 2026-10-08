@@ -4,19 +4,24 @@
 #
 # 在服务器上执行下面任一命令即可自动下载并安装（无需手动下载 zip）：
 #   curl -fsSL https://github.com/yanziruxue/docker-manager/releases/latest/download/quick-install.sh | sudo bash
-#   curl -fsSL https://git.ziruxue.top/yanzi/docker-manager-yanzi/releases/latest/download/quick-install.sh | sudo bash
+#   curl -fsSL http://192.168.24.16:8024/yanzi/docker-manager-yanzi/releases/download/<TAG>/quick-install.sh | sudo bash
 #   sudo bash quick-install.sh                 # 本地已下载本脚本时
 #   VERSION=1.18.2 sudo bash quick-install.sh  # 安装指定版本
+#
+# ⚠️ 自建 Gitea 不支持 releases/latest/download/ 快捷路径（实测 404）⇒ 取本脚本请带 tag。
+# ⚠️ 旧默认域名 git.ziruxue.top 已不通（2026-10-08 实测，curl 与 Node fetch 均失败）；
+#    默认入口已改为内网 http://192.168.24.16:8024。外网部署请覆盖 GITEA_BASE 为公网可达地址。
 #
 # 下载源顺序：自建 Gitea（优先）→ GitHub Releases（保底）。
 #   两个源始终按同一版本号双端发布，任一可用即可完成安装。
 #
 # 环境变量：
 #   VERSION        目标版本，默认 latest（最新 Release）
-#   GITEA_BASE     自建 Gitea 站点地址，默认 https://git.ziruxue.top
+#   GITEA_BASE     自建 Gitea 站点地址，默认 http://192.168.24.16:8024（内网）
+#                  外网示例：GITEA_BASE=https://git.example.com
 #   GITEA_REPO     自建 Gitea 仓库（owner/repo），默认 yanzi/docker-manager-yanzi
 #   UPDATE_MIRROR  自定义下载镜像前缀，例如 https://my-mirror.com/
-#                 （用于直连 GitHub 被墙时的回退，脚本已内置 gh-proxy.com 回退）
+#                  （用于直连 GitHub 被墙时的回退，脚本已内置 gh-proxy.com 回退）
 #
 # 说明：Release 资产名带版本号（docker-manager-yanzi-linux-x64-vX.Y.Z.zip），
 #       本脚本通过 Releases API 解析最新资产真实下载地址，不再依赖固定的非版本化文件名。
@@ -26,7 +31,7 @@
 set -euo pipefail
 
 REPO="yanziruxue/docker-manager"
-GITEA_BASE="${GITEA_BASE:-https://git.ziruxue.top}"
+GITEA_BASE="${GITEA_BASE:-http://192.168.24.16:8024}"
 GITEA_REPO="${GITEA_REPO:-yanzi/docker-manager-yanzi}"
 APP_NAME="docker-manager-yanzi"
 VERSION="${VERSION:-latest}"

@@ -94,7 +94,7 @@ python -c "import zipfile; z=zipfile.ZipFile('build-upload/docker-manager-yanzi-
 > **发布规约（v1.36.0 起）**：**每次发布都必须发两个地方**。App 的「检查更新」与 `quick-install.sh` 都是**自建 Gitea 优先、GitHub 保底**，只发一端会让另一源的用户拿不到更新。
 >
 > - GitHub Release：`https://github.com/yanziruxue/docker-manager/releases`
-> - 自建 Gitea Release：`https://git.ziruxue.top/yanzi/docker-manager-yanzi/releases`（本机 `curl`/`git` 走域名不通时，用 `git -c http.sslBackend=openssl -c http.proxy= -c https.proxy= push`；旧的 `http://60.205.251.18:8024` 直连**已不可用**）
+> - 自建 Gitea Release：**默认入口 `http://192.168.24.16:8024/yanzi/docker-manager-yanzi/releases`**（2026-10-08 起为默认值；实测 API 200、仓库 public 匿名可读）。⚠️ 旧默认域名 `https://git.ziruxue.top` **已完全不通**（本机 curl 000 + Node fetch failed）；域名恢复后用 `GITEA_BASE=...` / `UPDATE_GITEA_BASE=...` 覆盖回去。
 >
 > **⚠️ 仓库硬约束（2026-09-30 实测）**：App 的「检查更新 / 下载」与 `quick-install.sh` 取包都是**匿名**请求（不带令牌）⇒ Gitea 仓库**必须可匿名读**。
 > - 仓库可见性**受制于 owner 账号的 `visibility`**：owner 账号 visibility 为 `private` 时，仓库被 Gitea **强制**成 `internal`（仅登录用户可见），**API 传 `private:false` / `internal:false` / `visibility:"public"` 都改不动**（4 种写法均返回 200 但仓库仍 `internal:true`），匿名 `releases/latest` 与网页一律 404。
@@ -149,6 +149,33 @@ node scripts/publish-release.mjs --repo owner/repo --zip 自定义路径 --prere
 
 > ⚠️ `npm run release` 复用当前已构建的 zip，**不负责构建**。完整链路：
 > `npm run build:frontend && node scripts/build-binary.mjs` → SEA 注入 → `make-package.py` → `npm run release`。
+
+### 2.1' 自建 Gitea 端发布（`publish-gitea-release.mjs`）
+
+`npm run release` **只发 GitHub**。Gitea 端用这个脚本（免网页填表）：
+
+```bash
+# 默认入口已是内网地址，通常无需设置；换公网入口时才需要覆盖
+# export UPDATE_GITEA_BASE=https://git.example.com
+
+# 令牌二选一：环境变量最省事；否则 wincred 里按 host 单独存一条
+export GITEA_TOKEN=xxx
+#   或 printf 'protocol=http\nhost=192.168.24.16:8024\nusername=yanzi\npassword=<令牌>\n\n' | git credential approve
+
+node scripts/publish-gitea-release.mjs                    # 发 package.json 当前版本
+node scripts/publish-gitea-release.mjs --version 1.39.0   # 补历史版本（需对应 zip 在 build-upload/）
+```
+
+脚本行为：
+- 版本取 `--version`（支持 `v` 前缀）→ 缺省用 `package.json` 版本；TAG = `vX.Y.Z`
+- notes 自动取 `docs/CHANGELOG.md` 对应版本段
+- 资产 3 个：版本化 zip + `latest` 别名 zip（同字节）+ `quick-install.sh`
+- Release 已存在 → 删除后重建（保证 asset 与 notes 干净）
+- **发布后匿名回读校验** `/releases/latest`：打印实际指向的 tag 与资产列表；若不可匿名读（HTTP 401/404）会告警 —— 因为 App 与安装脚本都走匿名读，私有仓库会让 Gitea 源整体失效、退化成只走 GitHub
+
+⚠️ **补历史版本的两个坑**：
+1. 令牌在 wincred 里**按 host 分条存放**，换入口（域名 → IP:端口）后 `git.ziruxue.top` 那条**不会被复用**，须对新 host 重新 approve；
+2. 补历史版本会**把 `latest` 别名 zip 覆盖成该版本的包** ⇒ **补完最后一个（最新）版本后，必须再发一次最新版本**，否则 `latest` 指向旧包。
 
 ### 2.2 一键构建并发布（最省事）
 
@@ -206,8 +233,12 @@ bash build.sh && sudo bash install.sh
 
 | 源 | 地址 | 说明 |
 |------|------|------|
-| 自建 Gitea（**优先**） | `https://git.ziruxue.top` · `yanzi/docker-manager-yanzi` | **必须公开（匿名可读）** —— owner 账号 `visibility` 须为 public；国内直连快、不受 GitHub 资源 CDN 影响 |
+| 自建 Gitea（**优先**） | **默认 `http://192.168.24.16:8024`** · `yanzi/docker-manager-yanzi` | **必须公开（匿名可读）** —— owner 账号 `visibility` 须为 public；国内/内网直连快、不受 GitHub 资源 CDN 影响 |
 | GitHub（**保底**） | `api.github.com/repos/yanziruxue/docker-manager` | 公开仓库；Gitea 不可用 / 无可下载资产时自动回退 |
+
+> ⚠️ **默认入口已改为内网地址**（2026-10-08）。旧默认域名 `https://git.ziruxue.top` **已完全不通**（本机 `curl` 返 `000`、**Node `fetch` 亦 `fetch failed`**）。默认值指向内网 ⇒ **外网部署必须用 `UPDATE_GITEA_BASE` 覆盖**，否则 Gitea 源不可达、会自动回退 GitHub（功能不中断，但更新时效依赖 GitHub）。
+>
+> ⚠️ 若 `releases/latest` 指向的版本**低于**客户端当前版本，OTA **不会提示更新**（版本比对只认 latest，不回溯中间版本）⇒ 每次发布必须两端同步。
 
 | 字段 | 说明 |
 |------|------|
@@ -217,10 +248,22 @@ bash build.sh && sudo bash install.sh
 服务器侧可用环境变量覆盖自建源（**无需重新打包**）：
 
 ```bash
-UPDATE_GITEA_BASE=http://192.168.1.10:8024     # Gitea 站点根地址（默认 https://git.ziruxue.top）
-UPDATE_GITEA_REPO=yanzi/docker-manager-yanzi   # Gitea 仓库 owner/repo
+# 默认（内网入口，无需配置）
+UPDATE_GITEA_BASE=http://192.168.24.16:8024   # Gitea 站点根地址
+UPDATE_GITEA_REPO=yanzi/docker-manager-yanzi  # Gitea 仓库 owner/repo
+
+# ★ 外网部署必须覆盖为公网可达地址
+UPDATE_GITEA_BASE=https://git.example.com
+
 UPDATE_MIRROR=https://my-mirror.com/           # 额外下载镜像前缀（只对 GitHub 源拼接）
 ```
+
+写入位置：`/opt/docker-manager-yanzi/config/.env`（或 systemd `EnvironmentFile`）。
+
+> ⚠️ **`UPDATE_GITEA_BASE` 必须是「站点根」**（到端口为止，**不带** `/yanzi/docker-manager-yanzi`）。
+> 代码会用 `rewriteToGiteaBase()` 把 Gitea API 返回的 `browser_download_url` 按 base 做**协议 + 主机改写**，所以即使 Gitea 的 `ROOT_URL` 配成别的域名也能正确下载。
+>
+> ⚠️ **换入口后必须重新 approve 凭据**（若不用 `GITEA_TOKEN`）：令牌在 wincred 里**按 host 分条存放**，`192.168.24.16:8024` 与 `git.ziruxue.top` 是两条独立条目。
 
 > 注：自 v1.2.3 起仓库地址与 Token 已从「系统更新」卡片移除；自 **v1.36.0** 起改为**双源**（自建 Gitea 优先、GitHub 保底），检查更新与下载均无需鉴权。
 
@@ -257,7 +300,10 @@ UPDATE_MIRROR=https://my-mirror.com/           # 额外下载镜像前缀（只�
 
 - **自替换用 `mv` 而非 `cp`**：`mv` 是 rename 语义，进程运行时替换不会触发 `ETXTBSY`；服务以 `docker-manager-yanzi` 用户运行、**无 root、不能 `systemctl`**，靠 `Restart=always` 完成重启
 - **`.service` 权限**：必须含 `ReadWritePaths=/opt/docker-manager-yanzi`，否则二进制无法被替换
-- **出网要求**：检查更新**优先访问自建 Gitea**（默认 `git.ziruxue.top`，可用 `UPDATE_GITEA_BASE` 改），失败才回退 `api.github.com`；内网环境至少放行其一
+- **出网要求**：检查更新**优先访问自建 Gitea**（**默认 `http://192.168.24.16:8024`**，⚠️ 旧默认域名 `git.ziruxue.top` 已不通；**外网部署须用 `UPDATE_GITEA_BASE` 覆盖**），失败才回退 `api.github.com`；内网环境至少放行其一
+- **⚠️ 默认入口指向内网地址**（2026-10-08 起）：内网部署开箱即用；**外网部署必须覆盖** `UPDATE_GITEA_BASE` 为公网可达地址，否则 Gitea 源不可达 → 自动回退 GitHub（**功能不中断**，仅更新时效依赖 GitHub）。`https://git.ziruxue.top` **已完全不通**（2026-10-08 实测：本机 curl 返 `000`，**Node `fetch` 亦 `fetch failed`** —— 不只是 curl 的问题）；域名恢复后改回默认值即可。
+- **⚠️ Gitea 源的版本上限由 `releases/latest` 决定**：若内网 Gitea 只发到 v1.38.3，而客户端已是 v1.39.x，则**永远收不到更新提示**（版本比对只认 latest，不会回溯中间版本）⇒ 每次发布**必须两端同步**，补历史版本后**再发一次最新版本**以修正 `latest` 指向。
+- **Gitea 不支持 `releases/latest/download/<file>` 快捷路径**（实测 **HTTP 404**）；`quick-install.sh` 走的是 Releases API 取 `browser_download_url`，故安装逻辑不受影响，但**文档/README 里若写 `curl …/releases/latest/download/quick-install.sh` 会 404** —— 改用 API 或带 tag 的完整路径 `…/releases/download/<tag>/quick-install.sh`（实测 200 / 12,365 B）。
 - **取包规则**：两端均取 `releases/latest`；Tag 去 `v` 前缀比对；Asset 文件名正则 `/linux-x64\.zip$/i`；包内二进制路径 `docker-manager-yanzi/docker-manager-yanzi`。**Gitea 返回的 `browser_download_url` 用的是其服务端 `ROOT_URL`** —— 若 `UPDATE_GITEA_BASE` 指向别的入口（IP:端口 / 内网域名），代码会把该 URL 的**协议 + 主机改写**成配置入口后再下载（`rewriteToGiteaBase()`）
 - **错误码**：私有仓库未填 Token → 404（提示确认已填 Token）；Token 无效/权限不足 → 401
 

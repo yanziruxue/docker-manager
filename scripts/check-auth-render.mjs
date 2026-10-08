@@ -123,7 +123,9 @@ try {
   check("★ mode=reinit 找回码 hint 标「必填」", T.reinit.includes("必填"));
   check("★ mode 缺省找回码 hint 标「可选」且可后补", T.create.includes("可选，") && T.create.includes("留空可稍后"));
   check("★ mode=reinit 预填 initialUsername", r.reinit.includes("yanzi-admin"));
-  check("mode 缺省用户名默认 admin", r.create.includes('value="admin"'));
+  // v1.38.3 起：初始化向导的用户名/密码一律留空，不再预填占位内容
+  check("★ mode 缺省用户名【不预填】占位内容", !r.create.includes('value="admin"'));
+  check("★ mode 缺省密码【不预填】占位内容", !/type="password"[^>]*value="(123456|admin123|docker)"/.test(r.create));
   check("★ 两种模式 hint 均含「区分大小写」", T.reinit.includes("区分大小写") && T.create.includes("区分大小写"));
 
   // ---------- B. 长度区间文案（不硬编码 24） ----------

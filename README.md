@@ -67,15 +67,18 @@
 在服务器上直接执行以下命令，脚本会自动下载最新 Release 并安装：
 
 ```bash
-# 自建 Gitea（优先源，国内直连快）
-curl -fsSL https://git.ziruxue.top/yanzi/docker-manager-yanzi/releases/latest/download/quick-install.sh | sudo bash
-# GitHub Releases（保底源，与 Gitea 同步发布）
+# GitHub Releases（推荐，保底源）
 curl -fsSL https://github.com/yanziruxue/docker-manager/releases/latest/download/quick-install.sh | sudo bash
+# 自建 Gitea（优先源，国内直连快）—— ⚠️ git.ziruxue.top 已不通，改用内网入口
+curl -fsSL http://192.168.24.16:8024/yanzi/docker-manager-yanzi/releases/download/v1.39.2/quick-install.sh | sudo bash
 ```
 
 - **下载源顺序**：自建 Gitea → GitHub Releases（脚本自动回退，任一可用即可完成安装）
 - 指定版本：`curl -fsSL <上面的任一地址> | VERSION=1.6.0 sudo bash`
 - 切换自建源：`GITEA_BASE=http://<Gitea 地址:端口> GITEA_REPO=<owner/repo> sudo bash quick-install.sh`
+  （脚本默认 Gitea 入口＝内网 `http://192.168.24.16:8024`，仓库 `yanzi/docker-manager-yanzi`；
+  ⚠️ **外网部署须覆盖** `GITEA_BASE` 为公网可达地址 —— 旧域名 `git.ziruxue.top` 已完全不通）
+- ⚠️ Gitea **不支持** `releases/latest/download/<file>` 快捷路径（实测 404）⇒ 取脚本请带 tag，或直接用 GitHub 源
 - 国内网络：GitHub 源内置 `gh-proxy.com` 回退；如需自定义镜像，可加 `UPDATE_MIRROR=https://你的镜像前缀 sudo bash ...`
 - 仅支持 **Linux x86_64**，需 root 权限
 

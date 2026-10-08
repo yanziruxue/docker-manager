@@ -29,8 +29,6 @@ import {
   FileText,
   Upload,
   Plus,
-  Pencil,
-  KeyRound,
   ArrowLeft,
   Save,
   FilePlus2,
@@ -51,9 +49,6 @@ import {
   downloadContainerFileApi,
   downloadContainerArchiveApi,
   createContainerEntryApi,
-  renameContainerPathApi,
-  removeContainerPathApi,
-  chmodContainerPathApi,
 } from "../api";
 import { transformLogs, shortImageRef } from "../transforms";
 import { addOpLog } from "../opLog";
@@ -1247,11 +1242,6 @@ function ContainerFileTab({
   const [showCreate, setShowCreate] = useState(false);
   const [createType, setCreateType] = useState<"file" | "dir">("file");
   const [createName, setCreateName] = useState("");
-  const [showRename, setShowRename] = useState(false);
-  const [renameName, setRenameName] = useState("");
-  const [showChmod, setShowChmod] = useState(false);
-  const [chmodValue, setChmodValue] = useState("644");
-  const [deleteTarget, setDeleteTarget] = useState<ContainerFileEntry | null>(null);
   const [busy, setBusy] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1343,53 +1333,6 @@ function ContainerFileTab({
     }
   };
 
-  const doRename = async () => {
-    if (!selectedPath || !renameName.trim()) return;
-    setBusy(true);
-    try {
-      const parent = selectedPath.includes("/") ? selectedPath.slice(0, selectedPath.lastIndexOf("/")) : "";
-      const newPath = `${parent || "/"}/${renameName.trim()}`;
-      await renameContainerPathApi(engineId!, containerId, selectedPath, newPath);
-      setShowRename(false);
-      setSelectedPath(null);
-      loadList(currentPath);
-    } catch (e: any) {
-      setError(e?.message || "重命名失败");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const doDelete = async () => {
-    if (!deleteTarget) return;
-    setBusy(true);
-    try {
-      await removeContainerPathApi(engineId!, containerId, deleteTarget.path);
-      setDeleteTarget(null);
-      setSelectedPath(null);
-      loadList(currentPath);
-    } catch (e: any) {
-      setError(e?.message || "删除失败");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const doChmod = async () => {
-    if (!selectedPath) return;
-    setBusy(true);
-    try {
-      await chmodContainerPathApi(engineId!, containerId, selectedPath, chmodValue.trim());
-      setShowChmod(false);
-      setSelectedPath(null);
-      loadList(currentPath);
-    } catch (e: any) {
-      setError(e?.message || "修改权限失败");
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const onUploadClick = () => fileInputRef.current?.click();
   const onFilePicked = async (ev: React.ChangeEvent<HTMLInputElement>) => {
     const file = ev.target.files?.[0];
@@ -1454,46 +1397,28 @@ function ContainerFileTab({
           >
             <Upload size={14} /> 上传
           </button>
-          <input ref={fileInputRef} type="file" className="hidden" onChange={onFilePicked} />
-        </div>
-      </div>
-
-      {error && (
-        <div className="text-sm text-red-500 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{error}</div>
-      )}
-
-      {/* 选中条目操作条 */}
-      {selectedEntry && (
-        <div className="flex items-center gap-2 text-xs text-slate-500 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
-          <span className="font-medium text-slate-700 truncate max-w-[280px]">{selectedEntry.name}</span>
-          <span className="text-slate-300">•</span>
-          <span className="font-mono">{selectedEntry.mode}</span>
-          <div className="flex-1" />
-          {/* 目录走「打包下载」（tar.gz），文件走原样下载 */}
+          {/* 选中条目后才可下载：目录走「打包下载」（tar.gz），文件走原样下载 */}
           <button
             onClick={() => {
+              if (!selectedEntry) return;
               setBusy(true);
               const task = selectedEntry.isDir
                 ? downloadContainerArchiveApi(engineId!, containerId, selectedEntry.path)
                 : downloadContainerFileApi(engineId!, containerId, selectedEntry.path);
               task.catch((e) => setError(e?.message || "下载失败")).finally(() => setBusy(false));
             }}
-            disabled={busy}
-            title={selectedEntry.isDir ? "打包为 tar.gz 下载" : "下载文件"}
-            className="flex items-center gap-1 text-blue-600 hover:underline disabled:opacity-50"
+            disabled={!selectedEntry || busy}
+            title={selectedEntry ? (selectedEntry.isDir ? "打包为 tar.gz 下载" : "下载文件") : "请先选中文件或文件夹"}
+            className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors disabled:text-slate-300 disabled:border-slate-100 disabled:bg-slate-50 disabled:cursor-not-allowed disabled:hover:bg-slate-50"
           >
-            <Download size={13} /> {selectedEntry.isDir ? "打包下载" : "下载"}
+            <Download size={14} /> {selectedEntry ? (selectedEntry.isDir ? "打包下载" : "下载") : "下载"}
           </button>
-          <button onClick={() => { setRenameName(selectedEntry.name); setShowRename(true); }} className="flex items-center gap-1 text-slate-600 hover:underline">
-            <Pencil size={13} /> 重命名
-          </button>
-          <button onClick={() => { setChmodValue("644"); setShowChmod(true); }} className="flex items-center gap-1 text-slate-600 hover:underline">
-            <KeyRound size={13} /> 权限
-          </button>
-          <button onClick={() => setDeleteTarget(selectedEntry)} className="flex items-center gap-1 text-red-600 hover:underline">
-            <Trash2 size={13} /> 删除
-          </button>
+          <input ref={fileInputRef} type="file" className="hidden" onChange={onFilePicked} />
         </div>
+      </div>
+
+      {error && (
+        <div className="text-sm text-red-500 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{error}</div>
       )}
 
       {/* 文件列表 */}
@@ -1535,7 +1460,7 @@ function ContainerFileTab({
         ))}
       </div>
 
-      <p className="text-xs text-slate-400">双击文件夹进入目录；双击文件查看/编辑；单击选中后可下载（目录会打包为 tar.gz）、重命名、改权限或删除。</p>
+      <p className="text-xs text-slate-400">双击文件夹进入目录；双击文件查看/编辑；单击选中后可在右上角下载（目录会打包为 tar.gz）。</p>
 
       {/* 文件编辑弹窗 */}
       <Modal open={!!editing} onClose={() => setEditing(null)} title={`编辑文件 · ${editing?.name || ""}`} size="xl">
@@ -1614,56 +1539,6 @@ function ContainerFileTab({
         </div>
       </Modal>
 
-      {/* 重命名弹窗 */}
-      <Modal open={showRename} onClose={() => setShowRename(false)} title="重命名" size="sm">
-        <div className="space-y-3">
-          <input
-            autoFocus
-            value={renameName}
-            onChange={(e) => setRenameName(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && doRename()}
-            className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-200"
-          />
-          <div className="flex items-center justify-end gap-2">
-            <button onClick={() => setShowRename(false)} className="px-4 py-2 text-sm text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200">取消</button>
-            <button onClick={doRename} disabled={busy || !renameName.trim()} className="px-4 py-2 text-sm text-white bg-blue-500 rounded-lg hover:bg-blue-600 disabled:opacity-50">
-              {busy ? "处理中..." : "确定"}
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* 权限弹窗 */}
-      <Modal open={showChmod} onClose={() => setShowChmod(false)} title="修改权限" size="sm">
-        <div className="space-y-3">
-          <p className="text-xs text-slate-400">输入数字权限（如 644、755）或符号权限（如 u+x）。</p>
-          <input
-            autoFocus
-            value={chmodValue}
-            onChange={(e) => setChmodValue(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && doChmod()}
-            className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-200"
-          />
-          <div className="flex items-center justify-end gap-2">
-            <button onClick={() => setShowChmod(false)} className="px-4 py-2 text-sm text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200">取消</button>
-            <button onClick={doChmod} disabled={busy || !chmodValue.trim()} className="px-4 py-2 text-sm text-white bg-blue-500 rounded-lg hover:bg-blue-600 disabled:opacity-50">
-              {busy ? "处理中..." : "确定"}
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* 删除确认 */}
-      <ConfirmDialog
-        open={!!deleteTarget}
-        onClose={() => setDeleteTarget(null)}
-        onConfirm={doDelete}
-        title="删除确认"
-        message={`确定要删除「${deleteTarget?.name || ""}」吗？该操作不可恢复。`}
-        confirmText="删除"
-        danger
-        loading={busy}
-      />
     </div>
   );
 }

@@ -246,12 +246,21 @@ function getRepo(): string {
 
 /**
  * 自建 Gitea：更新首选源。
- * 默认站点 https://git.ziruxue.top、仓库 yanzi/docker-manager-yanzi（与 GitHub 双端同步发布）。
+ * 默认站点 http://192.168.24.16:8024、仓库 yanzi/docker-manager-yanzi（与 GitHub 双端同步发布）。
+ *
+ * 入口历史（勿回退）：
+ *   · `https://git.ziruxue.top`（443）—— **已完全不通**（2026-10-08 实测：本机 curl 返 000，
+ *     Node fetch 亦 fetch failed），故不再作为默认值；域名恢复后可改回。
+ *   · `http://60.205.251.18:8024` —— 早前已超时废弃。
+ *   · `http://192.168.24.16:8024`（当前默认）—— 内网入口，实测 API 200、仓库匿名可读。
+ *
+ * ⚠️ 默认值指向**内网地址**，外网部署必须用环境变量覆盖（否则 Gitea 源不可达，
+ *    会自动回退 GitHub 保底源，功能不中断但更新时效依赖 GitHub）。
  * 可用环境变量覆盖：
- *   UPDATE_GITEA_BASE  站点根地址（如 http://192.168.1.10:8024）
+ *   UPDATE_GITEA_BASE  站点根地址（到端口为止，不带 /owner/repo），如 https://git.example.com
  *   UPDATE_GITEA_REPO  owner/repo
  */
-const GITEA_BASE_DEFAULT = "https://git.ziruxue.top";
+const GITEA_BASE_DEFAULT = "http://192.168.24.16:8024";
 const GITEA_REPO_DEFAULT = "yanzi/docker-manager-yanzi";
 
 /** 自建 Gitea 站点根地址（去尾斜杠），可用 UPDATE_GITEA_BASE 覆盖 */
