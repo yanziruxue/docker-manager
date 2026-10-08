@@ -122,21 +122,54 @@ if [ "$DRY" = 1 ]; then
   exit 0
 fi
 
+# 令牌注入：只在本次命令的 URL 里临时带上，**不写入 .git/config**（remote 仍是无凭证的干净 URL）
+#   · 不设 GITEA_TOKEN 时行为不变（走 wincred / 交互输入）
+#   · 设了 GITEA_TOKEN 时必须让 git 无条件采用它，否则仍会先问 wincred 而挂起
+if [ -n "${GITEA_TOKEN:-}" ]; then
+  PUSH_URL="$(printf '%s' "$GITEA_URL" | sed -E "s#^(https?://)#\1yanzi:${GITEA_TOKEN}@#")"
+  say "  · 已注入 GITEA_TOKEN（仅本次命令有效，不写入 git config）"
+fi
+
+# 追踪配置：branch.main.remote 必须指向**远端名**（如 gitea），不能是带令牌的 URL。
+#   推完后无条件校正一次 —— `push -u <url>` 会把 branch.main.remote 写成那个 URL（明文令牌进 .git/config），
+#   而后续 fetch/pull 再走它就会静默用该令牌；这里覆盖回干净的远端名。
+fix_tracking() {
+  local cur
+  cur="$(git config --get "branch.$BRANCH.remote" || true)"
+  if [ -n "$cur" ] && [ "$cur" != "$REMOTE" ]; then
+    git config "branch.$BRANCH.remote" "$REMOTE"
+    say "  · 已把 branch.$BRANCH.remote 从 URL 形式校正为远端名 '$REMOTE'（避免明文令牌留在 .git/config）"
+  fi
+}
+
 # https 入口（本机 git 默认 schannel 后端握手失败、且 HTTP 代理会拦该站）
 #   ⇒ 强制 openssl 后端 + 清空代理；openssl 不可用时回退默认后端再试一次
 # http 入口（IP:端口）⇒ 只需清空代理（内网地址不该走代理）
-if [ -n "$GIT_PUSH_OPTS" ]; then
-  git $GIT_PUSH_OPTS push -u "$REMOTE" "$BRANCH"
+# 另：GIT_TERMINAL_PROMPT=0 保证「凭证助手挂起」时立刻报错而不是无限等待
+if [ -n "${GITEA_TOKEN:-}" ]; then
+  # 令牌模式：push 到 URL 而非远端名 ⇒ 天然不会污染 .git/config
+  if [ -n "${GIT_PUSH_OPTS:-}" ]; then
+    GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/echo git $GIT_PUSH_OPTS push "$PUSH_URL" "$BRANCH:$BRANCH"
+  else
+    GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/echo git -c http.sslBackend=openssl -c http.proxy= -c https.proxy= -c credential.helper= push "$PUSH_URL" "$BRANCH:$BRANCH"
+  fi
   rc=$?
 else
-  git -c http.sslBackend=openssl -c http.proxy= -c https.proxy= push -u "$REMOTE" "$BRANCH"
-  rc=$?
-  if [ "$rc" -ne 0 ]; then
-    say "  · openssl 后端推送失败，回退默认后端再试一次…"
-    git push -u "$REMOTE" "$BRANCH"
+  if [ -n "${GIT_PUSH_OPTS:-}" ]; then
+    GIT_TERMINAL_PROMPT=0 git $GIT_PUSH_OPTS push -u "$REMOTE" "$BRANCH"
+  else
+    GIT_TERMINAL_PROMPT=0 git -c http.sslBackend=openssl -c http.proxy= -c https.proxy= push -u "$REMOTE" "$BRANCH"
     rc=$?
+    if [ "$rc" -ne 0 ]; then
+      say "  · openssl 后端推送失败，回退默认后端再试一次…"
+      GIT_TERMINAL_PROMPT=0 git push -u "$REMOTE" "$BRANCH"
+      rc=$?
+    fi
   fi
+  [ -n "${rc:-0}" ] || rc=0
 fi
+
+fix_tracking
 if [ "$rc" -ne 0 ]; then
   say ""
   say "✗ 推送失败（退出码 $rc）。常见原因："
