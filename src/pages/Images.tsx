@@ -25,7 +25,8 @@ import type { DockerImage, PullTask, ImageUpdateStatusView, ImageLock } from "..
 import { Tag } from "../components/Badge";
 import { ConfirmDialog, Modal } from "../components/Modal";
 import { CmdOutputModal, useCmdOutput } from "../components/CmdOutputModal";
-import { EmptyState, IconButton, ActionDropdown, type ActionItem } from "../components/UI";
+import { EmptyState, IconButton } from "../components/UI";
+import { ContextMenu, type MenuItem } from "../components/ContextMenu";
 import { LoadingState, ErrorState } from "../components/DataState";
 
 import {
@@ -51,7 +52,21 @@ interface ImagesProps {
   error?: string | null;
   engineId?: string;
   onRefresh?: () => void;
+  /**
+   * 镜像删除成功后的**本地即时移除**回调（乐观更新，v1.43.21）。
+   * 背景：onRefresh 走 loadEngineData 需并行等 5 个请求全部返回才 setImages，
+   * 任一请求挂起 ⇒ 列表停留旧数据（已删镜像仍显示，手动刷新才消失）。
+   * 先本地移除被删镜像保证 UI 即时更新，随后的 onRefresh 再与服务端对账。
+   */
+  onImagesRemoved?: (ids: string[]) => void;
   defaultVisibleColumns?: string[];
+  /**
+   * 「仓库 registry 地址」显隐的初始值（系统设置 → 列显隐 → 镜像管理，v1.42.15）。
+   * true = 隐藏 registry 地址前缀（默认）；false = 原样显示完整仓库名。
+   * 页内工具栏「列」下拉的「仓库 registry 地址」项以此为初值、会话级切换（v1.42.18），
+   * 不回写服务端；设置页开关仍是持久化入口。
+   */
+  hideRepoRegistryInit?: boolean;
   /** 检查全部镜像更新（后端 digest 比对） */
   onCheckAllUpdates?: () => void;
   /** 检查单个镜像更新（右键菜单，传 repo:tag） */
@@ -78,6 +93,27 @@ function buildImageRef(image: DockerImage): string {
 /** 操作日志里的镜像标识：digest 取短 ID，repotag 原样展示 */
 function displayImageRef(ref: string): string {
   return ref.startsWith("sha256:") ? ref.slice(7, 19) : ref;
+}
+
+/**
+ * 仓库名隐藏 registry 地址前缀（v1.42.15，系统设置 → 列显隐 → 镜像管理 控制）。
+ * 判定沿用 Docker 自身规则：`/` 前首段含「.」或「:」、或为 `localhost` ⇒ 视为 registry 主机名并剥掉。
+ *   docker.1panel.live/gitea/gitea ⇒ gitea/gitea
+ *   registry:5000/foo/bar         ⇒ foo/bar
+ *   localhost/foo                 ⇒ foo
+ *   gitea/gitea / nginx / library/nginx ⇒ 原样（无主机名）
+ * 悬空镜像 `<none>`、空串、剥完为空（如裸 `localhost/`）时原样返回，绝不显示空仓库名。
+ */
+function stripRegistryHost(repo: string): string {
+  const raw = repo?.trim() || "";
+  if (!raw || raw === "<none>") return raw;
+  const slash = raw.indexOf("/");
+  if (slash <= 0) return raw; // 无斜杠或斜杠开头 ⇒ 无主机名可剥
+  const head = raw.slice(0, slash);
+  const isHost = head === "localhost" || head.includes(".") || head.includes(":");
+  if (!isHost) return raw;
+  const rest = raw.slice(slash + 1);
+  return rest ? rest : raw;
 }
 
 /**
@@ -477,11 +513,28 @@ function ImageImportPanel({
   );
 }
 
-export function Images({ images, loading, error, engineId, onRefresh, defaultVisibleColumns, onCheckAllUpdates, onCheckImageUpdate, checkingUpdates, imageUpdateStatus, imageUpdateError }: ImagesProps) {
+export function Images({ images, loading, error, engineId, onRefresh, onImagesRemoved, defaultVisibleColumns, hideRepoRegistryInit = true, onCheckAllUpdates, onCheckImageUpdate, checkingUpdates, imageUpdateStatus, imageUpdateError }: ImagesProps) {
   const [search, setSearch] = useState("");
+  // 搜索框 ref：非受控模式，原生事件直读 DOM 值（见下方 useEffect 注释）
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  // 搜索框非受控化：受控 onChange 在中文输入法组合态下会静默失效
+  // （框里有字、state 仍是空串，Enter/失焦也无法补救，列表永不过滤）。
+  // 改用原生 input/compositionend 事件直读 DOM value 同步 state，
+  // 绕开 React 合成事件系统，任何输入法/浏览器环境下都能生效。
+  useEffect(() => {
+    const el = searchInputRef.current;
+    if (!el) return;
+    const sync = () => setSearch(el.value);
+    el.addEventListener("input", sync);
+    el.addEventListener("compositionend", sync);
+    return () => {
+      el.removeEventListener("input", sync);
+      el.removeEventListener("compositionend", sync);
+    };
+  }, []);
   // 分类只有「使用中 / 未使用」；悬空不再单列，归入未使用
   const [filter, setFilter] = useState<"all" | "used" | "unused">("all");
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<{ ref: string; id: string } | null>(null);
   const [confirmCleanUnused, setConfirmCleanUnused] = useState(false);
   const [showColumnPicker, setShowColumnPicker] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -490,13 +543,15 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
   const [forceDeleteAvailable, setForceDeleteAvailable] = useState(false);
   const [pruning, setPruning] = useState(false);
   const [pruneError, setPruneError] = useState<string | null>(null);
-  /** 已锁定镜像列表（服务端持久化，换浏览器也生效） */
+  /** 不被清理的镜像列表（服务端持久化，换浏览器也生效） */
   const [locks, setLocks] = useState<ImageLock[]>([]);
-  /** 正在切换锁定状态的镜像 sha256，用于按钮 loading */
+  /** 正在切换不被清理状态的镜像 sha256，用于按钮 loading */
   const [lockBusy, setLockBusy] = useState<string | null>(null);
+  /** 右键菜单（操作列已移除，所有操作统一走右键，v1.42.13） */
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; img: DockerImage } | null>(null);
   const { cmdOutput, showOutput, closeOutput } = useCmdOutput();
 
-  // 拉取锁定列表
+  // 拉取不被清理列表
   useEffect(() => {
     if (!engineId) { setLocks([]); return; }
     let canceled = false;
@@ -521,7 +576,7 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
         lines.push(`- ${d.Deleted || d.Untagged || JSON.stringify(d)}`);
       }
     }
-    if (locked > 0) lines.push(`已跳过 ${locked} 个锁定镜像（解除锁定后可清理）`);
+    if (locked > 0) lines.push(`已跳过 ${locked} 个标记为「不被清理」的镜像（取消标记后才会被清理）`);
     lines.push(`释放空间：${formatBytes(space)}`);
     return lines.join("\n");
   };
@@ -804,6 +859,14 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
     setImageImport(null);
   };
 
+  // 导入成功后自动关闭弹窗（短暂展示「导入成功」后收起，无需手动关闭）
+  useEffect(() => {
+    if (imageImport?.phase === "done") {
+      const t = setTimeout(() => closeImageImport(), 1500);
+      return () => clearTimeout(t);
+    }
+  }, [imageImport?.phase, closeImageImport]);
+
   /** 后台拉取：关闭弹窗但保持任务运行 */
   const backgroundPull = () => {
     setShowPullModal(false);
@@ -816,7 +879,7 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
     try { await cancelPullTaskApi(engineId, activePullTaskId); } catch { /* 轮询同步状态 */ }
   };
 
-  const handleRemoveImage = async (imageRef: string, force = false) => {
+  const handleRemoveImage = async (imageRef: string, force = false, imageId?: string) => {
     if (!engineId) return;
     setDeleting(true);
     setDeleteError(null);
@@ -825,6 +888,16 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
       await removeImageApi(engineId, imageRef, force);
       addOpLog({ action: force ? "强制删除镜像" : "删除镜像", target: displayImageRef(imageRef), status: "success", engineId });
       setConfirmDelete(null);
+      // 先本地即时移除（不等 5 请求全返回），再服务端刷新对账
+      if (imageId) {
+        onImagesRemoved?.([imageId]);
+        setSelected((prev) => {
+          if (!prev.has(imageId)) return prev;
+          const next = new Set(prev);
+          next.delete(imageId);
+          return next;
+        });
+      }
       onRefresh?.();
     } catch (e: any) {
       addOpLog({ action: force ? "强制删除镜像" : "删除镜像", target: displayImageRef(imageRef), status: "failed", detail: e.message || "删除失败", engineId });
@@ -836,11 +909,11 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
     }
   };
 
-  /** 加锁 / 解锁镜像：锁定的镜像在「清理未使用」时会被跳过 */
+  /** 标记 / 取消「不被清理」：被标记为不被清理的镜像在「清理未使用」时会被跳过 */
   const handleToggleLock = async (img: DockerImage) => {
     if (!engineId) return;
     const key = img.sha256 || img.id;
-    // 悬空镜像无有效引用，只按 ID 锁定
+    // 悬空镜像无有效引用，只按 ID 标记为不被清理
     const ref = img.isDangling ? "" : `${img.repository}:${img.tag}`;
     const nextLocked = !isLocked(img);
     setLockBusy(key);
@@ -848,14 +921,14 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
       const list = await setImageLockApi(engineId, { id: key, ref, locked: nextLocked });
       setLocks(Array.isArray(list) ? list : []);
       addOpLog({
-        action: nextLocked ? "锁定镜像" : "解锁镜像",
+        action: nextLocked ? "标记为不被清理" : "允许清理",
         target: buildImageRef(img),
         status: "success",
         engineId,
       });
     } catch (e: any) {
       showOutput({
-        title: nextLocked ? "锁定镜像" : "解锁镜像",
+        title: nextLocked ? "标记为不被清理" : "允许清理",
         name: buildImageRef(img),
         output: e.message || "操作失败",
         failed: true,
@@ -884,9 +957,150 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
     }
   };
 
-  type ColumnKey = "repository" | "tag" | "id" | "size" | "createdAt" | "updateStatus" | "associatedContainers" | "sha256" | "actions";
+  // ===== 批量操作（镜像）=====
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  // v1.43.18：镜像更新检查结果不再以内嵌横幅展示（横幅已移除），改为：
+  //  1) 汇总进「通知中心」—— 服务端 /api/engines/:id/activity 派生一条汇总活动；
+  //  2) 手动检查（检查全部 / 单镜像）完成后，下方 showCheckResult 弹窗提示明细。
+  const [showCheckResult, setShowCheckResult] = useState(false);
+  const manualCheckPending = useRef(false);
+  // 手动检查完成（checkingUpdates 由 true 落回 false）即弹出结果明细弹窗
+  useEffect(() => {
+    if (manualCheckPending.current && !checkingUpdates) {
+      manualCheckPending.current = false;
+      setShowCheckResult(true);
+    }
+  }, [checkingUpdates]);
+  // 弹窗所需的汇总数据（取最近一次检查结果）
+  const checkResult = imageUpdateStatus
+    ? {
+        checked: imageUpdateStatus.checked,
+        updates: imageUpdateStatus.updates,
+        upToDate: Math.max(0, imageUpdateStatus.checked - imageUpdateStatus.updates),
+        at: imageUpdateStatus.at,
+      }
+    : null;
+  const [batchBusy, setBatchBusy] = useState(false);
+  const [batchDownloading, setBatchDownloading] = useState<{ current: number; total: number; ref: string } | null>(null);
+  const [confirmBatchDelete, setConfirmBatchDelete] = useState(false);
+
+  const toggleSelect = (id: string) => {
+    const next = new Set(selected);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    setSelected(next);
+  };
+
+  const selectedImages = useMemo(() => images.filter((i) => selected.has(i.id)), [images, selected]);
+
+  /** 批量标记 / 取消不被清理：逐条调用 setImageLockApi，刷新不被清理列表 */
+  const batchLock = async (lock: boolean) => {
+    if (!engineId || selected.size === 0) return;
+    setBatchBusy(true);
+    try {
+      let cur = locks;
+      for (const img of selectedImages) {
+        const key = img.sha256 || img.id;
+        const ref = img.isDangling ? "" : `${img.repository}:${img.tag}`;
+        const list = await setImageLockApi(engineId, { id: key, ref, locked: lock });
+        if (Array.isArray(list)) cur = list;
+      }
+      setLocks(cur);
+      addOpLog({ action: lock ? "批量标记为不被清理" : "批量允许清理", target: `${selectedImages.length} 个镜像`, status: "success", engineId });
+      setSelected(new Set());
+    } catch (e: any) {
+      showOutput({ title: lock ? "批量标记为不被清理" : "批量允许清理", name: `${selectedImages.length} 个镜像`, output: e.message || "操作失败", failed: true });
+    } finally {
+      setBatchBusy(false);
+    }
+  };
+
+  /** 批量删除：跳过被容器占用的镜像（in-use），逐个删除并汇总成功/失败/跳过 */
+  const batchDelete = async () => {
+    if (!engineId || selected.size === 0) return;
+    setBatchBusy(true);
+    const lines: string[] = [];
+    let ok = 0, fail = 0, skipped = 0;
+    // 同一镜像多 tag 拆成多行（同 id）⇒ 删除按镜像粒度去重：
+    // 否则第一个 tag 删掉后镜像已不存在，第二个 tag 的删除调用必失败（v1.43.12）。
+    const seenIds = new Set<string>();
+    const removedIds: string[] = [];
+    try {
+      for (const img of selectedImages) {
+        if (seenIds.has(img.id)) continue;
+        seenIds.add(img.id);
+        const ref = buildImageRef(img);
+        if (img.associatedContainers.length > 0) { skipped++; lines.push(`- 跳过（使用中）: ${displayImageRef(ref)}`); continue; }
+        try {
+          await removeImageApi(engineId, ref);
+          ok++; removedIds.push(img.id); lines.push(`✓ ${displayImageRef(ref)}`);
+        } catch (e: any) {
+          fail++; lines.push(`✗ ${displayImageRef(ref)}: ${e.message || "删除失败"}`);
+        }
+      }
+      lines.unshift(`删除成功 ${ok} 个，失败 ${fail} 个，跳过（使用中）${skipped} 个`);
+      addOpLog({ action: "批量删除镜像", target: `${ok} 个`, status: fail > 0 ? "failed" : "success", engineId });
+      showOutput({ title: "批量删除镜像", name: `${ok} 个`, output: lines.join("\n"), failed: fail > 0 });
+      setConfirmBatchDelete(false);
+      setSelected(new Set());
+      // 先本地即时移除已删镜像（不等 5 请求全返回），再服务端刷新对账
+      if (removedIds.length > 0) onImagesRemoved?.(removedIds);
+      onRefresh?.();
+    } finally {
+      setBatchBusy(false);
+    }
+  };
+
+  /** 批量拉取：逐个发起 pull 任务（任务条可见），不弹窗 */
+  const batchPull = async () => {
+    if (!engineId || selected.size === 0) return;
+    setBatchBusy(true);
+    const lines: string[] = [];
+    let ok = 0, fail = 0;
+    try {
+      for (const img of selectedImages) {
+        const ref = buildImageRef(img);
+        try { await startImagePullApi(engineId, ref); ok++; lines.push(`✓ ${ref}`); }
+        catch (e: any) { fail++; lines.push(`✗ ${ref}: ${e.message || "拉取失败"}`); }
+      }
+      lines.unshift(`已发起拉取 ${ok} 个，失败 ${fail} 个`);
+      addOpLog({ action: "批量拉取镜像", target: `${ok} 个`, status: fail > 0 ? "failed" : "success", engineId });
+      showOutput({ title: "批量拉取镜像", name: `${ok} 个`, output: lines.join("\n"), failed: fail > 0 });
+      setSelected(new Set());
+    } finally {
+      setBatchBusy(false);
+    }
+  };
+
+  /** 批量下载（导出）镜像：逐个串行下载，避免并发打满 */
+  const batchDownload = async () => {
+    if (!engineId || selected.size === 0) return;
+    setBatchBusy(true);
+    const lines: string[] = [];
+    let ok = 0, fail = 0;
+    try {
+      const list = selectedImages;
+      for (let i = 0; i < list.length; i++) {
+        const img = list[i];
+        const ref = buildImageRef(img);
+        setBatchDownloading({ current: i + 1, total: list.length, ref });
+        try { await downloadImageApi(engineId, ref); ok++; lines.push(`✓ ${displayImageRef(ref)}`); }
+        catch (e: any) { fail++; lines.push(`✗ ${displayImageRef(ref)}: ${e.message || "导出失败"}`); }
+      }
+      lines.unshift(`导出成功 ${ok} 个，失败 ${fail} 个`);
+      addOpLog({ action: "批量导出镜像", target: `${ok} 个`, status: fail > 0 ? "failed" : "success", engineId });
+      showOutput({ title: "批量导出镜像", name: `${ok} 个`, output: lines.join("\n"), failed: fail > 0 });
+      setSelected(new Set());
+    } finally {
+      setBatchDownloading(null);
+      setBatchBusy(false);
+    }
+  };
+
+  // 操作列已移除（v1.42.13）：所有操作统一走行右键菜单
+  type ColumnKey = "repository" | "tag" | "id" | "size" | "createdAt" | "updateStatus" | "associatedContainers" | "sha256";
+  // 「仓库名」列常驻不可隐藏（v1.42.17）：不进 allColumns ⇒ 页内「列」下拉无该项；
+  // 初始集合由下方 defaultSet.add("repository") 强制补回，旧设置里曾被取消勾选的也能恢复
   const allColumns: { key: ColumnKey; label: string }[] = [
-    { key: "repository", label: "仓库名" },
     { key: "tag", label: "标签" },
     { key: "id", label: "镜像 ID" },
     { key: "size", label: "大小" },
@@ -894,14 +1108,24 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
     { key: "updateStatus", label: "更新状态" },
     { key: "associatedContainers", label: "关联容器" },
     { key: "sha256", label: "SHA-256" },
-    { key: "actions", label: "操作" },
   ];
 
+  // 「SHA-256」列默认不显示（v1.42.19）：未保存过列显隐设置的用户，默认集合不含 sha256
+  // （列太长且极少用到；需要时可在页内「列」下拉或设置 → 列显隐 手动勾选）。
+  // 已保存过列选择的用户走 stored 分支，尊重其既有勾选（保存过 sha256 的仍显示）
   const defaultSet = defaultVisibleColumns && defaultVisibleColumns.length > 0
     ? new Set(defaultVisibleColumns as ColumnKey[])
-    : new Set(allColumns.map(c => c.key));
+    : new Set(allColumns.filter(c => c.key !== "sha256").map(c => c.key));
+  // 「仓库名」为镜像主标识列：常驻显示、不可隐藏（v1.42.17）——
+  // 无论旧设置是否勾选过该列，初始集合强制包含，保证镜像列表主标识始终可见
+  defaultSet.add("repository");
 
   const [visibleColumns, setVisibleColumns] = useState<Set<ColumnKey>>(defaultSet);
+
+  // 「仓库 registry 地址」显隐（v1.42.18）：工具栏「列」下拉新增项「仓库 registry 地址」——
+  // 勾选 = 显示完整仓库地址（含 registry 前缀）；不勾选 = 隐藏前缀只显示短名（gitea/gitea）。
+  // 初始值取服务端设置（缺省隐藏），页内切换为会话级，不写 settings（设置页开关仍是持久化入口）
+  const [hideRepoRegistry, setHideRepoRegistry] = useState(hideRepoRegistryInit);
 
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
@@ -921,15 +1145,39 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
   };
 
   const filtered = useMemo(() => {
+    const kw = search.toLowerCase();
     return images.filter((img) => {
-      const matchSearch = img.repository.toLowerCase().includes(search.toLowerCase()) || img.tag.toLowerCase().includes(search.toLowerCase());
+      // 仓库名同时按「完整地址」与「隐藏 registry 后的短名」匹配——
+      // 表头显示短名时用户按看到的文案搜也要能命中（v1.42.15）
+      const repo = img.repository.toLowerCase();
+      const repoShort = hideRepoRegistry ? stripRegistryHost(img.repository).toLowerCase() : repo;
+      const matchSearch = repo.includes(kw) || repoShort.includes(kw) || img.tag.toLowerCase().includes(kw);
       let matchFilter = true;
       if (filter === "used") matchFilter = img.associatedContainers.length > 0;
       // 「未使用」= 无任何容器引用；悬空镜像已归入此分类（不再单列）
       else if (filter === "unused") matchFilter = img.associatedContainers.length === 0;
       return matchSearch && matchFilter;
     });
-  }, [images, search, filter]);
+  }, [images, search, filter, hideRepoRegistry]);
+
+  // ⚠️ 勾选按「镜像」粒度计：transformImages 按 RepoTag 拆行 ⇒ 同一镜像 id 多行。
+  // 全选/取消判断必须走 id 维度——早期版本用 `selected.size === filtered.length`
+  // 比「去重后 id 数」与「行数」，多 tag 镜像存在时永不相等 ⇒ 全选后点标题行
+  // 复选框只会重复全选、无法取消（v1.43.12 修复）。
+  const filteredIds = useMemo(() => new Set(filtered.map((i) => i.id)), [filtered]);
+  const allFilteredSelected = filteredIds.size > 0 && [...filteredIds].every((id) => selected.has(id));
+  const someFilteredSelected = [...filteredIds].some((id) => selected.has(id));
+  const toggleSelectAll = () => {
+    if (allFilteredSelected) {
+      // 取消：仅移除当前筛选结果覆盖的 id，保留筛选范围外已勾选的镜像
+      const next = new Set(selected);
+      for (const id of filteredIds) next.delete(id);
+      setSelected(next);
+    } else {
+      // 全选：合并入已选（不清空筛选范围外的选择）
+      setSelected(new Set([...selected, ...filteredIds]));
+    }
+  };
 
   const totalSize = images.reduce((sum, img) => {
     const num = parseFloat(img.size);
@@ -948,24 +1196,86 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
     new Set(list.map((i) => i.sha256 || i.id)).size;
 
   const isUnused = (i: typeof images[number]) => i.associatedContainers.length === 0;
-  /** 未使用总数（**包含已锁定项**，与筛选标签数字一致） */
+  /** 未使用总数（**包含已被标记为不被清理项**，与筛选标签数字一致） */
   const unusedCount = images.filter(isUnused).length;
   const unusedSize = images.filter(isUnused).reduce((sum, img) => sum + sizeMB(img), 0);
 
-  /** 该镜像是否已锁定：镜像 ID 命中，或 repo:tag 命中 */
+  /** 该镜像是否已被标记为不被清理：镜像 ID 命中，或 repo:tag 命中 */
   const isLocked = (img: typeof images[number]) =>
     locks.some(
       (l) => (!!l.id && l.id === img.sha256) || (!!l.ref && l.ref === `${img.repository}:${img.tag}`)
     );
-  /** 已锁定的镜像数（按 ID 去重） */
+  /** 被标记为不被清理的镜像数（按 ID 去重） */
   const lockedCount = uniqImageCount(images.filter(isLocked));
-  /** 被锁定因而会被清理跳过的未使用镜像数（按 ID 去重） */
+  /** 被标记为不被清理因而会被清理跳过的未使用镜像数（按 ID 去重） */
   const lockedUnusedCount = uniqImageCount(images.filter((i) => isUnused(i) && isLocked(i)));
-  /** 本次「清理未使用」实际会删除的镜像数（按 ID 去重，不含锁定项） */
+  /** 本次「清理未使用」实际会删除的镜像数（按 ID 去重，不含不被清理项） */
   const deletableCount = uniqImageCount(images.filter((i) => isUnused(i) && !isLocked(i)));
   const deletableSize = images
     .filter((i) => isUnused(i) && !isLocked(i))
     .reduce((sum, img) => sum + sizeMB(img), 0);
+  /**
+   * 本次「清理未使用」实际会删除的镜像清单（按 ID 去重，不含不被清理项）。
+   * 用于确认弹窗逐条列出「有哪些会被清理」，避免误删（v1.43.4）。
+   */
+  const deletableList = (() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const img of images) {
+      if (!isUnused(img) || isLocked(img)) continue;
+      const key = img.sha256 || img.id;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(`${buildImageRef(img)}  ·  ${img.size}`);
+    }
+    return out;
+  })();
+
+  /**
+   * 镜像右键菜单（v1.42.13）：操作列已移除，原「操作」列下拉的全部条目迁到此处。
+   * 与原 ActionDropdown 逐条一致：拉取 / 下载镜像 / 检查更新 / 标记为不被清理（允许清理）/ 删除。
+   */
+  const getImageMenuItems = (img: DockerImage): MenuItem[] => [
+    { label: "拉取", icon: <Download size={14} />, onClick: () => openPullModal(`${img.repository}:${img.tag}`) },
+    {
+      label: downloadingImage === buildImageRef(img) ? "导出中..." : "下载镜像",
+      icon: <ImageDown size={14} />,
+      disabled: !!downloadingImage,
+      onClick: () => handleDownloadImage(buildImageRef(img)),
+    },
+    {
+      label: "检查更新",
+      icon: <RefreshCw size={14} />,
+      disabled: !onCheckImageUpdate,
+      onClick: () => {
+        manualCheckPending.current = true;
+        onCheckImageUpdate?.(`${img.repository}:${img.tag}`);
+      },
+    },
+    {
+      label:
+        lockBusy === (img.sha256 || img.id)
+          ? "处理中..."
+          : isLocked(img)
+            ? "允许清理（取消不被清理）"
+            : "标记为不被清理",
+      icon: isLocked(img) ? <Unlock size={14} /> : <Lock size={14} />,
+      disabled: lockBusy === (img.sha256 || img.id),
+      onClick: () => handleToggleLock(img),
+    },
+    { separator: true },
+    {
+      label: img.associatedContainers.length > 0 ? "删除（使用中）" : "删除",
+      icon: <Trash2 size={14} />,
+      danger: true,
+      disabled: img.associatedContainers.length > 0,
+      onClick: () => {
+        setDeleteError(null);
+        setForceDeleteAvailable(false);
+        setConfirmDelete({ ref: buildImageRef(img), id: img.id });
+      },
+    },
+  ];
 
   const filterOptions = [
     { key: "all", label: "全部", count: images.length },
@@ -1020,7 +1330,7 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-slate-100 flex items-center justify-center"><Lock size={18} className="text-slate-500" /></div>
             <div>
-              <p className="text-xs text-slate-500">已锁定</p>
+              <p className="text-xs text-slate-500">不被清理</p>
               <p className="text-xl font-bold text-slate-800">{lockedCount}</p>
             </div>
           </div>
@@ -1033,8 +1343,10 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
           <div className="relative">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              ref={searchInputRef}
+              defaultValue=""
+              onKeyDown={(e) => { if (e.key === "Enter") setSearch(e.currentTarget.value); }}
+              onBlur={(e) => setSearch(e.currentTarget.value)}
               placeholder="搜索镜像..."
               className="w-64 pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400"
             />
@@ -1103,6 +1415,22 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
                     {col.label}
                   </label>
                 ))}
+                {/* 「仓库 registry 地址」项（v1.42.18）：勾选 = 显示完整地址；不勾选 = 隐藏前缀显示短名。
+                    与其他列项并列在「列」下拉内，会话级切换；持久化入口仍在 设置 → 列显隐 → 镜像管理。 */}
+                <div className="mt-1 border-t border-slate-100 pt-1">
+                  <label
+                    className="flex items-center gap-2 px-2 py-1.5 text-sm text-slate-600 hover:bg-slate-50 rounded cursor-pointer"
+                    title="勾选显示完整仓库地址（如 docker.1panel.live/gitea/gitea）；不勾选隐藏 registry 地址前缀（如 gitea/gitea）"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={!hideRepoRegistry}
+                      onChange={() => setHideRepoRegistry((v) => !v)}
+                      className="rounded border-slate-300 text-blue-500 focus:ring-blue-500"
+                    />
+                    仓库 registry 地址
+                  </label>
+                </div>
               </div>
             )}
           </div>
@@ -1111,7 +1439,7 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
             disabled={deletableCount === 0}
             title={
               lockedUnusedCount > 0
-                ? `未使用共 ${unusedCount} 个，其中 ${lockedUnusedCount} 个已锁定，本次不会清理`
+                ? `未使用共 ${unusedCount} 个，其中 ${lockedUnusedCount} 个已标记为不被清理，本次不会清理`
                 : undefined
             }
             className="flex items-center gap-1.5 px-3 py-2 text-sm text-white bg-red-500 rounded-lg hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -1120,7 +1448,10 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
           </button>
           {onCheckAllUpdates && (
             <button
-              onClick={onCheckAllUpdates}
+              onClick={() => {
+                manualCheckPending.current = true;
+                onCheckAllUpdates();
+              }}
               disabled={checkingUpdates}
               className="flex items-center gap-1.5 px-3 py-2 text-sm text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed"
             >
@@ -1130,37 +1461,6 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
           )}
         </div>
       </div>
-
-      {/* 镜像版本检查结果：有更新数量 / 全部最新 / 失败原因 */}
-      {(imageUpdateStatus || imageUpdateError) && (
-        <div
-          className={`rounded-xl border shadow-sm p-3 flex items-start gap-2 text-sm ${
-            imageUpdateError
-              ? "bg-red-50 border-red-200 text-red-700"
-              : (imageUpdateStatus?.updates ?? 0) > 0
-              ? "bg-amber-50 border-amber-200 text-amber-700"
-              : "bg-green-50 border-green-200 text-green-700"
-          }`}
-        >
-          {imageUpdateError || (imageUpdateStatus?.updates ?? 0) > 0 ? (
-            <AlertTriangle size={15} className="mt-0.5 flex-shrink-0" />
-          ) : (
-            <CheckCircle2 size={15} className="mt-0.5 flex-shrink-0" />
-          )}
-          <div className="flex-1 min-w-0">
-            {imageUpdateError ? (
-              <span>检查更新失败：{imageUpdateError}</span>
-            ) : (
-              <span>
-                {(imageUpdateStatus?.updates ?? 0) > 0
-                  ? `${imageUpdateStatus!.updates} 个镜像有可用更新（已检查 ${imageUpdateStatus!.checked} 个）`
-                  : `全部镜像均为最新（已检查 ${imageUpdateStatus!.checked} 个）`}
-                <span className="opacity-70"> · {new Date(imageUpdateStatus!.at).toLocaleString("zh-CN")}</span>
-              </span>
-            )}
-          </div>
-        </div>
-      )}
 
       {/* 拉取任务条：进行中 + 最近完成的任务（后台拉取也在此展示） */}
       {visiblePullTasks.length > 0 && (
@@ -1230,12 +1530,40 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
         </div>
       )}
 
+      {/* 批量操作条（选中镜像后出现） */}
+      {selected.size > 0 && (
+        <div className="flex items-center gap-2 flex-wrap bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5">
+          <span className="text-sm text-blue-700 font-medium">已选中 {selected.size} 个镜像</span>
+          <div className="w-px h-5 bg-blue-200 mx-1" />
+          <button onClick={() => batchLock(true)} disabled={batchBusy} className="flex items-center gap-1 text-sm text-slate-600 hover:text-blue-600 disabled:opacity-50"><Lock size={14} /> 标记为不被清理</button>
+          <button onClick={() => batchLock(false)} disabled={batchBusy} className="flex items-center gap-1 text-sm text-slate-600 hover:text-blue-600 disabled:opacity-50"><Unlock size={14} /> 允许清理</button>
+          <button onClick={() => setConfirmBatchDelete(true)} disabled={batchBusy} className="flex items-center gap-1 text-sm text-red-600 hover:text-red-700 disabled:opacity-50"><Trash2 size={14} /> 删除</button>
+          <button onClick={batchPull} disabled={batchBusy} className="flex items-center gap-1 text-sm text-slate-600 hover:text-blue-600 disabled:opacity-50"><Download size={14} /> 拉取</button>
+          <button onClick={batchDownload} disabled={batchBusy} className="flex items-center gap-1 text-sm text-slate-600 hover:text-blue-600 disabled:opacity-50">
+            {batchDownloading ? <Loader2 size={14} className="animate-spin" /> : <ImageDown size={14} />}
+            {batchDownloading ? `导出中 ${batchDownloading.current}/${batchDownloading.total}` : "下载镜像"}
+          </button>
+          <button onClick={() => setSelected(new Set())} title="取消选择" aria-label="取消选择" className="ml-auto p-1 rounded-md text-slate-400 hover:text-slate-600 hover:bg-blue-100 transition-colors">
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
       {/* Table */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[800px]">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200">
+                <th className="w-10 px-3 py-3">
+                  <input
+                    type="checkbox"
+                    checked={allFilteredSelected}
+                    ref={(el) => { if (el) el.indeterminate = someFilteredSelected && !allFilteredSelected; }}
+                    onChange={toggleSelectAll}
+                    className="rounded border-slate-300 text-blue-500 focus:ring-blue-500"
+                  />
+                </th>
                 {visibleColumns.has("repository") && <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-5 py-3 whitespace-nowrap">仓库名</th>}
                 {visibleColumns.has("tag") && <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3 whitespace-nowrap">标签</th>}
                 {visibleColumns.has("id") && <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3 whitespace-nowrap">镜像 ID</th>}
@@ -1244,18 +1572,35 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
                 {visibleColumns.has("updateStatus") && <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3 whitespace-nowrap">更新状态</th>}
                 {visibleColumns.has("associatedContainers") && <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3 whitespace-nowrap">关联容器</th>}
                 {visibleColumns.has("sha256") && <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3 whitespace-nowrap">SHA-256</th>}
-                {visibleColumns.has("actions") && <th className="text-right text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3 whitespace-nowrap">操作</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
               {filtered.map((img) => (
-                <tr key={img.id} className="hover:bg-slate-50 transition-colors">
+                <tr
+                  key={img.id}
+                  className={`hover:bg-slate-50 transition-colors cursor-context-menu ${selected.has(img.id) ? "bg-blue-50/50" : ""}`}
+                  onContextMenu={(e) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, img }); }}
+                  title="右键打开操作菜单"
+                >
+                  <td className="w-10 px-3 py-3" onClick={(e) => { e.stopPropagation(); toggleSelect(img.id); }}>
+                    <input
+                      type="checkbox"
+                      readOnly
+                      checked={selected.has(img.id)}
+                      className="rounded border-slate-300 text-blue-500 focus:ring-blue-500 pointer-events-none"
+                    />
+                  </td>
                   {visibleColumns.has("repository") && (
                     <td className="px-5 py-3 whitespace-nowrap">
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-mono text-slate-700">{img.repository}</span>
+                        <span
+                          className="text-sm font-mono text-slate-700"
+                          title={hideRepoRegistry && stripRegistryHost(img.repository) !== img.repository ? img.repository : undefined}
+                        >
+                          {hideRepoRegistry ? stripRegistryHost(img.repository) : img.repository}
+                        </span>
                         {img.isDangling && <Tag text="悬空" color="amber" />}
-                        {isLocked(img) && <Tag text="已锁定" color="purple" />}
+                        {isLocked(img) && <Tag text="不被清理" color="purple" />}
                       </div>
                     </td>
                   )}
@@ -1306,52 +1651,7 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
                       )}
                     </td>
                   )}
-                  {visibleColumns.has("actions") && (
-                    <td className="px-3 py-3 whitespace-nowrap">
-                      <div className="flex items-center justify-end">
-                        <ActionDropdown
-                          items={[
-                            { label: "拉取", icon: <Download size={14} />, onClick: () => openPullModal(`${img.repository}:${img.tag}`) },
-                            {
-                              label: downloadingImage === buildImageRef(img) ? "导出中..." : "下载镜像",
-                              icon: <ImageDown size={14} />,
-                              disabled: !!downloadingImage,
-                              onClick: () => handleDownloadImage(buildImageRef(img)),
-                            },
-                            {
-                              label: "检查更新",
-                              icon: <RefreshCw size={14} />,
-                              disabled: !onCheckImageUpdate,
-                              onClick: () => onCheckImageUpdate?.(`${img.repository}:${img.tag}`),
-                            },
-                            {
-                              label:
-                                lockBusy === (img.sha256 || img.id)
-                                  ? "处理中..."
-                                  : isLocked(img)
-                                    ? "解除锁定（允许被清理）"
-                                    : "锁定（清理未使用时跳过）",
-                              icon: isLocked(img) ? <Unlock size={14} /> : <Lock size={14} />,
-                              disabled: lockBusy === (img.sha256 || img.id),
-                              onClick: () => handleToggleLock(img),
-                            },
-                            { separator: true },
-                            {
-                              label: img.associatedContainers.length > 0 ? "删除（使用中）" : "删除",
-                              icon: <Trash2 size={14} />,
-                              danger: true,
-                              disabled: img.associatedContainers.length > 0,
-                              onClick: () => {
-                                setDeleteError(null);
-                                setForceDeleteAvailable(false);
-                                setConfirmDelete(buildImageRef(img));
-                              },
-                            },
-                          ]}
-                        />
-                      </div>
-                    </td>
-                  )}
+                  {/* 操作列已移除：所有操作统一走右键菜单 */}
                 </tr>
               ))}
             </tbody>
@@ -1365,7 +1665,7 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
       <ConfirmDialog
         open={!!confirmDelete}
         onClose={() => { setConfirmDelete(null); setDeleteError(null); setForceDeleteAvailable(false); }}
-        onConfirm={() => { if (confirmDelete) { handleRemoveImage(confirmDelete); } }}
+        onConfirm={() => { if (confirmDelete) { handleRemoveImage(confirmDelete.ref, false, confirmDelete.id); } }}
         title="删除镜像"
         message="确定要删除此镜像吗？如果有关联的容器，需要先删除或更新对应容器。"
         confirmText="删除"
@@ -1374,7 +1674,7 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
         errorMessage={deleteError}
         extraAction={
           forceDeleteAvailable && confirmDelete
-            ? { label: "强制删除", onClick: () => handleRemoveImage(confirmDelete, true), loading: deleting }
+            ? { label: "强制删除", onClick: () => handleRemoveImage(confirmDelete.ref, true, confirmDelete.id), loading: deleting }
             : undefined
         }
       />
@@ -1387,14 +1687,28 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
         message={
           `将删除 ${deletableCount} 个未被容器引用的镜像（含悬空），释放约 ${deletableSize.toFixed(0)} MB 空间。` +
           (lockedUnusedCount > 0
-            ? `未使用镜像共 ${unusedCount} 个，其中 ${lockedUnusedCount} 个已锁定，本次将跳过。`
+            ? `未使用镜像共 ${unusedCount} 个，其中 ${lockedUnusedCount} 个已标记为不被清理，本次将跳过。`
             : "") +
-          `此操作不可撤销，正在运行的容器依赖的镜像不会被删除。`
+          `此操作不可撤销，正在运行的容器依赖的镜像不会被删除。下方为本次将清理的镜像清单：`
         }
+        list={deletableList}
         confirmText="清理"
         danger
+        wide
         loading={pruning}
         errorMessage={pruneError}
+      />
+
+      {/* 批量删除镜像确认 */}
+      <ConfirmDialog
+        open={confirmBatchDelete}
+        onClose={() => setConfirmBatchDelete(false)}
+        onConfirm={batchDelete}
+        title="批量删除镜像"
+        message={`确定要删除选中的 ${selected.size} 个镜像吗？被容器占用的镜像会被跳过，此操作不可撤销。`}
+        confirmText="批量删除"
+        danger
+        loading={batchBusy}
       />
 
       {/* 命令输出弹窗（清理镜像的 tail 文本） */}
@@ -1539,6 +1853,83 @@ export function Images({ images, loading, error, engineId, onRefresh, defaultVis
         {imageImport && (
           <ImageImportPanel state={imageImport} onCancel={cancelImageImport} onClose={closeImageImport} />
         )}
+      </Modal>
+
+      {/* 右键菜单（操作列已移除，v1.42.13） */}
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={getImageMenuItems(contextMenu.img)}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
+
+      {/* v1.43.18：手动检查更新（检查全部 / 单镜像）完成后弹出的结果明细 */}
+      <Modal
+        open={showCheckResult}
+        onClose={() => setShowCheckResult(false)}
+        title="镜像更新检查结果"
+        size="sm"
+      >
+        <div className="p-6 space-y-4">
+          {imageUpdateError ? (
+            <div className="flex items-center gap-2 text-sm text-red-600">
+              <AlertTriangle size={16} className="flex-shrink-0" />
+              <span>检查更新失败：{imageUpdateError}</span>
+            </div>
+          ) : checkResult ? (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 text-sm text-slate-600">
+                {checkResult.updates > 0 ? (
+                  <AlertTriangle size={16} className="text-amber-500 flex-shrink-0" />
+                ) : (
+                  <CheckCircle2 size={16} className="text-green-500 flex-shrink-0" />
+                )}
+                <span>
+                  {checkResult.updates > 0
+                    ? `发现 ${checkResult.updates} 个镜像有可用更新`
+                    : "全部镜像均为最新"}
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="rounded-lg bg-slate-50 border border-slate-100 p-3 text-center">
+                  <div className="text-2xl font-semibold text-slate-800">{checkResult.checked}</div>
+                  <div className="text-xs text-slate-500 mt-1">已检查</div>
+                </div>
+                <div className="rounded-lg bg-green-50 border border-green-100 p-3 text-center">
+                  <div className="text-2xl font-semibold text-green-600">{checkResult.upToDate}</div>
+                  <div className="text-xs text-slate-500 mt-1">为最新</div>
+                </div>
+                <div
+                  className={`rounded-lg border p-3 text-center ${
+                    checkResult.updates > 0 ? "bg-amber-50 border-amber-100" : "bg-slate-50 border-slate-100"
+                  }`}
+                >
+                  <div
+                    className={`text-2xl font-semibold ${
+                      checkResult.updates > 0 ? "text-amber-600" : "text-slate-400"
+                    }`}
+                  >
+                    {checkResult.updates}
+                  </div>
+                  <div className="text-xs text-slate-500 mt-1">可更新</div>
+                </div>
+              </div>
+              <p className="text-xs text-slate-400">
+                检查时间：{new Date(checkResult.at).toLocaleString("zh-CN")}
+              </p>
+            </div>
+          ) : null}
+          <div className="flex justify-end pt-2">
+            <button
+              onClick={() => setShowCheckResult(false)}
+              className="px-4 py-2 text-sm text-white bg-blue-500 rounded-lg hover:bg-blue-600"
+            >
+              知道了
+            </button>
+          </div>
+        </div>
       </Modal>
     </div>
   );

@@ -34,6 +34,8 @@ export interface VolumeMapping {
   hostPath: string;
   containerPath: string;
   mode: "rw" | "ro";
+  /** 挂载类型：bind = 宿主目录绑定（hostPath 为宿主路径）；volume = 命名卷（hostPath 为卷名）。缺省视为 bind（模板等旧数据） */
+  type?: "bind" | "volume";
 }
 
 export interface EnvVar {
@@ -69,6 +71,11 @@ export interface EngineResourceStats {
   serverVersion: string;
   /** 各物理核实时使用率（仅本机 socket 引擎可读 /proc/stat；远程引擎为空数组） */
   cpuCores: { name: string; percent: number }[];
+  /**
+   * 宿主机整机 CPU 使用率（%，/proc/stat 聚合行 `cpu ` 差分，覆盖全部进程含非容器）：
+   * 仅本机 socket 引擎有值；远程引擎 / 首采无基线为 null ⇒ 前端回落旧的「单条整体负载」展示。
+   */
+  hostCpuPercent: number | null;
   /** 已安装内存（MB）：本机引擎取 /proc/meminfo，远程回退 Docker MemTotal */
   memInstalledMB: number;
   /** 宿主机空闲内存（MB）：仅本机引擎有值，否则 0 */
@@ -83,7 +90,7 @@ export interface EngineResourceStats {
   netIfaces: NetIfaceStat[];
   /** 宿主机正常运行时间（秒）：读 /proc/uptime，读不到（远程引擎 / 非 Linux）为 0 → 前端显示「—」 */
   hostUptimeSec: number;
-  // ───────── 宿主机库存（仪表盘「系统概览」+ 处理器/内存图标 tooltip） ─────────
+  // ───────── 宿主机库存（系统设置 → 硬件信息页 + 处理器/内存图标 tooltip） ─────────
   /** 主机名称：本机读 os.hostname()，远程回退 docker.info.Name */
   hostName: string;
   /** 发行版本：本机读 /etc/os-release PRETTY_NAME，远程回退 docker.info.OperatingSystem */
@@ -115,6 +122,11 @@ export interface ResourceSample {
   netTxKBps: number;
   /** 运行容器 CPU 合计（%），与 EngineResourceStats.cpuPercent 同源 */
   cpuPercent: number;
+  /**
+   * 宿主机整机 CPU 使用率（%，/proc/stat 聚合行差分）：仅本机 socket 引擎有值；
+   * 远程引擎 / 首采无基线时缺省（前端回落旧展示；曲线沿用上一个有效值）。
+   */
+  hostCpuPercent?: number;
   /**
    * 逐网口速率（KB/s）：键 = 网口名（含 Docker 网桥 docker0 / br-xxxx）。
    * 仅本机 socket 引擎有值；远程引擎缺省（前端回退到合计口径）。
@@ -188,6 +200,8 @@ export interface Container {
   imageId?: string; // 完整镜像 ID (sha256:...)，用于交叉引用解析镜像名
   status: ContainerStatus;
   ports: PortMapping[];
+  /** 持久化目录映射（来自 Docker Mounts：bind = 宿主路径，volume = 命名卷） */
+  volumes: VolumeMapping[];
   ip: string;
   uptime: string;
   autoStart: boolean;
@@ -247,6 +261,10 @@ export interface StackTemplate {
 
 export interface StackContainer {
   name: string;
+  /** 真实容器短 id（12 位，v1.43.29 起后端带出；容器页「堆栈」列精确匹配用） */
+  containerId?: string;
+  /** 真实容器名（compose container_name 自定义时 ≠ 服务名） */
+  containerName?: string;
   image: string;
   tag: string;
   status: ContainerStatus;
@@ -260,6 +278,8 @@ export interface StackContainer {
 
 export interface StackWebUILabel {
   serviceName: string;
+  /** 服务描述（v1.44.1，LABELS 页展示；随 webuiLabels 全量落盘 meta） */
+  description?: string;
   iconUrl: string;
   webuiPort: string;
   webuiUrl: string;
@@ -640,16 +660,32 @@ export interface UpdateConfig {
   ignoredVersion: string;
 }
 
-/** 弹窗设置（系统设置 → 弹窗设置 维护） */
+/** 页面设置（系统设置 → 页面设置 维护） */
 export interface ModalConfig {
   /** 操作结果弹窗自动关闭延迟（秒）；0 = 不自动关闭 */
   autoCloseDelay: number;
+  /**
+   * 登录后默认显示的页面（v1.42.9）：dashboard / containers / stacks / images /
+   * volumes / networks / notifications / settings。空串或非法值回落为 "dashboard"。
+   */
+  defaultPage: PageKey;
   /**
    * 容器详情视图样式：
    * - `drawer` = 半页面（右侧抽屉，覆盖约半屏，列表仍可见；默认）
    * - `modal`  = 居中弹窗（原有样式）
    */
   containerDetailStyle: "drawer" | "modal";
+  /**
+   * 网络曲线**默认网卡**（v1.41.6）：仪表盘「网络」磁贴进页面时展示哪个网卡。
+   * - `""`（默认）= **自动选第一个物理网卡**（`kind === "host"`，跳过 lo / veth）；
+   * - 其他非空值 = 指定网卡名（`eth0` / `docker0` / `br-xxxx`）。
+   *
+   * ★ v1.42.10 起**移除「全部（容器合计）」**（原哨兵 `"__all__"` 已废弃）：
+   *   磁贴下拉只按「物理网卡 / 虚拟网卡」分组，始终展示某个真实网卡；
+   *   仅远程引擎读不到 /proc/net/dev 时才回落容器合计口径。
+   * ★ 用户在磁贴下拉里手动选过的网卡存在 localStorage，**优先级高于本设置**。
+   */
+  defaultNetIface: string;
 }
 
 /** 列可见性默认配置 */
@@ -690,10 +726,12 @@ export type ComposeInsertPosition =
   | "cursor"
   | "end";
 
-/** Compose 模板设置（系统设置 → Compose 管理 维护） */
+/** Compose 模板设置（系统设置 → 编辑堆栈 维护） */
 export interface ComposeConfig {
   /** 一键填入模板项 */
   templates: ComposeTemplate[];
+  /** 编辑堆栈 LABELS 页是否自动识别 ports 提取 WebUI 端口/URL（默认开启） */
+  autoDetectWebui: boolean;
 }
 
 // ============ 系统更新（OTA）类型 ============
@@ -747,8 +785,10 @@ export interface SystemSettings {
   columnVisibility: ColumnVisibility;
   /** 全局彩色标签库（系统设置 → 标签管理维护） */
   tags: ResourceTag[];
-  /** 弹窗设置（自动关闭延迟等） */
+  /** 页面设置（自动关闭延迟、容器详情视图、默认显示页面等） */
   modal: ModalConfig;
+  /** 镜像管理页显示选项（系统设置 → 列显隐 → 镜像管理 维护） */
+  imagesDisplay: ImagesDisplayConfig;
   /** Compose 模板（一键填入项） */
   compose: ComposeConfig;
   /**
@@ -768,6 +808,21 @@ export interface SystemSettings {
 export interface TelemetryConfig {
   /** 是否上传安装数量统计（默认 true；关闭后不再向远端发送任何数据） */
   enabled: boolean;
+}
+
+/**
+ * 镜像管理页显示选项（系统设置 → 列显隐 → 镜像管理 的开关，v1.42.15 新增）。
+ * 与列可见性（columnVisibility.images 数组）相互独立：那个管「整列显隐」，这个管「列内文案形态」。
+ */
+export interface ImagesDisplayConfig {
+  /**
+   * 仓库名隐藏 registry 地址前缀（**默认 true**）：
+   * `docker.1panel.live/gitea/gitea` ⇒ 显示 `gitea/gitea`。
+   * 判定沿用 Docker 自身规则——`/` 首段含 `.` / `:` 或为 `localhost` 即视为 registry 主机名；
+   * `gitea/gitea`、`nginx`、`library/nginx` 等无主机名的仓库名原样显示。
+   * 悬空镜像 `<none>` 与空串不受影响；鼠标悬停被缩短的仓库名仍可看到完整地址。
+   */
+  hideRegistryPrefix: boolean;
 }
 
 // ============ 应用详情 / 应用日志 / 目录镜像 ============
@@ -823,6 +878,10 @@ export interface LogRetentionConfig {
   notify?: LogRetentionOverride;
   /** 操作记录的覆盖（缺字段继承顶层） */
   oplog?: LogRetentionOverride;
+  /** ★ 每周打包开关（v1.41.6；顶层独有，**不参与频道继承** —— 归档包不分频道） */
+  packEnabled?: boolean;
+  /** ★ 每周打包的滚动间隔天数（v1.41.6；默认 7） */
+  packIntervalDays?: number;
 }
 
 /** 单个频道的运行态汇总（GET /api/applogs 的 channels[]） */
@@ -884,11 +943,49 @@ export interface LogFileInfo {
 /** 日志列表响应 */
 export interface LogListResult {
   files: LogFileInfo[];
+  /** ★ 含归档包（v1.41.6）——容量上限统计口径就是「散文件 + 压缩包」 */
   totalBytes: number;
   /** 向后兼容：顶层仍指「应用日志」的策略 */
   retention: LogRetentionConfig;
   /** 三分频道的汇总与生效策略（v1.38.0） */
   channels?: LogChannelStat[];
+  /** 每周打包状态（v1.41.6） */
+  pack?: LogPackConfig;
+  /** 已归档的压缩包列表（v1.41.6） */
+  archives?: LogArchiveInfo[];
+}
+
+/** 每周打包状态（v1.41.6） */
+export interface LogPackConfig {
+  enabled: boolean;
+  /** 滚动间隔（天），默认 7 */
+  intervalDays: number;
+  /** 上次打包时间（毫秒；0 = 从未打包） */
+  lastPackAt: number;
+  /** 当前总占用（散文件 + 归档包，字节） */
+  totalBytes: number;
+  /** 归档包数量 */
+  archiveCount: number;
+  /** 下次可打包时间（ISO；null = 未启用） */
+  nextPackAt: string | null;
+}
+
+/** 日志归档包（v1.41.6） */
+export interface LogArchiveInfo {
+  name: string;
+  sizeBytes: number;
+  mtime: string;
+}
+
+/** 日志打包结果（POST /api/applogs/pack） */
+export interface LogPackResult {
+  packed: boolean;
+  archiveName: string;
+  archivedFiles: string[];
+  sourceBytes: number;
+  archiveBytes: number;
+  /** 未打包的原因 */
+  reason: string;
 }
 
 /** 日志尾部读取结果（GET /api/applogs/:name?tail=N） */

@@ -74,13 +74,18 @@ export function render() {
   const create = renderToStaticMarkup(
     React.createElement(SetupWizard, { onDone: noop })
   );
+  // v1.40.6：create 模式传入 lockedUsername（安装时选定的服务运行账户）
+  // ⇒ 用户名应被锁定（disabled）且显示为该值
+  const createLocked = renderToStaticMarkup(
+    React.createElement(SetupWizard, { onDone: noop, lockedUsername: "yanzi" })
+  );
   const loginNotice = renderToStaticMarkup(
     React.createElement(LoginPage, { onDone: noop, notice: "账号已重新设置，请使用新的用户名和密码登录" })
   );
   const loginPlain = renderToStaticMarkup(
     React.createElement(LoginPage, { onDone: noop })
   );
-  return { reinit, create, loginNotice, loginPlain, fetchCalls: g.__fetchCalls };
+  return { reinit, create, createLocked, loginNotice, loginPlain, fetchCalls: g.__fetchCalls };
 }
 `;
 
@@ -105,6 +110,7 @@ try {
   const T = {
     reinit: toText(r.reinit),
     create: toText(r.create),
+    createLocked: toText(r.createLocked),
     loginNotice: toText(r.loginNotice),
     loginPlain: toText(r.loginPlain),
   };
@@ -127,6 +133,28 @@ try {
   check("★ mode 缺省用户名【不预填】占位内容", !r.create.includes('value="admin"'));
   check("★ mode 缺省密码【不预填】占位内容", !/type="password"[^>]*value="(123456|admin123|docker)"/.test(r.create));
   check("★ 两种模式 hint 均含「区分大小写」", T.reinit.includes("区分大小写") && T.create.includes("区分大小写"));
+
+  // ---------- A2. v1.40.6：初始设置页用户名锁定为安装时选定的服务运行账户 ----------
+  // 注意：用户名值在 input 的 value 属性里，toText() 会剥掉标签 ⇒ 必须查原始 HTML。
+  check("★ 传入 lockedUsername 时用户名显示为该值", /value="yanzi"/.test(r.createLocked));
+  check(
+    "★ 锁定时用户名输入框为 disabled（不可修改）",
+    /<input[^>]*\sdisabled=""[^>]*value="yanzi"/.test(r.createLocked) ||
+      /<input[^>]*value="yanzi"[^>]*\sdisabled=""/.test(r.createLocked),
+    r.createLocked.slice(0, 400),
+  );
+  check("★ 锁定时提示说明「不可修改」", T.createLocked.includes("不可修改"));
+  // ⚠️ 必须匹配真正的属性 `disabled=""`：Input 的 className 里含
+  //   `disabled:bg-slate-50 disabled:text-slate-400` 字样，裸 /disabled/ 会误判。
+  check(
+    "★ 未传 lockedUsername 时用户名框【不】是 disabled（降级为可输入）",
+    !/<input[^>]*\sdisabled=""[^>]*>/.test(r.create),
+  );
+  check(
+    "★ reinit 模式不受锁定影响（用户名框仍可编辑）",
+    /<input[^>]*value="yanzi-admin"/.test(r.reinit) &&
+      !/<input[^>]*\sdisabled=""[^>]*value="yanzi-admin"/.test(r.reinit),
+  );
 
   // ---------- B. 长度区间文案（不硬编码 24） ----------
   check("★ mode=reinit 渲染出「18~24 位」", T.reinit.includes("18~24 位"));

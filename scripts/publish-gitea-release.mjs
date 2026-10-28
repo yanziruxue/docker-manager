@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 一键发布到自建 Gitea Releases（yanzi/docker-manager-yanzi）。
+ * 一键发布到自建 Gitea Releases（yanzi/dockermanagementyanzi）。
  *
  * 前置：
  *   - 仓库必须可匿名读（owner 账号 visibility=public；否则 OTA / quick-install.sh 的
@@ -13,7 +13,7 @@
  *   node scripts/publish-gitea-release.mjs                  # 发 package.json 当前版本
  *   node scripts/publish-gitea-release.mjs --version 1.39.0 # 指定版本（补历史发布）
  *   GITEA_TOKEN=xxx node scripts/publish-gitea-release.mjs --version 1.39.2
- *   UPDATE_GITEA_BASE=http://192.168.24.16:8024 node scripts/publish-gitea-release.mjs
+ *   UPDATE_GITEA_BASE=http://192.168.24.10:8024 node scripts/publish-gitea-release.mjs
  *
  * 行为：
  *   1. 版本取 --version > package.json version → TAG = vX.Y.Z
@@ -36,8 +36,8 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 
-const GITEA_BASE = (process.env.UPDATE_GITEA_BASE || "http://192.168.24.16:8024").replace(/\/$/, "");
-const GITEA_REPO = process.env.UPDATE_GITEA_REPO || "yanzi/docker-manager-yanzi";
+const GITEA_BASE = (process.env.UPDATE_GITEA_BASE || "http://192.168.24.10:8024").replace(/\/$/, "");
+const GITEA_REPO = process.env.UPDATE_GITEA_REPO || "yanzi/dockermanagementyanzi";
 
 /** 解析 --version 1.2.3（支持 v 前缀） */
 function parseVersionArg() {
@@ -119,9 +119,13 @@ async function main() {
   const [owner, repo] = GITEA_REPO.split("/");
   const notes = extractChangelog(TAG) || `Release ${TAG}`;
 
-  const zip = path.join(ROOT, "build-upload", `docker-manager-yanzi-linux-x64-v${version}.zip`);
-  const aliasZip = path.join(ROOT, "build-upload", "docker-manager-yanzi-linux-x64.zip");
+  const zip = path.join(ROOT, "build-upload", `dockermanagementyanzi-linux-x64-v${version}.zip`);
+  const aliasZip = path.join(ROOT, "build-upload", "dockermanagementyanzi-linux-x64.zip");
   const scriptAsset = path.join(ROOT, "scripts", "quick-install.sh");
+  // Debian / RPM 安装包（v1.42.3 起随包发布；缺失则跳过 —— rpm 需在 RPM 系环境构建，
+  // 本机/CI 未产出时不应阻塞 zip 的发布）
+  const debAsset = path.join(ROOT, "build-upload", `dockermanagementyanzi_${version}_amd64.deb`);
+  const rpmAsset = path.join(ROOT, "build-upload", `dockermanagementyanzi-${version}-1.x86_64.rpm`);
 
   if (!fs.existsSync(zip)) {
     console.error(`[ERROR] 未找到交付包: ${zip}`);
@@ -131,7 +135,11 @@ async function main() {
   }
   // latest 别名 zip 与版本化 zip 同字节（补历史版本也会刷新它 ⇒ 补完最新版本后须再发一次最新版本）
   fs.copyFileSync(zip, aliasZip);
-  const assets = [zip, aliasZip, scriptAsset].filter((f) => fs.existsSync(f));
+  const assets = [zip, aliasZip, debAsset, rpmAsset, scriptAsset].filter((f) => fs.existsSync(f));
+  const skipped = [debAsset, rpmAsset].filter((f) => !fs.existsSync(f));
+  if (skipped.length) {
+    console.log(`  · 跳过未构建的安装包: ${skipped.map((f) => path.basename(f)).join(", ")}`);
+  }
 
   console.log(`发布目标: ${GITEA_REPO} @ ${TAG}（${GITEA_BASE}）`);
   if (version !== pkgVersion) {

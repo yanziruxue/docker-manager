@@ -100,7 +100,7 @@ export interface AppInfo {
   nodeVersion: string;
   platform: string;
   arch: string;
-  /** 运行用户（非 root 的 docker-manager-yanzi） */
+  /** 运行用户（非 root 的 dockermanagementyanzi） */
   user: string;
   pid: number;
   /** 进程启动时间（ISO） */

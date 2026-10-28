@@ -43,7 +43,7 @@ function Row({
     <div className={`flex justify-between gap-2${span2 ? " sm:col-span-2" : ""}`}>
       <span className="text-slate-500 flex-shrink-0">{label}</span>
       <span
-        className={`text-slate-700 truncate text-right${mono ? " font-mono text-xs" : ""}`}
+        className={`text-slate-700 truncate text-right${mono ? " font-mono" : ""}`}
         title={title || value}
       >
         {value || "—"}
@@ -239,6 +239,9 @@ export function ActivityPanel({
                 </button>
                 <span className="text-amber-600">在服务器上以 root 执行；会覆盖该单元并重启服务</span>
               </div>
+              <div className="text-amber-600 pt-0.5">
+                也可直接重新执行 <span className="font-mono">sudo bash install.sh</span>（会自动刷新并修复该单元，无需手动复制命令）
+              </div>
             </div>
           </div>
         </div>
@@ -279,7 +282,7 @@ export function ActivityPanel({
 
             {/* 各整盘温度 */}
             <div className="grid grid-cols-1 gap-y-2 text-sm">
-              <div className="text-xs text-slate-500">
+              <div className="text-sm text-slate-500">
                 硬盘温度{thermal.disks.length > 0 ? `（${thermal.disks.length} 块设备）` : ""}
               </div>
               {thermal.disks.length === 0 ? (
@@ -425,7 +428,8 @@ export function ActivityPanel({
               <Row label="运行环境" value={status.virtualized ? "虚拟化 / 容器" : "物理机"} />
               <Row label="应用版本" value={`v${status.appVersion}`} />
               <Row label="架构" value={status.arch} />
-              <Row label="系统" value={status.osVersion} title={status.osVersion} />
+              <Row label="发行版本" value={status.osName || "—"} title={status.osName} />
+              <Row label="内核版本" value={status.kernelVersion || "—"} mono title={status.kernelVersion} />
               <Row
                 label="标识文件"
                 value={status.deviceFile}
@@ -450,7 +454,7 @@ export function ActivityPanel({
               <Row label="GPU" value={fmtGpu(details?.gpu)} title={fmtGpu(details?.gpu)} />
               <Row label="内存" value={fmtMem(details?.memory)} title={fmtMem(details?.memory)} />
               <Row
-                label="硬盘"
+                label="硬盘（系统盘）"
                 value={fmtDisk(details?.disk)}
                 title={fmtDisk(details?.disk)}
               />

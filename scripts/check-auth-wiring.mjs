@@ -232,8 +232,31 @@ try {
     el && el.initializer ? el.initializer.getText() : "(无初始值)");
   check("★ SetupWizard Props 声明 initialUsername", !!props &&
     props.members.some((m) => m.name && m.name.getText() === "initialUsername"));
+  // v1.40.6：用户名锁定为安装时选定的服务运行账户
+  check("★ SetupWizard Props 声明 lockedUsername", !!props &&
+    props.members.some((m) => m.name && m.name.getText() === "lockedUsername"));
+  check("★ App.tsx setup 模式的 SetupWizard 透传 lockedUsername",
+    /<SetupWizard[^>]*?onDone=\{handleAuthDone\}[^>]*?lockedUsername=\{lockedUsername\}/.test(app.text) ||
+    /<SetupWizard[^>]*?lockedUsername=\{lockedUsername\}[^>]*?onDone=\{handleAuthDone\}/.test(app.text));
 } catch (e) {
   check("SetupWizard mode 声明", false, String(e && e.message));
+}
+
+// ---------- 8b. 服务端：用户名以安装账户为准（v1.40.6） ----------
+try {
+  const srv = parse("server/index.ts", ts.ScriptKind.TS);
+  check("★ 服务端解析安装账户（os.userInfo().username）", srv.text.includes("os.userInfo().username"));
+  check("★ init-status 返回 serviceUsername 字段", /serviceUsername:\s*serviceUsername\(\)/.test(srv.text));
+  check("★ root 运行时不锁定用户名（降级为可输入）",
+    /getuid\(\)\s*===\s*0[\s\S]{0,200}?return ""/.test(srv.text) && /!== "root"/.test(srv.text));
+  // /auth/init 必须以服务端解析值为准，忽略前端传值
+  const initRoute = srv.text.slice(srv.text.indexOf('app.post("/api/auth/init"'),
+    srv.text.indexOf('app.post("/api/auth/login"'));
+  check("★ /auth/init 用服务端账户覆盖前端传入的用户名",
+    /const finalUsername = fixed \|\| String\(username/.test(initRoute) &&
+    /createUser\(finalUsername/.test(initRoute));
+} catch (e) {
+  check("服务端用户名锁定", false, String(e && e.message));
 }
 
 // ---------- 9. LoginPage：notice 可选 + 向下透传 ----------

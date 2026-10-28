@@ -30,6 +30,8 @@ interface StackContainersModalProps {
   onContainerContextMenu?: (e: React.MouseEvent, stack: Stack, container: StackContainer) => void;
   /** 标题语言（默认中文） */
   language?: "zh" | "en";
+  /** 点击子表中容器「状态」格回调（跳转容器详情）；不传则状态格不可点击 */
+  onOpenContainerDetail?: (container: StackContainer) => void;
 }
 
 /**
@@ -44,6 +46,7 @@ export function StackContainersModal({
   operatingNames,
   onContainerContextMenu,
   language = "zh",
+  onOpenContainerDetail,
 }: StackContainersModalProps) {
   const [visible, setVisible] = useState<Set<string>>(() =>
     defaultVisibleColumns && defaultVisibleColumns.length > 0
@@ -153,9 +156,19 @@ export function StackContainersModal({
                     )}
                     {has("status") && (
                       <td className="px-3 py-2.5 whitespace-nowrap">
-                        <StatusBadge
-                          status={operatingNames?.has(container.name) ? "operating" : container.status}
-                        />
+                        {/* 与容器管理页一致：点击状态格跳转容器详情 */}
+                        <button
+                          type="button"
+                          onClick={() => onOpenContainerDetail?.(container)}
+                          title={onOpenContainerDetail ? "点击状态查看容器详情" : undefined}
+                          className={`inline-flex items-center rounded-md ring-1 ring-transparent transition-colors ${
+                            onOpenContainerDetail ? "cursor-pointer hover:ring-blue-300 hover:bg-blue-50" : "cursor-default"
+                          }`}
+                        >
+                          <StatusBadge
+                            status={operatingNames?.has(container.name) ? "operating" : container.status}
+                          />
+                        </button>
                       </td>
                     )}
                     {has("network") && (

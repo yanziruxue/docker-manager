@@ -433,5 +433,5 @@ export function fixCommandLine(): string {
   if (isSeaBinary()) {
     return `sudo ${quoteIfNeeded(process.execPath)} fix-perms`;
   }
-  return "sudo <安装目录>/docker-manager-yanzi fix-perms";
+  return "sudo <安装目录>/dockermanagementyanzi fix-perms";
 }

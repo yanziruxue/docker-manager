@@ -103,7 +103,7 @@ run_case() {
   local OUT="$SANDBOX/out.txt"
   (
     set -euo pipefail
-    APP_NAME="docker-manager-yanzi"
+    APP_NAME="dockermanagementyanzi"
     SKIP_DRIVETEMP="$skip"
     log()   { echo "LOG:  $*"; }
     warn()  { echo "WARN: $*"; }
@@ -130,7 +130,7 @@ eq "① exit" 0 "$RC"
 eq "① 写入 conf" "$CONF_STATE" "存在"
 eq "① modprobe 调用次数" "$N_PROBE" "1"
 if grep -q '^drivetemp$' "$CONF" 2>/dev/null; then ok "① conf 含 drivetemp 行"; else bad "① conf 缺 drivetemp 行"; fi
-if grep -q "^# docker-manager-yanzi:" "$CONF" 2>/dev/null; then ok "① conf 带归属标记（供卸载识别）"; else bad "① conf 缺归属标记"; fi
+if grep -q "^# dockermanagementyanzi:" "$CONF" 2>/dev/null; then ok "① conf 带归属标记（供卸载识别）"; else bad "① conf 缺归属标记"; fi
 if grep -q "已加载 drivetemp 模块" "$SANDBOX/out.txt"; then ok "① 打印「已加载」"; else bad "① 未打印「已加载」"; fi
 
 run_case "② --no-drivetemp 跳过" 1 ok ok yes
@@ -165,14 +165,14 @@ echo "── ③ 卸载侧归属识别（不能误删用户自建的 conf）"
 UCONF="$SANDBOX/etc/modules-load.d/drivetemp.conf"
 rm -rf "$SANDBOX/etc"; mkdir -p "$SANDBOX/etc/modules-load.d"
 
-printf '# docker-manager-yanzi: marker\ndrivetemp\n' > "$UCONF"
-( set -euo pipefail; APP_NAME="docker-manager-yanzi"
+printf '# dockermanagementyanzi: marker\ndrivetemp\n' > "$UCONF"
+( set -euo pipefail; APP_NAME="dockermanagementyanzi"
   log(){ echo "LOG:  $*"; }; warn(){ echo "WARN: $*"; }
   source "$U_BLOCK" ) > "$SANDBOX/un1.txt" 2>&1
 if [ -f "$UCONF" ]; then bad "⑦-1 未删除带标记的 conf"; else ok "⑦-1 已删除带标记的 conf"; fi
 
 printf 'drivetemp\n' > "$UCONF"
-( set -euo pipefail; APP_NAME="docker-manager-yanzi"
+( set -euo pipefail; APP_NAME="dockermanagementyanzi"
   log(){ echo "LOG:  $*"; }; warn(){ echo "WARN: $*"; }
   source "$U_BLOCK" ) > "$SANDBOX/un2.txt" 2>&1
 if [ -f "$UCONF" ]; then ok "⑦-2 保留了用户自建的 conf（无标记）"; else bad "⑦-2 误删了用户自建的 conf"; fi

@@ -22,8 +22,9 @@ export const FRONTEND_PORT = 8088;
 
 /**
  * 生产部署根目录（"当前文件夹"）：
- * systemd 服务的 WorkingDirectory 指向安装目录（如 /opt/docker-manager-yanzi），
- * 因此 process.cwd() 即应用安装目录。
+ * systemd 服务的 WorkingDirectory 指向安装目录，因此 process.cwd() 即应用安装目录。
+ * ★ 安装目录自 v1.41.1 起可由 install.sh 交互指定（默认 /opt/dockermanagementyanzi），
+ *   单元里的 WorkingDirectory 会同步替换 ⇒ 这里无需硬编码任何路径。
  */
 const APP_DIR = process.cwd();
 

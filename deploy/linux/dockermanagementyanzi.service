@@ -1,0 +1,65 @@
+[Unit]
+Description=Docker Manager Yanzi — 多引擎 Docker 管理面板
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+
+[Service]
+Type=simple
+# 账户由 install.sh 安装期按实际系统用户替换（跟随系统用户，不固定）
+User=__SERVICE_USER__
+Group=__SERVICE_GROUP__
+# 允许访问 Docker socket（docker 组权限）
+SupplementaryGroups=docker
+# 进程 cwd 即安装目录，数据/日志/配置分别保存在 data/ logs/ config/ 子目录
+# ★ __INSTALL_DIR__ 由 install.sh 安装期替换为实际安装目录（v1.41.1 起支持自定义，
+#   默认 /opt/dockermanagementyanzi）。同一占位符在 WorkingDirectory / DOCKER_CONFIG /
+#   ExecStart / ReadWritePaths 四处共用，替换后必须四处一致，否则服务起不来。
+WorkingDirectory=__INSTALL_DIR__
+Environment=NODE_ENV=production
+# 固定 PATH：确保 spawnSync 能找到 docker / docker-compose（与 root shell 一致）
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+# docker CLI 配置隔离：ProtectHome=yes 会屏蔽 /home 下的 ~/.docker，
+# 指向安装目录内可写目录，避免 "Error loading config file: permission denied" 干扰 compose 检测
+Environment="DOCKER_CONFIG=__INSTALL_DIR__/config/docker-cli"
+
+# 内核 DMI sysfs 中 product_serial / product_uuid / board_serial 的权限是 0400（仅 root 可读），
+# 非 root 服务读不到，会让「本机设备标识」卡片这几行显示「—」。
+# 启动前以 root（"+" 前缀：提权执行且绕过沙箱）把 DMI 值镜像成世界可读的小文件到 RuntimeDirectory，
+# 供卡片展示（仅展示用途，不参与 6 维硬件指纹）。刻意不写 $VAR：systemd 会先做变量展开。
+RuntimeDirectory=dockermanagementyanzi
+ExecStartPre=+/bin/sh -c 'cat /sys/class/dmi/id/board_name > /run/dockermanagementyanzi/dmi-board_name 2>/dev/null; cat /sys/class/dmi/id/board_serial > /run/dockermanagementyanzi/dmi-board_serial 2>/dev/null; cat /sys/class/dmi/id/product_serial > /run/dockermanagementyanzi/dmi-product_serial 2>/dev/null; cat /sys/class/dmi/id/product_uuid > /run/dockermanagementyanzi/dmi-product_uuid 2>/dev/null; true'
+
+ExecStart=__INSTALL_DIR__/dockermanagementyanzi
+Restart=always
+RestartSec=5
+
+# 安全加固
+# 注意：必须关闭 NoNewPrivileges，否则 sudo（setuid）会被 no_new_privs 拦截，
+# 导致「镜像加速源 → 写入 /etc/docker/daemon.json / 重启 docker」无法提权执行。
+NoNewPrivileges=no
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+# /var/run 通常是 /run 的符号链接，同时声明两条路径避免挂载隔离后找不到可写目标
+# 安装目录整体可写：在线升级需要替换安装目录下的二进制文件（mv 覆盖，无需 root）
+# /etc/docker 可写：设置页需要读写 daemon.json 的 registry-mirrors（配合 sudo 提权）
+#
+# ★ 所有路径必须带 "-" 前缀（可选语义：不存在时忽略，而不是启动失败）。
+#   ReadWritePaths= 的每一项都会被 systemd 逐个 bind-mount 到 unit-root，
+#   **路径不存在直接 226/NAMESPACE 退出**（"Failed to set up mount namespacing"），
+#   且失败发生在 ExecStartPre 之前 —— 日志里看不到任何程序输出，极易误判成程序故障。
+#   典型触发：目标机器没装 Docker（无 /run/docker.sock）、或无 /etc/docker。
+#   这里选"忽略"而非"fail-loud"是安全的：socket 缺失时程序对引擎优雅降级（显示离线），
+#   真正的权限边界是 User= / Group=docker，不是这三条路径。
+#   ⚠️ install.sh 会在 Docker 缺失时给出 WARN 提示，不会静默掩盖配置错误。
+ReadWritePaths=-__INSTALL_DIR__
+ReadWritePaths=-/run/docker.sock
+ReadWritePaths=-/var/run/docker.sock
+ReadWritePaths=-/etc/docker
+
+# 日志
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

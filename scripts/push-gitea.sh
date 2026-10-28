@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # ============================================================================
-# push-gitea.sh —— 把本工作区源码推到自建 Gitea（yanzi/docker-manager-yanzi）
+# push-gitea.sh —— 把本工作区源码推到自建 Gitea（yanzi/dockermanagementyanzi）
 #
 # ★ 入口（可覆盖，默认＝内网地址）：
 #   bash scripts/push-gitea.sh
 #   GITEA_BASE=https://git.example.com bash scripts/push-gitea.sh   # 公网入口
-#   仓库地址 = ${GITEA_BASE}/yanzi/docker-manager-yanzi.git
+#   仓库地址 = ${GITEA_BASE}/yanzi/dockermanagementyanzi.git
 #
 # ⚠️ 入口现状（2026-10-08 实测）：
-#   · **默认入口＝内网 http://192.168.24.16:8024** —— API HTTP 200、仓库 public
+#   · **默认入口＝内网 http://192.168.24.10:8024** —— API HTTP 200、仓库 public
 #     （匿名可读，满足 OTA 与 quick-install.sh 的前置条件）。
-#   · **旧域名 https://git.ziruxue.top 已完全不通** —— 本机 curl 返 000，
+#   · **旧域名 git.ziruxue.top 已不通；旧内网 IP 192.168.24.16 已迁移** —— 本机 curl 返 000，
 #     **Node fetch 也 fetch failed**（不再只是「curl 不通、Node 通」的老问题）。
 #     域名恢复后可用 GITEA_BASE=https://git.ziruxue.top 覆盖回去。
 #   · 更早的 http://60.205.251.18:8024 已超时废弃。
@@ -24,7 +24,7 @@
 #     # 取令牌（浏览器打开 ${GITEA_BASE}/user/settings/applications 生成，只显示一次）
 #     TOKEN=xxx
 #     # 内网入口
-#     printf 'protocol=http\nhost=192.168.24.16:8024\nusername=yanzi\npassword=%s\n\n' "$TOKEN" | git credential approve
+#     printf 'protocol=http\nhost=192.168.24.10:8024\nusername=yanzi\npassword=%s\n\n' "$TOKEN" | git credential approve
 #     # 旧域名入口（若将来恢复）
 #     printf 'protocol=https\nhost=git.ziruxue.top\nusername=yanzi\npassword=%s\n\n' "$TOKEN" | git credential approve
 #   要清除用 git credential reject。
@@ -37,7 +37,7 @@
 #   DRY=1 bash scripts/push-gitea.sh -m "..."    # 只提交，不推送
 #
 # 环境变量：
-#   GITEA_BASE   Gitea 站点根地址（默认 http://192.168.24.16:8024 内网）
+#   GITEA_BASE   Gitea 站点根地址（默认 http://192.168.24.10:8024 内网）
 #   GITEA_TOKEN  可选，走 URL 形式的凭据（不落 wincred）
 #
 # 选项：
@@ -74,9 +74,9 @@ done
 
 # 远端自检：没有就补上（幂等）
 # 入口可覆盖：GITEA_BASE=https://git.example.com bash scripts/push-gitea.sh
-GITEA_BASE="${GITEA_BASE:-http://192.168.24.16:8024}"
+GITEA_BASE="${GITEA_BASE:-http://192.168.24.10:8024}"
 GITEA_BASE="${GITEA_BASE%/}"
-GITEA_URL="${GITEA_BASE}/yanzi/docker-manager-yanzi.git"
+GITEA_URL="${GITEA_BASE}/yanzi/dockermanagementyanzi.git"
 case "$GITEA_BASE" in
   https://*) GIT_PUSH_OPTS="" ;;
   # http 入口（含 IP:端口）：清空代理，避免本机 HTTP 代理拦内网地址
@@ -125,9 +125,26 @@ fi
 # 令牌注入：只在本次命令的 URL 里临时带上，**不写入 .git/config**（remote 仍是无凭证的干净 URL）
 #   · 不设 GITEA_TOKEN 时行为不变（走 wincred / 交互输入）
 #   · 设了 GITEA_TOKEN 时必须让 git 无条件采用它，否则仍会先问 wincred 而挂起
+#
+# ★★ 必须先做 URL 百分号编码（2026-10-12 实测踩到）：
+#   Gitea 口令可能含**非 ASCII 字符**（如中文句号「。」）与 @ : / # 等 URL 保留字。
+#   未编码直接拼进 URL ⇒ git 侧 Basic 认证的 base64 编码出错 ⇒ 报
+#   "Failed to authenticate user" / "terminal prompts disabled" 挂死，
+#   但凭据本身完全正确（curl -u 用同一口令能拿到 200）。
+#   用 python3 做 percent-encoding；无 python3 时退化为原样（仅当口令纯 ASCII 才安全）。
 if [ -n "${GITEA_TOKEN:-}" ]; then
-  PUSH_URL="$(printf '%s' "$GITEA_URL" | sed -E "s#^(https?://)#\1yanzi:${GITEA_TOKEN}@#")"
-  say "  · 已注入 GITEA_TOKEN（仅本次命令有效，不写入 git config）"
+  _enc=""
+  if command -v python3 >/dev/null 2>&1; then
+    _enc="$(printf '%s' "$GITEA_TOKEN" | python3 -c 'import sys,urllib.parse; sys.stdout.write(urllib.parse.quote(sys.stdin.read(), safe=""))')"
+  elif command -v python >/dev/null 2>&1; then
+    _enc="$(printf '%s' "$GITEA_TOKEN" | python -c 'import sys,urllib.parse; sys.stdout.write(urllib.parse.quote(sys.stdin.read(), safe=""))')"
+  else
+    warn "未找到 python，无法对令牌做 URL 编码；若口令含非 ASCII / @ : / # 等字符会认证失败"
+    _enc="$GITEA_TOKEN"
+  fi
+  PUSH_URL="$(printf '%s' "$GITEA_URL" | sed -E "s#^(https?://)#\1yanzi:${_enc}@#")"
+  unset _enc
+  say "  · 已注入 GITEA_TOKEN（仅本次命令有效，不写入 git config；已做 URL 编码）"
 fi
 
 # 追踪配置：branch.main.remote 必须指向**远端名**（如 gitea），不能是带令牌的 URL。
@@ -183,4 +200,4 @@ fi
 
 say ""
 say "✓ 已推送 → $(git remote get-url "$REMOTE")  分支 $BRANCH"
-say "  网页：${GITEA_BASE}/yanzi/docker-manager-yanzi"
+say "  网页：${GITEA_BASE}/yanzi/dockermanagementyanzi"

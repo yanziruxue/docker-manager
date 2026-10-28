@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import path from "path";
+import os from "os";
 import { existsSync, readdirSync, readFileSync, writeFileSync, unlinkSync, rmSync } from "fs";
 import { fileURLToPath } from "url";
 import {
@@ -98,9 +99,18 @@ import {
   getRetentionConfig,
   logsTotalBytes,
   startLogRetention,
+  getPackConfig,
+  listLogArchives,
+  packLogsNow,
+  deleteLogArchive,
 } from "./applogs.js";
 import { LOG_CHANNELS, CHANNEL_LABELS } from "./logger.js";
-import { getMirrorStatus, syncMirrorNow, applyMirrorSettings, startMirror } from "./mirror.js";
+import {
+  getMirrorStatus,
+  syncMirrorNow,
+  applyMirrorSettings,
+  startMirror,
+} from "./mirror.js";
 import { sendTestNotify, startContainerWatch, EVENTS_WITHOUT_SOURCE, getSecretSources } from "./notify.js";
 import { WebSocketServer } from "ws";
 import {
@@ -124,7 +134,7 @@ import {
   requiresAccountReinit,
   reinitUser,
 } from "./users.js";
-import { createSession, getSessionUser, destroySession, requireAuth, invalidateSessionTtlCache, destroySessionsForUser } from "./auth.js";
+import { createSession, getSessionUser, renewSession, peekSessionUser, destroySession, requireAuth, invalidateSessionTtlCache, destroySessionsForUser } from "./auth.js";
 import { runFixPermsCli, runPermissionCheckCli, expectedUid } from "./perms-cli.js";
 import { scanPermIssues, formatIssue, currentUser, fixCommandLine } from "./perms.js";
 import { checkServiceUnit, describeServiceUnitGap } from "./unit-status.js";
@@ -256,10 +266,40 @@ app.use("/api", (req, res, next) => {
 });
 
 // ============ 鉴权（公开路由，无需登录） ============
+
+/**
+ * 安装时选定的服务运行账户（v1.40.6）。
+ *
+ * 服务进程**就是以该账户身份运行**的（v1.40.1 起 install.sh 跟随系统用户、
+ * 写进 .service 的 User=），所以进程自身的用户名即为安装时选定的那个账户 ——
+ * 无需额外落盘配置文件，也不会与实际运行身份脱节。
+ *
+ * 用于「初始设置」页：管理员用户名固定为该账户且**不可修改**，
+ * 保证 Web 登录身份与系统运行身份始终一致（便于审计、排障、sudoers 对应）。
+ */
+function serviceUsername(): string {
+  try {
+    // uid 0（root）或读不到时返回空串 ⇒ 前端降级为「可自由输入」，不锁死
+    if (typeof process.getuid === "function" && process.getuid() === 0) return "";
+    const u = os.userInfo().username;
+    return u && u !== "root" ? u : "";
+  } catch {
+    return "";
+  }
+}
+
 app.get("/api/auth/init-status", (_req, res) => {
   // needsReinit：存在「待重新初始化」的账号（老凭据版本）——
   // 前端据此在登录后强制用户重走一遍「用户名 + 密码 + 找回码」设置流程。
-  res.json({ success: true, data: { initialized: countUsers() > 0, needsReinit: requiresAccountReinit() } });
+  res.json({
+    success: true,
+    data: {
+      initialized: countUsers() > 0,
+      needsReinit: requiresAccountReinit(),
+      // 非空 ⇒ 初始设置页应把用户名锁定为该值（用户不可修改）
+      serviceUsername: serviceUsername(),
+    },
+  });
 });
 
 app.post("/api/auth/init", (req, res) => {
@@ -268,8 +308,17 @@ app.post("/api/auth/init", (req, res) => {
     return;
   }
   const { username, password, recoveryCode } = req.body || {};
-  if (!username || !username.trim() || !password) {
+  // ★ 用户名以**服务端**解析出的安装账户为准，忽略前端传值 ——
+  //   前端只是把它显示成只读，这里再兜一层，防止有人直接打 API 改成别的名字，
+  //   导致 Web 登录身份与系统运行身份不一致。
+  const fixed = serviceUsername();
+  const finalUsername = fixed || String(username || "").trim();
+  if (!finalUsername) {
     res.status(400).json({ success: false, error: "缺少用户名或密码" });
+    return;
+  }
+  if (!password) {
+    res.status(400).json({ success: false, error: "缺少密码" });
     return;
   }
   if (password.length < 6) {
@@ -285,7 +334,7 @@ app.post("/api/auth/init", (req, res) => {
     }
   }
   try {
-    const user = createUser(username, password, recoveryCode);
+    const user = createUser(finalUsername, password, recoveryCode);
     createSession(res, user.id);
     res.json({ success: true, data: { id: user.id, username: user.username, role: user.role } });
   } catch (e: any) {
@@ -341,10 +390,23 @@ app.post("/api/auth/logout", (req, res) => {
   res.json({ success: true });
 });
 
+// 登录态查询 + 滑动续期（**唯一会续期的接口**，仅由前端真实用户活动 → markActivity 节流调用）。
+// 后台数据轮询、WS 心跳等走 requireAuth → getSessionUser（只读、不续期），空闲超时才生效。
 app.get("/api/auth/me", (req, res) => {
-  const user = getSessionUser(req);
+  const user = renewSession(req);
   if (!user) {
     res.status(401).json({ success: false, error: "未登录" });
+    return;
+  }
+  res.json({ success: true, data: user });
+});
+
+// 探活心跳（只读、不续期）：人离开页面开着时，会话真过期返回 401，前端据此登出；
+// 不参与滑动续期，不会维持会话。前端活动节流续期走 /api/auth/me。
+app.get("/api/auth/ping", (req, res) => {
+  const user = peekSessionUser(req);
+  if (!user) {
+    res.status(401).json({ success: false, error: "未登录或会话已过期" });
     return;
   }
   res.json({ success: true, data: user });
@@ -1153,6 +1215,18 @@ const STACK_ACTION_ZH: Record<string, string> = {
  * - 连接断开只停止推送，compose 进程继续执行完毕（不影响实际操作）
  */
 app.get("/api/engines/:id/stacks/:name/actions/stream", async (req, res) => {
+  // 会话校验：未登录/已过期拒绝（EventSource 读不到 HTTP 状态码 ⇒ 200 + unauthorized 事件帧通知前端登出）
+  if (!getSessionUser(req)) {
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    });
+    res.write("event: unauthorized\ndata: {}\n\n");
+    res.end();
+    return;
+  }
   const engine = getEngine(req.params.id);
   if (!engine) { res.status(404).json({ success: false, error: "引擎不存在" }); return; }
   const { name } = req.params;
@@ -1443,6 +1517,18 @@ async function sseTick(engineId: string): Promise<void> {
 
 /** 仪表盘资源监控 SSE 端点：服务端 1s 聚合推送（替代前端轮询） */
 app.get("/api/engines/:id/resource-stats/stream", (req, res) => {
+  // 会话校验：未登录/已过期拒绝（EventSource 读不到 HTTP 状态码 ⇒ 200 + unauthorized 事件帧通知前端登出）
+  if (!getSessionUser(req)) {
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    });
+    res.write("event: unauthorized\ndata: {}\n\n");
+    res.end();
+    return;
+  }
   const engineId = req.params.id;
   if (!getEngine(engineId)) {
     res.status(404).json({ success: false, error: "引擎不存在" });
@@ -1482,6 +1568,18 @@ app.get("/api/engines/:id/resource-stats/stream", (req, res) => {
 
 /** 全局推送通道：登录后前端建立一条 EventSource，接收 image-update-checked 等事件即时刷新视图 */
 app.get("/api/push", (req, res) => {
+  // 会话校验：未登录/已过期拒绝（EventSource 读不到 HTTP 状态码 ⇒ 200 + unauthorized 事件帧通知前端登出）
+  if (!getSessionUser(req)) {
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    });
+    res.write("event: unauthorized\ndata: {}\n\n");
+    res.end();
+    return;
+  }
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache",
@@ -1526,10 +1624,25 @@ app.get("/api/engines/:id/activity", async (req, res) => {
           message: `镜像 ${ref} 有可用更新`,
         });
       }
+      // v1.43.18：镜像检查汇总进通知中心（取代镜像页内嵌横幅）。
+      // 既保留逐镜像「有可用更新」明细，又补一条「检查了多少 / 多少为最新 / 多少可更新」汇总，
+      // 使「全部为最新」这类结果也能在通知中心看到。
+      const sumChecked = updateCache.checked ?? 0;
+      const sumUpdates = updateCache.updates ?? 0;
+      const sumUpToDate = Math.max(0, sumChecked - sumUpdates);
+      activities.push({
+        id: `img-update-summary-${engine.id}`,
+        timestamp: ts,
+        type: sumUpdates > 0 ? "warning" : "success",
+        message:
+          sumUpdates > 0
+            ? `镜像更新检查：检查 ${sumChecked} 个，${sumUpdates} 个有可用更新，${sumUpToDate} 个为最新`
+            : `全部镜像均为最新（已检查 ${sumChecked} 个）`,
+      });
     }
-    // 重新按时间倒序，取最近 20 条（含镜像更新通知）
+    // 重新按时间倒序，取最近 100 条（含镜像更新通知；用户要求最多显示 100 条，与上游 getActivityLogs 的 100 上限一致）
     activities.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-    res.json({ success: true, data: activities.slice(0, 20) });
+    res.json({ success: true, data: activities.slice(0, 100) });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message || "获取活动日志失败" });
   }
@@ -1650,15 +1763,45 @@ app.get("/api/applogs", (_req, res) => {
       success: true,
       data: {
         files,
-        totalBytes: files.reduce((n, f) => n + f.sizeBytes, 0),
+        /** ★ 含归档包（v1.41.6）——容量上限的统计口径就是「散文件 + 压缩包」 */
+        totalBytes: logsTotalBytes(),
         /** 向后兼容：顶层保留策略仍指「应用日志」 */
         retention: getRetentionConfig("app"),
         channels,
+        /** 每周打包状态 + 归档包列表 */
+        pack: getPackConfig(),
+        archives: listLogArchives(),
       },
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message || "获取日志列表失败" });
   }
+});
+
+/**
+ * 立即执行「每周打包」（忽略间隔；界面按钮）。
+ * ⚠️ 必须注册在 `/api/applogs/:name` **之前** —— 否则 "pack" 会被当成日志文件名。
+ */
+app.post("/api/applogs/pack", (_req, res) => {
+  try {
+    const r = packLogsNow();
+    res.json({
+      success: true,
+      data: { ...r, pack: getPackConfig(), archives: listLogArchives() },
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || "日志打包失败" });
+  }
+});
+
+/** 删除单个日志归档包（白名单校验，拒绝穿越；与散文件删除同一套防线） */
+app.delete("/api/applogs/archive/:name", (req, res) => {
+  const r = deleteLogArchive(String(req.params.name || "").trim());
+  if (!r.ok) {
+    res.status(r.error === "归档包不存在" ? 404 : 400).json({ success: false, error: r.error });
+    return;
+  }
+  res.json({ success: true, data: { name: req.params.name, pack: getPackConfig(), archives: listLogArchives() } });
 });
 
 /**
@@ -2013,7 +2156,15 @@ app.post(
         return;
       }
       // 仅落盘为待应用包，不触发更新；zip 校验与魔数检查在 saveUploadPackage 内完成
-      const info = saveUploadPackage(buf);
+      // 透传前端 Header 的原始文件名（X-File-Name，encodeURIComponent），用于展示真实包名
+      const rawName = req.headers["x-file-name"];
+      const originalName = Array.isArray(rawName)
+        ? rawName[0]
+        : typeof rawName === "string"
+        ? rawName
+        : undefined;
+      const decodedName = originalName ? decodeURIComponent(originalName) : undefined;
+      const info = saveUploadPackage(buf, decodedName);
       // 安排自动销毁倒计时（2 分钟内未手动点击「更新」则服务端自动清除文件）
       schedulePendingExpiry();
       res.json({ success: true, data: info });
@@ -2074,7 +2225,7 @@ app.post("/api/engines/:id/images/prune", async (req, res) => {
 });
 
 // ============ 镜像锁定 API ============
-// 锁定后「清理未使用镜像」会跳过该镜像。状态存服务端，换浏览器 / 清缓存后依然生效。
+// 标记为「不被清理」后，「清理未使用镜像」会跳过该镜像。状态存服务端，换浏览器 / 清缓存后依然生效。
 
 /** 取某引擎的镜像锁定列表 */
 app.get("/api/engines/:id/images/locks", (req, res) => {
@@ -2097,7 +2248,7 @@ app.post("/api/engines/:id/images/locks", (req, res) => {
   }
   try {
     const locks = setImageLock(engine.id, { id, ref }, locked);
-    apiLog.info(`${locked ? "锁定" : "解锁"}镜像 | 引擎=${engine.name} id=${id.slice(0, 12)} ref=${ref || "-"}`);
+    apiLog.info(`${locked ? "标记为不被清理" : "允许清理"}镜像 | 引擎=${engine.name} id=${id.slice(0, 12)} ref=${ref || "-"}`);
     res.json({ success: true, data: locks });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message || "操作失败" });
@@ -2323,7 +2474,7 @@ const server = app.listen(PORT, () => {
         console.warn(`⚠️  权限体检：检查 ${checked} 项，发现 ${issues.length} 项异常（备份时会被跳过）`);
         for (const i of issues.slice(0, 10)) console.warn(`   · ${formatIssue(i)}\n     修复：${i.advice}`);
         if (issues.length > 10) console.warn(`   · …另有 ${issues.length - 10} 项，见「设置 → 备份」页`);
-        console.warn("   一键修复：sudo <安装目录>/docker-manager-yanzi fix-perms --dry-run");
+        console.warn("   一键修复：sudo <安装目录>/dockermanagementyanzi fix-perms --dry-run");
       }
     } catch {
       /* 体检失败不影响启动 */
@@ -2419,10 +2570,11 @@ const server = app.listen(PORT, () => {
 const wss = new WebSocketServer({ server, path: "/ws/terminal" });
 
 wss.on("connection", async (ws, req) => {
-  // 解析 URL: /ws/terminal?engineId=xxx&containerId=yyy
+  // 解析 URL: /ws/terminal?engineId=xxx&containerId=yyy&shell=zzz（shell = LABELS 配置的默认 Shell，可选）
   const url = new URL(req.url || "", `http://localhost:${PORT}`);
   const engineId = url.searchParams.get("engineId");
   const containerId = url.searchParams.get("containerId");
+  const shellParam = url.searchParams.get("shell") || undefined;
 
   if (!engineId || !containerId) {
     ws.close(1008, "Missing engineId or containerId");
@@ -2445,7 +2597,7 @@ wss.on("connection", async (ws, req) => {
   let execId: string | null = null;
 
   try {
-    const result = await attachContainerTerminal(engine, containerId);
+    const result = await attachContainerTerminal(engine, containerId, shellParam);
     const stream = result.stream;
     cleanup = result.cleanup;
     execId = result.execId;

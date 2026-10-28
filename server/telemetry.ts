@@ -351,10 +351,12 @@ function collectCpuId(): string {
   return tryExec("dmidecode", ["-s", "processor-serial"]) || tryExec("dmidecode", ["-t", "4"]) .match(/ID:\s*(\S+)/)?.[1] || "";
 }
 
-/** 采集主板序列号：sysfs 优先，dmidecode 兜底 */
+/** 采集主板序列号：root 镜像副本优先，sysfs 次之（0400 时读不到），dmidecode 兜底 */
 function collectBoardId(): string {
   return (
+    readTextFile("/run/dockermanagementyanzi/dmi-board_serial") ||
     readTextFile("/sys/class/dmi/id/board_serial") ||
+    readTextFile("/run/dockermanagementyanzi/dmi-product_uuid") ||
     readTextFile("/sys/class/dmi/id/product_uuid") ||
     tryExec("dmidecode", ["-s", "baseboard-serial-number"])
   );
@@ -581,14 +583,14 @@ function collectDiskDetails(): DeviceDetails["disk"] {
 /**
  * 采集 DMI 标识字段：主板型号 / 产品序列号 / 系统 UUID（只读展示）。
  *
- * 读取顺序：① systemd 以 root 镜像的世界可读副本 `/run/docker-manager-yanzi/dmi-<field>`
+ * 读取顺序：① systemd 以 root 镜像的世界可读副本 `/run/dockermanagementyanzi/dmi-<field>`
  * （内核把 product_serial / product_uuid 的 sysfs 权限设为 0400，非 root 服务直读不到）；
  * ② 回退 sysfs 直读。两者都失败则返回空串（卡片显示「—」）。
  * 注意：本函数只服务展示，不参与 6 维硬件指纹；`collectBoardId()` 保持原样以确保指纹稳定。
  */
 function collectDmiIds(): DeviceDetails["dmi"] {
   const read = (field: string) =>
-    readTextFile(`/run/docker-manager-yanzi/dmi-${field}`) ||
+    readTextFile(`/run/dockermanagementyanzi/dmi-${field}`) ||
     readTextFile(`/sys/class/dmi/id/${field}`);
   return {
     boardName: read("board_name"),
@@ -668,7 +670,7 @@ function buildPayload(info: DeviceInfo, collectHw: boolean, uploadEnabled: boole
     uploadEnabled,
     /** 安装时间（＝标识文件创建时间；重装 / 重建后为新的时间） */
     installedAt: info.createdAt,
-    app: "docker-manager-yanzi",
+    app: "dockermanagementyanzi",
     appVersion: currentAppVersion(),
     os: "linux",
     osVersion: collectOsVersion(),
@@ -883,6 +885,10 @@ export interface TelemetryStatus {
   appVersion: string;
   osVersion: string;
   arch: string;
+  /** 发行版本：/etc/os-release 的 PRETTY_NAME（如 "Debian GNU/Linux 12 (bookworm)"），所有引擎可读 */
+  osName: string;
+  /** 内核版本：os.release()（uname -r，如 "6.18.18.c1126-trim"），所有引擎可读 */
+  kernelVersion: string;
   /** 标识文件路径 */
   deviceFile: string;
   /** 运行态文件路径 */
@@ -924,6 +930,12 @@ export function getTelemetryStatus(): TelemetryStatus {
     appVersion: currentAppVersion(),
     osVersion: collectOsVersion(),
     arch: process.arch,
+    osName: (() => {
+      const osRelease = readTextFile("/etc/os-release");
+      const m = osRelease.match(/^PRETTY_NAME="?([^"\n]+)"?/m);
+      return m ? m[1].trim() : "";
+    })(),
+    kernelVersion: os.release(),
     deviceFile: DEVICE_FILE,
     stateFile: STATE_FILE,
     enabled: cfg.enabled,

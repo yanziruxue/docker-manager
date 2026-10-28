@@ -8,7 +8,7 @@
 #
 # 在装有 Docker 的 Linux 机器上构建:
 #   bash deploy/docker/build-image.sh
-#   或  docker build -f deploy/docker/Dockerfile -t docker-manager-yanzi .
+#   或  docker build -f deploy/docker/Dockerfile -t dockermanagementyanzi .
 # ============================================================
 
 # ---------- Stage 1: 构建 SEA 单文件二进制 ----------
@@ -44,13 +44,13 @@ RUN set -eux; \
       '}' > /build/sea-config.json; \
     node --experimental-sea-config /build/sea-config.json; \
     mkdir -p /out; \
-    cp "$(command -v node)" /out/docker-manager-yanzi; \
+    cp "$(command -v node)" /out/dockermanagementyanzi; \
     npm i --no-save --no-audit --no-fund --registry=${NPM_REGISTRY} postject; \
-    ./node_modules/.bin/postject /out/docker-manager-yanzi \
+    ./node_modules/.bin/postject /out/dockermanagementyanzi \
       NODE_SEA_BLOB /build/sea-prep.blob \
       --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2; \
-    chmod 755 /out/docker-manager-yanzi; \
-    ls -lh /out/docker-manager-yanzi
+    chmod 755 /out/dockermanagementyanzi; \
+    ls -lh /out/dockermanagementyanzi
 
 # ---------- Stage 2: 运行镜像 ----------
 FROM debian:bookworm-slim AS runtime
@@ -68,11 +68,11 @@ RUN apt-get update \
 ENV NODE_ENV=production
 
 WORKDIR /app
-COPY --from=builder /out/docker-manager-yanzi /app/docker-manager-yanzi
+COPY --from=builder /out/dockermanagementyanzi /app/dockermanagementyanzi
 RUN mkdir -p /app/data /app/logs /app/config
 
 EXPOSE 5024
 
 # 数据/日志/配置默认位于 /app/{data,logs,config}（生产模式自动生效）
 # 可用环境变量 DATA_DIR / LOG_DIR / CONFIG_DIR 覆盖
-CMD ["/app/docker-manager-yanzi"]
+CMD ["/app/dockermanagementyanzi"]

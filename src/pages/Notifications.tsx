@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Bell, Info, CheckCircle, AlertTriangle, AlertCircle, Filter, Search, CheckCircle2, History, Trash2, Activity } from "lucide-react";
 import type { ActivityLog } from "../types";
-import { getOpLogs, clearOpLogs, type OpLogEntry } from "../opLog";
+import { getOpLogs, type OpLogEntry } from "../opLog";
 
 interface NotificationsProps {
   notifications: ActivityLog[];
@@ -69,18 +69,26 @@ export function Notifications({ notifications, readIds = new Set(), onMarkRead, 
   const [opLogs, setOpLogs] = useState<OpLogEntry[]>([]);
   const [opFilter, setOpFilter] = useState<string>("all");
   const [opSearch, setOpSearch] = useState("");
+  // v1.42.16：「清空」只清当前页面显示、不删除实际内容。
+  // 操作记录＝本地标志位（重进本 Tab 时随 useEffect 重置）；通知＝按 id 忽略（新通知仍能正常显示）。
+  const [opsCleared, setOpsCleared] = useState(false);
+  const [clearedNotifIds, setClearedNotifIds] = useState<Set<string>>(new Set());
 
   // 加载操作记录
   useEffect(() => {
     if (tab === "operations") {
       setOpLogs(getOpLogs());
+      setOpsCleared(false);
     }
   }, [tab]);
 
   const isRead = (n: ActivityLog) => readIds.has(n.id);
-  const unreadCount = notifications.filter((n) => !isRead(n)).length;
+  // 被「清空」掉的通知仅从当前页视图里忽略；props / 已读状态 / 实际内容均不动
+  const visibleNotifs = notifications.filter((n) => !clearedNotifIds.has(n.id));
+  const notifAllCleared = notifications.length > 0 && visibleNotifs.length === 0;
+  const unreadCount = visibleNotifs.filter((n) => !isRead(n)).length;
 
-  const filtered = notifications.filter((n) => {
+  const filtered = visibleNotifs.filter((n) => {
     if (typeFilter !== "all" && n.type !== typeFilter) return false;
     if (search && !n.message.toLowerCase().includes(search.toLowerCase())) return false;
     return true;
@@ -93,8 +101,14 @@ export function Notifications({ notifications, readIds = new Set(), onMarkRead, 
   });
 
   const handleClearOps = () => {
-    clearOpLogs();
+    // 仅清空当前页面显示，不删除 localStorage 里的实际内容（离开本页重进即恢复）
     setOpLogs([]);
+    setOpsCleared(true);
+  };
+
+  const handleClearNotifs = () => {
+    // 仅把当前页面的通知从视图里忽略，不删除实际内容；之后到达的新通知仍会显示
+    setClearedNotifIds(new Set(notifications.map((n) => n.id)));
   };
 
   return (
@@ -134,18 +148,29 @@ export function Notifications({ notifications, readIds = new Set(), onMarkRead, 
         <>
           <div className="flex items-center justify-between mb-5">
             <p className="text-sm text-slate-500">
-              共 {notifications.length} 条通知
+              共 {visibleNotifs.length} 条通知
               {unreadCount > 0 && <span className="ml-1 text-amber-600 font-medium">（{unreadCount} 条未读）</span>}
-              {filtered.length !== notifications.length && `，筛选后 ${filtered.length} 条`}
+              {filtered.length !== visibleNotifs.length && `，筛选后 ${filtered.length} 条`}
             </p>
-            {unreadCount > 0 && onMarkAllRead && (
-              <button
-                onClick={onMarkAllRead}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
-              >
-                <CheckCircle2 size={14} /> 全部已读
-              </button>
-            )}
+            <div className="flex items-center gap-2">
+              {visibleNotifs.length > 0 && (
+                <button
+                  onClick={handleClearNotifs}
+                  title="仅清空当前页面显示，不删除实际内容"
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-500 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
+                >
+                  <Trash2 size={14} /> 清空
+                </button>
+              )}
+              {unreadCount > 0 && onMarkAllRead && (
+                <button
+                  onClick={onMarkAllRead}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
+                >
+                  <CheckCircle2 size={14} /> 全部已读
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="flex items-center gap-3 mb-5">
@@ -174,7 +199,8 @@ export function Notifications({ notifications, readIds = new Set(), onMarkRead, 
           {filtered.length === 0 ? (
             <div className="bg-white rounded-xl border border-slate-200 p-12 text-center">
               <Bell size={32} className="mx-auto mb-3 text-slate-300" />
-              <p className="text-sm text-slate-500">暂无匹配的通知</p>
+              <p className="text-sm text-slate-500">{notifAllCleared ? "当前页面显示已清空" : "暂无匹配的通知"}</p>
+              {notifAllCleared && <p className="text-xs text-slate-400 mt-1">实际内容未删除，新通知到达后仍会显示</p>}
             </div>
           ) : (
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -227,9 +253,10 @@ export function Notifications({ notifications, readIds = new Set(), onMarkRead, 
             {opLogs.length > 0 && (
               <button
                 onClick={handleClearOps}
+                title="仅清空当前页面显示，不删除实际内容"
                 className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-500 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
               >
-                <Trash2 size={14} /> 清空记录
+                <Trash2 size={14} /> 清空
               </button>
             )}
           </div>
@@ -259,8 +286,8 @@ export function Notifications({ notifications, readIds = new Set(), onMarkRead, 
           {filteredOps.length === 0 ? (
             <div className="bg-white rounded-xl border border-slate-200 p-12 text-center">
               <History size={32} className="mx-auto mb-3 text-slate-300" />
-              <p className="text-sm text-slate-500">暂无操作记录</p>
-              <p className="text-xs text-slate-400 mt-1">执行容器/堆栈操作后将自动记录</p>
+              <p className="text-sm text-slate-500">{opsCleared ? "当前页面显示已清空" : "暂无操作记录"}</p>
+              <p className="text-xs text-slate-400 mt-1">{opsCleared ? "实际内容未删除，离开本页再进入即可恢复" : "执行容器/堆栈操作后将自动记录"}</p>
             </div>
           ) : (
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">

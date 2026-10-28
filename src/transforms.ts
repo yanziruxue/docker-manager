@@ -7,6 +7,7 @@ import type {
   StackContainer,
   StackStatus,
   PortMapping,
+  VolumeMapping,
 } from "./types";
 
 /**
@@ -83,6 +84,16 @@ export function transformContainers(raw: any[]): Container[] {
     }
     const ports: PortMapping[] = Array.from(portMap.values());
 
+    // 持久化目录映射：来自 Docker Mounts（bind = 宿主路径绑定，volume = 命名卷，hostPath 存卷名）
+    const volumes: VolumeMapping[] = (c.Mounts || [])
+      .filter((m: any) => m.Type === "bind" || m.Type === "volume")
+      .map((m: any) => ({
+        hostPath: m.Type === "volume" ? m.Name || m.Source || "" : m.Source || "",
+        containerPath: m.Destination || "",
+        mode: (m.RW === false || m.Mode === "ro" ? "ro" : "rw") as "rw" | "ro",
+        type: m.Type as "bind" | "volume",
+      }));
+
     const name = (c.Names?.[0] || "").replace(/^\//, "");
     const networks = c.NetworkSettings?.Networks || {};
     const networkKeys = Object.keys(networks);
@@ -96,6 +107,7 @@ export function transformContainers(raw: any[]): Container[] {
       imageId: c.ImageID || "",
       status: stateMap[c.State] || "stopped",
       ports,
+      volumes,
       ip,
       uptime: parseUptime(c.Status || ""),
       autoStart: c.restartPolicy !== "no" && c.restartPolicy !== "—",
@@ -109,6 +121,9 @@ export function transformContainers(raw: any[]): Container[] {
 /** 转换镜像列表：与 docker images 口径一致，每个标签一行（同 ID 多标签会重复出现） */
 export function transformImages(raw: any[]): DockerImage[] {
   const out: DockerImage[] = [];
+  // 去重：daemon 的 /images/json 在多源拉取/镜像加速器场景可能返回重复条目或 RepoTags 内重复串，
+  // 按 sha256+repository+tag 去重（key 含 sha256 ⇒ 同 tag 不同镜像 ID 的合法场景仍保留）
+  const seen = new Set<string>();
   for (const img of raw) {
     const fullSha = (img.Id || "").replace("sha256:", "");
     const id = fullSha.slice(0, 12);
@@ -118,8 +133,18 @@ export function transformImages(raw: any[]): DockerImage[] {
     for (const repoTag of tags) {
       // 仓库名可能含 registry 端口/路径（如 docker.lms.run/postgres），从右侧切最后一个冒号
       const idx = repoTag.lastIndexOf(":");
-      const repository = idx > 0 ? repoTag.slice(0, idx) : repoTag;
+      let repository = idx > 0 ? repoTag.slice(0, idx) : repoTag;
       const tag = idx > 0 ? repoTag.slice(idx + 1) : "<none>";
+      // 官方镜像补全 library/ 命名空间：Docker API 的 RepoTags 默认省略 library/
+      //（如 node:22-alpine 实为 docker.io/library/node:22-alpine）。按用户要求保留命名空间、只省略
+      // docker.io 注册表，故在此补回 library/，使其与官方镜像完整引用一致。hideRegistryPrefix 仅
+      // strip registry 主机名，不会误伤 library/xxx。<none>、scratch 及已含 / 的第三方仓库名不处理。
+      if (repository !== "<none>" && !repository.includes("/") && repository !== "scratch") {
+        repository = `library/${repository}`;
+      }
+      const dedupeKey = `${fullSha}|${repository}|${tag}`;
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
       const isDangling = repository === "<none>" && tag === "<none>";
       out.push({
         id,
@@ -180,6 +205,9 @@ export function transformStacks(raw: any[]): Stack[] {
 
     const containers: StackContainer[] = (s.containers || []).map((c: any) => ({
       name: c.name || "",
+      // 真实容器标识透传（v1.43.29）：交叉引用按 Id/真实名精确匹配
+      containerId: c.containerId || undefined,
+      containerName: c.containerName || undefined,
       image: c.image || "",
       tag: c.tag || "latest",
       status: c.status === "running" ? "running" : "stopped",

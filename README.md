@@ -42,9 +42,9 @@
 ### 实时资源监控（SSE）
 - 通过 Server-Sent Events 持续推送各引擎的 CPU / 内存 / 磁盘等指标，前端实时刷新，断线自动重连。
 
-### 系统设置与 OTA 应用内升级
+### 设置中心与 OTA 应用内升级
 - 中文 / 英文界面切换。
-- **系统更新**：在「系统设置 → 系统更新」点「检查更新」即可发现新版本并一键升级。
+- **系统更新**：在「设置中心 → 系统更新」点「检查更新」即可发现新版本并一键升级。
   - 升级仓库已**固定写死**为公开仓库 `yanziruxue/docker-manager`，无需填写仓库地址、无需 Token。
   - 升级过程**实时进度条**：下载（5%→40%）→ 解压（50%）→ 替换二进制（75%）→ 完成（100%）。
   - 国内网络自动回退：GitHub 资产 CDN（`objects.githubusercontent.com`）被墙时，自动改走 `gh-proxy.com` 镜像代理下载（进度条标注「直连 / 镜像」）；也可通过环境变量 `UPDATE_MIRROR` 追加自定义镜像。
@@ -56,7 +56,7 @@
 - **前后端一体单文件二进制**：基于 Node 22 SEA（Single Executable Application）打包，无外部依赖，下载即可运行。
 - **三通道通信**：REST（常规请求）+ WebSocket（实时事件）+ SSE（资源监控流）。
 - **数据存储**：全部位于安装目录下的 `data/`（运行时数据）、`config/`（settings.json）、`logs/`（按天日志），备份与迁移只需拷贝整个安装目录。
-- **服务管理**：以 systemd 服务 `docker-manager-yanzi` 运行，默认端口 `5024`。
+- **服务管理**：以 systemd 服务 `dockermanagementyanzi` 运行，默认端口 `5024`。
 
 ---
 
@@ -84,13 +84,13 @@ curl -fsSL http://192.168.24.16:8024/yanzi/docker-manager-yanzi/releases/downloa
 
 ### 方式二：手动安装
 
-交付包为 `docker-manager-yanzi-linux-x64.zip`（含二进制 + 安装脚本）。完整安装步骤见包内 `deploy/linux/README.md`，简述如下：
+交付包为 `dockermanagementyanzi-linux-x64.zip`（含二进制 + 安装脚本）。完整安装步骤见包内 `deploy/linux/README.md`，简述如下：
 
 ```bash
 # 将 zip 传到服务器 /opt 后：
 cd /opt
-unzip docker-manager-yanzi-linux-x64.zip
-cd docker-manager-yanzi
+unzip dockermanagementyanzi-linux-x64.zip
+cd dockermanagementyanzi
 sudo bash install.sh
 ```
 
@@ -103,9 +103,9 @@ http://<服务器IP>:5024
 管理命令：
 
 ```bash
-systemctl status docker-manager-yanzi    # 查看状态
-systemctl restart docker-manager-yanzi   # 重启
-journalctl -u docker-manager-yanzi -f    # 实时日志
+systemctl status dockermanagementyanzi    # 查看状态
+systemctl restart dockermanagementyanzi   # 重启
+journalctl -u dockermanagementyanzi -f    # 实时日志
 ```
 
 ---
@@ -115,22 +115,22 @@ journalctl -u docker-manager-yanzi -f    # 实时日志
 **启动后报 EACCES（无法访问 docker.sock）**
 刷新 systemd 用户组缓存后重启：
 ```bash
-systemctl daemon-reexec && systemctl restart docker-manager-yanzi
+systemctl daemon-reexec && systemctl restart dockermanagementyanzi
 ```
 
 **修改端口**
 默认 5024，通过环境变量 `PORT` 覆盖：
 ```bash
-sudo systemctl edit docker-manager-yanzi
+sudo systemctl edit dockermanagementyanzi
 # 写入:
 # [Service]
 # Environment=PORT=8080
-sudo systemctl restart docker-manager-yanzi
+sudo systemctl restart dockermanagementyanzi
 ```
 
 **镜像加速源 / 拉取超时**
 - **设置 → Docker 全局配置 → 镜像加速源**直接读写宿主机 `/etc/docker/daemon.json` 的 `registry-mirrors`：打开页面以文件内容为准回读，点 APPLY 写回（保留 `insecure-registries`、`log-driver` 等其它配置项），内容变化后弹窗询问是否重启 Docker，选「是」立即执行并展示 tail 输出。
-- 写入需要 root 或免密 sudo。**重新执行 `install.sh` 会自动配置**：写入 `/etc/sudoers.d/docker-manager-yanzi`（仅放行 cat/tee daemon.json、mkdir /etc/docker、`systemctl|service restart docker`，写前 `visudo -c` 校验、失败自动回滚），并把 service 的 `NoNewPrivileges` 置为 `no`、`ReadWritePaths` 追加 `/etc/docker`。
+- 写入需要 root 或免密 sudo。**重新执行 `install.sh` 会自动配置**：写入 `/etc/sudoers.d/dockermanagementyanzi`（仅放行 cat/tee daemon.json、mkdir /etc/docker、`systemctl|service restart docker`，写前 `visudo -c` 校验、失败自动回滚），并把 service 的 `NoNewPrivileges` 置为 `no`、`ReadWritePaths` 追加 `/etc/docker`。
   - 通过**应用内 OTA 升级**不会更新 `.service` 文件，需重跑一次 `sudo bash install.sh`；设置页检测到无权限时会给出可直接复制的授权命令，配好后点「重新检测权限」即可（无需重启服务）。
   - 容器内运行（无 systemctl）时无法重启宿主机 Docker，写入也会落在容器内路径，此时请在宿主机上手动配置。
 - 注意 `fnnas` 等为 **mirror-only** 镜像源，只能作为 daemon 的 `registry-mirrors`，不能用于「拉取时改写镜像名」——改写会把 Docker Hub 镜像拼成 `fnnas/library/nginx` 导致 404。
@@ -143,15 +143,15 @@ sudo systemctl restart docker-manager-yanzi
 - 若当前运行的是**很旧的版本**（升级逻辑本身还不支持镜像回退），需先手动部署一次新版本（解压 zip 后 `sudo bash install.sh`），之后 OTA 才会走新逻辑。
 
 **数据备份**
-备份整个 `/opt/docker-manager-yanzi/` 即可（含 `data/` + `logs/` + `config/`），或单独拷贝 `data/` 与 `config/` 两个目录。
+备份整个 `/opt/dockermanagementyanzi/` 即可（含 `data/` + `logs/` + `config/`），或单独拷贝 `data/` 与 `config/` 两个目录。
 
 ---
 
 ## 目录结构（安装后）
 
 ```
-/opt/docker-manager-yanzi/
-├── docker-manager-yanzi     可执行文件
+/opt/dockermanagementyanzi/
+├── dockermanagementyanzi     可执行文件
 ├── data/                    运行时数据（引擎配置 / 堆栈 / 备份等）
 ├── logs/                    日志（app-YYYY-MM-DD.log，按天分文件）
 └── config/                  配置（settings.json）
@@ -162,4 +162,4 @@ sudo systemctl restart docker-manager-yanzi
 ## 说明
 
 - 本项目为个人自用 / 自部署工具，升级二进制通过公开 GitHub Releases 分发。
-- 应用内升级仅替换二进制本身，不改动你的 `data/` 与 `config/`，升级安全、可回退（旧版自动备份为 `/opt/docker-manager-yanzi.bak.<时间戳>`）。
+- 应用内升级仅替换二进制本身，不改动你的 `data/` 与 `config/`，升级安全、可回退（旧版自动备份为 `/opt/dockermanagementyanzi.bak.<时间戳>`）。

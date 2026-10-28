@@ -74,7 +74,7 @@ function claimDedupe(key: string | undefined): boolean {
 
 /**
  * 密钥可被环境变量覆盖。
- * systemd 部署可把这两行放进 `EnvironmentFile=/etc/docker-manager-yanzi/secrets.env`（0600、仅 root 可读）
+ * systemd 部署可把这两行放进 `EnvironmentFile=/etc/dockermanagementyanzi/secrets.env`（0600、仅 root 可读）
  * ⇒ **密钥根本不落 app 的配置目录**，也不进备份包。
  * 沿用项目既有 env 覆盖先例（`UPDATE_GITEA_BASE` / `UPDATE_GITEA_REPO` / `UPDATE_MIRROR`）。
  */

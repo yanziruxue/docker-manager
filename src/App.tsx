@@ -25,6 +25,7 @@ import {
   fetchAppVersion,
   getAuthInitStatus,
   getMe,
+  ping,
   logout,
   ApiError,
   checkImageUpdatesApi,
@@ -75,8 +76,8 @@ export default function App() {
   // 镜像版本检查结果（进页面读缓存，点「检查更新」重算）；byRef 以 repo:tag 为键匹配表格行
   const [imageUpdateStatus, setImageUpdateStatus] = useState<ImageUpdateStatusView | null>(null);
   const [imageUpdateError, setImageUpdateError] = useState<string | null>(null);
-  // 应用自身（OTA）更新信息：**单一数据源** —— 同时驱动全局侧边栏「系统设置」角标
-  // 与「系统设置 → 系统更新」页展示（进入页面即显示已检测到的更新，无需再手动点「检查更新」）
+  // 应用自身（OTA）更新信息：**单一数据源** —— 同时驱动全局侧边栏「设置中心」角标
+  // 与「设置中心 → 系统更新」页展示（进入页面即显示已检测到的更新，无需再手动点「检查更新」）
   const [appUpdateInfo, setAppUpdateInfo] = useState<UpdateInfo | null>(null);
   /** 后端实际运行的版本号（侧栏展示用，避免浏览器缓存旧前端导致版本显示滞后） */
   const [runtimeVersion, setRuntimeVersion] = useState("");
@@ -91,6 +92,8 @@ export default function App() {
   const [me, setMe] = useState<AuthUser | null>(null);
   /** 登录页顶部提示（账号重新设置完成后，引导用新凭据登录） */
   const [loginNotice, setLoginNotice] = useState<string | undefined>(undefined);
+  /** 安装时选定的服务运行账户（非空 ⇒ 初始设置页锁定用户名不可改，v1.40.6） */
+  const [lockedUsername, setLockedUsername] = useState<string>("");
 
   // 启动检测：并发判断「是否已初始化」与「当前是否已登录」
   useEffect(() => {
@@ -98,7 +101,7 @@ export default function App() {
     (async () => {
       try {
         const [init, meRes] = await Promise.all([
-          getAuthInitStatus().catch(() => ({ initialized: false, needsReinit: false })),
+          getAuthInitStatus().catch(() => ({ initialized: false, needsReinit: false, serviceUsername: "" })),
           getMe().catch(() => null),
         ]);
         if (cancelled) return;
@@ -114,6 +117,8 @@ export default function App() {
           setAuthState("authed");
         } else if (!init.initialized) {
           setAuthState("setup");
+          // v1.40.6：记录安装时选定的服务运行账户，初始设置页据此锁定用户名
+          setLockedUsername(init.serviceUsername || "");
         } else {
           setAuthState("login");
         }
@@ -145,25 +150,50 @@ export default function App() {
     return () => window.removeEventListener("auth:reinit-required", onReinit);
   }, []);
 
-  // 会话心跳：会话为「绝对过期」，服务端不因请求而续期。
-  // 每分钟探一次 /api/auth/me，即使页面静止、无任何业务请求，超时后也会自动回到登录页。
+  // 会话心跳：服务端为「空闲超时（仅真实活动续期）」—— 续期只发生在真实用户活动触发的 /api/auth/me
+  // （活动节流 getMe，服务端 renewSession 滑动）；业务请求 / 后台数据轮询 / WS 握手经 requireAuth →
+  // getSessionUser 只做只读校验、不续期，因此页面后台轮询不会维持会话，空闲满 TTL 仍能过期。
+  // 前端策略（**纯服务端权威，杜绝误踢**）：
+  //  - 监听真实用户活动（mousemove/keydown/pointerdown/wheel/touchstart），活动时节流发 /api/auth/me 续期；
+  //  - 低频（60s）探活 /api/auth/ping（只读、不续期）：会话真过期时服务端返回 401，
+  //    经全局 401 兜底（auth:unauthorized）回到登录页 —— 人离开页面开着也能自动登出；
+  //  - **不再用前端本地计时主动登出**：前端无法可靠感知服务端是否仍在续期，本地计时误判会导致
+  //    「正在操作却被踢」（服务端因业务请求持续续期，但前端 lastActivity 已陈旧）。
+  //  唯一登出触发条件 = 服务端 401（任意业务接口或 ping 探活）。
   useEffect(() => {
     if (authState !== "authed") return;
     let stopped = false;
-    const id = setInterval(async () => {
-      try {
-        await getMe();
-      } catch (e) {
-        // 仅明确的 401（会话已超时）才登出；网络抖动 / 后端重启不误判
-        if (!stopped && e instanceof ApiError && e.statusCode === 401) {
-          setMe(null);
-          setAuthState("login");
-        }
+    const lastRenew = { t: 0 }; // 最近一次活动续期请求时刻（节流用）
+    const markActivity = () => {
+      const now = Date.now();
+      // 真实活动 → 触发续期（节流到 30s/次，避免 mousemove 高频发请求）
+      if (now - lastRenew.t > 30000) {
+        lastRenew.t = now;
+        getMe().catch(() => {
+          /* 续期失败忽略；若会话已过期（401）由 notifyUnauthorized 全局派发 auth:unauthorized 登出 */
+        });
       }
+    };
+    const events: (keyof WindowEventMap)[] = [
+      "mousemove",
+      "mousedown",
+      "keydown",
+      "pointerdown",
+      "wheel",
+      "touchstart",
+    ];
+    events.forEach((ev) => window.addEventListener(ev, markActivity, { passive: true }));
+    // 低频探活（只读、不续期）：人离开页面开着时，会话真过期后服务端返回 401 → 自动登出
+    const pingId = setInterval(() => {
+      if (stopped) return;
+      ping().catch(() => {
+        /* 401 由全局 auth:unauthorized 兜底处理，这里忽略 */
+      });
     }, 60 * 1000);
     return () => {
       stopped = true;
-      clearInterval(id);
+      clearInterval(pingId);
+      events.forEach((ev) => window.removeEventListener(ev, markActivity));
     };
   }, [authState]);
 
@@ -227,7 +257,7 @@ export default function App() {
     volumes: { title: "数据卷管理", breadcrumb: ["首页", "数据卷管理"] },
     networks: { title: "网络管理", breadcrumb: ["首页", "网络管理"] },
     notifications: { title: "通知中心", breadcrumb: ["首页", "通知中心"] },
-    settings: { title: "系统设置", breadcrumb: ["首页", "系统设置"] },
+    settings: { title: "设置中心", breadcrumb: ["首页", "设置中心"] },
   };
 
   // 自动更新：检测到新版后自动下载应用，并监听后端重启后刷新前端（避免停留在旧前端 bundle）
@@ -253,7 +283,7 @@ export default function App() {
     };
   }, []);
 
-  // 初始化：加载引擎列表、活跃引擎 ID、系统设置
+  // 初始化：加载引擎列表、活跃引擎 ID、设置中心
   // 依赖 authState：仅在登录态就绪后拉取（未登录时 /api 一律 401，提前拉取会静默失败且登录后不会重试）
   useEffect(() => {
     if (authState !== "authed") return;
@@ -268,6 +298,16 @@ export default function App() {
         setEngines(list);
         if (settingsData) setSettings(settingsData);
         if (versionInfo?.version) setRuntimeVersion(versionInfo.version);
+        // 登录后默认显示页面（v1.42.9）：仅在登录态就绪、settings 已加载时跳转一次，
+        // 不覆盖用户当次会话内的手动导航（authState 变化才会重跑本 effect）。
+        const VALID_PAGES: PageKey[] = [
+          "dashboard", "containers", "stacks", "images",
+          "volumes", "networks", "notifications", "settings",
+        ];
+        const dp = settingsData?.modal?.defaultPage;
+        if (dp && VALID_PAGES.includes(dp as PageKey)) {
+          setPage(dp as PageKey);
+        }
         // 自动检查更新：覆盖「网页刷新 / 后端启动 / 每 6 小时」三触发条件
         // 挂载即查一次（启动/页面加载）；之后每 6 小时周期轮询（长开页面也能及时发现更新）
         if (settingsData?.update?.autoCheck) {
@@ -357,6 +397,25 @@ export default function App() {
         }
       }
 
+      // 交叉引用：标记容器所属堆栈（stackId），供容器管理页「堆栈」列显示
+      // 匹配规则（v1.43.29 起按可靠性排序）：
+      //   ① 真实容器短 id 精确匹配（最可靠，compose container_name 自定义也能命中）
+      //   ② 真实容器名精确匹配（同上）
+      //   ③~⑤ 名称推断回退（旧数据兼容）：服务名 / <project>-<service> / <project>-<service>-<index>
+      for (const st of xfStacks) {
+        if (!st.containers || st.containers.length === 0) continue;
+        for (const svc of st.containers) {
+          const matched = xfContainers.filter((c) =>
+            (svc.containerId ? c.id === svc.containerId : false) ||
+            (svc.containerName ? c.name === svc.containerName : false) ||
+            c.name === svc.name ||
+            c.name === `${st.name}-${svc.name}` ||
+            new RegExp(`^${st.name}-${svc.name}-\\d+$`).test(c.name)
+          );
+          for (const c of matched) c.stackId = st.id;
+        }
+      }
+
       // 交叉引用：解析容器镜像名（c.Image 可能返回 sha256 摘要而非镜像名）
       const xfImages = transformImages(rawImages);
       for (const c of xfContainers) {
@@ -425,7 +484,10 @@ export default function App() {
     }
   }, []);
 
-  const handleNavigate = (target: string) => {
+  // 跨页导航携带的焦点容器：从堆栈子表等入口跳转到容器页后自动打开其详情（消费后即清空）
+  const [focusContainerName, setFocusContainerName] = useState<string>("");
+  const handleNavigate = (target: string, opts?: { focusContainerName?: string }) => {
+    setFocusContainerName(opts?.focusContainerName ?? "");
     setPage(target as PageKey);
   };
 
@@ -440,6 +502,10 @@ export default function App() {
   useEffect(() => {
     if (!activeEngineId || page !== "dashboard") return;
     const es = new EventSource(`/api/engines/${activeEngineId}/resource-stats/stream`);
+    // 服务端会话过期：EventSource 读不到 HTTP 401，服务端发 unauthorized 事件帧（v1.43.11）
+    es.addEventListener("unauthorized", () => {
+      window.dispatchEvent(new Event("auth:unauthorized"));
+    });
     es.onmessage = (ev) => {
       try {
         setResourceStats(JSON.parse(ev.data));
@@ -554,6 +620,10 @@ export default function App() {
   useEffect(() => {
     if (!activeEngineId) return;
     const es = new EventSource("/api/push");
+    // 服务端会话过期：EventSource 读不到 HTTP 401，服务端发 unauthorized 事件帧（v1.43.11）
+    es.addEventListener("unauthorized", () => {
+      window.dispatchEvent(new Event("auth:unauthorized"));
+    });
     es.onmessage = (ev) => {
       try {
         const data = JSON.parse(ev.data);
@@ -631,7 +701,9 @@ export default function App() {
         </div>
       );
     }
-    if (authState === "setup") return <SetupWizard onDone={handleAuthDone} />;
+    if (authState === "setup") {
+      return <SetupWizard onDone={handleAuthDone} lockedUsername={lockedUsername} />;
+    }
     if (authState === "reinit") {
       return (
         <SetupWizard
@@ -693,6 +765,7 @@ export default function App() {
           {page === "containers" && (
             <Containers
               containers={containers}
+              stacks={stacks}
               onNavigate={handleNavigate}
               loading={showDataState ? dataLoading : false}
               error={showDataState ? dataError : null}
@@ -700,6 +773,8 @@ export default function App() {
               onRefresh={() => activeEngineId && loadEngineData(activeEngineId)}
               defaultVisibleColumns={settings?.columnVisibility?.containers}
               containerDetailStyle={settings?.modal?.containerDetailStyle ?? "drawer"}
+              focusContainerName={focusContainerName}
+              onFocusContainerConsumed={() => setFocusContainerName("")}
             />
           )}
           {page === "stacks" && (
@@ -713,7 +788,9 @@ export default function App() {
               tagLibrary={settings?.tags || []}
               autoCloseDelay={settings?.modal?.autoCloseDelay ?? 5}
               composeTemplates={settings?.compose?.templates ?? []}
+              autoDetectWebui={settings?.compose?.autoDetectWebui ?? true}
               defaultVisibleColumns={settings?.columnVisibility?.stackList}
+              onOpenContainerDetail={(name) => handleNavigate("containers", { focusContainerName: name })}
             />
           )}
           {page === "images" && (
@@ -723,7 +800,12 @@ export default function App() {
               error={showDataState ? dataError : null}
               engineId={activeEngineId}
               onRefresh={() => activeEngineId && loadEngineData(activeEngineId)}
+              onImagesRemoved={(ids) => {
+                // 乐观更新：删除成功后本地即时移除，不等 loadEngineData 的 5 个并行请求
+                setImages((prev) => prev.filter((i) => !ids.includes(i.id)));
+              }}
               defaultVisibleColumns={settings?.columnVisibility?.images}
+              hideRepoRegistryInit={settings?.imagesDisplay?.hideRegistryPrefix ?? true}
               onCheckAllUpdates={handleCheckAllUpdates}
               onCheckImageUpdate={handleCheckImageUpdate}
               checkingUpdates={checkingUpdates}

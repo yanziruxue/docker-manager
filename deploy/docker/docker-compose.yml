@@ -4,9 +4,9 @@
 #   docker compose logs -f        # 看日志
 #   docker compose down           # 停止
 services:
-  docker-manager-yanzi:
-    image: docker-manager-yanzi:latest
-    container_name: docker-manager-yanzi
+  dockermanagementyanzi:
+    image: dockermanagementyanzi:latest
+    container_name: dockermanagementyanzi
     restart: unless-stopped
     ports:
       - "5024:5024"

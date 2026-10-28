@@ -7,11 +7,13 @@ interface XTermTerminalProps {
   engineId?: string;
   containerId?: string;
   containerName?: string;
+  /** 首选 shell（来自 LABELS 配置的默认 Shell）；服务端仍带探测兜底 */
+  shell?: string;
   /** 撑满父容器高度（父级须为 flex 列布局且有确定高度）；默认用 50vh 固定高度 */
   fill?: boolean;
 }
 
-export function XTermTerminal({ engineId, containerId, containerName, fill = false }: XTermTerminalProps) {
+export function XTermTerminal({ engineId, containerId, containerName, shell, fill = false }: XTermTerminalProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -62,7 +64,7 @@ export function XTermTerminal({ engineId, containerId, containerName, fill = fal
 
     // 建立 WebSocket 连接
     const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${wsProtocol}//${window.location.host}/ws/terminal?engineId=${encodeURIComponent(engineId)}&containerId=${encodeURIComponent(containerId)}`;
+    const wsUrl = `${wsProtocol}//${window.location.host}/ws/terminal?engineId=${encodeURIComponent(engineId)}&containerId=${encodeURIComponent(containerId)}${shell ? `&shell=${encodeURIComponent(shell)}` : ""}`;
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
@@ -146,7 +148,7 @@ export function XTermTerminal({ engineId, containerId, containerName, fill = fal
       fitAddonRef.current = null;
       wsRef.current = null;
     };
-  }, [engineId, containerId, containerName]);
+  }, [engineId, containerId, containerName, shell]);
 
   return (
     <div className={fill ? "relative flex flex-col h-full min-h-0" : "relative"}>

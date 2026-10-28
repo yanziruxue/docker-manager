@@ -1,0 +1,93 @@
+name: build-and-publish
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  NODE_OPTIONS: ""          # 清空，避免 SafeDelete 垫片干扰构建/打包（npm ci 后 vite/esbuild 也走干净环境）
+
+jobs:
+  build:
+    runs-on: [linux]
+    steps:
+      - name: Checkout
+        uses: https://gitea.com/actions/checkout@v4
+        # ── 内网若不通 gitea.com，改用下方手动 clone（仓库 public，匿名可拉）──
+        # run: |
+        #   git clone --depth 1 "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" _src
+        #   shopt -s dotglob && mv _src/* . && rm -rf _src
+        #   git fetch --depth 1 origin "${GITHUB_REF}" && git checkout "${GITHUB_REF_NAME}"
+
+      - name: Environment check (Node 22 required)
+        run: |
+          node -v
+          python3 --version
+          node -e "const v=process.versions.node.split('.').map(Number); if(v[0]<22){console.error('❌ 需要 Node 22，当前 '+process.versions.node); process.exit(1)} console.log('✅ Node 版本满足 SEA 构建要求')"
+
+      - name: Ensure python3 (deb/zip 打包需要，node 镜像默认不带)
+        run: |
+          if command -v python3 >/dev/null 2>&1; then
+            echo "✅ python3 已存在：$(python3 --version)"
+          else
+            apt-get update && apt-get install -y --no-install-recommends python3 xz-utils
+            echo "✅ 已安装：$(python3 --version)"
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build SEA bundle (vite build → bundle.js)
+        run: npm run build:binary
+
+      - name: Generate SEA config (useCodeCache:false, 绝对路径)
+        run: |
+          # SEA config 的 main 必须真实绝对路径（node 不展开 $PWD/变量），用 node 生成最稳
+          node -e "const fs=require('fs'); fs.writeFileSync('/tmp/sea-config.json', JSON.stringify({main: process.cwd()+'/deploy/linux/bundle.js', output:'/tmp/sea-prep.blob', disableExperimentalSEAWarning:true, useSnapshot:false, useCodeCache:false}, null, 2))"
+          echo "✅ sea-config.json 已生成（useCodeCache=false，保证 blob 可移植）"
+          cat /tmp/sea-config.json
+          echo "--- 校验 main 指向真实文件 ---"
+          test -f "$(node -e "console.log(require('/tmp/sea-config.json').main)")" && echo "✅ bundle.js 存在" || { echo "❌ bundle.js 未找到"; exit 1; }
+
+      - name: Create SEA blob
+        run: node --experimental-sea-config /tmp/sea-config.json
+
+      - name: Assemble SEA binary (copy node base + postject)
+        run: |
+          # 取 runner 当前 node 作为 SEA 宿主基座（须 Node 22）
+          cp "$(command -v node)" deploy/linux/dockermanagementyanzi
+          # postject 无 bin 入口，先本地装再直调 cli.js
+          npm install --no-save postject
+          node node_modules/postject/dist/cli.js deploy/linux/dockermanagementyanzi NODE_SEA_BLOB /tmp/sea-prep.blob --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2
+          chmod +x deploy/linux/dockermanagementyanzi
+          echo "✅ SEA 二进制构建完成："
+          ls -l deploy/linux/dockermanagementyanzi
+          head -c4 deploy/linux/dockermanagementyanzi | xxd | head -1   # 应为 7f454c46 (ELF)
+
+      - name: Run gates (12 组门禁)
+        run: npm run test:gates
+
+      - name: Package zip
+        run: python3 deploy/linux/make-package.py
+
+      - name: Package deb
+        run: python3 deploy/linux/make-deb.py
+
+      - name: Package rpm (可选，仅当 rpmbuild 存在)
+        run: |
+          if command -v rpmbuild >/dev/null 2>&1; then
+            bash deploy/linux/make-rpm.sh
+          else
+            echo "ℹ️ rpmbuild 不可用，跳过 rpm（与本地未构建行为一致）"
+          fi
+
+      - name: Publish to Gitea Releases
+        env:
+          GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+        run: node scripts/publish-gitea-release.mjs

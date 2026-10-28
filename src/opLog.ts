@@ -14,7 +14,7 @@ export interface OpLogEntry {
 }
 
 const STORAGE_KEY = "docker-manager-op-logs";
-const MAX_ENTRIES = 500;
+const MAX_ENTRIES = 100;
 
 export function getOpLogs(): OpLogEntry[] {
   try {

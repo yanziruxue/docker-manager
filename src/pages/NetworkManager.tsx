@@ -20,7 +20,8 @@ import {
   removeNetworkApi,
 } from "../api";
 import { Modal, ConfirmDialog } from "../components/Modal";
-import { IconButton, EmptyState, FormField, Input, Select, ActionDropdown } from "../components/UI";
+import { IconButton, EmptyState, FormField, Input, Select } from "../components/UI";
+import { ContextMenu, type MenuItem } from "../components/ContextMenu";
 import { LoadingState, ErrorState } from "../components/DataState";
 import { formatBytes } from "../transforms";
 import { addOpLog } from "../opLog";
@@ -59,6 +60,8 @@ export function NetworkManager({ engineId, onRefresh }: NetworkManagerProps) {
   const [confirmDelete, setConfirmDelete] = useState<DockerNetwork | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  /** 右键菜单（操作列已移除，所有操作统一走右键，v1.42.13） */
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; net: DockerNetwork } | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<DockerNetwork | null>(null);
 
@@ -118,6 +121,27 @@ export function NetworkManager({ engineId, onRefresh }: NetworkManagerProps) {
         n.containers.some((c) => c.name.toLowerCase().includes(q))
     );
   }, [networks, search]);
+
+  /**
+   * 网络右键菜单（v1.42.13）：操作列已移除，原「操作」列下拉的全部条目迁到此处。
+   * 与原 ActionDropdown 逐条一致：编辑 / 删除。
+   */
+  const getNetworkMenuItems = (net: DockerNetwork): MenuItem[] => [
+    {
+      label: "编辑",
+      icon: <Edit3 size={14} />,
+      onClick: () => {
+        setEditing(net);
+        setShowForm(true);
+      },
+    },
+    {
+      label: "删除",
+      icon: <Trash2 size={14} />,
+      danger: true,
+      onClick: () => setConfirmDelete(net),
+    },
+  ];
 
   return (
     <div className="p-6">
@@ -196,12 +220,16 @@ export function NetworkManager({ engineId, onRefresh }: NetworkManagerProps) {
                 <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-3 whitespace-nowrap">子网 / 网关</th>
                 <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-3 whitespace-nowrap">使用容器</th>
                 <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-3 whitespace-nowrap">流量（↓ 下行 / ↑ 上行）</th>
-                <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-3 whitespace-nowrap">操作</th>
               </tr>
             </thead>
             <tbody>
               {filtered.map((net) => (
-                <tr key={net.id} className="hover:bg-slate-50/50 transition-colors border-b border-slate-50 last:border-0">
+                <tr
+                  key={net.id}
+                  className="hover:bg-slate-50/50 transition-colors cursor-context-menu border-b border-slate-50 last:border-0"
+                  onContextMenu={(e) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, net }); }}
+                  title="右键打开操作菜单"
+                >
                   <td className="px-5 py-3">
                     <div className="flex items-center gap-2 min-w-0">
                       <NetworkIcon size={14} className="text-blue-400 shrink-0" />
@@ -260,26 +288,7 @@ export function NetworkManager({ engineId, onRefresh }: NetworkManagerProps) {
                       </div>
                     </div>
                   </td>
-                  <td className="px-3 py-3 whitespace-nowrap">
-                    <ActionDropdown
-                      items={[
-                        {
-                          label: "编辑",
-                          icon: <Edit3 size={14} />,
-                          onClick: () => {
-                            setEditing(net);
-                            setShowForm(true);
-                          },
-                        },
-                        {
-                          label: "删除",
-                          icon: <Trash2 size={14} />,
-                          danger: true,
-                          onClick: () => setConfirmDelete(net),
-                        },
-                      ]}
-                    />
-                  </td>
+                  {/* 操作列已移除：所有操作统一走右键菜单 */}
                 </tr>
               ))}
             </tbody>
@@ -290,6 +299,16 @@ export function NetworkManager({ engineId, onRefresh }: NetworkManagerProps) {
           <EmptyState icon={<NetworkIcon size={28} />} title="未找到匹配的网络" description="尝试调整搜索条件或新建网络" />
         )}
       </div>
+
+      {/* 右键菜单（操作列已移除，v1.42.13） */}
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={getNetworkMenuItems(contextMenu.net)}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
 
       {/* Delete Confirmation */}
       <ConfirmDialog

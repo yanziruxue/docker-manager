@@ -1,5 +1,9 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useId, useRef, useState } from "react";
 import { X } from "lucide-react";
+
+// ESC 关闭栈：仅栈顶弹窗响应 Esc，避免叠加弹窗（如 Drawer 上的 ConfirmDialog）同时误关。
+// 不同组件共享同一栈，open 时 push 自己的 id，close/卸载时 splice。
+const escStack: string[] = [];
 
 interface ModalProps {
   open: boolean;
@@ -19,6 +23,18 @@ interface ModalProps {
    * 少数纯查看类弹窗可显式传 true 恢复「点外部关闭」。
    */
   dismissable?: boolean;
+  /**
+   * 宽度按内容自适应（内容决定宽度，不再固定铺满），但封顶为「当前 sm 宽度的 2 倍」（448px→896px）、
+   * 且不低于当前 sm 宽度（448px）。用于清单条目较长、固定窄宽会挤压/换行的场景（v1.43.6）。
+   * 与 `size` 互斥：fitWidth 优先，传入后忽略 size。
+   */
+  fitWidth?: boolean;
+  /**
+   * 是否允许 ESC 键关闭弹窗。默认 true：键盘主动操作不会误触，符合通用弹窗习惯。
+   * 注意：与 `dismissable`（控制「点击遮罩关闭」）解耦——默认仅允许 ESC，不允点击遮罩，
+   * 以防编辑中误触遮罩丢失内容（v1.43.15）。
+   */
+  closeOnEsc?: boolean;
 }
 
 const sizeMap = {
@@ -29,21 +45,29 @@ const sizeMap = {
   full: "max-w-[95vw] h-[90vh]",
 };
 
-export function Modal({ open, onClose, title, children, size = "md", bodyClassName, footer, dismissable = false }: ModalProps) {
+export function Modal({ open, onClose, title, children, size = "md", bodyClassName, footer, dismissable = false, fitWidth = false, closeOnEsc = true }: ModalProps) {
+  const id = useId();
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
-    const handleEsc = (e: KeyboardEvent) => {
-      // dismissable 为 false 时屏蔽 ESC 关闭，防止误触丢失编辑内容
-      if (e.key === "Escape" && dismissable) onClose();
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => {
+      // ESC 始终可关（键盘主动操作，不会误触）；仅栈顶弹窗响应，避免叠加误关
+      if (e.key === "Escape" && closeOnEsc && escStack[escStack.length - 1] === id) {
+        onCloseRef.current();
+      }
     };
-    if (open) {
-      document.addEventListener("keydown", handleEsc);
-      document.body.style.overflow = "hidden";
-    }
+    escStack.push(id);
+    document.addEventListener("keydown", handler);
+    if (escStack.length === 1) document.body.style.overflow = "hidden";
     return () => {
-      document.removeEventListener("keydown", handleEsc);
-      document.body.style.overflow = "";
+      document.removeEventListener("keydown", handler);
+      const i = escStack.lastIndexOf(id);
+      if (i >= 0) escStack.splice(i, 1);
+      if (escStack.length === 0) document.body.style.overflow = "";
     };
-  }, [open, onClose, dismissable]);
+  }, [open, closeOnEsc, id]);
 
   if (!open) return null;
 
@@ -53,7 +77,11 @@ export function Modal({ open, onClose, title, children, size = "md", bodyClassNa
       onClick={() => { if (dismissable) onClose(); }}
     >
       <div
-        className={`modal-content bg-white rounded-xl shadow-2xl w-full ${sizeMap[size]} flex flex-col max-h-[90vh]`}
+        className={`modal-content bg-white rounded-xl shadow-2xl ${
+          fitWidth
+            ? "w-fit max-w-[896px] min-w-[448px] mx-auto"
+            : `w-full ${sizeMap[size]}`
+        } flex flex-col max-h-[90vh]`}
         onClick={(e) => e.stopPropagation()}
       >
         {title && (
@@ -92,6 +120,11 @@ interface DrawerProps {
   minWidth?: number;
   /** 拖动时的最大宽度占视口比例（0~1） */
   maxWidthRatio?: number;
+  /**
+   * 是否允许 ESC 键关闭抽屉。默认 true：键盘主动操作不会误触，符合通用弹窗习惯。
+   * 与 `dismissable`（控制「点击遮罩关闭」）解耦（v1.43.15）。
+   */
+  closeOnEsc?: boolean;
 }
 
 /**
@@ -111,7 +144,12 @@ export function Drawer({
   resizable = false,
   minWidth = 380,
   maxWidthRatio = 0.92,
+  closeOnEsc = true,
 }: DrawerProps) {
+  const id = useId();
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   /** null = 未拖动过，沿用 `panelClassName` 的响应式宽度 */
   const [width, setWidth] = useState<number | null>(null);
   const draggingRef = useRef(false);
@@ -121,18 +159,23 @@ export function Drawer({
   const startWidthRef = useRef(0);
 
   useEffect(() => {
-    const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && dismissable) onClose();
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => {
+      // ESC 始终可关；仅栈顶弹窗响应，避免叠加误关
+      if (e.key === "Escape" && closeOnEsc && escStack[escStack.length - 1] === id) {
+        onCloseRef.current();
+      }
     };
-    if (open) {
-      document.addEventListener("keydown", handleEsc);
-      document.body.style.overflow = "hidden";
-    }
+    escStack.push(id);
+    document.addEventListener("keydown", handler);
+    if (escStack.length === 1) document.body.style.overflow = "hidden";
     return () => {
-      document.removeEventListener("keydown", handleEsc);
-      document.body.style.overflow = "";
+      document.removeEventListener("keydown", handler);
+      const i = escStack.lastIndexOf(id);
+      if (i >= 0) escStack.splice(i, 1);
+      if (escStack.length === 0) document.body.style.overflow = "";
     };
-  }, [open, onClose, dismissable]);
+  }, [open, closeOnEsc, id]);
 
   // 拖动改宽：向左拖（clientX 变小）变宽，向右拖变窄
   useEffect(() => {
@@ -213,8 +256,11 @@ export function ConfirmDialog({
   danger = false,
   loading = false,
   errorMessage,
+  /** 受影响条目清单（如即将删除的资源列表）；提供时渲染为可滚动列表 */
+  list,
   extraAction,
   primaryFirst = false,
+  wide = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -226,10 +272,14 @@ export function ConfirmDialog({
   danger?: boolean;
   loading?: boolean;
   errorMessage?: string | null;
+  /** 受影响条目清单（如即将删除的资源列表）；提供时渲染为可滚动列表 */
+  list?: string[];
   /** 次要操作（如删除冲突后的「强制删除」），仅在提供时渲染 */
   extraAction?: { label: string; onClick: () => void; loading?: boolean };
   /** true 时主操作（确认）排左侧、取消排右侧；默认相反（取消在左、确认在右） */
   primaryFirst?: boolean;
+  /** true 时弹窗宽度扩大一倍（默认 sm=448px → lg=896px），用于条目清单较长时避免挤压/换行（v1.43.6） */
+  wide?: boolean;
 }) {
   const cancelButton = (
     <button
@@ -262,10 +312,26 @@ export function ConfirmDialog({
   );
 
   return (
-    <Modal open={open} onClose={onClose} size="sm">
+    <Modal open={open} onClose={onClose} fitWidth={wide} closeOnEsc={!loading}>
       <div className="py-2">
         <h3 className="text-lg font-semibold text-slate-800 mb-2">{title}</h3>
         <p className="text-sm text-slate-600 mb-2">{message}</p>
+        {list && list.length > 0 && (
+          <div className={`max-h-60 ${wide ? "overflow-auto" : "overflow-y-auto"} border border-slate-200 rounded-lg my-3 text-sm bg-slate-50`}>
+            <ul className="divide-y divide-slate-100">
+              {list.map((item, idx) => (
+                <li
+                  key={idx}
+                  className={`px-3 py-1.5 text-slate-600 font-mono text-xs leading-relaxed ${
+                    wide ? "whitespace-nowrap" : "whitespace-pre-wrap break-all"
+                  }`}
+                >
+                  {item}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         {errorMessage && (
           <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2 mb-4">{errorMessage}</p>
         )}

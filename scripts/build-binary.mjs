@@ -70,7 +70,7 @@ function readDistFiles() {
 // ---------- 2a. 读取 systemd 单元模板（供在线自检「服务单元是否落后」） ----------
 // 单元文件由 install.sh 复制到 /etc/systemd/system/，而 OTA 只换二进制、不碰它，
 // 所以必须把模板嵌进二进制，运行时才能与已安装单元比对并提示用户更新。
-const SERVICE_NAME = "docker-manager-yanzi.service";
+const SERVICE_NAME = "dockermanagementyanzi.service";
 function readServiceTemplate() {
   const p = path.join(DEPLOY_LINUX, SERVICE_NAME);
   if (!fs.existsSync(p)) {

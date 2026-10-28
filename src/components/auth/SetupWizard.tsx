@@ -19,13 +19,22 @@ interface Props {
   mode?: "create" | "reinit";
   /** reinit 模式预填的当前用户名（便于沿用，可改） */
   initialUsername?: string;
+  /**
+   * 安装时选定的服务运行账户（v1.40.6）。
+   * 非空 ⇒ **create 模式下用户名锁定为该值且不可修改**（与系统运行身份保持一致）；
+   * 为空（root 运行 / 非 Linux）⇒ 降级为可自由输入。
+   * reinit 模式不受影响：账号已存在，仍允许改名。
+   */
+  lockedUsername?: string;
 }
 
 /** 账号设置向导：首次部署创建 / 升级后重新设置（同一套表单，靠 mode 区分文案与校验） */
-export function SetupWizard({ onDone, mode = "create", initialUsername }: Props) {
+export function SetupWizard({ onDone, mode = "create", initialUsername, lockedUsername }: Props) {
   const isReinit = mode === "reinit";
+  // 用户名锁定：仅 create 模式 + 服务端给出了安装账户时生效
+  const locked = !isReinit && !!lockedUsername;
   // 初始化不预填用户名（原先默认 "admin"）；reinit 模式仍预填**当前用户名**，那是必要的
-  const [username, setUsername] = useState(initialUsername || "");
+  const [username, setUsername] = useState(initialUsername || lockedUsername || "");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [confirm, setConfirm] = useState("");
@@ -36,7 +45,8 @@ export function SetupWizard({ onDone, mode = "create", initialUsername }: Props)
 
   const submit = async () => {
     setError(null);
-    if (!username.trim()) {
+    const finalUsername = locked ? lockedUsername! : username.trim();
+    if (!finalUsername) {
       setError("用户名不能为空");
       return;
     }
@@ -64,8 +74,8 @@ export function SetupWizard({ onDone, mode = "create", initialUsername }: Props)
     setBusy(true);
     try {
       const user = isReinit
-        ? await reinitAccount(username.trim(), password, recovery)
-        : await initAccount(username.trim(), password, recovery || undefined);
+        ? await reinitAccount(finalUsername, password, recovery)
+        : await initAccount(finalUsername, password, recovery || undefined);
       onDone(user);
     } catch (e: any) {
       setError(e?.message || (isReinit ? "重新设置账号失败" : "创建账户失败"));
@@ -105,12 +115,21 @@ export function SetupWizard({ onDone, mode = "create", initialUsername }: Props)
           className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-4"
           onSubmit={(e) => { e.preventDefault(); if (!busy) submit(); }}
         >
-          <FormField label="用户名" required>
+          <FormField
+            label="用户名"
+            required
+            hint={
+              locked
+                ? "即安装时选定的服务运行账户（与系统进程身份一致），不可修改"
+                : undefined
+            }
+          >
             <div className="relative">
               <User size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <Input
-                value={username}
+                value={locked ? lockedUsername : username}
                 onChange={setUsername}
+                disabled={locked}
                 className="pl-9"
               />
             </div>

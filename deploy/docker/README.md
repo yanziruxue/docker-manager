@@ -16,14 +16,14 @@ deploy/docker/
 
 ```bash
 # 1. 解压源码包
-unzip docker-manager-yanzi-docker-src.zip
-cd docker-manager-yanzi-docker
+unzip dockermanagementyanzi-docker-src.zip
+cd dockermanagementyanzi-docker
 
-# 2. 构建（输出 docker-manager-yanzi:latest）
+# 2. 构建（输出 dockermanagementyanzi:latest）
 bash deploy/docker/build-image.sh
 
 # 国内网络 npm 慢时加 registry 加速：
-bash deploy/docker/build-image.sh docker-manager-yanzi:latest \
+bash deploy/docker/build-image.sh dockermanagementyanzi:latest \
     --build-arg NPM_REGISTRY=https://registry.npmmirror.com
 ```
 
@@ -47,13 +47,13 @@ docker compose up -d
 
 ```bash
 mkdir -p /opt/dsm/data /opt/dsm/logs /opt/dsm/config
-docker run -d --name docker-manager-yanzi --restart unless-stopped \
+docker run -d --name dockermanagementyanzi --restart unless-stopped \
   -p 5024:5024 \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v /opt/dsm/data:/app/data \
   -v /opt/dsm/logs:/app/logs \
   -v /opt/dsm/config:/app/config \
-  docker-manager-yanzi:latest
+  dockermanagementyanzi:latest
 ```
 
 访问 `http://<服务器IP>:5024`。
@@ -73,8 +73,8 @@ docker run -d --name docker-manager-yanzi --restart unless-stopped \
 ```bash
 docker compose logs -f            # 实时日志（compose 方式）
 docker compose down               # 停止（数据保留在 ./data ./logs ./config）
-docker save -o docker-manager-yanzi.tar docker-manager-yanzi:latest   # 导出离线镜像包
-docker load -i docker-manager-yanzi.tar                               # 另一台机器导入
+docker save -o dockermanagementyanzi.tar dockermanagementyanzi:latest   # 导出离线镜像包
+docker load -i dockermanagementyanzi.tar                               # 另一台机器导入
 ```
 
 ## 五、说明与注意事项

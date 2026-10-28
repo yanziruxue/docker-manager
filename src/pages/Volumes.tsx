@@ -9,7 +9,6 @@ import {
   AlertTriangle,
   CheckCircle2,
   ChevronRight,
-  Eye,
   Terminal,
   Info,
   Columns,
@@ -20,7 +19,7 @@ import { Tag } from "../components/Badge";
 import { ContextMenu, type MenuItem } from "../components/ContextMenu";
 import { Modal, ConfirmDialog } from "../components/Modal";
 import { CmdOutputModal, useCmdOutput } from "../components/CmdOutputModal";
-import { IconButton, EmptyState, FormField, Input, Select, ActionDropdown } from "../components/UI";
+import { IconButton, EmptyState, FormField, Input, Select } from "../components/UI";
 import { LoadingState, ErrorState } from "../components/DataState";
 import { formatBytes } from "../transforms";
 import { removeVolumeApi, pruneVolumesApi, createVolumeApi } from "../api";
@@ -95,7 +94,8 @@ export function Volumes({ volumes, loading, error, engineId, defaultVisibleColum
     }
   };
 
-  type ColumnKey = "name" | "driver" | "mountpoint" | "size" | "associatedContainers" | "createdAt" | "actions";
+  // 操作列已移除（v1.42.13）：所有操作统一走行右键菜单
+  type ColumnKey = "name" | "driver" | "mountpoint" | "size" | "associatedContainers" | "createdAt";
   const allColumns: { key: ColumnKey; label: string }[] = [
     { key: "name", label: "卷名称" },
     { key: "driver", label: "驱动" },
@@ -103,7 +103,6 @@ export function Volumes({ volumes, loading, error, engineId, defaultVisibleColum
     { key: "size", label: "大小" },
     { key: "associatedContainers", label: "关联容器" },
     { key: "createdAt", label: "创建时间" },
-    { key: "actions", label: "操作" },
   ];
 
   const defaultSet = defaultVisibleColumns && defaultVisibleColumns.length > 0
@@ -142,6 +141,61 @@ export function Volumes({ volumes, loading, error, engineId, defaultVisibleColum
       return matchSearch && matchStatus;
     });
   }, [volumes, search, statusFilter]);
+
+  // ===== 批量操作（数据卷）=====
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [batchBusy, setBatchBusy] = useState(false);
+  const [confirmBatchDelete, setConfirmBatchDelete] = useState(false);
+
+  const toggleSelect = (id: string) => {
+    const next = new Set(selected);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    setSelected(next);
+  };
+  // 全选/取消判断走 id 维度（与镜像页同构）：`selected.size === filtered.length` 在
+  // 跨筛选残留已选时可能数值巧合相等而误显「全选」，且取消会清掉筛选范围外的选择（v1.43.12）。
+  const filteredIds = useMemo(() => new Set(filtered.map((v) => v.id)), [filtered]);
+  const allFilteredSelected = filteredIds.size > 0 && [...filteredIds].every((id) => selected.has(id));
+  const someFilteredSelected = [...filteredIds].some((id) => selected.has(id));
+  const toggleSelectAll = () => {
+    if (allFilteredSelected) {
+      // 取消：仅移除当前筛选结果覆盖的 id，保留筛选范围外已勾选的数据卷
+      const next = new Set(selected);
+      for (const id of filteredIds) next.delete(id);
+      setSelected(next);
+    } else {
+      // 全选：合并入已选（不清空筛选范围外的选择）
+      setSelected(new Set([...selected, ...filteredIds]));
+    }
+  };
+  const selectedVolumes = useMemo(() => volumes.filter((v) => selected.has(v.id)), [volumes, selected]);
+
+  /** 批量删除：跳过 in-use（被容器引用）数据卷，逐个删除并汇总 */
+  const batchDeleteVolume = async () => {
+    if (!engineId || selected.size === 0) return;
+    setBatchBusy(true);
+    const lines: string[] = [];
+    let ok = 0, fail = 0, skipped = 0;
+    try {
+      for (const v of selectedVolumes) {
+        if (v.inUse) { skipped++; lines.push(`- 跳过（使用中）: ${v.name}`); continue; }
+        try {
+          await removeVolumeApi(engineId, v.name);
+          ok++; lines.push(`✓ ${v.name}`);
+        } catch (e: any) {
+          fail++; lines.push(`✗ ${v.name}: ${e.message || "删除失败"}`);
+        }
+      }
+      lines.unshift(`删除成功 ${ok} 个，失败 ${fail} 个，跳过（使用中）${skipped} 个`);
+      addOpLog({ action: "批量删除数据卷", target: `${ok} 个`, status: fail > 0 ? "failed" : "success", engineId });
+      showOutput({ title: "批量删除数据卷", name: `${ok} 个`, output: lines.join("\n"), failed: fail > 0 });
+      setConfirmBatchDelete(false);
+      setSelected(new Set());
+      onRefresh?.();
+    } finally {
+      setBatchBusy(false);
+    }
+  };
 
   /** 把 formatBytes 产物（如 "12.3 MB"）解析回字节数，用于「总占用空间」汇总 */
   const parseSizeToBytes = (s?: string): number | null => {
@@ -295,28 +349,56 @@ export function Volumes({ volumes, loading, error, engineId, defaultVisibleColum
         </div>
       </div>
 
+      {/* 批量操作条（选中数据卷后出现） */}
+      {selected.size > 0 && (
+        <div className="flex items-center gap-2 flex-wrap bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5">
+          <span className="text-sm text-blue-700 font-medium">已选中 {selected.size} 个数据卷</span>
+          <div className="w-px h-5 bg-blue-200 mx-1" />
+          <button onClick={() => setConfirmBatchDelete(true)} disabled={batchBusy} className="flex items-center gap-1 text-sm text-red-600 hover:text-red-700 disabled:opacity-50"><Trash2 size={14} /> 删除</button>
+          <button onClick={() => setSelected(new Set())} title="取消选择" aria-label="取消选择" className="ml-auto p-1 rounded-md text-slate-400 hover:text-slate-600 hover:bg-blue-100 transition-colors">
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
       {/* Volume Table */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[700px]">
             <thead>
               <tr className="bg-slate-50/50 border-b border-slate-100">
+                <th className="w-10 px-3 py-3">
+                  <input
+                    type="checkbox"
+                    checked={allFilteredSelected}
+                    ref={(el) => { if (el) el.indeterminate = someFilteredSelected && !allFilteredSelected; }}
+                    onChange={toggleSelectAll}
+                    className="rounded border-slate-300 text-blue-500 focus:ring-blue-500"
+                  />
+                </th>
                 {visibleColumns.has("name") && <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-5 py-3 whitespace-nowrap">卷名称</th>}
                 {visibleColumns.has("driver") && <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-3 whitespace-nowrap">驱动</th>}
                 {visibleColumns.has("mountpoint") && <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-3 whitespace-nowrap">挂载点</th>}
                 {visibleColumns.has("size") && <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-3 whitespace-nowrap">大小</th>}
                 {visibleColumns.has("associatedContainers") && <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-3 whitespace-nowrap">关联容器</th>}
                 {visibleColumns.has("createdAt") && <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-3 whitespace-nowrap">创建时间</th>}
-                {visibleColumns.has("actions") && <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-3 whitespace-nowrap">操作</th>}
               </tr>
             </thead>
             <tbody>
               {filtered.map((volume) => (
                 <tr
                   key={volume.id}
-                  className="hover:bg-slate-50/50 transition-colors cursor-context-menu border-b border-slate-50 last:border-0"
+                  className={`hover:bg-slate-50/50 transition-colors cursor-context-menu border-b border-slate-50 last:border-0 ${selected.has(volume.id) ? "bg-blue-50/50" : ""}`}
                   onContextMenu={(e) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, volume }); }}
                 >
+                  <td className="w-10 px-3 py-3" onClick={(e) => { e.stopPropagation(); toggleSelect(volume.id); }}>
+                    <input
+                      type="checkbox"
+                      readOnly
+                      checked={selected.has(volume.id)}
+                      className="rounded border-slate-300 text-blue-500 focus:ring-blue-500 pointer-events-none"
+                    />
+                  </td>
                   {visibleColumns.has("name") && (
                     <td className="px-5 py-3">
                       <div className="flex items-center gap-2 min-w-0">
@@ -367,26 +449,7 @@ export function Volumes({ volumes, loading, error, engineId, defaultVisibleColum
                       <span className="text-xs text-slate-500">{volume.createdAt || "—"}</span>
                     </td>
                   )}
-                  {visibleColumns.has("actions") && (
-                    <td className="px-3 py-3 whitespace-nowrap">
-                      <div className="flex items-center">
-                        <ActionDropdown
-                          items={[
-                            { label: "详情", icon: <Eye size={14} />, onClick: () => setDetailVolume(volume) },
-                            { label: "导出", icon: <Download size={14} />, onClick: () => {} },
-                            { separator: true },
-                            {
-                              label: volume.inUse ? "删除（已关联）" : "删除",
-                              icon: <Trash2 size={14} />,
-                              danger: true,
-                              disabled: volume.inUse,
-                              onClick: () => !volume.inUse && setConfirmDelete(volume.id),
-                            },
-                          ]}
-                        />
-                      </div>
-                    </td>
-                  )}
+                  {/* 操作列已移除：所有操作统一走右键菜单 */}
                 </tr>
               ))}
             </tbody>
@@ -522,6 +585,18 @@ export function Volumes({ volumes, loading, error, engineId, defaultVisibleColum
         message={`将删除 ${unusedCount} 个未关联的数据卷。此操作不可撤销。`}
         confirmText="清理"
         danger
+      />
+
+      {/* 批量删除数据卷确认 */}
+      <ConfirmDialog
+        open={confirmBatchDelete}
+        onClose={() => setConfirmBatchDelete(false)}
+        onConfirm={batchDeleteVolume}
+        title="批量删除数据卷"
+        message={`确定要删除选中的 ${selected.size} 个数据卷吗？被容器占用的卷会被跳过，此操作不可撤销。`}
+        confirmText="批量删除"
+        danger
+        loading={batchBusy}
       />
 
       {/* 命令输出弹窗（清理未关联数据卷的 tail 文本） */}

@@ -1,4 +1,4 @@
-import type { DockerEngine, EngineResourceStats, ResourceSample, SystemSettings, SchedulerStatus, SchedulerLastResult, ImageUpdateSummaryView, DockerNetwork, NetworkCreateOptions, NetInterfaceOption, ContainerFileEntry, AppInfo, LogListResult, LogTailResult, LogPruneResult, MirrorRuntimeState, NotifyRuntimeStatus, NotifyTestResult } from "./types";
+import type { DockerEngine, EngineResourceStats, ResourceSample, SystemSettings, SchedulerStatus, SchedulerLastResult, ImageUpdateSummaryView, DockerNetwork, NetworkCreateOptions, NetInterfaceOption, ContainerFileEntry, AppInfo, LogListResult, LogTailResult, LogPruneResult, LogPackResult, LogPackConfig, LogArchiveInfo, MirrorRuntimeState, NotifyRuntimeStatus, NotifyTestResult } from "./types";
 
 const BASE = "/api";
 
@@ -19,6 +19,28 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * 登录前即可能返回 401 的端点（这些 401 不代表「会话过期」，不触发登出）：
+ * - /auth/login：密码错误
+ * - /auth/logout：主动登出（会话本就应当销毁）
+ * - /auth/init-status、/auth/init：首次初始化探测 / 创建账号（尚无会话概念）
+ */
+const PRE_LOGIN_401_ENDPOINTS = ["/auth/login", "/auth/logout", "/auth/init-status", "/auth/init"];
+
+/**
+ * 会话失效（401）→ 派发 auth:unauthorized，App 监听后回到登录页。
+ *
+ * ⚠️ `/auth/me` 与 `/auth/ping` 的 401 **必须**派发：前端「闲时自动退出」依赖 60s 探活
+ * ping 检测到服务端会话过期后登出。历史版本用 `!url.startsWith("/auth/")` 把整个
+ * /auth/ 前缀排除在派发之外，ping 的 401 被静默吞掉 ⇒ 会话过期后用户停在页面上
+ * 登不出去（v1.43.11 修复：改为仅排除上面的预登录端点）。
+ */
+function notifyUnauthorized(url: string): void {
+  if (typeof window === "undefined") return;
+  if (PRE_LOGIN_401_ENDPOINTS.some((p) => url.startsWith(p))) return;
+  window.dispatchEvent(new Event("auth:unauthorized"));
+}
+
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${url}`, {
     headers: { "Content-Type": "application/json" },
@@ -26,12 +48,8 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
     ...options,
   });
   const json = await res.json().catch(() => ({ success: false, error: "响应解析失败" }));
-  // 会话失效（非鉴权接口）：通知 App 回到登录页
-  if (res.status === 401 && !url.startsWith("/auth/")) {
-    if (typeof window !== "undefined") {
-      window.dispatchEvent(new Event("auth:unauthorized"));
-    }
-  }
+  // 会话失效：通知 App 回到登录页（/auth/me、/auth/ping 的 401 也走这里，见 notifyUnauthorized）
+  if (res.status === 401) notifyUnauthorized(url);
   // 账号待重新初始化：通知 App 进入「账号重新设置」流程（后端兜底拒绝，前端据此切换界面）
   if (res.status === 403 && (json as { code?: string }).code === "REINIT_REQUIRED") {
     if (typeof window !== "undefined") {
@@ -58,9 +76,22 @@ export interface AuthUser {
   needsReinit?: boolean;
 }
 
-/** 是否已初始化（存在用户）+ 是否存在待重新初始化的账号 */
-export function getAuthInitStatus(): Promise<{ initialized: boolean; needsReinit?: boolean }> {
-  return request<{ initialized: boolean; needsReinit?: boolean }>("/auth/init-status");
+/**
+ * 是否已初始化（存在用户）+ 是否存在待重新初始化的账号
+ *
+ * `serviceUsername`：安装时选定的服务运行账户（v1.40.6）。
+ * 服务进程即以该账户运行，故由服务端 `os.userInfo().username` 得出。
+ * 非空时，初始设置页应把用户名**锁定为该值且不可修改**；
+ * 为空（root 运行 / 非 Linux）时前端降级为可自由输入。
+ */
+export function getAuthInitStatus(): Promise<{
+  initialized: boolean;
+  needsReinit?: boolean;
+  serviceUsername?: string;
+}> {
+  return request<{ initialized: boolean; needsReinit?: boolean; serviceUsername?: string }>(
+    "/auth/init-status",
+  );
 }
 
 /** 首次部署创建管理员账号（recoveryCode 可选，留空可后续在设置页补设） */
@@ -110,6 +141,15 @@ export function getMe(): Promise<AuthUser> {
   return request<AuthUser>("/auth/me");
 }
 
+/**
+ * 探活心跳（只读、不续期）。用于前端低频（60s）探测：
+ * 人离开页面开着时，会话真过期后服务端返回 401，经全局 401 兜底（auth:unauthorized）回到登录页；
+ * 该接口不参与滑动续期，不会维持会话（续期由 /auth/me 与业务请求负责）。
+ */
+export function ping(): Promise<void> {
+  return request<void>("/auth/ping");
+}
+
 // ---------- 遥测（安装量与活跃度，仅上报端） ----------
 
 /** 本机设备标识的 6 维硬件属性（与后端 telemetry.ts 同构） */
@@ -147,6 +187,10 @@ export interface TelemetryStatus {
   appVersion: string;
   osVersion: string;
   arch: string;
+  /** 发行版本（/etc/os-release PRETTY_NAME，如 "Debian GNU/Linux 12 (bookworm)"） */
+  osName: string;
+  /** 内核版本（os.release() / uname -r，如 "6.18.18.c1126-trim"） */
+  kernelVersion: string;
   /** 标识文件路径 */
   deviceFile: string;
   /** 运行态文件路径 */
@@ -443,9 +487,7 @@ export async function writeContainerFileApi(engineId: string, containerId: strin
     body: content,
   });
   const json = await res.json().catch(() => ({ success: false, error: "响应解析失败" }));
-  if (res.status === 401 && !url.startsWith("/auth/")) {
-    if (typeof window !== "undefined") window.dispatchEvent(new Event("auth:unauthorized"));
-  }
+  if (res.status === 401) notifyUnauthorized(url);
   if (!res.ok || !json.success) throw new ApiError(json.error || "写入失败", json.code, res.status);
 }
 
@@ -459,9 +501,7 @@ export async function uploadContainerFileApi(engineId: string, containerId: stri
     body: data,
   });
   const json = await res.json().catch(() => ({ success: false, error: "响应解析失败" }));
-  if (res.status === 401 && !url.startsWith("/auth/")) {
-    if (typeof window !== "undefined") window.dispatchEvent(new Event("auth:unauthorized"));
-  }
+  if (res.status === 401) notifyUnauthorized(url);
   if (!res.ok || !json.success) throw new ApiError(json.error || "上传失败", json.code, res.status);
 }
 
@@ -521,12 +561,12 @@ export function pruneImagesApi(engineId: string, all: boolean = false): Promise<
   });
 }
 
-/** 取某引擎的镜像锁定列表 */
+/** 取某引擎的不被清理镜像列表 */
 export function fetchImageLocksApi(engineId: string): Promise<import("./types").ImageLock[]> {
   return request<import("./types").ImageLock[]>(`/engines/${engineId}/images/locks`);
 }
 
-/** 加锁 / 解锁镜像（锁定的镜像在「清理未使用」时会被跳过） */
+/** 标记 / 取消「不被清理」（被标记的镜像在「清理未使用」时会被跳过） */
 export function setImageLockApi(
   engineId: string,
   body: { id: string; ref?: string; locked: boolean }
@@ -822,6 +862,14 @@ export function streamStackActions(
       handlers.onFail(detail);
     });
   });
+  // 服务端会话校验失败：EventSource 拿不到 HTTP 状态码，服务端以 200 + unauthorized 事件帧通知，
+  // 这里派发 auth:unauthorized 让 App 回登录页（v1.43.11）
+  es.addEventListener("unauthorized", () => {
+    finish(() => {
+      if (typeof window !== "undefined") window.dispatchEvent(new Event("auth:unauthorized"));
+      handlers.onFail("会话已过期，请重新登录");
+    });
+  });
   es.onerror = () => {
     // 服务器正常 end 后 EventSource 也会触发 error；仅在未收到 done/fail 时视为中断
     finish(() => handlers.onFail("连接中断，操作状态未知（请刷新列表确认）"));
@@ -1056,10 +1104,8 @@ function triggerBlobDownload(blob: Blob, filename: string): void {
  */
 async function downloadAsBlob(url: string): Promise<string> {
   const res = await fetch(`${BASE}${url}`, { credentials: "include" });
-  if (res.status === 401 && !url.startsWith("/auth/")) {
-    if (typeof window !== "undefined") {
-      window.dispatchEvent(new Event("auth:unauthorized"));
-    }
+  if (res.status === 401) {
+    notifyUnauthorized(url);
     throw new ApiError("未登录或会话已过期", undefined, 401);
   }
   if (!res.ok) {
@@ -1233,6 +1279,8 @@ export function uploadUpdateZipApi(
     xhr.open("POST", `${BASE}/system/update/upload`, true);
     xhr.withCredentials = true;
     xhr.setRequestHeader("Content-Type", "application/zip");
+    // 透传原始文件名（服务端固定重命名为 pending-update.zip，需靠此 Header 保留真实包名用于展示）
+    xhr.setRequestHeader("X-File-Name", encodeURIComponent(file.name));
 
     let settled = false;
     const finish = (fn: () => void) => {
@@ -1329,6 +1377,18 @@ export function deleteAppLogApi(name: string): Promise<{ message: string }> {
 /** 按保留策略立即清理一次日志 */
 export function pruneAppLogsApi(): Promise<LogPruneResult> {
   return request<LogPruneResult>("/applogs/prune", { method: "POST" });
+}
+
+/** 立即执行一次日志打包（忽略间隔；v1.41.6） */
+export function packAppLogsApi(): Promise<LogPackResult & { pack?: LogPackConfig; archives?: LogArchiveInfo[] }> {
+  return request("/applogs/pack", { method: "POST" });
+}
+
+/** 删除单个日志归档包（v1.41.6） */
+export function deleteAppLogArchiveApi(
+  name: string
+): Promise<{ name: string; pack?: LogPackConfig; archives?: LogArchiveInfo[] }> {
+  return request(`/applogs/archive/${encodeURIComponent(name)}`, { method: "DELETE" });
 }
 
 /** 目录镜像运行态（两个源的配置 / 目标 / 上次同步结果 / 监听是否生效） */

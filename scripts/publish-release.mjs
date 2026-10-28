@@ -9,7 +9,7 @@
  *          （读私有仓库只需 repo scope；gh auth login 强制要求 read:org，PAT 常缺该 scope）
  *       b. gh auth login 已登录
  *       c. 项目根目录 .env 文件写 GITHUB_TOKEN=xxx（脚本自动加载，不进代码/交付包）
- *   - 已构建交付包 build-upload/docker-manager-yanzi-linux-x64.zip
+ *   - 已构建交付包 build-upload/dockermanagementyanzi-linux-x64.zip
  *
  * 用法：
  *   node scripts/publish-release.mjs [--repo owner/repo] [--zip 路径] [--prerelease] [--draft]
@@ -304,14 +304,14 @@ async function main() {
   const TAG = "v" + version;
   const repo = args.repo || defaultRepo();
   const zip =
-    args.zip || path.join(ROOT, "build-upload", `docker-manager-yanzi-linux-x64-v${version}.zip`);
+    args.zip || path.join(ROOT, "build-upload", `dockermanagementyanzi-linux-x64-v${version}.zip`);
   // 一键安装脚本作为 Release 附加资源，使「curl ... | sudo bash」可直接拉取
   const scriptAsset = path.join(ROOT, "scripts", "quick-install.sh");
 
   // 同时发布一个不带版本号的「latest」别名资产，使
-  // `releases/latest/download/docker-manager-yanzi-linux-x64.zip` 稳定指向最新版本
+  // `releases/latest/download/dockermanagementyanzi-linux-x64.zip` 稳定指向最新版本
   // （quick-install.sh 直链、手动下载均可用）。内容与版本化包完全一致。
-  const aliasZip = path.join(ROOT, "build-upload", "docker-manager-yanzi-linux-x64.zip");
+  const aliasZip = path.join(ROOT, "build-upload", "dockermanagementyanzi-linux-x64.zip");
   fs.copyFileSync(zip, aliasZip);
 
   const assets = [zip, aliasZip];

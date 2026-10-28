@@ -3,15 +3,19 @@
 打包 Linux 交付 zip（保留 Unix 可执行权限位）
 
 用法: python make-package.py
-产物: deploy/linux/docker-manager-yanzi-linux-x64.zip
-      zip 顶层含 docker-manager-yanzi/ 文件夹，unzip 到 /opt 即得安装目录
+产物: build-upload/dockermanagementyanzi-linux-x64-v<VERSION>.zip   （版本化，发布用）
+      build-upload/dockermanagementyanzi-linux-x64.zip             （latest 别名，同字节）
+      zip 顶层含 dockermanagementyanzi/ 文件夹，unzip 到 /opt 即得安装目录
 
 zip 内通过 ZipInfo.external_attr 高 16 位写入 Unix 权限位，
 Linux 上 unzip / bsdtar 解压后可执行位会被正确恢复。
+
+⚠️ 交付包统一落在 build-upload/（见项目约定「打包好的压缩包都放到 build-upload」）。
 """
 import os
 import time
 import json
+import shutil
 import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -20,10 +24,14 @@ ROOT = os.path.dirname(os.path.dirname(HERE))  # deploy/linux -> 仓库根 (dock
 with open(os.path.join(ROOT, "package.json"), encoding="utf-8") as _f:
     VERSION = json.load(_f)["version"]
 # 本部署实例的应用名（目录 / 服务 / 用户 / 二进制名）
-APP = "docker-manager-yanzi"
+APP = "dockermanagementyanzi"
 # 源二进制（交叉构建产物）
 SRC_BIN = os.path.join(HERE, APP)
-OUT = os.path.join(HERE, f"{APP}-linux-x64-v{VERSION}.zip")
+# 交付包统一输出到 build-upload/
+OUT_DIR = os.path.join(ROOT, "build-upload")
+os.makedirs(OUT_DIR, exist_ok=True)
+OUT = os.path.join(OUT_DIR, f"{APP}-linux-x64-v{VERSION}.zip")
+ALIAS = os.path.join(OUT_DIR, f"{APP}-linux-x64.zip")  # latest 别名（同字节）
 PREFIX = f"{APP}/"  # zip 内顶层文件夹
 
 FILES = [
@@ -53,6 +61,10 @@ def main():
 
     size = os.path.getsize(OUT)
     print(f"\n完成: {OUT} ({size/1024/1024:.1f} MB)")
+
+    # 生成 latest 别名（同字节，便于 OTA / 下载站识别最新版）
+    shutil.copyfile(OUT, ALIAS)
+    print(f"别名: {ALIAS} ({os.path.getsize(ALIAS)/1024/1024:.1f} MB)")
 
     # 验证权限位
     print("\n=== 验证 zip 内权限位 ===")

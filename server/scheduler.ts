@@ -4,7 +4,7 @@ import { getAllEngines, getEngine } from "./engines.js";
 import { checkAllImageUpdates, startImagePull, type ImageUpdateDetail, type ImageUpdateSummary } from "./docker.js";
 import { createLogger } from "./logger.js";
 import { dataPath } from "./paths.js";
-import { createFullBackup, pruneBackups } from "./backup.js";
+import { createFullBackup, pruneBackups, BACKUP_NAME_PREFIX } from "./backup.js";
 import { broadcastPush } from "./push.js";
 import { notify } from "./notify.js";
 
@@ -348,7 +348,7 @@ export async function checkEngineImages(engineId: string, onlyRef?: string): Pro
 //
 // 读取 settings.backup（三级备份策略：weekly/monthly/yearly 三档，由 autoBackupEnabled 总开关统一控制），
 // 到期后创建全量备份（server/backup.ts），并按各档 retention 清理同前缀历史包（年备除外，永久保存、不自动删除）。
-// 备份包命名：auto-<key>_<timestamp>.zip（key ∈ weekly/monthly/yearly/simple）。
+// 备份包命名：dockermanagementyanzi_auto-<key>_<YYYYMMDD_HHMMSS>.zip（key ∈ weekly/monthly/yearly/simple）。
 
 export interface BackupScheduleView {
   key: string;
@@ -530,7 +530,7 @@ async function runBackup(key: string, retention: number): Promise<void> {
   try {
     const r = createFullBackup("auto", key);
     // 年备长期归档、永久保存：不执行滚动清理
-    const removed = key === "yearly" ? 0 : pruneBackups(`auto-${key}_`, retention);
+    const removed = key === "yearly" ? 0 : pruneBackups(`${BACKUP_NAME_PREFIX}_auto-${key}_`, retention);
     lastBackupRunAt = Date.now();
     backupStatus.lastRun = new Date(lastBackupRunAt).toISOString();
     persistBackupStatus();

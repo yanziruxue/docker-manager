@@ -25,6 +25,7 @@ const LIVE_SAMPLE_LIMIT = 60;
  * 把 SSE 推来的「当前值」(`EngineResourceStats`) 转成一个曲线点 (`ResourceSample`)。
  * 两套结构字段名不同（`memoryUsageMB`→`memDockerMB`、`netIfaces[]`→按名索引的 Record），
  * 磁盘同理（`readMBps/writeMBps/busyPct`→`read/write/busy`）；远程引擎这两项为空 ⇒ 缺省不写。
+ * `hostCpuPercent`（宿主机整机 CPU%）同理：远程引擎 / 首采无基线为 null ⇒ 缺省不写。
  */
 function statsToSample(st: EngineStats): ResourceSample {
   const netIfaces: Record<string, { rx: number; tx: number }> = {};
@@ -38,6 +39,7 @@ function statsToSample(st: EngineStats): ResourceSample {
     netRxKBps: st.netRxKBps,
     netTxKBps: st.netTxKBps,
     cpuPercent: st.cpuPercent,
+    hostCpuPercent: st.hostCpuPercent ?? undefined,
     ...(Object.keys(netIfaces).length ? { netIfaces } : {}),
     ...(Object.keys(disks).length ? { disks } : {}),
   };
@@ -47,7 +49,7 @@ import { NodeCard } from "../components/NodeCard";
 import { NodeCardGrid, FilterChips } from "../components/NodeCardGrid";
 import { StackContainersModal } from "../components/StackContainersModal";
 import { Toast } from "../components/UI";
-import { fetchResourceHistoryApi, fetchNetInterfacesApi } from "../api";
+import { fetchResourceHistoryApi, fetchNetInterfacesApi, fetchSettings } from "../api";
 import { tempTextColor, fmtTemp } from "../lib/thermal";
 import type {
   Container,
@@ -119,6 +121,36 @@ function clockLabels(pts: ResourceSample[]): string[] {
 
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
 const round1 = (n: number) => Math.round(n * 10) / 10;
+
+/** 处理器磁贴两段口径的固定配色：宿主负载（蓝，延续原「整体负载」色）/ 容器负载（琥珀，同内存磁贴「Docker 占用」） */
+const HOST_LOAD_COLOR = "#3b82f6";
+const CONTAINER_LOAD_COLOR = "#f59e0b";
+
+/**
+ * 处理器磁贴两段口径拆分（v1.42.20）：
+ * - `containerPct` = 运行容器 CPU 合计 ÷ ncpu（**整机口径**：`cpuPercent` 是「占单核百分比」，
+ *   8 核跑满 = 800%，除以核数即「占整机百分比」，与各核横条 / 宿主负载的 0–100% 同量纲）
+ * - `hostPct` = 宿主机整机 CPU%（/proc/stat 聚合行差分，含非容器进程）
+ * - `hostOnlyPct` = 宿主负载中非容器部分（横条蓝段）= max(0, hostPct − containerPct)
+ * - 修正（v1.42.21）：`hostPct < containerPct` 时（容器是宿主子集，物理上不可能，必为
+ *   /proc/stat 聚合行 ~10ms tick 差分在轻载时把宿主读数吞成 0% 的假零）取 `hostPct = containerPct`，
+ *   蓝段归零，宿主读数始终 ≥ 容器读数，消除「宿主 0% / 条全琥珀」割裂。
+ * 蓝段 + 琥珀段之和恒等于 hostPct。
+ * `hostPct` 为 null / 非有限值（远程引擎 / 首采无基线）⇒ 返回 null，调用方回落旧的单条展示。
+ */
+function splitCpuLoad(
+  containerSum: number,
+  hostPct: number | null,
+  ncpu: number
+): { hostPct: number; containerPct: number; hostOnlyPct: number } | null {
+  if (hostPct === null || hostPct === undefined || !Number.isFinite(hostPct)) return null;
+  const c = Number.isFinite(containerSum) && ncpu > 0 ? clamp(containerSum / ncpu, 0, 100) : 0;
+  // 采样伪影修正：容器负载是宿主负载的子集，hostPct < containerPct 只可能来自 /proc/stat 轻载假零；
+  // 取容器值为下界，使 hostPct 始终 ≥ containerPct。
+  const hRaw = clamp(hostPct, 0, 100);
+  const h = hRaw < c ? c : hRaw;
+  return { hostPct: h, containerPct: c, hostOnlyPct: Math.max(0, h - c) };
+}
 
 /** 按负载取条形色：<60 绿 / 60–85 琥珀 / ≥85 红（沿用原核环簇的语义） */
 function loadColor(p: number): string {
@@ -270,6 +302,20 @@ function Bar({ percent, color, className = "" }: { percent: number; color: strin
   );
 }
 
+/**
+ * 两段堆叠横条（v1.42.20 处理器磁贴：蓝 = 宿主机不含容器部分、琥珀 = 容器负载）。
+ * 两段宽度即各自占整机的百分比，总宽 = 宿主机整机负荷；量程 0–100%，段宽各自 clamp。
+ */
+function StackedBar({ segments, className = "" }: { segments: { percent: number; color: string }[]; className?: string }) {
+  return (
+    <div className={`flex h-2 rounded-full bg-slate-100 overflow-hidden ${className}`}>
+      {segments.map((s, i) => (
+        <div key={i} className="h-full" style={{ width: `${clamp(s.percent, 0, 100)}%`, background: s.color }} />
+      ))}
+    </div>
+  );
+}
+
 function Legend({ color, children }: { color: string; children: React.ReactNode }) {
   return (
     <span className="flex items-center gap-1 text-slate-500">
@@ -392,46 +438,63 @@ function useStoredString(storageKey: string, initial = "") {
 
 /**
  * 网口下拉（放在磁贴头 actions 槽位）：
- * 「全部（容器合计）」= 原先的合计口径；后面按 **网口 / Docker 虚拟网卡** 分组。
+ * v1.42.10 起**移除「全部（容器合计）」**，只按 **物理网卡 / 虚拟网卡** 两组分类，
+ * 且必须落到某个真实网卡；无网卡可选（远程引擎读不到 /proc/net/dev）时才显示禁用占位。
  * 列表来自 `GET /api/engines/:id/net-interfaces`（仅本机 socket 引擎有值）。
  */
 function IfaceSelect({
   value,
   onChange,
   options,
+  autoPicked = false,
 }: {
   value: string;
   onChange: (v: string) => void;
   options: NetInterfaceOption[];
+  /** 当前选中项来自「自动 / 系统设置」而非用户手动选择（v1.41.6） */
+  autoPicked?: boolean;
 }) {
   const host = options.filter((o) => o.kind === "host");
   const docker = options.filter((o) => o.kind === "docker");
+  const none = host.length === 0 && docker.length === 0;
   return (
     <select
       value={value}
       onChange={(e) => onChange(e.target.value)}
       aria-label="网络接口"
-      title="选择要绘制的网口 / Docker 虚拟网卡"
-      className="max-w-[8.5rem] text-xs border border-slate-200 rounded-md px-1.5 py-1 bg-white text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400"
+      disabled={none}
+      title={
+        autoPicked
+          ? `当前自动选中物理网卡「${value}」（可在「系统设置 → 页面设置」改默认值，或在此手动指定）`
+          : "选择要绘制的物理网卡 / 虚拟网卡"
+      }
+      className="max-w-[8.5rem] text-xs border border-slate-200 rounded-md px-1.5 py-1 bg-white text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed"
     >
-      <option value="">全部（容器合计）</option>
-      {host.length > 0 && (
-        <optgroup label="网口">
-          {host.map((o) => (
-            <option key={o.name} value={o.name}>
-              {o.label}
-            </option>
-          ))}
-        </optgroup>
-      )}
-      {docker.length > 0 && (
-        <optgroup label="Docker 虚拟网卡">
-          {docker.map((o) => (
-            <option key={o.name} value={o.name}>
-              {o.label}
-            </option>
-          ))}
-        </optgroup>
+      {none ? (
+        <option value="" disabled>
+          无可用网卡
+        </option>
+      ) : (
+        <>
+          {host.length > 0 && (
+            <optgroup label="物理网卡">
+              {host.map((o) => (
+                <option key={o.name} value={o.name}>
+                  {o.label}
+                </option>
+              ))}
+            </optgroup>
+          )}
+          {docker.length > 0 && (
+            <optgroup label="虚拟网卡">
+              {docker.map((o) => (
+                <option key={o.name} value={o.name}>
+                  {o.label}
+                </option>
+              ))}
+            </optgroup>
+          )}
+        </>
       )}
     </select>
   );
@@ -454,7 +517,6 @@ function SystemTile({ stats, engineId }: { stats: EngineResourceStats | null; en
       id="system"
       title="系统概览"
       icon={<Monitor size={32} />}
-      subtitle={stats ? `Docker ${stats.serverVersion || "—"} · ${stats.ncpu} 逻辑核` : NO_STATS}
     >
       <p className="text-[40px] font-normal leading-none text-ink tabular-nums">{time}</p>
       <p className="text-[13px] text-slate-500 mt-1.5">{date}</p>
@@ -462,15 +524,10 @@ function SystemTile({ stats, engineId }: { stats: EngineResourceStats | null; en
       {stats ? (
         <dl className="mt-4 pt-4 border-t border-slate-100 grid grid-cols-2 gap-x-4 gap-y-2.5">
           <InfoItem label="主机名称" value={stats.hostName || "—"} mono />
-          <InfoItem label="发行版本" value={stats.osName || "—"} />
-          <InfoItem label="内核版本" value={stats.kernelVersion || "—"} mono />
-          <InfoItem label="系统类型" value={stats.arch || "—"} mono />
           <InfoItem label="主机地址" value={stats.hostAddress || "—"} mono />
           <InfoItem label="启动时间" value={bootTime} />
-          {/* 运行时间取宿主机 /proc/uptime（远程引擎读不到 → 「—」），单独占满一行 */}
-          <div className="col-span-2">
-            <InfoItem label="运行时间" value={fmtUptime(stats.hostUptimeSec)} />
-          </div>
+          {/* 运行时间取宿主机 /proc/uptime（远程引擎读不到 → 「—」），与启动时间并排 */}
+          <InfoItem label="运行时间" value={fmtUptime(stats.hostUptimeSec)} />
         </dl>
       ) : (
         <Placeholder />
@@ -515,32 +572,64 @@ function IconTip({
 }
 
 /**
- * 处理器：整体负载横条（**常驻**）+ 各物理核横条（随磁贴折叠）+ 整体负载曲线（**常驻**、自己单独折叠）。
- * 折叠语义：磁贴折叠只收起「各核明细」，整体负载与曲线仍在——曲线可以折叠后单独显示。
+ * 处理器：宿主负载 / 容器负载 两段横条（**常驻**）+ 各物理核横条（随磁贴折叠）
+ * + 宿主负载 / 容器负载 双曲线（**常驻**、自己单独折叠）。
+ * 折叠语义：磁贴折叠只收起「各核明细」，横条与曲线仍在——曲线可以折叠后单独显示。
+ *
+ * 口径（v1.42.20）：宿主负载 = 宿主机整机 CPU%（/proc/stat 聚合行差分，覆盖全部进程含非容器）；
+ * 容器负载 = 运行容器 CPU 合计 ÷ ncpu（`cpuPercent` 是占单核百分比，8 核跑满 = 800%，除核数得整机口径）；
+ * 横条两段（蓝 = 宿主机不含容器部分、琥珀 = 容器负载）之和恒等于宿主负载。
+ * 远程引擎读不到 /proc/stat（hostCpuPercent 为 null）⇒ 完全回落旧展示（单蓝条 = 容器合计）。
  */
 function CpuTile({ stats, history }: { stats: EngineResourceStats | null; history: ResourceSample[] }) {
   const { range, setRange, points } = useChartRange("cpu");
   // 曲线小节独立折叠：与磁贴整体折叠分开，各自持久化
   const [showChart, setShowChart] = useStoredFlag("dm.tile.cpu.chart", false);
 
-  // 「整体负载」口径 = 运行容器 CPU 合计，按 0–100% 展示（不再用 ncpu×100 的总容量口径）
-  const overallPct = stats ? clamp(stats.cpuPercent, 0, 100) : 0;
+  // 两段口径：宿主机整机%（含容器）拆成「宿主机不含容器」+「容器负载」；
+  // 远程引擎无整机数据 ⇒ null（回落旧的单条展示）
+  const split = stats ? splitCpuLoad(stats.cpuPercent, stats.hostCpuPercent ?? null, stats.ncpu || 1) : null;
   const cores = stats?.cpuCores || [];
 
   const pts = history.slice(-points);
-  // 与「整体负载」条同源（运行容器 CPU 合计）；量程固定 0–100%（与副标题「/ 100%」同一口径，
-  // 也对齐 Unraid 参考图：纵轴恒为 100% / 0%）。
-  const cpuSeries: LineSeries[] = [
-    { name: "整体负载", color: "#3b82f6", values: pts.map((s) => s.cpuPercent), area: true },
-  ];
+  // 曲线双序列与横条同源：宿主负载（整机，蓝）+ 容器负载（琥珀，占单核合计 ÷ncpu 换算整机口径）；
+  // 量程固定 0–100%（与副标题「/ 100%」同一口径，也对齐 Unraid 参考图：纵轴恒为 100% / 0%）。
+  // 远程引擎回落单序列（旧「整体负载」口径 = 容器合计 clamp 0–100）。
+  // 历史点缺 hostCpuPercent（远程 / 首采无基线）传 NaN ⇒ LineChart 沿用上一个有效值。
+  const ncpu = stats?.ncpu || 1;
+  const cpuSeries: LineSeries[] = split
+    ? [
+        { name: "宿主负载", color: HOST_LOAD_COLOR, values: pts.map((s) => {
+          const hv = s.hostCpuPercent;
+          if (hv === undefined || hv === null || !Number.isFinite(hv)) return NaN;
+          // 与横条同口径：host < container（轻载假零）取容器值下界，消除曲线 0 尖峰
+          return Math.max(hv, clamp(s.cpuPercent / ncpu, 0, 100));
+        }), area: true },
+        { name: "容器负载", color: CONTAINER_LOAD_COLOR, values: pts.map((s) => clamp(s.cpuPercent / ncpu, 0, 100)), area: true },
+      ]
+    : [{ name: "整体负载", color: HOST_LOAD_COLOR, values: pts.map((s) => s.cpuPercent), area: true }];
 
-  // 折叠后仍常驻的两段：top = 整体负载横条；bottom = 曲线小节（自带开关，磁贴折叠后也可单独显示）
+  // 折叠后仍常驻的两段：top = 宿主负载 / 容器负载 两段横条；bottom = 曲线小节（自带开关，磁贴折叠后也可单独显示）
   const persistent = stats
     ? {
-        top: (
+        top: split ? (
+          <div className="flex items-center gap-3">
+            <span className="w-14 flex-shrink-0 text-xs text-slate-500">宿主负载</span>
+            <StackedBar
+              className="flex-1"
+              segments={[
+                { percent: split.hostOnlyPct, color: HOST_LOAD_COLOR },
+                { percent: split.containerPct, color: CONTAINER_LOAD_COLOR },
+              ]}
+            />
+            <span className="w-24 flex-shrink-0 text-right text-xs font-mono text-slate-600">
+              {round1(split.hostPct)}% / {round1(split.containerPct)}%
+            </span>
+          </div>
+        ) : (
           <div className="flex items-center gap-3">
             <span className="w-14 flex-shrink-0 text-xs text-slate-500">整体负载</span>
-            <Bar percent={overallPct} color="#3b82f6" className="flex-1" />
+            <Bar percent={clamp(stats.cpuPercent, 0, 100)} color={HOST_LOAD_COLOR} className="flex-1" />
             <span className="w-12 flex-shrink-0 text-right text-xs font-mono text-slate-600">
               {round1(stats.cpuPercent)}%
             </span>
@@ -554,13 +643,20 @@ function CpuTile({ stats, history }: { stats: EngineResourceStats | null; histor
               aria-expanded={showChart}
               className="flex w-full items-center justify-between text-xs text-slate-500 hover:text-slate-700 transition-colors"
             >
-              <span>整体负载曲线</span>
+              <span>{split ? "宿主负载曲线" : "整体负载曲线"}</span>
               <ChevronUp size={14} className={`transition-transform ${showChart ? "" : "rotate-180"}`} />
             </button>
             {showChart && (
               <>
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] mt-1.5 mb-1">
-                  <Legend color="#3b82f6">当前 {round1(stats.cpuPercent)}%</Legend>
+                  {split ? (
+                    <>
+                      <Legend color={HOST_LOAD_COLOR}>宿主负载 {round1(split.hostPct)}%</Legend>
+                      <Legend color={CONTAINER_LOAD_COLOR}>容器负载 {round1(split.containerPct)}%</Legend>
+                    </>
+                  ) : (
+                    <Legend color={HOST_LOAD_COLOR}>当前 {round1(stats.cpuPercent)}%</Legend>
+                  )}
                 </div>
                 <LineChart
                   series={cpuSeries}
@@ -597,7 +693,13 @@ function CpuTile({ stats, history }: { stats: EngineResourceStats | null; histor
           }
         />
       }
-      subtitle={stats ? `整体负载 ${round1(stats.cpuPercent)}% / 100%` : NO_STATS}
+      subtitle={
+        stats
+          ? split
+            ? `宿主负载 ${round1(split.hostPct)}% / 容器负载 ${round1(split.containerPct)}% / 100%`
+            : `整体负载 ${round1(stats.cpuPercent)}% / 100%`
+          : NO_STATS
+      }
       actions={<RangeSelect value={range} onChange={setRange} />}
       persistent={persistent}
     >
@@ -930,8 +1032,9 @@ function ImagesTile({
 
 /**
  * 网络：下行 / 上行 双曲线 + **网口选择** + 时间范围选择（两个选择器都放在磁贴头右侧）。
- * 网口列表来自后端 /proc/net/dev（本机网口 + Docker 网桥虚拟网卡）；
- * 默认「全部（容器合计）」＝ 原先的合计口径，行为与改动前一致。
+ * 网口列表来自后端 /proc/net/dev（本机物理网卡 + Docker 网桥虚拟网卡）；
+ * v1.42.10 起**移除「全部（容器合计）」选项**，始终展示某个真实网卡；
+ * 仅当引擎没有任何可选网卡（远程 TCP / SSH 读不到 /proc/net/dev）时，才回落到容器合计口径。
  */
 function NetTile({
   stats,
@@ -943,9 +1046,31 @@ function NetTile({
   engineId?: string;
 }) {
   const { range, setRange, points } = useChartRange("network");
-  // 选中的网口：空串 = 全部（容器合计）；按磁贴持久化
+  // 选中的网口：按磁贴持久化。**空串不再代表「全部」** —— v1.41.6 起空串是
+  // 「未选择」状态，实际展示项由下方 resolveIface() 按设置/自动规则决定。
   const [iface, setIface] = useStoredString("dm.chart.network.iface", "");
   const [ifaces, setIfaces] = useState<NetInterfaceOption[]>([]);
+  /** 系统设置 → 页面设置 →「网络曲线默认网卡」；undefined = 还没拿到 */
+  const [defaultIface, setDefaultIface] = useState<string | undefined>(undefined);
+  /** ★ 用户是否在磁贴下拉里**手动选过**（localStorage 有值）—— 手动选择优先级高于系统设置 */
+  const userPicked = iface !== "";
+
+  // 默认网卡：进页面拉一次系统设置即可（设置变更需刷新页面生效，与其它设置一致）
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        const s = await fetchSettings();
+        if (alive) setDefaultIface(s?.modal?.defaultNetIface ?? "");
+      } catch {
+        // 拿不到设置就退回自动挑物理网卡
+        if (alive) setDefaultIface("");
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // 接口列表：进页面拉一次，之后每 60s 刷新（新建 / 删除 Docker 网络会增减 br-xxxx 网桥）
   useEffect(() => {
@@ -956,7 +1081,7 @@ function NetTile({
         const list = await fetchNetInterfacesApi(engineId);
         if (alive) setIfaces(list || []);
       } catch {
-        // 忽略：拿不到列表就只保留「全部（容器合计）」
+        // 忽略：拿不到列表（远程引擎）则回落容器合计口径
       }
     };
     void load();
@@ -967,8 +1092,38 @@ function NetTile({
     };
   }, [engineId]);
 
-  // 选中的网口若已不存在（网络被删 / 换了引擎），自动回落到「全部」
-  const active = iface && ifaces.some((o) => o.name === iface) ? iface : "";
+  /**
+   * 解析实际要展示的网卡（v1.41.6 规则，v1.42.10 去掉「全部」回落）：
+   *   ① 用户手动选过（localStorage）⇒ 用它（但网卡若已不存在则继续往下走）；
+   *   ② 系统设置指定了某个真实网卡 ⇒ 用它（`__all__` 已废弃，按「自动」处理）；
+   *   ③ 否则 **自动挑第一个物理网卡**（`kind === "host"`，跳过 lo / veth）；
+   *   ④ 没有物理网卡（只有 Docker 虚拟网卡）⇒ 挑第一个虚拟网卡；
+   *   ⑤ 一个可选网卡都没有（远程引擎读不到 /proc/net/dev）⇒ 返回空串，
+   *      由调用方回落到「容器合计」口径（`netRxKBps` / `netTxKBps`）。
+   *
+   * ★ 选「自动」而非硬编码 `eth0`：网卡名因机器而异（eth0 / enp3s0 / eno1…）。
+   *
+   * ★★ 自动挑选时**跳过回环 `lo` 与 `veth*`**：后端 `isExposedNetIface()` 已过滤二者，
+   *   这里再挡一层属防御 —— 万一将来接口数据来源变化（例如远程引擎真的返回了 lo），
+   *   默认展示一张恒为 0 流量、或只反映容器内部流量的曲线只会让人困惑。
+   */
+  const resolveIface = (): string => {
+    const exists = (n: string) => ifaces.some((o) => o.name === n);
+    if (userPicked && exists(iface)) return iface;
+    const want = defaultIface ?? "";
+    // `__all__` 是已废弃的「全部（容器合计）」哨兵值：v1.42.10 起不再是可选项，
+    // 若旧 settings.json 仍写着它，按「自动」处理（继续往下挑物理网卡）。
+    if (want && want !== "__all__" && exists(want)) return want;
+    const isRealHost = (n: string) => n !== "lo" && !n.startsWith("veth");
+    const firstHost = ifaces.find((o) => o.kind === "host" && isRealHost(o.name));
+    if (firstHost) return firstHost.name;
+    const firstAny = ifaces.find((o) => isRealHost(o.name));
+    return firstAny ? firstAny.name : "";
+  };
+
+  // 网卡列表尚未加载（或远程引擎无列表）时 active 为空串 ⇒ 暂按容器合计渲染，
+  // 列表加载完成 / 有物理网卡后自动切到目标网卡
+  const active = resolveIface();
   const usingAll = active === "";
   const ifaceStat = usingAll ? undefined : stats?.netIfaces?.find((n) => n.name === active);
 
@@ -994,7 +1149,13 @@ function NetTile({
       subtitle={stats ? `下行 ${fmtRate(rxNow)} · 上行 ${fmtRate(txNow)}` : NO_STATS}
       actions={
         <>
-          <IfaceSelect value={active} onChange={setIface} options={ifaces} />
+          <IfaceSelect
+            value={active}
+            onChange={setIface}
+            options={ifaces}
+            /* 未手动选过时，提示当前网卡来自「自动挑第一个物理网卡 / 系统设置」 */
+            autoPicked={!userPicked && !usingAll}
+          />
           <RangeSelect value={range} onChange={setRange} />
         </>
       }
@@ -1026,33 +1187,134 @@ function NetTile({
 }
 
 /**
- * 磁盘：读写速率 + 利用率曲线（常驻、可单独折叠）+ 各设备明细表。
+ * 磁盘曲线指标（v1.42.12）：
+ *   - `all`      = 读 + 写 + 繁忙度**三条曲线**（按 DiskSelect 选中的盘 / 合计，默认）；
+ *   - `read` / `write` / `busy` = 该指标下**每块盘各一条曲线**（多盘对比，固定看所有盘）。
+ */
+type DiskMetric = "all" | "read" | "write" | "busy";
+
+/** 多盘曲线配色板（v1.42.12）：读 / 写 / 繁忙度视图每块盘一条曲线，按盘索引取色（超出循环） */
+const DISK_LINE_COLORS = [
+  "#3b82f6", "#f59e0b", "#10b981", "#8b5cf6", "#ef4444",
+  "#06b6d4", "#f97316", "#ec4899", "#84cc16", "#14b8a6",
+];
+const diskColor = (i: number) => DISK_LINE_COLORS[i % DISK_LINE_COLORS.length];
+
+/**
+ * 磁盘下拉（放在磁盘磁贴曲线区，v1.42.11）：选择「磁盘速率曲线」绘制哪块盘，
+ * 「全部（合计）」= 所有盘读写求和 + 平均繁忙度（与原合计口径一致，默认）。
+ * 与网络磁贴的 `IfaceSelect` 同思路，但磁盘无物理/虚拟之分，故平铺列出。
+ * v1.42.12：旁侧新增第二个下拉 `DiskMetricSelect`（全部 / 读 / 写 / 繁忙度）；
+ * 后三个单指标视图固定展示所有硬盘，此时本下拉**禁用**（选盘无意义）。
+ */
+function DiskSelect({
+  value,
+  onChange,
+  options,
+  disabled = false,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: string[];
+  /** v1.42.12：读 / 写 / 繁忙度视图固定展示所有硬盘 ⇒ 选盘下拉禁用 */
+  disabled?: boolean;
+}) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      disabled={disabled}
+      aria-label="磁盘设备"
+      title={disabled ? "「读 / 写 / 繁忙度」视图固定展示所有硬盘，切回「全部」可再选盘" : "选择要绘制读写速率曲线的磁盘"}
+      className="max-w-[8.5rem] text-xs border border-slate-200 rounded-md px-1.5 py-1 bg-white text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      <option value="">全部（合计）</option>
+      {options.map((name) => (
+        <option key={name} value={name}>
+          {name}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+/**
+ * 磁盘指标下拉（放在磁盘磁贴曲线区，v1.42.12）：与 `DiskSelect` 并排的第二个下拉。
+ * - 「全部」（最上）= 读速率 + 写速率 + 繁忙度三条曲线（按 DiskSelect 选中的盘 / 合计）；
+ * - 「读 / 写 / 繁忙度」= 该指标下**每块盘各一条曲线**（多盘对比视图，固定所有盘）。
+ */
+function DiskMetricSelect({
+  value,
+  onChange,
+}: {
+  value: DiskMetric;
+  onChange: (v: DiskMetric) => void;
+}) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => {
+        const v = e.target.value;
+        onChange(v === "read" || v === "write" || v === "busy" ? v : "all");
+      }}
+      aria-label="磁盘指标"
+      title="全部 = 读 + 写 + 繁忙度；读 / 写 / 繁忙度 = 每块盘各一条曲线"
+      className="max-w-[8.5rem] text-xs border border-slate-200 rounded-md px-1.5 py-1 bg-white text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400"
+    >
+      <option value="all">全部</option>
+      <option value="read">读</option>
+      <option value="write">写</option>
+      <option value="busy">繁忙度</option>
+    </select>
+  );
+}
+
+/**
+ * 磁盘：读写速率 + 利用率曲线（常驻、可单独折叠）+ **磁盘选择下拉** + 各设备明细表。
  * 形态与处理器磁贴一致：曲线放在 `persistent.bottom`（磁贴折叠后仍显示），
  * 且**自己带一个折叠开关**（`dm.tile.disk.chart`），与磁贴折叠是两套状态。
+ * v1.42.11：曲线区新增磁盘下拉（`DiskSelect`），可看**单块盘**的读写/利用率曲线，
+ * 「全部（合计）」= 所有盘求和 + 平均利用率（与原合计口径一致，默认）。
+ * v1.42.12：旁侧新增第二个下拉 `DiskMetricSelect`——「全部」画读+写+繁忙度三条曲线
+ * （按选中盘/合计）；「读 / 写 / 繁忙度」画**每块盘各一条**同指标曲线（多盘对比，
+ * 固定所有盘，此时 DiskSelect 禁用）。默认「全部」。
  */
 function DiskTile({ stats, history }: { stats: EngineResourceStats | null; history: ResourceSample[] }) {
   const { range, setRange, points } = useChartRange("disk");
   const [showChart, setShowChart] = useStoredFlag("dm.tile.disk.chart", false);
+  // 选中的磁盘（v1.42.11）：按磁贴持久化，空串 = 「全部（合计）」。仅「全部」指标视图可用。
+  const [dev, setDev] = useStoredString("dm.chart.disk.dev", "");
+  // 曲线指标（v1.42.12）：all = 读+写+繁忙度（默认）；read/write/busy = 每块盘各一条曲线。
+  // 按磁贴持久化；旧值（如上一版的 "rw"）或脏数据一律回落 all。
+  const [metricSel, setMetric] = useStoredString("dm.chart.disk.metric", "all");
+  const metric: DiskMetric =
+    metricSel === "read" || metricSel === "write" || metricSel === "busy" ? metricSel : "all";
+  // 单指标视图固定展示所有硬盘 ⇒ 选盘下拉禁用
+  const perDisk = metric !== "all";
   const disks: DiskStat[] = stats?.disks || [];
   const avg = disks.length > 0 ? Math.round(disks.reduce((sum, d) => sum + d.busyPct, 0) / disks.length) : 0;
+  // 选中的盘若已不存在（热插拔 / 切换引擎）⇒ 回落合计口径
+  const activeDev = dev && disks.some((d) => d.name === dev) ? dev : "";
 
-  // 全盘合计曲线（MB/s）。样本里的 disks 仅本机 socket 引擎有值，远程引擎为 undefined → 全 0。
+  // 曲线（MB/s）：选中单盘取该盘，否则全盘合计。样本里的 disks 仅本机 socket 引擎有值，远程引擎为 undefined → 全 0。
   const pts = history.slice(-points);
   const hasDiskHistory = pts.some((s) => s.disks);
-  const sumBy = (pick: (d: { read: number; write: number; busy: number }) => number) =>
+  const seriesFor = (pick: "read" | "write") =>
     pts.map((s) => {
       const m = s.disks;
       if (!m) return 0;
+      if (activeDev) return Math.round((m[activeDev]?.[pick] ?? 0) * 100) / 100;
       let sum = 0;
-      for (const k in m) sum += pick(m[k]);
+      for (const k in m) sum += m[k][pick];
       return Math.round(sum * 100) / 100;
     });
-  const readSeries = sumBy((d) => d.read);
-  const writeSeries = sumBy((d) => d.write);
-  // 平均利用率（%）：与副标题「平均利用率」同一口径
+  const readSeries = seriesFor("read");
+  const writeSeries = seriesFor("write");
+  // 利用率（%）：选中单盘取该盘，否则取平均（与副标题「平均利用率」同一口径）
   const busySeries = pts.map((s) => {
     const m = s.disks;
     if (!m) return 0;
+    if (activeDev) return Math.round((m[activeDev]?.busy ?? 0) * 10) / 10;
     const keys = Object.keys(m);
     if (keys.length === 0) return 0;
     let sum = 0;
@@ -1060,47 +1322,98 @@ function DiskTile({ stats, history }: { stats: EngineResourceStats | null; histo
     return Math.round((sum / keys.length) * 10) / 10;
   });
 
-  const readNow = disks.reduce((s, d) => s + d.readMBps, 0);
-  const writeNow = disks.reduce((s, d) => s + d.writeMBps, 0);
+  const sel = activeDev ? disks.find((d) => d.name === activeDev) : undefined;
+  const readNow = sel ? sel.readMBps : disks.reduce((s, d) => s + d.readMBps, 0);
+  const writeNow = sel ? sel.writeMBps : disks.reduce((s, d) => s + d.writeMBps, 0);
+  const busyNow = sel ? sel.busyPct : avg;
   const canChart = !!stats && (disks.length > 0 || hasDiskHistory);
 
-  const diskSeries: LineSeries[] = [
-    { name: "读速率", color: "#3b82f6", values: readSeries, area: true },
-    { name: "写速率", color: "#f59e0b", values: writeSeries, area: true },
-    // 利用率量纲是 %，必须走**右轴**（左轴是 MB/s）；共用一根轴会被大量纲压成贴底直线
-    { name: "利用率", color: "#10b981", values: busySeries, axis: "right", dashed: true },
-  ];
+  // 单块盘某指标的历史序列（读 / 写 / 繁忙度视图用；样本里的 disks 仅本机 socket 引擎有值）
+  const perDiskSeries = (dev: string, pick: "read" | "write" | "busy") =>
+    pts.map((s) => {
+      const v = s.disks?.[dev]?.[pick] ?? 0;
+      if (!Number.isFinite(v)) return 0;
+      return pick === "busy" ? Math.round(v * 10) / 10 : Math.round(v * 100) / 100;
+    });
+
+  // 曲线序列按指标切换（v1.42.12）：
+  //   - 「全部」= 读/写速率（左轴 MB/s，面积图）+ 繁忙度（右轴 %，虚线）三条曲线；
+  //   - 「读 / 写 / 繁忙度」= **每块盘各一条**同指标曲线（多盘对比，左轴单量纲，不填面积）。
+  const diskSeries: LineSeries[] =
+    metric === "all"
+      ? [
+          { name: "读速率", color: "#3b82f6", values: readSeries, area: true },
+          { name: "写速率", color: "#f59e0b", values: writeSeries, area: true },
+          // 利用率量纲是 %，必须走**右轴**（左轴是 MB/s）；共用一根轴会被大量纲压成贴底直线
+          {
+            name: activeDev ? "繁忙度" : "平均繁忙度",
+            color: "#10b981",
+            values: busySeries,
+            axis: "right",
+            dashed: true,
+          },
+        ]
+      : disks.map((d, i) => ({
+          name: d.name,
+          color: diskColor(i),
+          values: perDiskSeries(d.name, metric),
+        }));
 
   const persistent = canChart
     ? {
         bottom: (
           <div className="pt-3 border-t border-slate-100">
-            <button
-              type="button"
-              onClick={() => setShowChart(!showChart)}
-              aria-expanded={showChart}
-              className="flex w-full items-center justify-between text-xs text-slate-500 hover:text-slate-700 transition-colors"
-            >
-              <span>磁盘速率曲线</span>
-              <ChevronUp size={14} className={`transition-transform ${showChart ? "" : "rotate-180"}`} />
-            </button>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => setShowChart(!showChart)}
+                aria-expanded={showChart}
+                className="flex items-center text-xs text-slate-500 hover:text-slate-700 transition-colors"
+              >
+                <span>磁盘速率曲线</span>
+                <ChevronUp size={14} className={`transition-transform ml-1 ${showChart ? "" : "rotate-180"}`} />
+              </button>
+              {/* 两个下拉并排（v1.42.12）：选盘（单指标视图禁用）+ 选指标（全部/读/写/繁忙度） */}
+              <div className="flex items-center gap-2">
+                <DiskSelect value={activeDev} onChange={setDev} options={disks.map((d) => d.name)} disabled={perDisk} />
+                <DiskMetricSelect value={metric} onChange={setMetric} />
+              </div>
+            </div>
             {showChart && (
               <>
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] mt-1.5 mb-1">
-                  <Legend color="#3b82f6">读速率 <b className="font-semibold">{fmtDiskRate(readNow)}</b></Legend>
-                  <Legend color="#f59e0b">写速率 <b className="font-semibold">{fmtDiskRate(writeNow)}</b></Legend>
-                  <Legend color="#10b981">平均利用率 <b className="font-semibold">{avg}%</b></Legend>
+                  {metric === "all" ? (
+                    <>
+                      <Legend color="#3b82f6">读速率 <b className="font-semibold">{fmtDiskRate(readNow)}</b></Legend>
+                      <Legend color="#f59e0b">写速率 <b className="font-semibold">{fmtDiskRate(writeNow)}</b></Legend>
+                      <Legend color="#10b981">
+                        {activeDev ? "繁忙度" : "平均繁忙度"} <b className="font-semibold">{round1(busyNow)}%</b>
+                      </Legend>
+                    </>
+                  ) : (
+                    // 单指标视图：每块盘一条图例（盘名 + 当前值），与曲线颜色一一对应
+                    disks.map((d, i) => (
+                      <Legend key={d.name} color={diskColor(i)}>
+                        {d.name}{" "}
+                        <b className="font-semibold">
+                          {metric === "busy"
+                            ? `${round1(d.busyPct)}%`
+                            : fmtDiskRate(metric === "read" ? d.readMBps : d.writeMBps)}
+                        </b>
+                      </Legend>
+                    ))
+                  )}
                 </div>
                 <LineChart
                   series={diskSeries}
-                  yMaxRight={100}
-                  formatMax={fmtDiskRate}
-                  formatMaxRight={(v) => `${Math.round(v)}%`}
-                  formatMin={() => "0"}
+                  yMaxRight={metric === "all" ? 100 : undefined}
+                  formatMax={metric === "busy" ? (v) => `${Math.round(v)}%` : fmtDiskRate}
+                  formatMaxRight={metric === "all" ? (v) => `${Math.round(v)}%` : undefined}
+                  formatMin={metric === "busy" ? (v) => `${Math.round(v)}%` : () => "0"}
                   emptyText="正在采样磁盘…"
                   labels={clockLabels(pts)}
-                  // 读/写走左轴（MB/s），利用率走右轴（%）
-                  formatValue={(v, s) => (s.axis === "right" ? `${round1(v)}%` : fmtDiskRate(v))}
+                  // 「全部」：读/写走左轴（MB/s）、繁忙度走右轴（%）；单指标视图统一左轴
+                  formatValue={(v, s) => (metric === "busy" || s.axis === "right" ? `${round1(v)}%` : fmtDiskRate(v))}
                 />
               </>
             )}

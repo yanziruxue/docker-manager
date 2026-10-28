@@ -12,11 +12,23 @@ set -euo pipefail
 # 固定 PATH：精简 Debian 容器 / 最小镜像常缺 /usr/sbin，会导致 userdel / groupdel 找不到
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
-APP_NAME="docker-manager-yanzi"
-INSTALL_DIR="/opt/${APP_NAME}"
+APP_NAME="dockermanagementyanzi"
+DEFAULT_INSTALL_DIR="/opt/${APP_NAME}"
+# 安装目录可能被 install.sh 指定为自定义路径（v1.41.1）⇒ 实际目录从 systemd 单元读：
+#   WorkingDirectory= 是安装时写入的事实值，最可靠（比另建一份记录文件不易失同步）。
+# 可用 APP_INSTALL_DIR=<绝对路径> 覆盖（单元已删 / 手工部署场景）。
+UNIT_FILE="/etc/systemd/system/${APP_NAME}.service"
+INSTALL_DIR="${APP_INSTALL_DIR:-}"
+if [ -z "$INSTALL_DIR" ] && [ -f "$UNIT_FILE" ]; then
+  INSTALL_DIR="$(grep -E '^WorkingDirectory=' "$UNIT_FILE" 2>/dev/null | head -1 | cut -d= -f2- || true)"
+fi
+# 兜底：读不到（无单元 / 残留占位符 / 路径已不存在）就用默认值
+case "$INSTALL_DIR" in
+  ""|*__INSTALL_DIR__*) INSTALL_DIR="$DEFAULT_INSTALL_DIR" ;;
+esac
 # 数据/日志/配置都在安装目录下，--keep 时保留 data/ 子目录
 DATA_DIR="${INSTALL_DIR}/data"
-SERVICE_USER="${APP_NAME}"
+# SERVICE_USER 不再由本包定义（v1.40.1 起服务跟随系统用户，卸载时不删除该系统用户）
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 log()   { echo -e "${GREEN}[INFO]${NC}  $*"; }
@@ -71,8 +83,8 @@ if systemctl is-enabled --quiet "${APP_NAME}" 2>/dev/null; then
 fi
 
 # 删除 systemd 文件
-if [ -f "/etc/systemd/system/${APP_NAME}.service" ]; then
-  rm -f "/etc/systemd/system/${APP_NAME}.service"
+if [ -f "$UNIT_FILE" ]; then
+  rm -f "$UNIT_FILE"
   systemctl daemon-reload
   log "已删除 systemd 服务文件"
 fi
@@ -113,27 +125,8 @@ if [ -f "/etc/sudoers.d/${APP_NAME}" ]; then
   log "已删除 /etc/sudoers.d/${APP_NAME}"
 fi
 
-# 删除用户（原先 `userdel ... || true` 会静默失败却照样打印「已删除」，属于假成功）
-if id -u "$SERVICE_USER" &>/dev/null; then
-  if USERDEL="$(cmd_path userdel)"; then
-    if "$USERDEL" "$SERVICE_USER" 2>/dev/null; then
-      log "已删除用户 ${SERVICE_USER}"
-    else
-      warn "删除用户 ${SERVICE_USER} 失败（可能仍有进程占用），可手动执行: userdel ${SERVICE_USER}"
-    fi
-  else
-    warn "未找到 userdel，跳过删除用户 ${SERVICE_USER}"
-  fi
-fi
-
-# 删除同名用户组（安装脚本会显式创建，卸载一并清理，避免重装时残留旧的 GID 归属）
-if getent group "$SERVICE_USER" &>/dev/null; then
-  if GROUPDEL="$(cmd_path groupdel)" && "$GROUPDEL" "$SERVICE_USER" 2>/dev/null; then
-    log "已删除用户组 ${SERVICE_USER}"
-  else
-    warn "删除用户组 ${SERVICE_USER} 失败，可手动执行: groupdel ${SERVICE_USER}"
-  fi
-fi
+# v1.40.1 起服务跟随系统用户运行，不再由本包创建专属账户，
+# 故卸载时**不删除**该系统用户 / 组（避免误删用户原有的登录账户）。
 
 echo ""
 log "卸载完成"

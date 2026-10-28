@@ -1,0 +1,29 @@
+# 行尾策略：本项目部署目标是 Linux，`.sh` / `.service` 若带 CRLF 会直接坏 ——
+#   `bad interpreter: /bin/bash^M`、systemd 单元解析失败。
+# 本机 git 配置是 core.autocrlf=true，它只保证「仓库里存 LF」，却会让
+#   **Windows checkout** 与 **git archive（打发布 zip）** 都产出 CRLF
+#   —— 2026-09-28 实测：git archive 出的 install.sh 带 CR，14462 bytes。
+# 所以在这里显式钉死：源码一律 LF，Windows 专用脚本才用 CRLF。
+* text=auto eol=lf
+*.sh      text eol=lf
+*.service text eol=lf
+*.conf    text eol=lf
+Dockerfile text eol=lf
+*.cmd     text eol=crlf
+*.bat     text eol=crlf
+*.ps1     text eol=crlf
+
+# 二进制：不做任何行尾转换（否则会被静默损坏）
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.zip  binary
+*.gz   binary
+*.tar  binary
+*.woff binary
+*.woff2 binary
+*.ttf  binary
+*.eot  binary
+*.pdf  binary

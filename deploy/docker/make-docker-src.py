@@ -1,16 +1,16 @@
 # -*- coding: utf-8 -*-
 """
 打包 Docker 镜像构建源码包（本机无 docker 也可直接交付）。
-输出: build-upload/docker-manager-yanzi-docker-src.zip
-zip 顶层带 docker-manager-yanzi-docker/ 文件夹，解压后即可 docker build。
+输出: build-upload/dockermanagementyanzi-docker-src.zip
+zip 顶层带 dockermanagementyanzi-docker/ 文件夹，解压后即可 docker build。
 """
 import os
 import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))          # deploy/docker
 ROOT = os.path.dirname(os.path.dirname(HERE))              # 项目根
-OUT = os.path.join(ROOT, "build-upload", "docker-manager-yanzi-docker-src.zip")
-PREFIX = "docker-manager-yanzi-docker/"
+OUT = os.path.join(ROOT, "build-upload", "dockermanagementyanzi-docker-src.zip")
+PREFIX = "dockermanagementyanzi-docker/"
 
 # 项目根下需要交付的文件与目录
 ROOT_FILES = [

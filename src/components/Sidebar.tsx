@@ -31,7 +31,7 @@ interface SidebarProps {
   engineStatus?: "connected" | "disconnected" | "error";
   dockerVersion?: string;
   notificationsCount?: number;
-  /** 有可用系统更新时在「系统设置」项旁显示角标 */
+  /** 有可用系统更新时在「设置中心」项旁显示角标 */
   updateAvailable?: boolean;
   /** 后端返回的运行时版本（/api/system/version）；缺失时回退到构建期注入的版本号 */
   runtimeVersion?: string;
@@ -49,7 +49,7 @@ const navItems: { key: PageKey; label: string; icon: React.ReactNode }[] = [
   { key: "volumes", label: "数据卷管理", icon: <Database size={18} /> },
   { key: "networks", label: "网络管理", icon: <Network size={18} /> },
   { key: "notifications", label: "通知中心", icon: <Bell size={18} /> },
-  { key: "settings", label: "系统设置", icon: <Settings size={18} /> },
+  { key: "settings", label: "设置中心", icon: <Settings size={18} /> },
 ];
 
 export function Sidebar({

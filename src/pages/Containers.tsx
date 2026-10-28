@@ -34,7 +34,7 @@ import {
   FilePlus2,
   FolderPlus,
 } from "lucide-react";
-import type { Container, LogEntry, ContainerFileEntry } from "../types";
+import type { Container, LogEntry, ContainerFileEntry, Stack } from "../types";
 import { StatusBadge, Tag } from "../components/Badge";
 import { Modal, ConfirmDialog, Drawer } from "../components/Modal";
 import { Toggle, ProgressBar, IconButton, EmptyState, SortableTh } from "../components/UI";
@@ -63,11 +63,38 @@ interface ContainersProps {
   error?: string | null;
   engineId?: string;
   defaultVisibleColumns?: string[];
-  /** 容器详情展示形式：drawer = 半页面（默认）；modal = 居中弹窗。由系统设置 → 弹窗设置控制 */
+  /** 容器详情展示形式：drawer = 半页面（默认）；modal = 居中弹窗。由系统设置 → 页面设置控制 */
   containerDetailStyle?: "drawer" | "modal";
+  /** 跨页跳转焦点容器：非空时自动打开该容器的详情（消费后由 App 清空） */
+  focusContainerName?: string;
+  /** 焦点容器已消费回调（App 清空状态，避免刷新后重复打开） */
+  onFocusContainerConsumed?: () => void;
+  /** 堆栈列表：用于按 container.stackId 映射出所属堆栈名称 */
+  stacks?: Stack[];
 }
 
-export function Containers({ containers, onNavigate, onRefresh, loading, error, engineId, defaultVisibleColumns, containerDetailStyle = "drawer" }: ContainersProps) {
+// 堆栈配色：一个堆栈一种颜色用于区分。完整字面量（含 dot 的 bg-X-500），
+// 确保 Tailwind 不被 purge。stackId 经稳定哈希映射到下标，重排/刷新颜色不变。
+const STACK_COLORS: { badge: string; dot: string }[] = [
+  { badge: "bg-indigo-50 text-indigo-700 border-indigo-200", dot: "bg-indigo-500" },
+  { badge: "bg-emerald-50 text-emerald-700 border-emerald-200", dot: "bg-emerald-500" },
+  { badge: "bg-amber-50 text-amber-700 border-amber-200", dot: "bg-amber-500" },
+  { badge: "bg-rose-50 text-rose-700 border-rose-200", dot: "bg-rose-500" },
+  { badge: "bg-sky-50 text-sky-700 border-sky-200", dot: "bg-sky-500" },
+  { badge: "bg-violet-50 text-violet-700 border-violet-200", dot: "bg-violet-500" },
+  { badge: "bg-teal-50 text-teal-700 border-teal-200", dot: "bg-teal-500" },
+  { badge: "bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200", dot: "bg-fuchsia-500" },
+  { badge: "bg-orange-50 text-orange-700 border-orange-200", dot: "bg-orange-500" },
+  { badge: "bg-cyan-50 text-cyan-700 border-cyan-200", dot: "bg-cyan-500" },
+];
+
+function stackColorIndex(id: string): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return h % STACK_COLORS.length;
+}
+
+export function Containers({ containers, onNavigate, onRefresh, loading, error, engineId, defaultVisibleColumns, containerDetailStyle = "drawer", focusContainerName, onFocusContainerConsumed, stacks }: ContainersProps) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -80,8 +107,18 @@ export function Containers({ containers, onNavigate, onRefresh, loading, error, 
     const latest = containers.find((c) => c.id === detailContainer.id);
     return latest || detailContainer;
   }, [containers, detailContainer]);
+
+  // 跨页跳转焦点容器：按名称找到容器后自动打开详情；数据未就绪时等 containers 更新后重试
+  useEffect(() => {
+    if (!focusContainerName) return;
+    const target = containers.find((c) => c.name === focusContainerName);
+    if (!target) return;
+    setDetailContainer(target);
+    setDetailTab("info");
+    onFocusContainerConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusContainerName, containers]);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
-  const [confirmBatchDelete, setConfirmBatchDelete] = useState(false);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [showColumnPicker, setShowColumnPicker] = useState(false);
   const columnPickerRef = useRef<HTMLDivElement>(null);
@@ -137,35 +174,14 @@ export function Containers({ containers, onNavigate, onRefresh, loading, error, 
     onRefresh?.();
   };
 
-  // 批量删除（强制删除，含运行中的容器），二次确认后执行
-  const batchDelete = async () => {
-    if (!engineId || selected.size === 0) return;
-    const ids = Array.from(selected);
-    let ok = 0;
-    let fail = 0;
-    for (const id of ids) {
-      const name = containers.find((c) => c.id === id)?.name || id;
-      try {
-        await removeContainerApi(engineId, id, true);
-        ok++;
-        addOpLog({ action: "批量删除容器", target: name, status: "success", engineId });
-      } catch (e: any) {
-        fail++;
-        addOpLog({ action: "批量删除容器", target: name, status: "failed", detail: e.message || "删除失败", engineId });
-      }
-    }
-    setSelected(new Set());
-    setConfirmBatchDelete(false);
-    onRefresh?.();
-  };
-
   // 列可见性状态
-  type ColumnKey = "icon" | "name" | "status" | "tags" | "image" | "ports" | "network" | "uptime" | "restartPolicy" | "actions";
+  type ColumnKey = "icon" | "name" | "status" | "tags" | "stack" | "image" | "ports" | "network" | "uptime" | "restartPolicy" | "actions";
   const allColumns: { key: ColumnKey; label: string }[] = [
     { key: "icon", label: "图标" },
     { key: "name", label: "容器名称" },
     { key: "status", label: "状态" },
     { key: "tags", label: "标签" },
+    { key: "stack", label: "堆栈" },
     { key: "image", label: "镜像" },
     { key: "ports", label: "端口映射" },
     { key: "network", label: "网络模式" },
@@ -174,7 +190,7 @@ export function Containers({ containers, onNavigate, onRefresh, loading, error, 
     { key: "actions", label: "操作" },
   ];
   const containerDefaults = defaultVisibleColumns && defaultVisibleColumns.length > 0
-    ? new Set(defaultVisibleColumns as ColumnKey[])
+    ? new Set<ColumnKey>([...(defaultVisibleColumns as ColumnKey[]), "stack"])
     : new Set(allColumns.map((c) => c.key));
   const [visibleColumns, setVisibleColumns] = useState<Set<ColumnKey>>(containerDefaults);
 
@@ -228,7 +244,7 @@ export function Containers({ containers, onNavigate, onRefresh, loading, error, 
   }, [containers, search, statusFilter]);
 
   // 排序：默认按名称升序；名称/状态/标签/重启策略 列头可点击切换排序
-  type SortKey = "name" | "status" | "tags" | "restartPolicy";
+  type SortKey = "name" | "status" | "tags" | "stack" | "restartPolicy";
   const STATUS_ORDER: Record<string, number> = {
     running: 0, restarting: 1, paused: 2, exited: 3, dead: 4, stopped: 5, created: 6, removing: 7,
   };
@@ -250,6 +266,9 @@ export function Containers({ containers, onNavigate, onRefresh, loading, error, 
         const join = (c: Container) => (c.tags || []).map((t) => t.name).join(" ").toLowerCase();
         cmp = join(a).localeCompare(join(b), "zh");
         if (cmp === 0) cmp = (a.tags?.length || 0) - (b.tags?.length || 0);
+      } else if (sortKey === "stack") {
+        const stackName = (c: Container) => stacks?.find((s) => s.id === c.stackId)?.name ?? "";
+        cmp = stackName(a).localeCompare(stackName(b), "zh");
       } else if (sortKey === "restartPolicy") {
         cmp = (RESTART_ORDER[a.restartPolicy] ?? 9) - (RESTART_ORDER[b.restartPolicy] ?? 9);
       }
@@ -354,7 +373,6 @@ export function Containers({ containers, onNavigate, onRefresh, loading, error, 
           <button onClick={() => batchAction("start")} className="flex items-center gap-1 text-sm text-slate-600 hover:text-blue-600"><Play size={14} /> 批量启动</button>
           <button onClick={() => batchAction("stop")} className="flex items-center gap-1 text-sm text-slate-600 hover:text-blue-600"><Square size={14} /> 批量停止</button>
           <button onClick={() => batchAction("restart")} className="flex items-center gap-1 text-sm text-slate-600 hover:text-blue-600"><RotateCw size={14} /> 批量重启</button>
-          <button onClick={() => setConfirmBatchDelete(true)} className="flex items-center gap-1 text-sm text-red-600 hover:text-red-700"><Trash2 size={14} /> 批量删除</button>
           <button onClick={() => setSelected(new Set())} className="ml-auto text-slate-400 hover:text-slate-600">
             <X size={16} />
           </button>
@@ -376,6 +394,7 @@ export function Containers({ containers, onNavigate, onRefresh, loading, error, 
               {visibleColumns.has("name") && <SortableTh label="容器名称" sortKey={sortKey} dir={sortDir} sortId="name" onSort={toggleSort} />}
               {visibleColumns.has("status") && <SortableTh label="状态" align="center" sortKey={sortKey} dir={sortDir} sortId="status" onSort={toggleSort} />}
               {visibleColumns.has("tags") && <SortableTh label="标签" align="center" sortKey={sortKey} dir={sortDir} sortId="tags" onSort={toggleSort} />}
+              {visibleColumns.has("stack") && <SortableTh label="堆栈" align="center" sortKey={sortKey} dir={sortDir} sortId="stack" onSort={toggleSort} />}
               {visibleColumns.has("image") && <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3">镜像</th>}
               {visibleColumns.has("ports") && <th className="text-center text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3">端口映射</th>}
               {visibleColumns.has("network") && <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3">网络模式</th>}
@@ -473,6 +492,23 @@ export function Containers({ containers, onNavigate, onRefresh, loading, error, 
                       </div>
                     </td>
                   )}
+                  {visibleColumns.has("stack") && (
+                    <td className="px-3 py-3">
+                      <div className="flex justify-center">
+                        {(() => {
+                          const stack = stacks?.find((s) => s.id === container.stackId);
+                          if (!stack) return <span className="text-xs text-slate-300">—</span>;
+                          const c = STACK_COLORS[stackColorIndex(stack.id)];
+                          return (
+                            <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium border ${c.badge}`}>
+                              <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${c.dot}`} />
+                              {stack.name}
+                            </span>
+                          );
+                        })()}
+                      </div>
+                    </td>
+                  )}
                   {visibleColumns.has("image") && <td className="px-3 py-3"><span className="text-sm text-slate-600 font-mono">{container.image}</span></td>}
                   {visibleColumns.has("ports") && (
                     <td className="px-3 py-3">
@@ -551,7 +587,9 @@ export function Containers({ containers, onNavigate, onRefresh, loading, error, 
           onClose={() => setDetailContainer(null)}
           engineId={engineId}
           onRefresh={onRefresh}
+          onRequestDelete={setConfirmDelete}
           presentation={containerDetailStyle}
+          defaultShell={stacks?.find((s) => s.id === activeContainer.stackId)?.webuiLabels?.find((l) => l.serviceName === activeContainer.name)?.defaultShell}
         />
       )}
 
@@ -563,17 +601,6 @@ export function Containers({ containers, onNavigate, onRefresh, loading, error, 
         title="删除容器"
         message="确定要删除此容器吗？此操作不可撤销，容器的数据卷不会被删除。"
         confirmText="删除"
-        danger
-      />
-
-      {/* Batch Delete Confirmation */}
-      <ConfirmDialog
-        open={confirmBatchDelete}
-        onClose={() => setConfirmBatchDelete(false)}
-        onConfirm={batchDelete}
-        title="批量删除容器"
-        message={`确定要删除选中的 ${selected.size} 个容器吗？此操作不可撤销，容器的数据卷不会被删除。`}
-        confirmText="批量删除"
         danger
       />
     </div>
@@ -665,7 +692,9 @@ function ContainerDetailModal({
   onClose,
   engineId,
   onRefresh,
+  onRequestDelete,
   presentation = "drawer",
+  defaultShell,
 }: {
   container: Container;
   tab: "info" | "logs" | "stats" | "terminal" | "file";
@@ -673,8 +702,12 @@ function ContainerDetailModal({
   onClose: () => void;
   engineId?: string;
   onRefresh?: () => void;
+  /** 请求删除容器（仅容器停止时由父级允许）：触发父级确认弹窗 */
+  onRequestDelete?: (id: string) => void;
   /** 展示形式：drawer = 半页面（默认）；modal = 居中弹窗 */
   presentation?: "drawer" | "modal";
+  /** LABELS 配置的默认 Shell（编辑堆栈 → LABELS），终端连接时优先使用 */
+  defaultShell?: string;
 }) {
   const [logs, setLogs] = useState<{ timestamp: string; level: string; message: string }[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
@@ -947,6 +980,18 @@ function ContainerDetailModal({
                 </button>
               </>
             )}
+            <button
+              onClick={() => onRequestDelete?.(container.id)}
+              disabled={container.status !== "stopped"}
+              title={container.status !== "stopped" ? "仅容器停止后才允许删除" : "删除容器"}
+              className={`flex items-center gap-1 px-3 py-1.5 text-sm rounded-lg transition-colors ${
+                container.status === "stopped"
+                  ? "text-white bg-red-500 hover:bg-red-600"
+                  : "text-slate-300 bg-slate-100 cursor-not-allowed"
+              }`}
+            >
+              <Trash2 size={14} /> 删除
+            </button>
             {container.webuiUrl && (
               <button
                 onClick={() => window.open(container.webuiUrl, "_blank")}
@@ -1177,6 +1222,7 @@ function ContainerDetailModal({
               engineId={engineId}
               containerId={container.id}
               containerName={container.name}
+              shell={defaultShell}
               fill
             />
           )}
@@ -1334,6 +1380,7 @@ function ContainerFileTab({
   };
 
   const onUploadClick = () => fileInputRef.current?.click();
+
   const onFilePicked = async (ev: React.ChangeEvent<HTMLInputElement>) => {
     const file = ev.target.files?.[0];
     if (!file) return;
@@ -1378,17 +1425,12 @@ function ContainerFileTab({
           ))}
         </div>
         <div className="flex items-center gap-1.5 flex-shrink-0">
+          {/* 新建：弹窗内选择新建文件或新建文件夹 */}
           <button
             onClick={() => { setCreateType("file"); setCreateName(""); setShowCreate(true); }}
             className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
           >
-            <FilePlus2 size={14} /> 新建文件
-          </button>
-          <button
-            onClick={() => { setCreateType("dir"); setCreateName(""); setShowCreate(true); }}
-            className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
-          >
-            <FolderPlus size={14} /> 新建文件夹
+            <Plus size={14} /> 新建
           </button>
           <button
             onClick={onUploadClick}
@@ -1460,7 +1502,7 @@ function ContainerFileTab({
         ))}
       </div>
 
-      <p className="text-xs text-slate-400">双击文件夹进入目录；双击文件查看/编辑；单击选中后可在右上角下载（目录会打包为 tar.gz）。</p>
+      <p className="text-xs text-slate-400">双击文件夹进入目录；双击文件查看/编辑；单击选中后可下载（目录会打包为 tar.gz）；「新建」弹窗内选择新建文件或新建文件夹。</p>
 
       {/* 文件编辑弹窗 */}
       <Modal open={!!editing} onClose={() => setEditing(null)} title={`编辑文件 · ${editing?.name || ""}`} size="xl">
@@ -1511,8 +1553,8 @@ function ContainerFileTab({
         )}
       </Modal>
 
-      {/* 新建弹窗 */}
-      <Modal open={showCreate} onClose={() => setShowCreate(false)} title={createType === "dir" ? "新建文件夹" : "新建文件"} size="sm">
+      {/* 新建弹窗：选择新建文件或新建文件夹 */}
+      <Modal open={showCreate} onClose={() => setShowCreate(false)} title="新建" size="sm">
         <div className="space-y-3">
           <div className="flex items-center gap-2">
             <button onClick={() => setCreateType("file")} className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-sm rounded-lg border ${createType === "file" ? "border-blue-300 bg-blue-50 text-blue-600" : "border-slate-200 text-slate-600"}`}>
@@ -1579,6 +1621,25 @@ function ContainerInfoTab({ container }: { container: Container }) {
             </div>
           ))}
           {container.ports.length === 0 && <span className="text-sm text-slate-400">无端口映射</span>}
+        </div>
+      </div>
+
+      {/* 持久化目录映射：bind = 宿主路径，volume = 命名卷（宿主侧显示卷名） */}
+      <div>
+        <h4 className="text-sm font-semibold text-slate-700 mb-2">持久化目录映射</h4>
+        <div className="bg-slate-50 rounded-lg p-3">
+          {container.volumes.map((v, i) => (
+            <div key={i} className="flex items-center gap-3 py-1 text-sm font-mono">
+              <span className="text-slate-600" title={v.type === "volume" ? `命名卷 ${v.hostPath}` : v.hostPath}>
+                {v.hostPath || "—"}
+              </span>
+              <span className="text-slate-400">→</span>
+              <span className="text-slate-600">{v.containerPath}</span>
+              <Tag text={v.type === "volume" ? "volume" : "bind"} color={v.type === "volume" ? "purple" : "blue"} />
+              <Tag text={v.mode} color={v.mode === "rw" ? "green" : "slate"} />
+            </div>
+          ))}
+          {container.volumes.length === 0 && <span className="text-sm text-slate-400">无目录映射</span>}
         </div>
       </div>
     </div>

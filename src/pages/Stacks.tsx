@@ -66,7 +66,7 @@ import { StatusBadge, Tag } from "../components/Badge";
 import { ContextMenu, type MenuItem } from "../components/ContextMenu";
 import { Modal, ConfirmDialog } from "../components/Modal";
 import { CmdOutputModal, useCmdOutput } from "../components/CmdOutputModal";
-import { Toggle, IconButton, EmptyState, FormField, Input, Select, SortableTh } from "../components/UI";
+import { IconButton, EmptyState, FormField, Input, Select, SortableTh } from "../components/UI";
 import { TagGroup, TagSelect } from "../components/TagPicker";
 import { LoadingState, ErrorState } from "../components/DataState";
 import { YamlEditor } from "../components/YamlEditor";
@@ -168,6 +168,8 @@ function validateSvgCode(raw: string): { code: string; bytes: number; error: str
  * 从 Compose YAML 内容中提取 services 下的服务信息。
  * - name：服务声明了 container_name 时优先返回 container_name（与实际 Docker 容器名一致，便于 WebUI Labels 与容器列表/图标联动）。
  * - hostPort：ports: 下第一行端口映射中的宿主机端口（英文冒号左侧，如 `8807:8080` → `8807`；兼容 `ip:hostPort:containerPort` 与 `hostPort:containerPort`）。
+ *   变量写法（v1.44.0）：`${VAR:-9443}` 取缺省值；`${VAR}` / `${VAR:-}` 从 envContent（.env）解析变量值；无法解析时不识别。
+ * - envContent：堆栈 .env 内容（可选），用于解析 `${VAR}` 类无缺省值的端口变量。
  */
 interface ComposeServiceInfo {
   name: string;
@@ -175,8 +177,22 @@ interface ComposeServiceInfo {
   hostPort?: string;
 }
 
-function parseComposeServices(composeContent: string): ComposeServiceInfo[] {
+function parseComposeServices(composeContent: string, envContent?: string): ComposeServiceInfo[] {
   if (!composeContent) return [];
+  // .env 变量表：KEY=VAL（容忍 export 前缀与成对引号）
+  const envVars: Record<string, string> = {};
+  if (envContent) {
+    for (const l of envContent.split("\n")) {
+      const t = l.trim();
+      if (!t || t.startsWith("#")) continue;
+      const eq = t.indexOf("=");
+      if (eq <= 0) continue;
+      const k = t.slice(0, eq).trim().replace(/^export\s+/, "");
+      let v = t.slice(eq + 1).trim();
+      if ((v.startsWith('"') && v.endsWith('"') && v.length >= 2) || (v.startsWith("'") && v.endsWith("'") && v.length >= 2)) v = v.slice(1, -1);
+      if (k) envVars[k] = v;
+    }
+  }
   const lines = composeContent.split("\n");
   const services: ComposeServiceInfo[] = [];
   let inServices = false;
@@ -192,7 +208,14 @@ function parseComposeServices(composeContent: string): ComposeServiceInfo[] {
   // 127.0.0.1:8807:8080 → 8807
   // 8080（仅容器端口）   → null
   const extractHostPort = (mapping: string): string | null => {
-    const parts = mapping.split(":");
+    // 变量展开（v1.44.0）：先替换 ${VAR:-def} / ${VAR} 再拆冒号——
+    // 否则 `${MGT_PORT:-9443}:1443` 会在 `${MGT_PORT:-9443}` 内部的冒号处被错误切分
+    const resolved = mapping.replace(
+      /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g,
+      (_all: string, name: string, def?: string) =>
+        def !== undefined && def !== "" ? def : (envVars[name] ?? "")
+    );
+    const parts = resolved.split(":");
     if (parts.length >= 2) {
       const cand = parts[parts.length - 2];
       if (cand && /^\d+$/.test(cand)) return cand;
@@ -309,13 +332,17 @@ interface StacksProps {
   defaultVisibleColumns?: string[];
   /** 容器子表默认可见列（来自系统设置 → 列显隐 → 容器子表）；控制弹窗内子表，与主页完全独立 */
   defaultSubColumns?: string[];
-  /** 操作结果弹窗自动关闭延迟（秒），来自系统设置 → 弹窗设置；0/未设 = 不自动关闭 */
+  /** 操作结果弹窗自动关闭延迟（秒），来自系统设置 → 页面设置；0/未设 = 不自动关闭 */
   autoCloseDelay?: number;
-  /** 一键填入模板（来自系统设置 → Compose 管理） */
+  /** 一键填入模板（来自系统设置 → 编辑堆栈） */
   composeTemplates?: ComposeTemplate[];
+  /** 编辑堆栈 LABELS 页是否自动识别 WebUI 端口/URL（来自系统设置 → 编辑堆栈；默认开） */
+  autoDetectWebui?: boolean;
+  /** 点击容器子表「状态」格回调（跳转容器详情，由 App 提供跨页导航） */
+  onOpenContainerDetail?: (containerName: string) => void;
 }
 
-export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLanguage = "zh", tagLibrary = [], defaultVisibleColumns, defaultSubColumns, autoCloseDelay = 5, composeTemplates = [] }: StacksProps) {
+export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLanguage = "zh", tagLibrary = [], defaultVisibleColumns, defaultSubColumns, autoCloseDelay = 5, composeTemplates = [], autoDetectWebui = true, onOpenContainerDetail }: StacksProps) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   // 排序：默认按堆栈名称升序；名称/状态/标签/容器数 列头可点击切换
@@ -757,7 +784,6 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
           <button onClick={() => handleBatchAction("up")} className="flex items-center gap-1 text-sm text-slate-600 hover:text-blue-600 disabled:opacity-50" disabled={!!batchOperating}><Play size={14} /> 批量启动</button>
           <button onClick={() => handleBatchAction("down")} className="flex items-center gap-1 text-sm text-slate-600 hover:text-blue-600 disabled:opacity-50" disabled={!!batchOperating}><Square size={14} /> 批量停止</button>
           <button onClick={() => handleBatchAction("restart")} className="flex items-center gap-1 text-sm text-slate-600 hover:text-blue-600 disabled:opacity-50" disabled={!!batchOperating}><RotateCw size={14} /> 批量重启</button>
-          <button onClick={() => handleBatchAction("pull")} className="flex items-center gap-1 text-sm text-slate-600 hover:text-blue-600 disabled:opacity-50" disabled={!!batchOperating}><RefreshCw size={14} /> 批量更新</button>
           <button onClick={() => handleBatchAction("delete")} className="flex items-center gap-1 text-sm text-red-600 hover:text-red-700 disabled:opacity-50" disabled={!!batchOperating}>{batchOperating === "delete" ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />} 批量删除</button>
           <button onClick={() => setSelected(new Set())} className="ml-auto text-slate-400 hover:text-slate-600">
             <X size={16} />
@@ -888,7 +914,7 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
       )}
 
       {/* Stack Editor Modal */}
-      {editStack && <StackEditorModal stack={editStack} onClose={() => setEditStack(null)} engineId={engineId} onRefresh={onRefresh} tagLibrary={tagLibrary} composeTemplates={composeTemplates} />}
+      {editStack && <StackEditorModal stack={editStack} onClose={() => setEditStack(null)} engineId={engineId} onRefresh={onRefresh} tagLibrary={tagLibrary} composeTemplates={composeTemplates} autoDetectWebui={autoDetectWebui} />}
 
       {/* Create Stack Modal */}
       {createMode && <CreateStackModal onClose={() => setCreateMode(false)} engineId={engineId} onRefresh={onRefresh} />}
@@ -911,6 +937,7 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
           onContainerContextMenu={(e, stack, container) =>
             setContextMenu({ x: e.clientX, y: e.clientY, stack, container })
           }
+          onOpenContainerDetail={onOpenContainerDetail ? (container) => onOpenContainerDetail(container.name) : undefined}
         />
       )}
 
@@ -1153,7 +1180,13 @@ function insertTemplateBlock(
   return { next: lines.join("\n"), ok: true };
 }
 
-function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = [], composeTemplates = [] }: { stack: Stack; onClose: () => void; engineId?: string; onRefresh?: () => void; tagLibrary?: ResourceTag[]; composeTemplates?: ComposeTemplate[] }) {
+// 堆栈名称合法字符集：小写字母 / 数字 / 横线 / 下划线（与 Docker Compose 项目名规范一致）
+// 中文、大写、空格等会被 Compose 强制改写（中文→"-"）并产生歧义，故前端直接拦在提交前
+const STACK_NAME_RE = /^[a-z0-9_-]+$/;
+const isValidStackName = (name: string) => STACK_NAME_RE.test(name);
+const STACK_NAME_HINT = "堆栈名称只能包含小写字母、数字、横线(-)和下划线(_)";
+
+function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = [], composeTemplates = [], autoDetectWebui = true }: { stack: Stack; onClose: () => void; engineId?: string; onRefresh?: () => void; tagLibrary?: ResourceTag[]; composeTemplates?: ComposeTemplate[]; autoDetectWebui?: boolean }) {
   const [activeTab, setActiveTab] = useState<"compose" | "env" | "webui" | "settings">("compose");
   const [composeContent, setComposeContent] = useState(stack.composeContent);
   const [envContent, setEnvContent] = useState(stack.envContent || "");
@@ -1163,6 +1196,8 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  /** 堆栈名称非法（含中文/大写/空格等）时标红并禁用保存；空值另由必填逻辑拦 */
+  const nameInvalid = settings.name.length > 0 && !isValidStackName(settings.name);
   /** 一键填入模板面板的瞬时提示（同名跳过 / 结构错误原因） */
   const [tplHint, setTplHint] = useState<string | null>(null);
   /** 编辑器光标所在行（0-based；null = 用户尚未在编辑器中点击过） */
@@ -1225,38 +1260,54 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
     { key: "settings", label: "SETTINGS", icon: <SettingsIcon size={14} /> },
   ];
 
-  // 切换到 Web UI Labels Tab 时，自动识别 compose 中的服务并补全缺失条目
-  const autoDetectedRef = useRef(false);
+  // 切换到 Web UI Labels Tab 时，自动识别 compose 中的服务并补全缺失条目；
+  // 自动识别出的条目即时落盘，使容器管理的「打开 WebUI」无需手动点「应用」即可生效
+  const webuiLabelsRef = useRef(webuiLabels);
+  webuiLabelsRef.current = webuiLabels;
+
   useEffect(() => {
     if (activeTab !== "webui") return;
-    const services = parseComposeServices(composeContent);
+    // 设置中心 → 编辑堆栈：自动识别开关关闭时不补全（v1.44.0）
+    if (!autoDetectWebui) return;
+    const services = parseComposeServices(composeContent, envContent);
     if (services.length === 0) return;
 
-    setWebuiLabels((prev) => {
-      // 已自动检测过且用户没有新增/删除服务，跳过
-      const existingNames = new Set(prev.map((l) => l.serviceName).filter(Boolean));
-      const missing = services.filter((s) => !existingNames.has(s.name));
-      if (missing.length === 0) return prev; // 无需补全
+    const prev = webuiLabelsRef.current;
+    const existingNames = new Set(prev.map((l) => l.serviceName).filter(Boolean));
+    // 只补全识别到宿主机端口的服务：未声明 ports 的服务无法给出 WebUI 地址，不进 LABELS（v1.44.0）
+    const missing = services.filter((s) => !existingNames.has(s.name) && s.hostPort);
+    if (missing.length === 0) return; // 无需补全
 
-      // WebUI URL 默认 = 地址栏 scheme://hostname : 识别到的宿主机端口
-      const base = `${window.location.protocol}//${window.location.hostname}`;
-      // 只追加缺失的服务，保留已有配置（自动填入宿主机端口与 WebUI 地址）
-      return [
-        ...prev,
-        ...missing.map((s) => ({
-          serviceName: s.name,
-          iconUrl: "",
-          webuiPort: s.hostPort || "",
-          webuiUrl: s.hostPort ? `${base}:${s.hostPort}` : "",
-          defaultShell: "/bin/sh",
-          tags: [],
-        })),
-      ];
-    });
-    autoDetectedRef.current = true;
-  }, [activeTab, composeContent]);
+    // WebUI URL 默认 = 地址栏 scheme://hostname : 识别到的宿主机端口
+    const base = `${window.location.protocol}//${window.location.hostname}`;
+    // 只追加缺失的服务，保留已有配置（自动填入宿主机端口与 WebUI 地址）
+    const next = [
+      ...prev,
+      ...missing.map((s) => ({
+        serviceName: s.name,
+        description: "",
+        iconUrl: "",
+        webuiPort: s.hostPort || "",
+        webuiUrl: s.hostPort ? `${base}:${s.hostPort}` : "",
+        defaultShell: "/bin/sh",
+        tags: [],
+      })),
+    ];
+    setWebuiLabels(next);
+    // 自动识别即落盘：否则容器管理「打开 WebUI」需等用户手动「应用」才生效
+    if (engineId) {
+      saveStackSettingsApi(engineId, stack.name, { webuiLabels: next })
+        .then(() => onRefresh?.())
+        .catch(() => { /* 落盘失败不影响本地展示 */ });
+    }
+  }, [activeTab, composeContent, envContent, engineId, stack.name, onRefresh, autoDetectWebui]);
 
   const handleSave = async () => {
+    // 堆栈名称非法（中文/大写/空格等）或为空：直接拦下，避免落盘后被 Compose 改写产生歧义
+    if (!settings.name.trim() || !isValidStackName(settings.name)) {
+      setSaveError("堆栈名称不合法：" + STACK_NAME_HINT);
+      return;
+    }
     if (!engineId || saving) return;
     setSaving(true);
     setSaveError(null);
@@ -1384,7 +1435,7 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
       open={true}
       onClose={onClose}
       size="full"
-      dismissable
+      dismissable={false}
       bodyClassName="flex-1 min-h-0 flex flex-col overflow-hidden"
     >
         {/* Header */}
@@ -1446,7 +1497,7 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
                   onCursorLineChange={(l) => setCaretLine((prev) => (prev === l ? prev : l))}
                   placeholder={"services:\n  web:\n    restart: unless-stopped\n    ports:\n      - \"8080:80\"\n    image: nginx:alpine"}
                 />
-                {/* 右：一键填入模板面板（系统设置 → Compose 管理 配置） */}
+                {/* 右：一键填入模板面板（系统设置 → 编辑堆栈 配置） */}
                 {composeTemplates.length > 0 && (
                   <div className="w-52 shrink-0 flex flex-col border border-slate-200 rounded-lg bg-slate-50/60 overflow-hidden">
                     <div className="px-3 py-2 border-b border-slate-100 text-xs font-semibold text-slate-500">
@@ -1533,7 +1584,7 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
                   <p className="text-xs text-slate-400 mt-0.5">自动识别 Compose 中的服务，为每个服务配置 WebUI 访问地址和图标</p>
                 </div>
                 <button
-                  onClick={() => setWebuiLabels([...webuiLabels, { serviceName: "", iconUrl: "", webuiPort: "", webuiUrl: "", defaultShell: "/bin/sh", tags: [] }])}
+                  onClick={() => setWebuiLabels([...webuiLabels, { serviceName: "", description: "", iconUrl: "", webuiPort: "", webuiUrl: "", defaultShell: "/bin/sh", tags: [] }])}
                   className="flex items-center gap-1 px-3 py-1.5 text-sm text-white bg-blue-500 rounded-lg hover:bg-blue-600"
                 >
                   <Plus size={14} /> 添加服务
@@ -1541,7 +1592,7 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
               </div>
               {/* 服务自动识别状态条：实时从 Compose 内容解析 */}
               {(() => {
-                const detected = parseComposeServices(composeContent);
+                const detected = parseComposeServices(composeContent, envContent);
                 if (detected.length === 0) {
                   return (
                     <div className="flex items-center gap-2 px-3 py-2 mb-4 bg-amber-50 border border-amber-100 rounded-lg">
@@ -1551,7 +1602,8 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
                   );
                 }
                 const configured = new Set(webuiLabels.map((l) => l.serviceName).filter(Boolean));
-                const missing = detected.filter((s) => !configured.has(s.name));
+                // 「将自动补全」只针对识别到宿主机端口的服务；未声明 ports 的服务不会自动进 LABELS（v1.44.0）
+                const missing = detected.filter((s) => !configured.has(s.name) && s.hostPort);
                 return (
                   <div className="flex items-center gap-2 flex-wrap px-3 py-2 mb-4 bg-blue-50 border border-blue-100 rounded-lg">
                     <CheckCircle2 size={14} className="text-blue-500 flex-shrink-0" />
@@ -1680,10 +1732,6 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
                           ]}
                         />
                       </FormField>
-                    </div>
-
-                    {/* 标签：为每个服务（对应容器）打上全局标签库中的彩色标签 */}
-                    <div className="mt-3">
                       <FormField label="标签">
                         <TagSelect
                           library={tagLibrary}
@@ -1695,6 +1743,17 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
                           }}
                           placeholder="选择标签（容器管理/堆栈管理列表将同步显示）"
                         />
+                      </FormField>
+                    </div>
+
+                    {/* 描述：样式与位置对齐 SETTINGS 页的描述（v1.44.1，标签已移至默认 Shell 右侧） */}
+                    <div className="mt-3">
+                      <FormField label="描述">
+                        <Input value={label.description || ""} onChange={(val) => {
+                          const next = [...webuiLabels];
+                          next[i] = { ...label, description: val };
+                          setWebuiLabels(next);
+                        }} placeholder="服务的用途说明（可选）" />
                       </FormField>
                     </div>
                   </div>
@@ -1710,7 +1769,14 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
             <div className="p-6 space-y-5">
               <div className="grid grid-cols-2 gap-4">
                 <FormField label="堆栈名称" required>
-                  <Input value={settings.name} onChange={(val) => setSettings({ ...settings, name: val })} />
+                  <div>
+                    <Input
+                      value={settings.name}
+                      onChange={(val) => setSettings({ ...settings, name: val })}
+                      className={nameInvalid ? "!border-red-400 focus:!border-red-400 focus:!ring-red-500/20" : ""}
+                    />
+                    {nameInvalid && <p className="text-[11px] text-red-500 mt-1">{STACK_NAME_HINT}</p>}
+                  </div>
                 </FormField>
                 <FormField label="图标">
                   {isInlineSvgIcon(settings.iconUrl) ? (
@@ -1779,26 +1845,6 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
               <FormField label="描述">
                 <Input value={settings.description} onChange={(val) => setSettings({ ...settings, description: val })} />
               </FormField>
-
-              <div className="bg-slate-50 rounded-lg p-4 border border-slate-100 space-y-3">
-                <h4 className="text-sm font-semibold text-slate-700">自动更新</h4>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-slate-600">启用自动更新检查</span>
-                  <Toggle active={settings.autoUpdateEnabled} onChange={(val) => setSettings({ ...settings, autoUpdateEnabled: val })} />
-                </div>
-                {settings.autoUpdateEnabled && (
-                  <FormField label="更新方式">
-                    <Select
-                      value={settings.autoUpdateMode}
-                      onChange={(val) => setSettings({ ...settings, autoUpdateMode: val as any })}
-                      options={[
-                        { value: "notify", label: "仅通知" },
-                        { value: "auto", label: "自动拉取并更新" },
-                      ]}
-                    />
-                  </FormField>
-                )}
-              </div>
             </div>
           )}
         </div>
@@ -1825,14 +1871,14 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
             {saving && <Loader2 size={14} className="animate-spin text-blue-500" />}
             <button
               onClick={async () => { await handleSave(); onClose(); }}
-              disabled={saving}
+              disabled={saving || nameInvalid || !settings.name.trim()}
               className="px-4 py-1.5 text-xs font-semibold tracking-wider text-white bg-green-600 rounded hover:bg-green-700 disabled:opacity-50"
             >
               确定
             </button>
             <button
               onClick={handleSave}
-              disabled={saving}
+              disabled={saving || nameInvalid || !settings.name.trim()}
               className="px-4 py-1.5 text-xs font-semibold tracking-wider text-white bg-blue-500 rounded hover:bg-blue-600 disabled:opacity-50"
             >
               应用
@@ -1927,6 +1973,9 @@ function CreateStackModal({ onClose, engineId, onRefresh }: { onClose: () => voi
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [yamlValid, setYamlValid] = useState(true);
+  // 堆栈名称非法（中文/大写/空格等）：标红 + 禁用「创建」；空值另由必填逻辑拦
+  const nameInvalid = stackName.length > 0 && !isValidStackName(stackName);
+  const nameBorderCls = nameInvalid ? "!border-red-400 focus:!border-red-400 focus:!ring-red-500/20" : "";
   // 从堆栈备份初始化：选中的堆栈备份 zip + 隐藏 file input
   const [backupFile, setBackupFile] = useState<File | null>(null);
   const backupInputRef = useRef<HTMLInputElement>(null);
@@ -1965,7 +2014,8 @@ function CreateStackModal({ onClose, engineId, onRefresh }: { onClose: () => voi
     setCreateError(null);
     const derived = file.name
       .replace(/\.[^.]*$/, "")
-      .replace(/[^A-Za-z0-9_-]+/g, "-")
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, "-")
       .replace(/^-+|-+$/g, "");
     if (derived) setStackName((prev) => (prev.trim() ? prev : derived));
   };
@@ -2014,6 +2064,7 @@ function CreateStackModal({ onClose, engineId, onRefresh }: { onClose: () => voi
 
   const handleCreate = async () => {
     if (!stackName.trim()) { setCreateError("请输入堆栈名称"); return; }
+    if (!isValidStackName(stackName.trim())) { setCreateError("堆栈名称不合法：" + STACK_NAME_HINT); return; }
     if (!composeContent.trim()) { setCreateError("compose 文件内容不能为空"); return; }
     if (!engineId) { setCreateError("未选择 Docker 引擎"); return; }
     setCreating(true);
@@ -2032,6 +2083,7 @@ function CreateStackModal({ onClose, engineId, onRefresh }: { onClose: () => voi
   /** 从上传的堆栈备份 zip 初始化新堆栈（名称用于避免与现有堆栈冲突） */
   const handleCreateFromBackup = async () => {
     if (!stackName.trim()) { setCreateError("请输入堆栈名称"); return; }
+    if (!isValidStackName(stackName.trim())) { setCreateError("堆栈名称不合法：" + STACK_NAME_HINT); return; }
     if (!backupFile) { setCreateError("请选择堆栈备份文件（.zip）"); return; }
     if (!engineId) { setCreateError("未选择 Docker 引擎"); return; }
     setCreating(true);
@@ -2075,7 +2127,10 @@ function CreateStackModal({ onClose, engineId, onRefresh }: { onClose: () => voi
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <FormField label="堆栈名称" required>
-                <Input value={stackName} onChange={setStackName} placeholder="如: my-new-stack" disabled={creating} />
+                <div>
+                  <Input value={stackName} onChange={setStackName} placeholder="如: my-new-stack" disabled={creating} className={nameBorderCls} />
+                  {nameInvalid && <p className="text-[11px] text-red-500 mt-1">{STACK_NAME_HINT}</p>}
+                </div>
               </FormField>
               <FormField label="描述">
                 <Input value={stackDescription} onChange={setStackDescription} placeholder="简要描述堆栈用途" disabled={creating} />
@@ -2100,7 +2155,10 @@ function CreateStackModal({ onClose, engineId, onRefresh }: { onClose: () => voi
         {method === "upload" && (
           <div className="space-y-3">
             <FormField label="堆栈名称" required>
-              <Input value={stackName} onChange={setStackName} placeholder="如: my-new-stack" disabled={creating} />
+              <div>
+                <Input value={stackName} onChange={setStackName} placeholder="如: my-new-stack" disabled={creating} className={nameBorderCls} />
+                {nameInvalid && <p className="text-[11px] text-red-500 mt-1">{STACK_NAME_HINT}</p>}
+              </div>
             </FormField>
             <FormField label="描述">
               <Input value={stackDescription} onChange={setStackDescription} placeholder="简要描述堆栈用途" disabled={creating} />
@@ -2170,7 +2228,10 @@ function CreateStackModal({ onClose, engineId, onRefresh }: { onClose: () => voi
         {method === "fromBackup" && (
           <div className="space-y-3">
             <FormField label="新堆栈名称" required>
-              <Input value={stackName} onChange={setStackName} placeholder="如: my-restored-stack" disabled={creating} />
+              <div>
+                <Input value={stackName} onChange={setStackName} placeholder="如: my-restored-stack" disabled={creating} className={nameBorderCls} />
+                {nameInvalid && <p className="text-[11px] text-red-500 mt-1">{STACK_NAME_HINT}</p>}
+              </div>
             </FormField>
             <FormField
               label="堆栈备份文件"
@@ -2303,7 +2364,7 @@ function CreateStackModal({ onClose, engineId, onRefresh }: { onClose: () => voi
         {method !== "convert" && (
           <button
             onClick={method === "fromBackup" ? handleCreateFromBackup : handleCreate}
-            disabled={creating || !stackName.trim() || (method === "fromBackup" ? !backupFile : !composeContent.trim())}
+            disabled={creating || !stackName.trim() || nameInvalid || (method === "fromBackup" ? !backupFile : !composeContent.trim())}
             className="px-4 py-2 text-sm text-white bg-blue-500 rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
           >
             {creating ? (

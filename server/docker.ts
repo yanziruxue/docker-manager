@@ -11,7 +11,7 @@ import { COMPOSE_DIR } from "./paths.js";
 import { getSettings } from "./settings.js";
 import { getImageLocks, isImageLocked, pruneStaleLocks, normalizeId, type ImageLock } from "./image-locks.js";
 import { notify } from "./notify.js";
-import { resolveBackupDir, backupFilePath, runTar, copyTree } from "./backup.js";
+import { resolveBackupDir, backupFilePath, runTar, copyTree, BACKUP_NAME_PREFIX, tsCompact } from "./backup.js";
 import { zipDirectory, extractZip } from "./zip.js";
 
 /**
@@ -92,7 +92,7 @@ function dockerCliEnv(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
   if (!env.DOCKER_CONFIG) {
     try {
-      const dir = path.join(os.tmpdir(), "docker-manager-yanzi-docker-config");
+      const dir = path.join(os.tmpdir(), "dockermanagementyanzi-docker-config");
       fs.mkdirSync(dir, { recursive: true });
       env.DOCKER_CONFIG = dir;
     } catch {
@@ -1582,6 +1582,15 @@ export async function createContainerEntry(
   if (r.exitCode !== 0) throw new Error(`创建${type === "dir" ? "目录" : "文件"}失败：${r.stderr || "未知错误"}`);
 }
 
+/** exec 失败 stderr 转译：bind mount 挂载点在容器内 mv/rm 必然 EBUSY（内核限制），转成可操作的人话 */
+function translatePathExecError(op: string, stderr: string): string {
+  const s = (stderr || "").toLowerCase();
+  if (s.includes("resource busy") || s.includes("device or resource busy") || s.includes("ebusy")) {
+    return `${op}失败：该路径是容器的挂载点（bind mount），内核不允许在容器内${op}它。请在宿主机上对源路径${op}，或修改容器的挂载配置后重建容器。`;
+  }
+  return `${op}失败：${stderr || "未知错误"}`;
+}
+
 /** 重命名/移动容器内路径（oldPath -> newPath，均容器内绝对路径）。 */
 export async function renameContainerPath(
   engine: DockerEngine,
@@ -1594,7 +1603,7 @@ export async function renameContainerPath(
   const b = normalizeContainerPath(newPath);
   const script = `mv -- "$1" "$2"`;
   const r = await execInContainer(engine, containerId, script, { scriptArgs: ["_", a, b], timeoutMs: 15000 });
-  if (r.exitCode !== 0) throw new Error(`重命名失败：${r.stderr || "未知错误"}`);
+  if (r.exitCode !== 0) throw new Error(translatePathExecError("重命名", r.stderr));
 }
 
 /** 删除容器内路径（递归）。UI 层需二次确认。 */
@@ -1607,7 +1616,7 @@ export async function removeContainerPath(
   const p = normalizeContainerPath(targetPath);
   const script = `rm -rf -- "$1"`;
   const r = await execInContainer(engine, containerId, script, { scriptArgs: ["_", p], timeoutMs: 20000 });
-  if (r.exitCode !== 0) throw new Error(`删除失败：${r.stderr || "未知错误"}`);
+  if (r.exitCode !== 0) throw new Error(translatePathExecError("删除", r.stderr));
 }
 
 /** 修改容器内路径权限（mode 透传，如 `644` / `u+x`）。 */
@@ -1781,6 +1790,11 @@ export async function getStacks(engine: DockerEngine): Promise<any[]> {
 
       return {
         name: serviceName,
+        // 真实容器标识（v1.43.29）：compose 允许 container_name 自定义容器名
+        // （如 safeline 项目服务 detect → 容器 safeline-detector），仅靠服务名
+        // 推断会让容器页「堆栈」列匹配失败；带出短 id 与真实容器名供前端精确匹配
+        containerId: (c.Id || "").slice(0, 12),
+        containerName: (c.Names?.[0] || "").replace(/^\//, ""),
         image: image,
         tag: tag,
         status: c.State === "running" ? "running" : "stopped",
@@ -2413,8 +2427,8 @@ export async function backupStack(
 
   const backupsDir = resolveBackupDir();
 
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-  const backupName = `${stackName}_${timestamp}.zip`;
+  // 命名规则（v1.41.5）：dockermanagementyanzi_<堆栈名>_YYYYMMDD_HHMMSS.zip
+  const backupName = `${BACKUP_NAME_PREFIX}_${stackName}_${tsCompact()}.zip`;
 
   // 归档内以「堆栈名」为顶层目录（与旧 tar 行为的 <stackName>/... 保持一致），
   // 恢复时解压回 COMPOSE_DIR 即得 COMPOSE_DIR/<stackName>/...
@@ -3191,34 +3205,42 @@ interface NetSnapshot {
 const lastNetSnapshot = new Map<string, NetSnapshot>();
 
 /**
- * 宿主机各核 CPU 使用率快照（仅「本机 socket 引擎」有意义，供仪表盘 CPU 多核环形图）。
- * /proc/stat 是自开机以来的累计值，必须与上次采样差分；首次采样无基线 → 各核 0。
- * 远程引擎（tcp/ssh）读不到对端 /proc/stat，返回空数组，前端回退为单环进度。
+ * 宿主机 CPU 快照（仅「本机 socket 引擎」有意义，供仪表盘 CPU 磁贴两段口径）。
+ * - cores：各物理核使用率（与上次采样差分），首采无基线 → 各核 0
+ * - hostPercent：整机聚合行（`cpu `）差分使用率（0–100%），首采无基线 → null
+ * /proc/stat 是自开机以来的累计值，必须与上次采样差分；聚合行与逐核行**同一次读取**，
+ * 避免两次读把时间基准挪到帧中间（与 `sampleHostDisks` 不复用是一个坑）。
+ * 远程引擎（tcp/ssh）读不到对端 /proc/stat ⇒ cores 为空、hostPercent 为 null，
+ * 前端据此回退为旧的「单条整体负载」展示。
  */
 interface CpuCoreSnapshot {
   total: number;
   busy: number;
 }
-const lastCpuCoreSnapshot = new Map<string, { ts: number; cores: Map<string, CpuCoreSnapshot> }>();
+const lastCpuSnapshot = new Map<string, { ts: number; cores: Map<string, CpuCoreSnapshot>; total: CpuCoreSnapshot | null }>();
 
-function sampleHostCpuCores(engineId: string): { name: string; percent: number }[] {
+function sampleHostCpu(engineId: string): { cores: { name: string; percent: number }[]; hostPercent: number | null } {
   let text = "";
   try {
     text = fs.readFileSync("/proc/stat", "utf8");
   } catch {
-    return [];
+    return { cores: [], hostPercent: null };
   }
   const cur = new Map<string, CpuCoreSnapshot>();
+  let agg: CpuCoreSnapshot | null = null;
   for (const line of text.split("\n")) {
-    if (!/^cpu\d+\s/.test(line)) continue;
+    // 聚合行「cpu 」与逐核行「cpuN 」都要：整机负荷用聚合行，各核横条用逐核行
+    if (!/^cpu(\d+\s|\s)/.test(line)) continue;
     const parts = line.trim().split(/\s+/);
     const nums = parts.slice(1).map((n) => Number(n) || 0);
     const total = nums.reduce((a, b) => a + b, 0);
     const idle = (nums[3] || 0) + (nums[4] || 0); // idle + iowait
-    cur.set(parts[0], { total, busy: total - idle });
+    const snap: CpuCoreSnapshot = { total, busy: total - idle };
+    if (parts[0] === "cpu") agg = snap;
+    else cur.set(parts[0], snap);
   }
-  if (cur.size === 0) return [];
-  const prev = lastCpuCoreSnapshot.get(engineId);
+  if (cur.size === 0 && !agg) return { cores: [], hostPercent: null };
+  const prev = lastCpuSnapshot.get(engineId);
   const out: { name: string; percent: number }[] = [];
   let idx = 0;
   for (const [key, c] of cur) {
@@ -3234,8 +3256,17 @@ function sampleHostCpuCores(engineId: string): { name: string; percent: number }
     out.push({ name: `核心${idx + 1}`, percent: Math.round(percent * 10) / 10 });
     idx++;
   }
-  lastCpuCoreSnapshot.set(engineId, { ts: Date.now(), cores: cur });
-  return out;
+  // 整机聚合行：同样差分；首采无基线 → null（前端回落旧的单条展示）
+  let hostPercent: number | null = null;
+  if (agg && prev?.total) {
+    const dTotal = agg.total - prev.total.total;
+    const dBusy = agg.busy - prev.total.busy;
+    if (dTotal > 0) {
+      hostPercent = Math.round(Math.max(0, Math.min(100, (dBusy / dTotal) * 100)) * 10) / 10;
+    }
+  }
+  lastCpuSnapshot.set(engineId, { ts: Date.now(), cores: cur, total: agg });
+  return { cores: out, hostPercent };
 }
 
 /* ============ 宿主机内存 / 磁盘 / 资源时间序列（仅本机 socket 引擎可取真实值） ============ */
@@ -3295,6 +3326,11 @@ export interface ResourceSample {
   netTxKBps: number;
   /** 运行容器 CPU 合计（%），与 stats.cpuPercent 同源，供仪表盘「整体负载曲线」 */
   cpuPercent: number;
+  /**
+   * 宿主机整机 CPU 使用率（%，/proc/stat 聚合行 `cpu ` 差分）：仅本机 socket 引擎有值；
+   * 远程引擎 / 首采无基线为 undefined（前端回落旧展示；曲线沿用上一个有效值）。
+   */
+  hostCpuPercent?: number;
   /**
    * 逐网口速率（KB/s）：键 = 网口名（含 Docker 网桥 docker0 / br-xxxx）。
    * 仅本机 socket 引擎可读 /proc/net/dev；远程引擎为 undefined（前端回退到合计口径）。
@@ -3813,8 +3849,11 @@ export async function getEngineResourceStats(engine: DockerEngine): Promise<any>
   lastNetSnapshot.set(engine.id, { ts: now, rxKB: netRxKB, txKB: netTxKB });
 
   const isLocal = engine.connectionType === "socket";
-  // 各核 CPU 使用率：仅本机 socket 引擎可读 /proc/stat；远程引擎为空
-  const cpuCores = isLocal ? sampleHostCpuCores(engine.id) : [];
+  // 各核 CPU 使用率 + 宿主机整机负荷：仅本机 socket 引擎可读 /proc/stat；远程引擎为空 / null
+  const hostCpu = isLocal ? sampleHostCpu(engine.id) : { cores: [] as { name: string; percent: number }[], hostPercent: null as number | null };
+  const cpuCores = hostCpu.cores;
+  // 宿主机整机 CPU%（/proc/stat 聚合行差分）：仅本机引擎有值；远程引擎为 null ⇒ 前端回落旧展示
+  const hostCpuPercent = hostCpu.hostPercent;
   // 宿主机磁盘利用率：仅本机引擎可读 /proc/diskstats
   const disks = isLocal ? sampleHostDisks(engine.id) : [];
   // 各网口实时速率：仅本机 socket 引擎可读 /proc/net/dev（同时覆盖物理网口与 Docker 网桥虚拟网卡）
@@ -3887,6 +3926,8 @@ export async function getEngineResourceStats(engine: DockerEngine): Promise<any>
     netRxKBps: round1(netRxKBps),
     netTxKBps: round1(netTxKBps),
     cpuPercent: Math.round(cpuPercent * 100) / 100,
+    // 宿主机整机 CPU%：仅本机引擎有值（远程 / 首采无基线为 undefined，前端回落旧展示）
+    hostCpuPercent: hostCpuPercent ?? undefined,
     // 逐网口速率只在有值时带上：远程引擎保持 undefined（前端回退到合计口径）
     netIfaces: netIfaces.length > 0 ? netIfacesMap : undefined,
     // 逐磁盘速率同理：远程引擎保持 undefined（前端显示「无曲线」）
@@ -3903,6 +3944,8 @@ export async function getEngineResourceStats(engine: DockerEngine): Promise<any>
     runningContainers: (running as any[]).length,
     sampledContainers: sampled,
     cpuCores,
+    /** 宿主机整机 CPU 使用率（%，/proc/stat 聚合行 `cpu ` 差分）：仅本机 socket 引擎有值；远程引擎 / 首采无基线为 null */
+    hostCpuPercent,
     disks,
     cpuPercent: Math.round(cpuPercent * 100) / 100,
     cpuMaxPercent: ncpu * 100,
@@ -3988,51 +4031,115 @@ export async function getActivityLogs(engine: DockerEngine): Promise<any[]> {
       });
     }
 
-    // 按时间倒序，取最近 20 条
+    // 按时间倒序，取最近 100 条
     activities.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-    return activities.slice(0, 20);
+    return activities.slice(0, 100);
   } catch {
     return [];
   }
 }
 
 /**
- * 在容器中创建 exec 并返回可交互的 stream
+ * 探测容器内 shell 是否真实存在。
+ * container.exec() 创建时不校验二进制存在性（必然成功），OCI "exec failed" 错误
+ * 在 start 之后的流里异步出现 —— 因此必须用 `exit 0` 探针 + 退出码判定。
+ */
+async function probeShellExists(container: any, shell: string): Promise<boolean> {
+  let probe: any = null;
+  try {
+    probe = await withTimeout(
+      container.exec({
+        Cmd: [shell, "-c", "exit 0"],
+        AttachStdout: true,
+        AttachStderr: true,
+        User: "root",
+      }),
+      5000
+    );
+    const stream = await withTimeout(
+      new Promise((resolve, reject) => {
+        probe.start({ hijack: true, stdin: false }, (err: any, s: any) => {
+          if (err) reject(err);
+          else resolve(s);
+        });
+      }),
+      5000
+    );
+    // 探针进程立即退出：等流结束（3s 兜底）后查退出码
+    await new Promise<void>((resolve) => {
+      const done = () => resolve();
+      (stream as any)?.on?.("end", done);
+      (stream as any)?.on?.("close", done);
+      setTimeout(done, 3000);
+    });
+    const info = await withTimeout(
+      new Promise((resolve, reject) => {
+        probe.inspect((err: any, d: any) => (err ? reject(err) : resolve(d)));
+      }),
+      5000
+    );
+    return (info as any)?.ExitCode === 0;
+  } catch {
+    return false;
+  } finally {
+    try { (probe as any)?.abort?.(); } catch { /* ignore */ }
+  }
+}
+
+/**
+ * 在容器中创建 exec 并返回可交互的 stream。
+ * @param preferredShell 首选 shell（LABELS 配置的默认 Shell，经 WS 传入）；须为容器内绝对路径格式
  */
 export async function attachContainerTerminal(
   engine: DockerEngine,
-  containerId: string
+  containerId: string,
+  preferredShell?: string
 ): Promise<{ stream: any; execId: string; cleanup: () => void }> {
   const docker = getDocker(engine);
   const container = docker.getContainer(containerId);
 
-  // 尝试常见的 shell
-  const shells = ["/bin/bash", "/bin/sh", "/bin/ash"];
-  let exec: any = null;
-  let lastError: any = null;
+  // 候选 shell：LABELS 配置优先 → 镜像默认 shell（Alpine=/bin/sh、Debian=/bin/bash）→ 常见 shell 兜底去重
+  const candidates: string[] = [];
+  // 安全：只接受容器内绝对路径格式的 shell（防注入任意 Cmd）
+  if (preferredShell && /^\/[A-Za-z0-9/._-]+$/.test(preferredShell)) {
+    candidates.push(preferredShell);
+  }
+  try {
+    const info = await withTimeout(container.inspect(), 5000);
+    const imageName = info?.Config?.Image;
+    if (imageName) {
+      const img = await withTimeout(docker.getImage(imageName).inspect(), 5000) as any;
+      const s = img?.Config?.Shell?.[0];
+      if (s && !candidates.includes(s)) candidates.push(s);
+    }
+  } catch { /* 镜像 inspect 失败不影响回退链 */ }
+  for (const s of ["/bin/bash", "/bin/sh", "/bin/ash"]) {
+    if (!candidates.includes(s)) candidates.push(s);
+  }
 
-  for (const shell of shells) {
-    try {
-      exec = await withTimeout(
-        container.exec({
-          Cmd: [shell],
-          AttachStdin: true,
-          AttachStdout: true,
-          AttachStderr: true,
-          Tty: true,
-          User: "root",
-        }),
-        5000
-      );
+  // 逐个真实探测（exit 0 探针），选第一个存在的 shell
+  let shell: string | null = null;
+  for (const cand of candidates) {
+    if (await probeShellExists(container, cand)) {
+      shell = cand;
       break;
-    } catch (e) {
-      lastError = e;
     }
   }
-
-  if (!exec) {
-    throw lastError || new Error("无法在容器中创建终端");
+  if (!shell) {
+    throw new Error("容器内没有可用的 shell（/bin/bash、/bin/sh、/bin/ash 均不存在，可能基于 distroless 镜像）");
   }
+
+  const exec = await withTimeout(
+    container.exec({
+      Cmd: [shell],
+      AttachStdin: true,
+      AttachStdout: true,
+      AttachStderr: true,
+      Tty: true,
+      User: "root",
+    }),
+    5000
+  );
 
   const stream = await withTimeout(
     new Promise((resolve, reject) => {
@@ -4052,7 +4159,7 @@ export async function attachContainerTerminal(
     execId: exec.id,
     cleanup: () => {
       try { (stream as any)?.destroy?.(); } catch { /* ignore */ }
-      try { exec?.abort?.(); } catch { /* ignore */ }
+      try { (exec as any)?.abort?.(); } catch { /* ignore */ }
     },
   };
 }

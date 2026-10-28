@@ -99,19 +99,26 @@ const DEFAULT_SETTINGS = {
    * 两条都命中时「先到先清」，**永不删除当天文件**（正在写入）。
    */
   logRetention: {
-    /** 顶层三项 ＝ **应用日志**的保留策略，同时是通知 / 操作记录的**默认继承来源** */
+    /** 顶层三项 ＝ **应用日志**的保留策略；通知 / 操作记录各自独立，互不相干（v1.42.7 起） */
     enabled: true,
     maxDays: 365,
     maxTotalMB: 1024,
     /**
-     * 通知日志 / 操作记录的**可选覆盖**（v1.38.0）。
-     * ★ 刻意**不给默认值**：字段缺失即**继承顶层** ⇒ 用户改「应用日志」时三个频道一起跟随；
-     *   只有显式写过的字段才生效（「可单独设置」的语义）。
-     *   若在此处写死默认值，二级合并会先填默认值 ⇒ 顶层改动无法传导（实测踩到，勿加）。
-     *   `server/applogs.ts#getRetentionConfig` 负责 `{ ...顶层, ...该频道 }` 的合并。
+     * 通知日志 / 操作记录的**独立覆盖**（v1.38.0 引入，v1.42.7 改为互不继承）。
+     * ★ 刻意**不给默认值**：字段缺失即**各自 fallback 到 365 天 / 1024 MB**（见 `server/applogs.ts#getRetentionConfig`），
+     *   而非跟随「应用日志」——改「应用日志」不再牵连另外两个频道。
+     *   子段可含 `enabled`（运行时仍被 `getRetentionConfig` 识别，可单独关闭某频道裁剪），但 UI 仅暴露 `maxDays` / `maxTotalMB`，主开关由顶层 `enabled` 统一控制。
      */
     notify: {} as { enabled?: boolean; maxDays?: number; maxTotalMB?: number },
     oplog: {} as { enabled?: boolean; maxDays?: number; maxTotalMB?: number },
+    /**
+     * **每周打包**（v1.41.6）：把已结束的每日 `.log` 归拢成 zip 归档。
+     *  · `packEnabled` 默认开启；`packIntervalDays = 7`（滚动间隔：距上次打包满 7 天即执行）。
+     *  · 打包成功后**删除被归档的原始文件**，日志目录长期只留最近一周散文件 ＋ 历史压缩包。
+     *  · **压缩包自身同样受 maxDays / maxTotalMB 约束**（`applogs.ts` 统一统计与清理），不另设规则。
+     */
+    packEnabled: true,
+    packIntervalDays: 7,
   },
   pathFavorites: [
     { id: "p1", name: "应用数据", path: "/mnt/user/appdata" },
@@ -154,14 +161,33 @@ const DEFAULT_SETTINGS = {
   /** 全局彩色标签库（设置页「标签管理」维护，可挂到堆栈 LABELS 服务条目） */
   tags: [],
   /**
-   * 弹窗设置：操作结果弹窗的自动关闭延迟（秒）。
+   * 页面设置（v1.42.9 起由「弹窗设置」改名）：操作结果弹窗的自动关闭延迟（秒）、
+   * 容器详情视图样式、登录后默认显示页面等。
    * 启动堆栈等操作完成后，弹窗显示倒计时并在 autoCloseDelay 秒后自动关闭；
-   * 0 = 不自动关闭。设置页「弹窗设置」可调整。
+   * 0 = 不自动关闭。设置页「页面设置」可调整。
    */
   modal: {
     autoCloseDelay: 5,
     // 容器详情视图：drawer = 半页面（右侧抽屉，默认）；modal = 居中弹窗
     containerDetailStyle: "drawer",
+    /**
+     * 登录后默认显示的页面（v1.42.9）：
+     * dashboard / containers / stacks / images / volumes / networks / notifications / settings。
+     * 空串或非法值 ⇒ 回落为 "dashboard"。浏览器侧仅在登录态就绪（settings 已加载）后跳转。
+     */
+    defaultPage: "dashboard",
+    /**
+     * 网络曲线**默认网卡**（v1.41.6）：仪表盘「网络」磁贴进页面时展示哪个网卡。
+     * - `""`（默认）= **自动选第一个物理网卡**（`kind === "host"`，按名称排序，跳过 lo / veth）；
+     * - 其他非空值   = 指定网卡名（`eth0` / `docker0` / `br-xxxx`）。
+     *
+     * ★ v1.42.10 起**移除「全部（容器合计）」**（原哨兵 `"__all__"` 已废弃，旧配置按「自动」处理）：
+     *   磁贴下拉只按「物理网卡 / 虚拟网卡」分组，始终展示某个真实网卡；
+     *   仅远程引擎读不到 /proc/net/dev 时才回落容器合计口径。
+     * ★ 空串而非写死某个网卡名：网卡名因机器而异（`eth0`/`enp3s0`/`eno1`…），
+     *   硬编码会让「默认」在多数机器上匹配不到 ⇒ 自动挑第一个 host 网卡才可靠。
+     */
+    defaultNetIface: "",
   },
   /**
    * Compose 模板（系统设置 → Compose 管理 维护）：
@@ -179,6 +205,8 @@ const DEFAULT_SETTINGS = {
       { content: "restart: ", insert: "services" },
       { content: "container_name: ", insert: "services" },
     ],
+    // 编辑堆栈 LABELS 页：是否自动识别 ports 提取 WebUI 端口/URL（默认开）
+    autoDetectWebui: true,
   },
   /**
    * 安装量 / 活跃度上报开关（系统设置 → 硬件信息）。
@@ -187,6 +215,13 @@ const DEFAULT_SETTINGS = {
    */
   telemetry: {
     enabled: true,
+  },
+  /**
+   * 镜像管理页显示选项（系统设置 → 列显隐 → 镜像管理，v1.42.15 新增）。
+   * 仓库名隐藏 registry 地址前缀默认开启：docker.1panel.live/gitea/gitea ⇒ gitea/gitea。
+   */
+  imagesDisplay: {
+    hideRegistryPrefix: true,
   },
 };
 
@@ -291,10 +326,14 @@ export function getSettings(): any {
                       }
                 )
             : DEFAULT_SETTINGS.compose.templates,
+          // 二级合并：旧配置无此段时继承默认（开启自动识别）
+          autoDetectWebui: parsed?.compose?.autoDetectWebui !== false,
         },
         columnVisibility: mergedColumns,
         // 上报开关二级合并：旧配置没有 telemetry 段时继承默认值（开启）
         telemetry: { ...DEFAULT_SETTINGS.telemetry, ...(parsed?.telemetry || {}) },
+        // 镜像管理页显示选项二级合并：旧配置无此段时继承默认（隐藏 registry 前缀）
+        imagesDisplay: { ...DEFAULT_SETTINGS.imagesDisplay, ...(parsed?.imagesDisplay || {}) },
         defaultsVersion: DEFAULTS_VERSION,
       });
     }

@@ -1,6 +1,7 @@
 # 版本记录
 
 > 本文件是项目的**唯一权威进度文档**：完整版本变更日志 + 当前进度 + 开发报告。
+>   
 > 原 `开发进度总结.md`（2026-08-12 历史快照）已并入此处并删除。
 
 ## 维护约定（每次改代码后必做）
@@ -12,6 +13,1741 @@
    - **下一步**：基于本次改动的后续计划（没有就写「无」）。
 3. 同步更新下方「开发进度总览」的**当前版本行**、模块状态、待办与下一步。
 4. 发布后补记 Release 链接与源码 commit SHA。
+
+---
+
+
+## v1.44.5 — 2026-10-27（**已构建 · 待双推**）
+
+### 已完成
+- **容器终端优先使用 LABELS 配置的默认 Shell**：编辑堆栈 → LABELS 给服务配的「默认 Shell」此前只存不用于终端连接。现全链贯通——`Containers` 按 `container.stackId → stack.webuiLabels(serviceName === 容器名).defaultShell` 解析 → `ContainerDetailModal` → `XTermTerminal` 新增 `shell` prop → WS URL `&shell=` → 服务端 `attachContainerTerminal(engine, containerId, preferredShell)` 放候选队首。安全：服务端只接受 `/[A-Za-z0-9/._-]+` 绝对路径格式（防注入任意 Cmd）；v1.44.4 的镜像 `Config.Shell` + `exit 0` 探测兜底保留（配置的 shell 不存在时自动回退）。涉及 `src/pages/Containers.tsx`、`src/components/XTermTerminal.tsx`、`server/index.ts`、`server/docker.ts`。**验证**：tsc root+server 双 0；16 组门禁全 0 FAIL；ELF `7f454c46`/e_machine 62；二进制 `shellParam`×2、白名单正则×1；dist `&shell=`×1、版本串 `1.44.5`×1、`1.44.4`×0；**SHA-256 三处逐字节一致** `eebef3ebac7687e72dc0596ef84eef063d6dd70ae7be7e9e37997146fcdfb051`（130,419,904 B，SEA=zip=deb）。
+- 版本号 1.44.4 → 1.44.5（功能补全走 Patch，改动链路沿用 v1.44.4 同一功能域）。
+
+### 未完成 / 已知限制
+无。
+
+### 下一步
+双推 v1.44.5（连同 v1.43.28~v1.44.4 积压版本，GitHub 侧待 api.github.com 恢复）。
+
+
+## v1.44.4 — 2026-10-27（**已构建 · 待双推**）
+
+### 已完成
+- **修复容器终端连接 Alpine 系容器报 `exec: "/bin/bash": no such file or directory`**（`server/docker.ts` `attachContainerTerminal`）：原回退链 `["/bin/bash","/bin/sh","/bin/ash"]` 是假回退——`container.exec()` 创建时不校验二进制存在性（必然成功并 break），OCI 错误在 start 之后的流里异步出现，永远轮不到 `/bin/sh`。修复为探测式选 shell：① inspect 镜像 `Config.Shell` 优先（Alpine=/bin/sh、Debian=/bin/bash）；② 每个候选先跑 `exit 0` 探针 exec、以退出码 0 判定真实存在；③ 全部不存在时友好报错「容器内没有可用的 shell（可能基于 distroless 镜像）」。**验证**：tsc root+server 双 0；16 组门禁全 0 FAIL；ELF `7f454c46`/e_machine 62；二进制 `probeShellExists`×2、`exit 0`×2、友好报错×1；dist 版本串 `1.44.4`×1、`1.44.3`×0；**SHA-256 三处逐字节一致** `dfd3ed69d125865ba2ccb8b43fa85fdc5a79998e20f590687c69c15d11649491`（130,419,904 B，SEA=zip=deb）。
+- 版本号 1.44.3 → 1.44.4（bug 修复走 Patch）。
+
+### 未完成 / 已知限制
+无。
+
+### 下一步
+双推 v1.44.4（连同 v1.43.28~v1.44.3 积压版本，GitHub 侧待 api.github.com 恢复）。
+
+
+## v1.44.3 — 2026-10-27（**已构建 · 待双推**）
+
+### 已完成
+- **「WebUI 自动识别」开关移到标题行**（设置中心 → 编辑堆栈）：Toggle 经 `Card actions` 与「WebUI 自动识别」标题同排显示（与「一键填入模板」卡按钮同机制）；卡片正文只保留说明文案，去掉原正文行内的「编辑堆栈 LABELS 页自动识别 WebUI 端口/URL」副标题。功能逻辑零改动，纯布局（`src/pages/Settings.tsx`）。**验证**：tsc 0 错误；16 组门禁全 0 FAIL；ELF `7f454c46`/e_machine 62；版本串 dist `1.44.3`×1、`1.44.2`×0；**SHA-256 三处逐字节一致** `5986ac62e0e614e9afdeb999f04d0dc25eb2123be01c7e73e582e5f715e57835`（130,419,904 B，SEA=zip=deb）。
+- 版本号 1.44.2 → 1.44.3（UI 小改走 Patch）。
+
+### 未完成 / 已知限制
+无。
+
+### 下一步
+双推 v1.44.3（连同 v1.43.28~v1.44.2 积压版本，GitHub 侧待 api.github.com 恢复）。
+
+
+## v1.44.2 — 2026-10-27（**已构建 · 待双推**）
+
+### 已完成
+- **简化「WebUI 自动识别」开关描述文案**（设置中心 → 编辑堆栈）：长段说明（变量写法/缺省值/.env 读取细节）精简为「LABELS 会解析端口映射，自动填入WebUI端口与URL；服务未声明 ports 时不识别。关闭则 LABELS 页保持空白，需要手动添加。」功能逻辑零改动。**验证**：tsc 0 错误；16 组门禁全 0 FAIL；ELF `7f454c46`/e_machine 62；dist 新文案「需要手动添加」×1、旧文案「取变量缺省值」×0；版本串 `1.44.2`×1、`1.44.1`×0；**SHA-256 三处逐字节一致** `c43303bce6b57202551f9c67cfc21ef5d0ecd28fee2d769c008dd133d64df0c3`（130,419,904 B，SEA=zip=deb）。
+- 版本号 1.44.1 → 1.44.2（文案微调走 Patch）。
+
+### 未完成 / 已知限制
+- 未发布，待用户下令「双推」（仅最新 v1.44.2 双源；v1.43.17~1.44.1 已构建但被取代、不单独发布）。
+
+---
+
+## v1.44.1 — 2026-10-27（**已构建 · 待双推**）
+
+### 已完成
+- **LABELS 页布局调整**：每个服务卡片中「标签」移到「默认 Shell」右侧（grid-cols-2 第 4 格）；原标签整行位置改为「**描述**」（`FormField label="描述" + Input`，样式与位置对齐 SETTINGS 页描述）。`StackWebUILabel` 新增 `description?: string`（自动补全与手动添加均初始化空串）；server 端 `.stack-meta.json` 全量透传无白名单，`description` 随 `webuiLabels` 直接落盘，**后端零改动**。**验证**：tsc（root）0 错误；16 组门禁全 0 FAIL；ELF `7f454c46`/e_machine 62；dist 内版本串 `1.44.1`×1、旧版本串 `1.44.0`×0；新描述 placeholder「服务的用途说明」×1、「选择标签」×2（保留）；**SHA-256 三处逐字节一致** `10c7a723c80ef26fb7ef2ab44b3a87636975c13326199eb5cd4a69a07eeebff3`（130,419,904 B，SEA=zip=deb）。
+- 版本号 1.44.0 → 1.44.1（UI 小改走 Patch）。
+
+### 未完成 / 已知限制
+- 未发布，待用户下令「双推」（仅最新 v1.44.1 双源；v1.43.17~1.44.0 已构建但被取代、不单独发布）。
+- 描述目前仅在 LABELS 编辑页展示，列表/子表未展示（未要求）。
+
+---
+
+## v1.44.0 — 2026-10-27（**已构建 · 待双推**）
+
+### 已完成
+- **LABELS 页 WebUI 端口识别支持变量写法**：`ports: - ${MGT_PORT:-9443}:1443` 此前因 `extractHostPort` 只认纯数字而捕捉失败。`src/pages/Stacks.tsx` `parseComposeServices` 增强：先做变量展开再拆冒号（否则 `${VAR:-9443}` 内部冒号会被错误切分）——`${VAR:-9443}` 取缺省值；`${VAR}`/`${VAR:-}` 从堆栈 `.env` 内容解析变量值（新增 `envContent` 可选参数，容忍 `export` 前缀与成对引号）；无法解析为纯数字时不识别。
+- **服务未声明 `ports:` 时不再自动进 LABELS**：自动补全与「将自动补全」提示均只针对识别到宿主机端口的服务；无 ports 服务如需 WebUI 仍可手动添加。
+- **设置中心 → 编辑堆栈（原「Compose 管理」，本次改名）新增「WebUI 自动识别」开关**：`ComposeConfig.autoDetectWebui`（默认开，旧配置二级合并继承默认）。链路：`server/settings.ts`（DEFAULT + 合并段）→ `src/types.ts` → `Settings.tsx`（Toggle UI + 前端 DEFAULT）→ `App.tsx` → `Stacks.tsx` → `StackEditorModal`；关闭后 LABELS 页不自动识别，全部手动添加。
+- **设置中心侧栏分区改名**：「Compose 管理」→「编辑堆栈」（label/注释/相关文案 5 处同步）；门禁 `scripts/check-backup-naming.mjs` 期望顺序数组同步更新。
+- 验证：tsc（root + server）0 错误；16 组门禁全 0 FAIL；ELF `7f454c46`/e_machine 62；版本串 `1.44.0`×2（server 段）、dist 内 `1.44.0`×1；**SHA-256 三处逐字节一致** `bd3b8399c3dc273de0aeb03ec7c8bb958e5fae775f129b21494d02e741422a80`（130,419,904 B，SEA=zip=deb）；解码内嵌 dist `autoDetectWebui`×8、「编辑堆栈」×7、旧版本串 `1.43.29`×0。
+- 版本号 1.43.29 → 1.44.0（新功能走 Minor）。
+
+### 未完成 / 已知限制
+- 未发布，待用户下令「双推」（仅最新 v1.44.0 双源；v1.43.17~1.43.29 已构建但被取代、不单独发布）。
+- ★ **核验口径修正**：SEA 二进制中 server 段注释会被 esbuild 保留（历来含 `v1.42.x` 等历史版本号，本版源码注释 `v1.43.29` 使二进制整体计数出现 1 处「旧版本串」）——**旧版本串负向断言今后以解码后的 dist（前端）为准**，二进制整体层面 server 注释保留版本号属正常现象。
+
+---
+
+## v1.43.29 — 2026-10-27（**已构建 · 待双推**）
+
+### 已完成
+- **修复容器页「堆栈」列部分容器不显示堆栈**：同一堆栈拉起的容器有的堆栈列为「—」（如 safeline 项目的 `safeline-detector`/`safeline-pg`）。**根因**：交叉引用匹配三条规则全是名称推断（服务名 / `<project>-<service>` / `<project>-<service>-<index>`），而 compose `container_name:` 自定义容器名后（服务 `detect`→容器 `safeline-detector`、`postgres`→`safeline-pg`）三条全不命中；其余服务恰好 `safeline-<服务名>` 撞上规则 2 才显示。**修复**（4 处）：① `server/docker.ts` `stackContainers` 补导出 `containerId`（12 位短 id）+ `containerName`（真实容器名）；② `src/types.ts` `StackContainer` 加可选字段；③ `src/transforms.ts` `transformStacks` 透传；④ `src/App.tsx` 交叉引用改为**真实容器短 id 优先 → 真实容器名 → 名称三规则回退**（旧数据兼容）。**验证**：tsc（root + server）0 错误；16 组门禁全 0 FAIL；ELF `7f454c46`/e_machine 62；版本串字节检索 `1.43.29`×3、`1.43.28`×0；**SHA-256 三处逐字节一致** `b9b883df498730094ff0c0554b02d5c266132dfea9ca1b10fb464674052d87a1`（130,419,904 B，SEA=zip=deb）；解码内嵌 dist `containerId`×9、`containerName`×9、版本串 `1.43.29`×1。
+- 版本号 1.43.28 → 1.43.29。
+
+### 未完成 / 已知限制
+- 未发布，待用户下令「双推」（仅最新 v1.43.29 双源；v1.43.17~1.43.28 已构建但被取代、不单独发布）。
+- 堆栈子表（StackContainersModal）仍按 compose 服务名展示（`detect`/`postgres`），与容器页显示的真实容器名不同——属 compose 语义，未改动。
+
+---
+
+## v1.43.28 — 2026-10-26（**已构建 · 待双推**）
+
+### 已完成
+- **修复镜像页搜索框「框里有字、列表不过滤」**：用户搜索 `snowdreamtech` 时 `yanzi/carmanagementyanzi` 仍显示；源码侧排除渲染路径（`filtered` 单一路径、App 层无 key 重挂载、无全局 input 拦截、过滤表达式数学上不可能命中）后，定位为**受控 onChange 在运行时未生效**——最可能是中文输入法组合态下 React 合成事件丢失（组合期不派发 onChange，Enter/失焦也无从补救，DOM 文本与 state 永久脱节）。`src/pages/Images.tsx` 搜索框**非受控化**：`value/onChange` → `ref + defaultValue`，原生 `input`/`compositionend` 事件直读 DOM value 同步 `setSearch`（绕开 React 合成事件系统），`onKeyDown` Enter 与 `onBlur` 兜底强制同步。**验证**：tsc（root）0 错误；16 组门禁全 0 FAIL（PASS=35/40/30/41/75/18/15/34/80/47/44/34/39/49/20/46）；ELF `7f454c46`/e_machine 62；版本串字节检索 `1.43.28`×2、`1.43.27`×0；**SHA-256 三处逐字节一致** `0fcb9ab1ffa583d6d55d5b79a4eb4b1d0de428ce9d373fd6429e6d51bd559ccd`（130,419,904 B，SEA=zip=deb）；解码内嵌 dist：`compositionend`×13、`defaultValue`×24、「搜索镜像」×1、版本串 `1.43.28`×1。
+- 版本号 1.43.27 → 1.43.28。
+
+### 未完成 / 已知限制
+- 未发布，待用户下令「双推」（仅最新 v1.43.28 双源；v1.43.17~1.43.27 已构建但被取代、不单独发布）。
+- 根因无法在用户运行环境直接取证（合成事件为何未送达 state），修复采用覆盖全部失败模式的非受控方案；若其他页面（容器管理等）搜索也复现同类问题，可按同模式推广。
+
+---
+
+## v1.43.27 — 2026-10-26（**已构建 · 待双推**）
+
+### 已完成
+- **移除容器文件页「重命名」按钮**（v1.43.25 引入）：`src/pages/Containers.tsx` 删除工具栏重命名按钮、重命名弹窗、`showRename`/`renameName` state 与 `doRename()`，清理 `Pencil` 图标与 `renameContainerPathApi` import，底部提示文案同步。**决策依据**：容器内改动落在可写层——`docker compose down` 等容器重建场景全部回滚（仅 `restart`/`stop+start` 保留），长期生效必须落在 volume/bind mount 或镜像层；且需改的配置文件多为挂载点（内核 EBUSY 禁改）。容器内重命名仅剩「运行期临时调试」价值，故移除。**保留**：新建/上传/下载/删除按钮；后端 `renameContainerPath` API 与 v1.43.26 的 EBUSY 错误转译（删除挂载点仍会遇到，提示仍有效）。
+- 验证：tsc（root + server）0 错误；16 组门禁 0 FAIL；ELF `7f454c46`/e_machine 62；版本串二进制逐字节检索 `1.43.27`×2、`1.43.26`×0；**SHA-256 三处逐字节一致** `9063163dde810d9012b51fbb52b3527ec18b38537a13034bd9072ae9ba78848f`（130,419,904 B，SEA=zip=deb）；解码内嵌 dist 负向断言「重命名中」「输入新名称」absent + 正向 `1.43.27`/「新建」/「上传」present；源码 `grep rename|Rename|重命名|Pencil` 于 Containers.tsx 零残留（dist 中「重命名」命中为 Settings 标签管理改名功能，与本次无关；「请先选中文件或文件夹」为保留的下载按钮提示）。
+
+### 未完成 / 已知限制
+- 未发布，待用户下令「双推」（仅最新 v1.43.27 双源；v1.43.17~1.43.26 已构建但被取代、不单独发布）。
+
+---
+
+## v1.43.26 — 2026-10-26（**已构建 · 待双推**）
+
+### 已完成
+- **挂载点 EBUSY 错误转译**（用户报告：重命名 `/etc/easytier/config.toml` 报 `mv: can't rename ... Resource busy`）。根因：该文件是容器 **bind mount 挂载点**，内核不允许在容器内对挂载点 `mv`/`rm`（EBUSY），属内核限制、容器内任何实现无法绕过。修复：`server/docker.ts` 新增 `translatePathExecError(op, stderr)`——识别 `resource busy`/`device or resource busy`/`ebusy` 后转译为可操作提示「该路径是容器的挂载点（bind mount），内核不允许在容器内{op}它。请在宿主机上对源路径{op}，或修改容器的挂载配置后重建容器」；`renameContainerPath` 与 `removeContainerPath`（同类根因顺带覆盖）的失败 throw 均改走该转译。
+- 验证：tsc(root+server) 0 错误；16 组门禁 0 FAIL；SEA ELF `7f454c46`/e_machine 62；版本串 `1.43.26`×2、`1.43.25`×0；SHA-256 三处逐字节一致 `f6e13b42c44972a5257447c59d3e04108e650dc19f1c59291c6ef8122034fafe`（130,419,904 B，SEA=zip=deb）；二进制内确认 `function translatePathExecError` + 调用点 + `resource busy`/`ebusy` 匹配均在。核验特征插曲：模板串 `` `${op}失败：...` `` 运行时拼接，完整拼接串本就不存在于二进制（首版断言写错已修正为查调用点）。
+
+### 未完成 / 已知限制
+- 未发布，待用户下令「双推」（仅最新 v1.43.26 双源；v1.43.17~1.43.25 已构建但被取代、不单独发布）。
+- v1.43.22 GitHub 源码/Release 推送仍被阻（api.github.com 直连与代理均不可达），Gitea 已发布至 v1.43.22。
+- 挂载点重命名/删除本身是内核限制，本版只改善报错可读性，不改变能力边界。
+
+### 下一步
+- 无。
+
+## v1.43.25 — 2026-10-26（**已构建 · 待双推**）
+
+### 已完成
+- **容器弹窗「文件」页：新建合并 + 重命名**（用户指令）：
+  - 工具栏「新建文件」「新建文件夹」两按钮合并为单个「新建」按钮，点击弹出「新建」弹窗，弹窗内选择文件/文件夹（复用弹窗顶部既有 tab）。
+  - 「新建」左侧新增「重命名」按钮（`Pencil` 图标）：选中文件/文件夹后可点，弹窗预填当前名称、仅改名字（目录前缀保持当前路径），确认走既有后端 `action:"rename"`（`renameContainerPathApi`，服务端实现本就存在，零后端改动），成功后刷新列表并清选中。
+  - 底部操作提示文案同步更新；`FilePlus2`/`FolderPlus` 保留（新建弹窗内 tab 使用）。
+- 验证：tsc(root+server) 0 错误；16 组门禁 0 FAIL；SEA ELF `7f454c46`/e_machine 62；版本串 `1.43.25`×2、`1.43.24`×0；SHA-256 三处逐字节一致 `1622ce02a0167fce2b260a04acdd82b132dc83b4e6d82301118adff27aed56ab`（130,419,904 B，SEA=zip=deb）；解码内嵌 dist：正向「重命名/输入新名称/重命名失败/action:"rename"/1.43.25」均在、负向旧按钮形态 `新建文件</button>`/`新建文件夹</button>` 均消失（核验特征首版误报澄清：`renameContainerPathApi` 为命名 import 被压缩改名属正常；残留「新建文件」实为新提示文案「新建弹窗内选择新建文件或新建文件夹」）。
+
+### 未完成 / 已知限制
+- 未发布，待用户下令「双推」（仅最新 v1.43.25 双源；v1.43.17~1.43.24 已构建但被取代、不单独发布）。
+- v1.43.22 GitHub 源码/Release 推送仍被阻（api.github.com 直连与代理均不可达），Gitea 已发布至 v1.43.22。
+
+### 下一步
+- 无。
+
+## v1.43.24 — 2026-10-26（**已构建 · 待双推**）
+
+### 已完成
+- **移除编辑堆栈 SETTINGS 下的「自动更新」区块**（用户指令）：删掉 `src/pages/Stacks.tsx` 编辑抽屉 settings 页的「自动更新」卡片（「启用自动更新检查」Toggle + 「更新方式」Select，仅通知/自动拉取并更新），同步移除该文件不再使用的 `Toggle` import。数据模型（`autoUpdateEnabled`/`autoUpdateMode` 字段、transforms、server 存储）保留不动——历史已开启的堆栈仍按原值运行（列表 Bell 角标保留），仅 UI 入口移除。
+- 插曲：`Select` 在「默认 Shell」处仍有使用（首次 grep 漏匹配致误删 import，tsc 抓回并恢复）。
+- 验证：tsc(root+server) 0 错误；16 组门禁 0 FAIL；SEA ELF `7f454c46`/e_machine 62；版本串 `1.43.24`×2、`1.43.23`×0；SHA-256 三处逐字节一致 `a68e7a3eb282e696753f21e74fec7c331815ac33fd023ff9aa895bb3e6881a8c`（130,419,904 B，SEA=zip=deb）；解码内嵌 dist 负向断言「启用自动更新检查」「自动拉取并更新」均消失、正向锚点「默认 Shell」+ `1.43.24` 均在。
+
+### 未完成 / 已知限制
+- 未发布，待用户下令「双推」（仅最新 v1.43.24 双源；v1.43.17~1.43.23 已构建但被取代、不单独发布）。
+- v1.43.22 GitHub 源码/Release 推送仍被阻（api.github.com 直连与代理均不可达），Gitea 已发布至 v1.43.22。
+
+### 下一步
+- 无。
+
+## v1.43.23 — 2026-10-26（**已构建 · 待双推**）
+
+### 已完成
+- **修复镜像列表重复行**（用户报告：同仓库/同 tag/同 ID `snowdreamtech/frps:0.70.1-debian 73b82481081d` 出现两行）。根因：`src/transforms.ts#transformImages` 按「每个 RepoTag 一行」拆行且全程无去重——daemon 的 `/images/json` 在多源拉取/镜像加速器场景可能返回重复条目或 `RepoTags` 内重复串，前端原样渲染成重复行。修复：转换时按 `sha256|repository|tag` 维护 `seen` Set 去重（key 含完整 sha256 ⇒ 同 tag 不同镜像 ID 的合法场景仍保留，与 `docker images` 口径一致）。
+- 验证：tsc(root+server) 0 错误；16 组门禁 0 FAIL；SEA ELF `7f454c46`/e_machine 62；版本串 `1.43.23`×2、`1.43.22`×0（二进制原始字节检索）；SHA-256 三处逐字节一致 `a440d08b1020e851675e97eaff88d7bd8559fcf6cf96bfbfcf2d6a6038d87ba9`（130,419,904 B，SEA=zip=deb）；解码内嵌 dist 确认去重模板 `` `${l}|${f}|${m}` `` 与 `1.43.23` 均在（`dedupeKey` 局部变量被压缩改名为 `g` 属正常）。
+
+### 未完成 / 已知限制
+- 未发布，待用户下令「双推」（仅最新 v1.43.23 双源；v1.43.17~1.43.22 已构建但被取代、不单独发布）。
+- v1.43.22 GitHub 源码/Release 推送仍被阻（api.github.com 直连与代理均不可达），Gitea 已发布。
+
+### 下一步
+- 无。
+
+## v1.43.22 — 2026-10-26（**已构建 · 待双推**）
+
+### 已完成
+- **install.sh：无候选用户时自动创建服务账户**（`deploy/linux/install.sh`）。改前：未检测到可用登录系统用户（UID 1000-65533 且非 nologin）时要求输入**已存在**的用户名，输入不存在的名字只会循环报「系统用户不存在」。改后：提示「请输入要创建的用户名」，输入后自动 `useradd --create-home --shell /bin/bash <名>` 创建（主组同名、家目录 /home/<名>）；校验规则 = 小写字母/下划线开头、仅含小写字母/数字/下划线/连字符、≤32 字符（与 Debian 默认 NAME_REGEX 对齐）；拒绝 root；已存在的用户名直接复用；缺 useradd 时给出 passwd 安装提示；创建失败可换名重试。候选用户存在的分支与 `APP_RUN_AS_USER` 非交互路径不变。
+- 注意：本改动只进安装包，OTA 不更新 install.sh ⇒ 已部署机器需**重跑 install.sh** 才生效。
+
+### 未完成 / 已知限制
+- 未发布，待用户下令「双推」（仅最新 v1.43.22 双源；v1.43.17~1.43.21 已构建但被取代、不单独发布）。
+
+### 验证
+- `bash -n` 语法通过；16 组门禁 0 FAIL（含 install / service-unit 断言）。
+- tsc（root）0 错误；SEA 构建：ELF `7f454c46` / e_machine `3e`(62)；版本串 `1.43.22`×2、`1.43.21`×0。
+- SHA-256 三处逐字节一致 `2bb513c1591775399ed66f2bcf3013735fa1afae956a86c25547978e87368bda`（130,419,904 B，SEA=zip=deb）。
+- zip 与 deb 包内 install.sh 均含新文案（`将自动创建服务账户` / `请输入要创建的用户名` / `--create-home --shell /bin/bash` / `已创建系统用户`）。
+
+## v1.43.21 — 2026-10-25（**已构建 · 待双推**）
+
+### 已完成
+- **修复：镜像删除后列表不即时更新（筛选后批量删除场景）**（`src/pages/Images.tsx` + `src/App.tsx`）。根因：删除成功后仅 `onRefresh()` → `loadEngineData()` 需并行等容器/镜像/卷/堆栈/活动 5 个请求全部返回才 `setImages`，浏览器 fetch 无超时，任一请求挂起 ⇒ 列表停留旧数据（已删镜像仍显示，手动刷新页面才消失）。修复：新增 `onImagesRemoved(ids)` 乐观更新回调——批量删除与单镜像删除成功后，先把被删镜像从本地 `images` 即时移除（同时清理勾选态），再叠加 `onRefresh()` 与服务端对账。单镜像确认删除的 `confirmDelete` 状态由 `string` 升级为 `{ ref, id }` 以携带镜像 id。
+- **页面大小说明**：镜像管理页无分页，一页显示当前筛选后的全部行（同镜像多 tag 按 RepoTag 拆行）。
+
+### 未完成 / 已知限制
+- 未发布，待用户下令「双推」（仅最新 v1.43.21 双源；v1.43.17~1.43.20 已构建但被取代、不单独发布）。
+
+### 验证
+- tsc（root + server）0 错误；16 组门禁 0 FAIL。
+- SEA 构建：ELF `7f454c46` / e_machine `3e`(62)；版本串 `1.43.21`×2、`1.43.20`×0（原始字节检索）。
+- SHA-256 三处逐字节一致 `fff4638c40a1d7f6f163801069db0c89e3dca2af893c8589c3462e13e91bdb98`（130,419,904 B，SEA=zip=deb）。
+- 解码内嵌 dist：`onImagesRemoved`（接线属性名）+ `1.43.21` 均在、`1.43.20` 不在（局部变量 `removedIds` 被压缩器重命名属正常）。
+
+## v1.43.20 — 2026-10-25（**已构建 · 待双推**）
+
+### 已完成
+- **「系统设置」整体更名为「设置中心」**（用户指令：「系统设置改为设置中心」）：
+  - 侧边栏导航项 `src/components/Sidebar.tsx`：`label: "系统设置"` → `"设置中心"`。
+  - 页面标题/面包屑 `src/App.tsx`：`settings` 的 `title` 与 `breadcrumb` 改为「设置中心」。
+  - 默认显示页面下拉 `src/pages/Settings.tsx`：`{ value: "settings", label: "系统设置" }` → `"设置中心"`。
+  - 门禁断言 `scripts/check-net-iface.mjs`：原断言 `label: "系统设置"` 同步改为 `"设置中心"`（否则该门禁 FAIL）。
+  - 用户文档 `README.md` 章节标题与「设置中心 → 系统更新」路径同步；侧栏角标/初始化等相邻注释同步。
+  - **源码内大量描述「系统设置 → 子页」的历史/内部注释未批量改写**（如 `types.ts`/`server/*` 里的「系统设置 → 硬件信息」等），属开发注释、非用户可见文案，符合以往改名惯例（历史版本段不回改）。
+- **修复：设置中心 → 列显隐 → 容器管理卡片缺「堆栈」勾选框**（回归自 v1.43.17/19 加堆栈列时漏改集中卡片）：`src/pages/Settings.tsx` 的 `COLVIS_PAGES` 中 `containers` 卡片 `cols` 在 `["tags","标签"]` 之后补 `["stack","堆栈"]`，与容器页列顺序一致；该卡片现可勾选/隐藏「堆栈」列并持久化到 `columnVisibility.containers`。
+
+### 未完成 / 已知限制
+- 未发布，待用户下令「双推」（仅最新 v1.43.20 双源；v1.43.19 已构建但被本版取代、不单独发布）。
+
+### 下一步
+- 用户下令「双推」即发布 v1.43.20 到 GitHub + Gitea 双源（沿用 curl 补传规避 `publish-release.mjs` 大文件挂起）。
+
+### 验证
+- SHA `ed6b45d0b7b031a7d11d7193ded1d78abc823a34351e83ad251588887160feaa`（130,419,904 B）三处一致（SEA=zip=deb）。
+- ELF `7f454c46` / e_machine `3e`(62)；版本串 `1.43.20`×2、`1.43.19`×0（二进制原始字节检索 0 处，grep `-c` 假阳性已澄清）。
+- tsc（root + server）0 错误；门禁 16 组 0 FAIL（含更新后的 net-iface 断言）。
+- 解码内嵌 dist 确认：`设置中心`（`key:"settings",label:"设置中心"`）+ 堆栈列显隐元组 `["tags","标签"],["stack","堆栈"],["image","镜像"]` + `1.43.20` 均存在、`1.43.19` 不在。
+
+---
+
+## v1.43.19 — 2026-10-25（**已构建 · 待双推 · 被 v1.43.20 取代**）
+
+> Release：尚未发布（待用户下令「双推」后补记 GitHub + Gitea 链接）。
+
+### 已完成
+- **容器管理「堆栈」列默认勾选**：`Containers.tsx` 派生默认可见列时补入 `"stack"`，无论是否有已存列显隐配置（含早期不含 stack 的遗留配置），堆栈列均默认勾选。
+- **一个堆栈一种颜色**：新增模块级 `STACK_COLORS` 10 色调色板（完整 Tailwind 字面量防 purge）+ 稳定哈希 `stackColorIndex(stackId)`，堆栈列按所属堆栈 id 映射固定颜色，渲染为「色点 + 堆栈名」徽标，颜色重排/刷新不变，用于区分不同堆栈。
+- **镜像导入成功后自动关闭**：`Images.tsx` 新增 effect，导入任务进入 `done` 终态后 1.5s 自动调用 `closeImageImport()` 收起弹窗（短暂展示「导入成功」）。
+
+### 验证
+- tsc（root + server）0 错误；16 组门禁 0 FAIL。
+- ELF `7f454c46` / e_machine `3e`(62)；版本串 `1.43.19`×6、`1.43.18`×0。
+- SHA-256 三处逐字节一致 `8f1d92a2a92d32278a00ddcaea6d1114c7668f5ad8856bbfe799b2769b121f1a`（130,419,904 B，SEA=zip=deb）。
+- 解码二进制内嵌 dist：`bg-cyan-50/bg-fuchsia-50/bg-indigo-50` 配色串、`自动关闭`、`1.43.19` 均存在 → 三特性确已嵌入。
+
+### 未完成 / 已知限制
+- 未发布，待用户下令「双推」（仅最新 v1.43.19 双源；v1.43.18 已构建但被取代、不单独发布）。
+
+### 下一步
+- 用户下令「双推」即发布 v1.43.19 到 GitHub + Gitea 双源（沿用 curl 补传规避 `publish-release.mjs` 大文件挂起）。
+
+---
+
+## v1.43.18 — 2026-10-21（**已构建 · 待双推**）
+
+> Release：尚未发布（待用户下令「双推」后补记 GitHub + Gitea 链接）。
+
+### 已完成
+- **镜像更新检查结果：从镜像页内嵌横幅改为「通知中心 + 手动检查弹窗」（用户指令）**：
+  - 改动：
+    1. `src/pages/Images.tsx`：移除镜像页内嵌结果横幅（含其 localStorage 关闭持久化状态 `imageUpdateBannerDismissed`）；新增手动检查结果弹窗（`Modal`），在「检查全部更新」与单镜像右键「检查更新」完成后弹出，展示「已检查 / 为最新 / 可更新」三项计数 + 检查时间，失败时展示失败原因。
+    2. `server/index.ts`：`/api/engines/:id/activity` 端点新增一条汇总活动（稳定 id `img-update-summary-<engineId>`）——`全部镜像均为最新（已检查 N 个）` 或 `镜像更新检查：检查 N 个，M 个有可用更新，K 个为最新`，取代原镜像页横幅，使检查结果统一进「通知中心」（既保留逐镜像「有可用更新」明细，又补汇总）。
+  - 验证：tsc(root+server) 0 错误；16 组门禁 0 FAIL；ELF `7f454c46` / e_machine `3e`；版本串 `1.43.18`×2、`1.43.17`×0；三处 SHA-256 逐字节一致（`4eb3141e456f8a8a3e892aed362cba553689eebefc85f8e9b1bf3eb3b9f9649d`，130,419,904 B）；解码 bundle.js 确认前端弹窗串与后端汇总串（`\u` 转义形式）均嵌入交付二进制。
+
+### 未完成 / 已知限制
+- 未发布，待用户下令「双推」（同前，仅最新版双源发布即终态）。
+
+### 下一步
+- 发布 v1.43.18 到 GitHub + Gitea 双源。
+
+---
+
+## v1.43.17 — 2026-10-21（**未发布 · 已被 v1.43.18 取代**）
+
+> Release：尚未发布（待用户下令「双推」后补记 GitHub + Gitea 链接）。
+
+### 已完成
+- **容器管理页新增「堆栈」列（用户指令）**：在「标签」列右侧新增「堆栈」列，显示该容器由哪个堆栈启动，并接入列显隐机制（列选择器 + 列可见性持久化）。
+  - 改动：
+    1. `src/pages/Containers.tsx`：`ColumnKey` / `allColumns` 增加 `stack`；表头、表体在「标签」列后插入堆栈列（按 `container.stackId` 映射 `stacks` 中对应 `name`，无则显「—」）；`SortKey` 增加 `stack` 并补足排序比较器（按堆栈名 `localeCompare`）；列选择器自然覆盖（遍历 `allColumns`）。
+    2. `src/App.tsx`：交叉引用段新增「标记容器所属堆栈」循环——复用既有 WebUI Labels 的三规则名称匹配（精确 serviceName / `<project>-<service>` / `<project>-<service>-<index>`），给匹配到的容器写 `c.stackId = st.id`，与列内 `stacks.find(s => s.id === container.stackId)` 自洽。
+    3. `src/App.tsx`：`<Containers>` 调用补 `stacks={stacks}` prop。
+  - 根因前置：`Container.stackId` 字段虽已定义，但服务端 `getContainers` 与前端 `transformContainers` 均未赋值，原会恒显「—」；本次在前端交叉引用段按既有的堆栈↔容器名称匹配规则补齐，避免改动服务端/转换函数带来的额外回归面。
+  - 涉及文件：`src/pages/Containers.tsx`、`src/App.tsx`、`package.json`（1.43.16 → 1.43.17）。
+
+### 验证（硬证据）
+- tsc(root) 0 错误；tsc(server) 0 错误；门禁 16 组 0 FAIL。
+- ELF `7f454c46`/e_machine=`3e`(62)；版本串 `1.43.17` ×2、`1.43.16` 归零。
+- **SHA-256 三处逐字节一致**：`e52ad5d27e1854f7e1de1ec5ffdabfad03c7f11b92bc0457b4d5fc2d3de5de1b`（130,419,904 B，SEA=zip=deb）。
+- 解码 bundle.js 内嵌 dist 检索：`堆栈`(列标签)、`stackId`(数据字段) 均存在；`1.43.17` 在、`1.43.16` 不在——确认前端特性已嵌入交付二进制。
+
+### 未完成 / 已知限制
+- 未发布，待用户下令「双推」（仅最新版 v1.43.17 双源）。
+
+## v1.43.16 — 2026-10-21（**已发布 · 双源 2026-10-21**）
+
+> Release：
+> - GitHub：`https://github.com/yanziruxue/docker-manager/releases/tag/v1.43.16`（zip + latest 别名 zip + quick-install.sh；GitHub 发布脚本 `publish-release.mjs` 的 REST 通道上传 43MB 资产偶发挂起被 SIGTERM，本次改用 curl 逐个补传 3 个资产）
+> - Gitea（以此为准）：`http://192.168.24.10:8024/yanzi/dockermanagementyanzi/releases/tag/v1.43.16`（zip + latest 别名 zip + deb + quick-install.sh）
+> - 双源 `releases/latest` 均指向 v1.43.16，OTA「系统更新」可感知。
+
+### 已完成
+- **通知中心最多显示 100 条（用户指令）**：修复通知中心「一直只显示 20 条」与用户要求「最多 100 条」不一致。
+  - 根因：后端 `/api/engines/:id/activity` 端点（`server/index.ts`）在收到上游 `getActivityLogs`（`server/docker.ts`，已 `slice(0,100)`）返回的 100 条后，**二次截断成 20 条**（`activities.slice(0,20)`），注释也写死「取最近 20 条」，导致无论上游产生多少活动都只回传 20 条。前端 `Notifications.tsx` 对返回数据无 slice 限制、全量渲染，故瓶颈只在后端这处。
+  - 改动：将该端点 `slice(0,20)` → `slice(0,100)`，注释同步为「取最近 100 条」，与上游 100 上限、用户要求一致。
+  - 涉及文件：`server/index.ts`（1 处）。
+
+### 验证（硬证据）
+- tsc(server) 0 错误；门禁 16 组 0 FAIL（合计 647 项）。
+- ELF `7f454c46`/e_machine=`3e`(62)；版本串 `1.43.16` ×2、`1.43.15` 归零。
+- **SHA-256 三处逐字节一致**：`89652eca62dbb1555e7aebf85a6b760c7920f59dc3679c82a290421e19b3f7e8`（130,419,904 B，SEA=zip=deb）。
+
+### 未完成 / 已知限制
+- 无。已随「双推」发布（GitHub + Gitea 双源），`releases/latest` 均指向 v1.43.16。
+
+### 下一步
+- 发布（同前，仅最新版 v1.43.16 双源：GitHub + Gitea）。
+
+---
+
+## v1.43.15 — 2026-10-21（**已出包 · 未发布**）
+
+### 已完成
+- **所有弹窗支持键盘 ESC 关闭（用户指令）**：将 ESC 与「点击遮罩关闭」解耦，全量支持键盘 Esc 关弹窗。
+  - 根因：`src/components/Modal.tsx` 的 `Modal`/`Drawer` 旧逻辑中 ESC 关闭**受 `dismissable` 控制**，而 `dismissable` 默认 `false`（防误触遮罩丢数据），导致所有不传 `dismissable` 的弹窗（编辑类、`ConfirmDialog` 等）**ESC 被屏蔽**——与用户「所有弹窗都支持 ESC」诉求相悖。
+  - 改动：
+    - 新增 `closeOnEsc?: boolean = true`（与 `dismissable` 解耦）：ESC 始终可关（键盘主动操作，不会误触）；遮罩点击仍由 `dismissable`（默认 false）控制，保留防误触丢数据语义。
+    - 引入模块级 **ESC 栈**（`escStack` + `useId` + `useRef`）：多层叠加弹窗（如 `Drawer` 容器详情上叠加 `ConfirmDialog` 删除确认）按 open 顺序入栈，**仅栈顶弹窗响应 ESC**，按一次 ESC 只关最上层，避免两层同时误关；`document.body.style.overflow` 改为按栈计数管理（栈非空即 hidden，归零才恢复），修复叠加时关闭内层误恢复滚动。
+    - `ConfirmDialog` 透传 `closeOnEsc={!loading}`：操作进行中（删除/提交）锁定 ESC，与取消按钮 `disabled` 一致；其余情况 ESC = 取消。
+  - 涉及文件：`src/components/Modal.tsx`（Modal + Drawer + ConfirmDialog 三处）。
+  - 已自带 ESC 的组件（`ContextMenu`、`TagPicker`、下拉选择 `UI.tsx`）无需改动，行为不变。
+
+### 验证（硬证据）
+- tsc(src) 0 错误（useId/useRef 类型校验通过）；门禁 16 组 0 FAIL（合计 647 项）。
+- ELF `7f454c46`/e_machine=`3e`(62)；版本串 `1.43.15` ×2、`1.43.14` 归零。
+- **SHA-256 三处逐字节一致**：`0d416cea0dfd3507132d55d32508fcfaff7e6882d181443205af787186ff9ee7`（130,419,904 B，SEA=zip=deb）。
+- 功能串在构建内：dist 明文 `"Escape"` ×7（Modal/Drawer/ConfirmDialog/ContextMenu/TagPicker/UI 等 ESC 监听）。
+
+### 未完成 / 已知限制
+- 未发布，待用户下令「双推」（同前，仅最新版 v1.43.15 双源）。
+
+### 下一步
+- 发布（同前，仅最新版 v1.43.15 双源：GitHub + Gitea）。
+
+## v1.43.14 — 2026-10-19（**已发布 · 双源 2026-10-20**）
+
+> Release：
+> - GitHub：`https://github.com/yanziruxue/docker-manager/releases/tag/v1.43.14`（zip + latest 别名 zip + **deb** + quick-install.sh；deb 于 2026-10-20 补传，使双源资产一致）
+> - Gitea（以此为准）：`http://192.168.24.10:8024/yanzi/dockermanagementyanzi/releases/tag/v1.43.14`（zip + latest 别名 zip + deb + quick-install.sh）
+> - 双源 `releases/latest` 均指向 v1.43.14，OTA「系统更新」可感知。
+
+### 已完成
+- **镜像管理页「检查结果」消息条右侧增加 × 关闭按钮（用户指令；关闭持久化）**：页面顶部「全部镜像均为最新（已检查 N 个）· 时间 / N 个镜像有可用更新 / 检查更新失败」横幅右侧加 × 图标按钮（`title`/`aria-label` = 「关闭这条消息」）。
+  - **关闭持久化**（v1.43.14，回应用户「关闭后刷新页面就又有了」）：关闭 key（`at:<检查时间戳>` 或 `err:<错误信息>`）写入 `localStorage`（`imageUpdateBannerDismissed`），刷新/重进镜像页不再显示；仅当**新检查结果**到达（时间戳变化 / 新错误信息，key 不匹配）才重新显示——不会因误关而错过下一次检查结果。
+  - 涉及文件：`src/pages/Images.tsx`（+1 state/+1 持久化 key/横幅条件/× 按钮）。
+
+### 验证（硬证据）
+- tsc(src) 0 错误；门禁 16 组 0 FAIL（合计 647 项）。
+- ELF `7f454c46`/e_machine=`3e`(62)；版本串 `1.43.14` ×2、`1.43.13` 归零。
+- **zip/deb 内二进制 vs SEA 产物 SHA-256 逐字节一致**：`f6e31f5c800ca8ddf87708ca90f9f9c49ad7487f6448c39a1cd137e63ae4256a`（130,419,904 B）。
+- 功能串在 `dist` 明文：「关闭这条消息」×2（title+aria-label）、`imageUpdateBannerDismissed`×1（localStorage key）。
+- v1.43.13 中间包（未持久化版本）已按废包清理删除。
+
+### 未完成 / 已知限制
+- 关闭状态按「检查结果 key」持久化：同一结果的重复出现保持隐藏；若用户希望「新结果也不显示」，需在设置里提供开关（当前按产品语义不做）。
+
+### 下一步
+- 无（待用户下令发布）。
+
+---
+
+## v1.43.12 — 2026-10-19（**已出包 · 未发布**）
+
+### 已完成
+- **修复「镜像管理页勾选标题行复选框后无法取消勾选」（用户报告）**：根因是 `transformImages` 按 RepoTag **拆行**（同一镜像 id 多行），而 `toggleSelectAll` 的取消条件写的是 `selected.size === filtered.length`——拿「Set 去重后的 id 数」比「行数」，只要存在多 tag 镜像就永不相等 ⇒ 全选后点标题行复选框只会重复全选、无法取消。
+  - 修复：全选/取消判断改走 **id 维度**（`filteredIds` 去重集 + `every/some` 判定）；取消时**仅移除当前筛选结果覆盖的 id**（保留筛选范围外已勾选的），全选时合并入已选而非清空重设；标题行复选框 `checked`/`indeterminate` 同步改用 id 维度（顺带消除跨筛选时 `size` 数值巧合导致的误显「全选」）。
+  - **连带修复（同根因）**：批量删除对同一镜像的多 tag 行重复调 `removeImageApi`——第一个 tag 删掉后镜像已不存在，第二个 tag 的调用必失败 ⇒ 按 `img.id` 去重后逐个删。
+- **「取消选择」按钮 → × 图标按钮（镜像 + 数据卷两页，用户指令）**：批量操作条右侧文字按钮「取消选择」改为 `X` 图标按钮（`title`/`aria-label` 保留「取消选择」，保可访问性），`ml-auto` 靠右布局不变。
+- **数据卷页全选判断同步改 id 维度**（与镜像页同构，v1.43.12）：卷 id 虽基本唯一，但 `selected.size === filtered.length` 在「跨筛选残留已选」时存在数值巧合误判与「取消即清空全部」的体验问题，一并消除。
+
+### 验证（硬证据）
+- tsc(src) 0 错误（迁移 `filteredIds` 块至 `filtered` 定义之后，消除 TS2448/TS2454）；门禁 16 组 0 FAIL（合计 647 项）。
+- ELF `7f454c46`/e_machine=`3e`(62)；版本串 `1.43.12` ×2、`1.43.11` 归零。
+- **zip/deb 内二进制 vs SEA 产物 SHA-256 逐字节一致**：`e445140a67e995491f9d4fc3d6824219802ef4ffb256f55a52588158ede4aedb`（130,419,904 B）。
+- 功能串在 `dist` 明文：「取消选择」×4（两页各 title+aria-label）、「已选中」×6。
+
+### 未完成 / 已知限制
+- 批量拉取/下载仍按 tag 行逐条执行（产品语义「逐条列镜像、逐个下载」，v1.43.10 用户确认过），仅删除按镜像去重。
+
+### 下一步
+- 无（待用户下令发布）。
+
+---
+
+## v1.43.11 — 2026-10-19（**已出包 · 未发布**）
+
+### 已完成
+- **修复「闲时自动退出没成功」（用户报告回归）**：根因是 `src/api.ts` 的 401 兜底逻辑用 `!url.startsWith("/auth/")` 把**整个 `/auth/` 前缀**排除在 `auth:unauthorized` 派发之外——v1.43.8 新增的空闲探活 `GET /auth/ping`（60s/次、只读不续期）检测到服务端会话过期返回 401 时，事件被静默吞掉 ⇒ 用户停在页面上登不出去。
+  - 修复：抽出 `notifyUnauthorized(url)`，改为**仅排除预登录端点白名单**（`/auth/login` 密码错误、`/auth/logout` 主动登出、`/auth/init-status`、`/auth/init`）；`/auth/me`、`/auth/ping` 及 requireAuth 端点（`/auth/password`、`/auth/recovery`、`/auth/reinit`）的 401 一律派发登出。4 处内联检查（`request()`、两个容器文件 PUT、`downloadAsBlob`）统一改走 helper。
+  - 启动竞态已核验：页面加载时 `getMe()` 401 派发的事件把 `authState` 置 `login`，随后 `Promise.all`  continuation 按 init-status 结果覆盖为 `setup`/`login`，终态正确。
+- **SSE 端点会话校验（安全缺口，同批修复）**：三个 SSE 端点此前**零会话校验**——`GET /api/engines/:id/stacks/:name/actions/stream` 未登录即可触发 compose up/down/pull/build；`resource-stats/stream`、`/api/push` 未登录可读。
+  - EventSource 读不到 HTTP 状态码 ⇒ 服务端统一以 **200 + `event: unauthorized` 帧 + end** 通知；前端 `src/api.ts#streamStackActions` 与 `src/App.tsx`（resource-stats、push 两个 EventSource）监听该帧派发 `auth:unauthorized`。
+- 服务端续期模型不变（v1.43.8 起）：`getSessionUser` 只读、`renewSession` 仅由真实用户活动节流触发、`peekSessionUser` 供 ping 探活——后台轮询/SSE 不维持会话，空闲满 TTL 仍过期。
+
+### 验证（硬证据）
+- tsc(src)+tsc(server) 0 错误；门禁 16 组 0 FAIL（末组 cpu-load-split 46/0）。
+- ELF `7f454c46`/e_machine=`3e`(62)；版本串 `1.43.11` ×2、`1.43.10` 归零。
+- **zip/deb 内二进制 vs SEA 产物 SHA-256 逐字节一致**：`ddaa43090e4b60723b90fd214c2bbdb9900675f2357e27e7141190ae910e7382`（130,419,904 B）。
+- 功能代码在构建内：`dist` 明文「会话已过期，请重新登录」×1、`auth:unauthorized`×8、白名单端点串（/auth/login、/auth/logout、/auth/init-status）各×2；`bundle.js` `event: unauthorized`×3（三 SSE 端点）、`/auth/ping` 路由×1。
+
+### 未完成 / 已知限制
+- 无。
+
+### 下一步
+- 无（待用户下令发布）。
+
+---
+
+## v1.43.10 — 2026-10-19（**已出包 · 未发布**）
+
+### 已完成
+- **概念改名：「锁定 / 解锁」→「不被清理 / 允许清理」**（用户指令：「增加「不被清理」= 仅保护不被「清理未使用/未关联」自动删除，它不阻止手动拉取、更新或删除，取代之前的「锁定」」）：功能逻辑不变（标记后仅在「清理未使用/未关联」自动删除时被跳过，不阻止手动拉取/更新/删除），仅把用户可见文案统一替换。
+  - 覆盖：`src/pages/Images.tsx`（统计卡「不被清理」、Tag「不被清理」、右键菜单「标记为不被清理/允许清理」、批量栏「标记为不被清理/允许清理」、清理确认/提示文案）、`src/api.ts#setImageLockApi` 文档注释、`server/index.ts` 镜像锁定 API 注释与日志串。
+  - **内部数据模型与后端契约保持不变**（`locks` / `config/image-locks.json` / `GET|POST /api/engines/:id/images/locks`），仅前端展示语义澄清，不破坏持久化格式。
+- **四页面批量操作改造（沿用用户本批指令）随本版出包落地**：
+  - 镜像管理：行首复选框 + 全选；批量栏 = 标记为不被清理 / 允许清理 / 删除（跳过 in-use）/ 拉取 / 下载镜像（逐个串行）；**移除「更新」按钮**（与拉取语义重叠，按用户确认）。
+  - 数据卷管理：行首复选框 + 全选；批量栏 = 仅删除（跳过 in-use 卷）；**不实现卷锁定后端**（按用户确认：边际价值低、且需新增 ~300 行后端承担误删风险）。
+  - 容器管理：**移除批量删除**（删 `batchDelete`/`confirmBatchDelete` 状态/按钮/弹窗）；容器详情头部新增「删除」按钮，置于控制按钮组与 WebUI 之间，**仅 `status==='stopped'` 可点**（其余状态禁用灰显，提示「仅容器停止后才允许删除」）；子组件 `ContainerDetailModal` 通过新增 `onRequestDelete` prop 回调父级确认弹窗（修复 tsc 报错 `setConfirmDelete` 越作用域）。
+  - 堆栈管理：**移除「批量更新」按钮**（`handleBatchAction` 的 `pull` 分支不再被调用；单栈「拉取/检查更新/强制更新」仍保留）。
+
+### 验证（硬证据）
+- tsc(src)+tsc(server) 0 错误；门禁 16 组 0 FAIL。
+- ELF `7f454c46`/e_machine=`3e`(62)；内部版本 `1.43.10` ×2、`1.43.9` 归零；旧名 `dockermanageryanzi` 在二进制内残留 = 0，新名 `dockermanagementyanzi` 出现 32 处。
+- 前端 `dist` 明文核验：不被清理 ×12、标记为不被清理 ×8、允许清理 ×6（前端 base64 嵌入二进制，二进制内为 `\u` 转义，grep 字面量 0 为正常）。
+- 后端 `bundle.js` 第 104260 行日志串为 `\u6807\u8BB0\u4E3A\u4E0D\u88AB\u6E05\u7406`/`\u5141\u8BB8\u6E05\u7406`（=「标记为不被清理」/「允许清理」，esbuild 转义，已在构建内）。
+- **zip/deb 内二进制 vs SEA 产物 SHA-256 逐字节一致**：`f27f61289f8de9098f1c6082ce0bf98acac1ca91548400ff5ad0fdc9486918f7`（130,419,904 B）。
+
+### 未完成 / 已知限制
+- 数据卷锁定后端未实现（按用户确认不做），卷的「清理未关联」保护缺位——但手动删除已按 `inUse` 限制，影响有限。
+- Gitea 仓库 slug 服务端已由用户重命名（`yanzi/dockermanageryanzi`→`yanzi/dockermanagementyanzi`，上轮已确认），发布链路现可正常走。
+
+### 下一步
+- 双源发布（GitHub + 自建 Gitea，GitHub 仍按现行策略跳过仅推 Gitea），同步 GitHub 源码至 v1.43.10。
+
+## v1.43.9 — 2026-10-19（**已出包 · 未发布**）
+
+### 已完成
+- **全局重命名部署身份 `dockermanageryanzi` → `dockermanagementyanzi`**（用户指令：「dockermanageryanzi改为dockermanagementyanzi」）：按用户确认的三项决策全量替换——① 安装目录默认 `/opt/dockermanageryanzi` 一并改 `/opt/dockermanagementyanzi`；② Gitea 仓库 slug `yanzi/dockermanageryanzi` 代码侧改 `yanzi/dockermanagementyanzi`（需用户在 Gitea 服务端同步重命名仓库，否则 OTA/发布会 404）；③ 历史文档（含 CHANGELOG 旧版本条目）全量文本替换。
+  - 覆盖点：`dockermanageryanzi.service`（git mv 重命名 + 内部 `RuntimeDirectory`/`ExecStartPre` 的 `/run/...`/`ExecStart` 二进制名）、SEA 宿主二进制 `deploy/linux/dockermanageryanzi`→`dockermanagementyanzi`、`server/auth.ts#SESSION_COOKIE`（`dockermanagementyanzi_session`）、`server/unit-status.ts`（`UNIT_NAME`/`APP_NAME`/`DMI_MIRROR_DIR=/run/dockermanagementyanzi`）、`server/updater.ts`（`ASSET_APP_NAME`/User-Agent/`GITEA_REPO_DEFAULT`）、`server/telemetry.ts`（`/run/.../dmi-*`/`app:`）、`server/daemon-config.ts`（sudoers `/etc/sudoers.d/dockermanagementyanzi`、`.service.d`）、`server/backup.ts` + `src/pages/Settings.tsx` `BACKUP_NAME_PREFIX`、`deploy/linux/{install,uninstall}.sh` `APP_NAME`、`.service` 内 `User=__SERVICE_USER__`（系统用户跟随系统用户、未强制改名）、`make-package.py`/`make-deb.py`/`make-rpm.sh` `APP`/`SRC_BIN`、`scripts/*`（build-binary/publish-*/push-gitea/quick-install/check-*）、`src/components/auth/LoginPage.tsx` 品牌文案、全部 `docs/*.md`、`README.md`、`deploy/docker/*`。
+  - 系统用户：**未强制改名**（`User=__SERVICE_USER__` 占位符由 install 期填实际系统用户），避免旧装文件属主迁移风险；仅部署名/目录/单元名/品牌改。
+  - `.gitignore`：第 17 行陈旧老名 `deploy/linux/docker-manager-yanzi` 更新为 `deploy/linux/dockermanagementyanzi`；旧二进制 `deploy/linux/dockermanageryanzi` 实际被 git 追踪（130MB 误入库），已 `git rm --cached` 解除追踪，新二进制按忽略规则不再入库。
+
+### 验证（硬证据）
+- tsc(src)+tsc(server) 0 错误；门禁 16 组 0 FAIL（check-service-unit / check-backup-naming 等关键断言随改名同步通过）。
+- ELF `7f454c46`/e_machine=`3e`(62)；内部版本 `1.43.9` ×2、`1.43.8` 归零；**旧名 `dockermanageryanzi` 在二进制内残留 = 0**，新名 `dockermanagementyanzi` 出现 32 处。
+- **zip/deb 内二进制 vs SEA 产物 SHA-256 逐字节一致**：`83329309260e9198e969c6ac0b83f1be51cff6a6d7cc9db55b96f5181a8966b5`（130,419,904 B）。
+- 包成员 5 个齐全（`dockermanagementyanzi/dockermanagementyanzi` + install/uninstall/`dockermanagementyanzi.service`/README）。
+
+### 未完成 / 已知限制
+- **Gitea 仓库 slug 服务端未重命名**：代码已指向 `yanzi/dockermanagementyanzi`，但 Gitea 实际仓库仍为 `yanzi/dockermanageryanzi`。发布/OTA 前必须由用户在 Gitea 服务端把仓库重命名为 `dockermanagementyanzi`，否则 `releases/latest` 与下载 404。
+- 旧装（已部署在 `/opt/dockermanageryanzi`）不受影响：`.service` 路径占位符 + 进程 `cwd` 决定 APP_DIR，OTA 只换二进制；新装才走 `/opt/dockermanagementyanzi`。两套目录并存，互不干扰。
+
+## v1.43.8 — 2026-10-18（**已出包 · 未发布**）
+
+### 已完成
+- **修复「空闲超时自动登出」不生效**（用户指令：「自动退出登录还是没有成功」）：根因 = v1.43.2 那轮修复只解决了「操作时误踢」，但**滑动续期仍发生在所有请求上**——`server/auth.ts#getSessionUser`（被 `requireAuth`、所有业务请求、WS 握手调用）每次请求都滑动 `expiresAt`；而前端 Dashboard 每 3s `load` 轮询（`Dashboard.tsx:201`）、Settings 每 30s（`Settings.tsx:709`）、容器统计轮询（`Containers.tsx:825`）等后台数据轮询持续触发业务请求 → 只要页面开着，会话被 3s 一次的轮询永久续住，空闲满 TTL 永远不会过期，自动登出始终不触发。
+  - 改法（核心：**续期只认「真实用户活动」，不认「请求流量」**）：
+    - `server/auth.ts`：`getSessionUser` 改为**只读校验、不刷新 `expiresAt`**；新增 `renewSession(req)` 承载滑动逻辑（验证 + 滑动，与原 `getSessionUser` 行为一致）。
+    - `server/index.ts`：`GET /api/auth/me` 改用 `renewSession`（该接口**只由前端真实活动触发**：`src/App.tsx#markActivity` 监听 mousemove/keydown/pointerdown/wheel/touchstart，节流 30s 调 `getMe()`）；`/api/auth/ping`（只读探活）、`requireAuth`、业务请求、WS 握手一律走只读 `getSessionUser`，不再续期。
+    - `src/App.tsx`：更新心跳注释（业务请求不再续期，仅 `/api/auth/me` 续期）。
+  - 效果：空闲（无鼠标/键盘活动）满 `sessionTimeout`（默认 30min，设置页可调）后，后台轮询/ping 命中过期 → 服务端 401 → 全局 `auth:unauthorized` 兜底回登录页；真实操作期间因活动节流每 ≤30s 续期，不会误踢。涉及文件：`server/auth.ts`、`server/index.ts`、`src/App.tsx`、`package.json`（1.43.7→1.43.8）。
+
+### 验证（硬证据）
+- tsc(src)+tsc(server) 0 错误；门禁 16 组 0 FAIL（含 auth-wiring / auth-render）。
+- ELF `7f454c46`/e_machine=`3e`(62)；内部版本 `1.43.8` ×2、`1.43.7` 归零。
+- zip/deb 内二进制与 SEA 产物 SHA-256 逐字节一致：`c48d156ea5210ccbeb7610c494500dc38c50eaa9c77fb780f54718f4de897793`（130,419,904 B）。
+- 包成员 5 个，4 个非二进制成员与 `deploy/linux/` 源 SHA 一致。
+
+### 未完成 / 已知限制
+- 无（已出包）。
+
+### 下一步
+- 双源发布（GitHub + 自建 Gitea），同步 GitHub 源码至 v1.43.8。
+
+
+## v1.43.7 — 2026-10-18（**已出包 · 未发布**）
+
+### 已完成
+- **两处镜像/更新 UI 修正（用户指令：「清理未使用镜像，仓库名对准仓库名，标签对准标签；上传更新包后显示上传更新包原来的名称」）：**
+  - **A. 清理未使用镜像弹窗清单回退为干净两字段 `仓库名:标签`**（撤销 v1.43.5 四段式）：`src/pages/Images.tsx#deletableList` 从 `formatCleanListName(img)` 改回 `buildImageRef(img)`（即 `命名空间/仓库:标签`，已去 registry 主机名，如 `library/node:22-alpine`、`gitea/gitea:latest`、`gitea/gitea:1.23`）；删除死代码 `splitImageRef`/`formatCleanListName`；弹窗文案去掉「（格式：注册表 / 命名空间 / 仓库 : 标签）」。`ConfirmDialog#wide` 自适应宽保留（无害）。
+  - **B. 上传更新包后展示原始包名**（根因修复）：服务端 `server/updater.ts` 原把**每次上传的更新包固定重命名为 `pending-update.zip`**，`saveUploadPackage`/`getPendingUpload` 返回的 `fileName` 恒为 `"pending-update.zip"`，原始名（如 `dockermanagementyanzi-linux-x64-v1.43.6.zip`）丢失，前端虽显示 `fileName` 但永远显示 `pending-update.zip`。改法：前端 `src/api.ts#uploadUpdateZipApi` 新增 Header `X-File-Name: encodeURIComponent(file.name)`；`server/index.ts` 上传路由读取并 decode 后传给 `saveUploadPackage`；`server/updater.ts` 新增 sidecar `pending-update.meta.json`（存 `{fileName,size,uploadedAt}`），`saveUploadPackage(buf, originalName?)` 写 zip + 写 meta、返回原始名，`getPendingUpload` 优先读 meta，`clearPendingUpload` 一并删 meta；**磁盘 zip 仍固定名 `pending-update.zip`**（供 `performUpdateFromUpload` 读取，不可改）。前端 `Settings.tsx` 待应用卡片/上传进度卡已显示 `fileName`/`uploadFileName`，服务端返回真实名即生效。
+  - 涉及文件：`src/pages/Images.tsx`、`src/api.ts`、`server/updater.ts`、`server/index.ts`、`package.json`（1.43.6→1.43.7）。
+
+### 验证（硬证据）
+- `tsc`(src) + `tsc`(server) 0 错误；门禁 **16 组全绿 0 FAIL**（cpu-load-split 46/0，EXIT=0）。
+- **ELF** `7f454c46` / e_machine=`3e`(62)；**内部版本** `1.43.7` ×2、`1.43.6`/`1.42.23` 归零。
+- **zip/deb 内二进制与 SEA 产物 SHA-256 逐字节一致**：`ba697657bd2627fbedb8f5b268b8234758f92ab0e0b2f9b8055e8f9149a8b0dc`（130,419,904 B）。
+- **包成员 5 个**，4 个非二进制成员（install/uninstall/`.service`/README）与 `deploy/linux/` 源文件 SHA 一致。
+- **前端改动已编入**（bundle.js 解码核验）：清理清单回退 `buildImageRef` 两字段（`library/node:22-alpine · 1.23 GB`）+ `X-File-Name` 透传 + `pending-update.meta.json` sidecar。
+
+### 未完成 / 已知限制
+- 无（已出包）。
+
+### 下一步
+- 双源发布（GitHub + 自建 Gitea），同步 GitHub 源码至 v1.43.7。
+
+---
+
+## v1.43.6 — 2026-10-18（**已出包 · 未发布**）
+
+### 已完成
+- **「清理未使用镜像」确认弹窗宽度改为「按内容自适应、最大不超过当前 2 倍」**（用户指令：「宽度根据内容自适应，最大是现在宽度的 2 倍」）：
+  - 背景：v1.43.5 四段式镜像名（`注册表 / 命名空间 / 仓库 : 标签`）较长，原 `ConfirmDialog` 固定 `size="sm"`（`max-w-md` 448px）会挤压/换行。原拟直接 `size="lg"`（固定 896px），用户要求改为「自适应、封顶 2 倍」。
+  - 改法：
+    - `src/components/Modal.tsx#Modal` 新增 `fitWidth` 选项——`fitWidth` 时内容容器用 `w-fit max-w-[896px] min-w-[448px] mx-auto`（按内容定宽、封顶 896px＝448×2、不低于 448px），与 `size` 互斥，传入后忽略 `size`。
+    - `ConfirmDialog` 新增 `wide` 开关，传给 `Modal#fitWidth`；清理弹窗传入 `wide`。
+    - 宽弹窗清单项改 `whitespace-nowrap`（不再 `break-all`），列表容器 `overflow-auto`，使 `w-fit` 能按最长一行自适应撑宽、超长时横向滚动，避免 CJK 在窄宽下塌缩。
+  - 涉及文件：`src/components/Modal.tsx`、`src/pages/Images.tsx`、`package.json`（1.43.5→1.43.6）。
+  - **四段式镜像名（v1.43.5）保留不变**：`docker.io / library / node : 22-alpine`（官方）、`docker.io / gitea / gitea : latest`（Hub 第三方）、`docker.1panel.live / gitea / gitea : 1.23`（私有仓库）、`sha256:…`（悬空回退）。
+
+### 验证（硬证据）
+- `tsc`(src) + `tsc`(server) 0 错误；门禁 **16 组全绿 0 FAIL**（cpu-load-split 46/0，EXIT=0）。
+- **ELF** `7f454c46` / e_machine=`3e`(62)；**内部版本** `1.43.6` ×2、`1.43.5` 归零、`__APP_VERSION__` 已替换。
+- **zip/deb 内二进制与 SEA 产物 SHA-256 逐字节一致**：`49b712be72130aecd4bca2bd8bb57715d1688b4eb073485e876b038ab2c99799`（130,419,904 B）。
+- **包成员 5 个**，4 个非二进制成员（install/uninstall/`.service`/README）与 `deploy/linux/` 源文件 SHA 一致。
+- **前端改动已编入**（bundle.js 解码核验）：清理清单格式说明文案（`下方为本次将清理的镜像清单（格式：注册表…）`）+ 自适应宽 `w-fit max-w-[896px] min-w-[448px]` + `fitWidth` 接线。
+
+### 下一步
+- 双源发布（GitHub + 自建 Gitea），同步 GitHub 源码至 v1.43.6。
+
+---
+
+## v1.43.5 — 2026-10-18（**已出包 · 未发布**）
+
+### 已完成
+- **镜像管理页「清理未使用镜像」确认弹窗：镜像名称改为「注册表 / 命名空间 / 仓库 : 标签」四段式显示**（用户指令：「镜像名称按照 注册表 命名空间 仓库 标签 这个格式显示」）：
+  - 原清单每行用 `buildImageRef`（即 `仓库:标签`，registry 与命名空间混在路径里），无法直观区分注册表 / 命名空间 / 仓库 / 标签。
+  - 修复：
+    - `src/pages/Images.tsx` 新增 `splitImageRef(image)`——把 `image.repository`（已含 registry 主机名与 `library/` 命名空间）拆成 `{registry, namespace, repo}`：首段含 `.`/`:` 或为 `localhost` 视为 registry 主机名剥离，其余按 `/` 切、末段为仓库、前面为命名空间（可多级）；无显式 registry 时默认补 `docker.io`（Docker 默认仓库），使四段完整。
+    - 新增 `formatCleanListName(image)`——拼装为 `注册表 / 命名空间 / 仓库 : 标签`（空命名空间略去），dangling（`<none>:<none>`）无可用标签时回退 `sha256:短摘要`；删除逻辑仍走 `buildImageRef`（不受影响）。
+    - 弹窗文案补格式说明「（格式：注册表 / 命名空间 / 仓库 : 标签）」。
+  - 展示示例：
+    - `docker.io / library / node : 22-alpine`（官方镜像）
+    - `docker.io / gitea / gitea : latest`（Docker Hub 第三方）
+    - `docker.1panel.live / gitea / gitea : 1.23`（私有仓库，registry 真实主机名）
+    - `sha256:9f86d0819b762…`（悬空镜像，回退 digest）
+  - 涉及文件：`src/pages/Images.tsx`、`package.json`（1.43.4→1.43.5）。
+
+### 验证（硬证据）
+- `tsc`(src) + `tsc`(server) 0 错误；门禁 **16 组全绿 0 FAIL**（cpu-load-split 46/0，EXIT=0）。
+- SEA 重建后 ELF `7f454c46` / e_machine=62，二进制内部版本 `1.43.5` ×2、`1.43.4` 归零、`__APP_VERSION__` 已替换。
+- zip/deb 内二进制与 SEA 产物 SHA-256 **逐字节一致**（`3f4f09c2ca5d96e0844f10e5cd421f61f24b47967880b9021f191c1532b2f937`，130,419,904 B）；zip 另含 latest 别名 `dockermanagementyanzi-linux-x64.zip` 同字节；4 个非二进制成员（install/uninstall/.service/README）与 `deploy/linux/` 源文件 SHA 一致。
+- 前端改动经 bundle.js 解码核验：「下方为本次将清理的镜像清单（格式：注册表 / 命名空间 / 仓库 : 标签）」文案 + `docker.io` 默认 registry 逻辑（`splitImageRef` 编译为 `r||(r="docker.io")`）已编入。
+
+---
+
+## v1.43.4 — 2026-10-18（**已出包 · 未发布**）
+
+### 已完成
+- **镜像管理页：清理未使用镜像前在确认弹窗逐条列出「将清理哪些镜像」**（用户指令：「清理未使用镜像时列出有哪些」）：
+  - 根因：原「清理未使用镜像」确认弹窗只给出「将删除 N 个、释放 X MB」的笼统数字，不展示具体镜像清单，用户无法在确认前核对会误删哪些（尤其多 tag 镜像、悬空镜像）。
+  - 修复：
+    - `src/components/Modal.tsx#ConfirmDialog` 新增可选 `list?: string[]` prop——提供时在其内部渲染一个 `max-h-60` 可滚动、等宽小字的清单列表（介于 message 与按钮之间），复用且不破坏既有调用。
+    - `src/pages/Images.tsx`：在 `confirmCleanUnused` 弹窗中新增 `deletableList` 派生（过滤「未使用 ∧ 未锁定」、按镜像 ID 去重，与按钮计数 `deletableCount` 口径一致），每行格式 `${buildImageRef(img)}  ·  ${img.size}`（如 `library/node:22-alpine  ·  1.23 GB` / `sha256:abcd…  ·  456 MB`），作为 `list` 传入确认弹窗；弹窗文案同步改为「下方为本次将清理的镜像清单：」。锁定项仍只在文案中告知跳过数量，不进入清单（清单只列真实会删的）。
+  - 涉及文件：`src/components/Modal.tsx`、`src/pages/Images.tsx`、`package.json`（1.43.3→1.43.4）。
+  - 验证（硬证据）：`tsc`(src) + `tsc`(server) 0 错误；门禁 **16 组全绿 0 FAIL**（cpu-load-split 46/0，EXIT=0）；SEA 重建后 ELF `7f454c46`/e_machine=62，二进制内部版本 `1.43.4` ×2、`1.43.3` 归零、`__APP_VERSION__` 已替换；zip/deb 内二进制与 SEA 产物 SHA-256 **逐字节一致**（`33d9a86f4bc4a383c87642af0b377d71304f6a53de1310aab4a1bb2753dad9fe`，130,419,904 B）；前端改动经 bundle.js 解码核验「下方为本次将清理的镜像清单：」+ `list:` 接线已编入；zip 另含 latest 别名 `dockermanagementyanzi-linux-x64.zip` 同字节，4 个非二进制成员（install/uninstall/.service/README）与 `deploy/linux/` 源文件 SHA 一致。
+
+### 未完成 / 已知限制
+- 未发布（线上 latest = v1.42.23 双源）；GitHub 源码仍停在 v1.39.0 `f99dd247` 未同步。
+
+### 下一步
+- 双源发布（GitHub + 自建 Gitea），同步 GitHub 源码至 v1.43.4。
+
+---
+
+## v1.43.3 — 2026-10-18（**已出包 · 未发布**）
+
+### 已完成
+- **镜像管理页：官方镜像保留 `library/` 命名空间（只省略 `docker.io` 注册表）**（用户指令：「命名空间 library 不省略，只省略 docker.io」）：
+  - 根因：Docker API 的 `RepoTags` 默认省略官方镜像命名空间与注册表——`node:22-alpine` 实为 `docker.io/library/node:22-alpine`，但 API 返回的是省略后的 `node:22-alpine`。`src/transforms.ts#transformImages` 直接透传 `RepoTags` 拆成 `repository`/`tag`，故镜像管理页仓库名显示为 `node` 而非 `library/node`。
+  - 修复：`transformImages` 中对官方镜像（无 `/`、非 `<none>`、非 `scratch`）补回 `library/` 命名空间，使其与 Docker 官方镜像完整引用一致。`hideRepoRegistry` 仅 strip registry 主机名（如 `docker.1panel.live/gitea/gitea`→`gitea/gitea`），不会误伤 `library/xxx`；第三方仓库名、悬空镜像 `<none>`、`scratch` 均不受影响。
+  - 涉及文件：`src/transforms.ts`（`transformImages` 的 `repository` 拆分段）。
+  - 验证：`tsc`(src) 0 错误；全套门禁 **16 组 0 FAIL**（cpu-load-split 46/0，EXIT=0）；功能单测 7/7 PASS（官方镜像 `node:22-alpine`→`library/node`、`redis:7`→`library/redis`，第三方 `gitea/gitea:1.0`/`docker.1panel.live/gitea/gitea:1.0` 不动，`<none>:<none>`/`scratch` 不动）；SEA 重建后 ELF `7f454c46`/e_machine=62，zip/deb 内二进制与 SEA 宿主 SHA 逐字节一致，旧版本 `1.43.2`/`1.43.1` 归零、dist 含 `library/`×3 补全逻辑。
+
+### 未完成 / 已知限制
+- 无
+
+### 下一步
+- 出包并双源发布（GitHub + 自建 Gitea），同步 GitHub 源码至 v1.43.3。
+
+---
+
+## v1.43.2 — 2026-10-18（**已出包 · 未发布**）
+
+### 已完成
+- **修复：空闲超时策略误将「正在操作」用户踢出登录**（用户指令：「空闲超时自动退出没实现成功，我正在操作时自动推出登录了」）：
+  - 根因：v1.43.0 引入的空闲超时（滑动窗口）在前端用了「双权威」设计——服务端 `server/auth.ts#getSessionUser` 每次请求都滑动刷新 `expiresAt`（操作时服务端**不会**过期），但前端 `src/App.tsx` 另有一个**本地 idle 计时器**，每 10s 用前端自己的 `lastActivity`（只被 mousemove/keydown 等更新）判断 `Date.now() - lastActivity.t >= TTL` 就主动登出。当用户以「业务请求为主、鼠标活动少」的方式操作（专注看数据、偶尔点按钮）时，前端 `lastActivity` 停在较早时刻，而服务端因业务请求持续续期——前端误判 idle 抢先跳登录，造成「操作时却被踢」的假象。
+  - 修复（改为**纯服务端权威**）：前端不再用本地计时主动登出，唯一登出触发条件 = 服务端 401。具体：
+    - 删除前端本地 idle 主动登出定时器（`App.tsx` 会话心跳 effect 内 `setInterval` 检查 `lastActivity` 那段）。
+    - 保留活动节流 `/api/auth/me` 续期（mousemove 等活动时 30s/次；业务请求本身也会经 `requireAuth → getSessionUser` 续期）。
+    - 新增 `GET /api/auth/ping`（服务端 `auth.ts#peekSessionUser`：只读、**不刷新** `expiresAt`）＋ 前端 60s 低频探活：人离开页面开着时，会话真过期后服务端返回 401，经全局 401 兜底（`api.ts` 派发 `auth:unauthorized`）回到登录页——既能「人离开后自动登出」，又**绝不误踢**（ping 只读不续期，不会维持会话）。
+    - 会话心跳 effect 依赖由 `[authState, settings]` 收紧为 `[authState]`（不再因 `settings` 变化重跑、重置计时）。
+  - 涉及文件：`server/auth.ts`（新增 `peekSessionUser`）、`server/index.ts`（新增 `GET /api/auth/ping`）、`src/api.ts`（新增 `ping()`）、`src/App.tsx`（会话心跳重构）。
+  - 验证：`tsc`(src) + `tsc`(server) 0 错误；全套门禁 **16 组 0 FAIL**（cpu-load-split 46/0，EXIT=0）；SEA 重建后服务端改动在 bundle.js 明文命中 `peekSessionUser`×2、`/auth/ping`×1，前端改动经 `dist/assets/index-*.js` 核验「mousemove」×24（活动监听保留）、「auth/ping」×1（新增调用）、旧 `lastActivity.t` 归零；zip/deb 内二进制与 SEA 宿主 SHA 逐字节一致。
+
+### 未完成 / 已知限制
+- 无
+
+### 下一步
+- 出包并双源发布（GitHub + 自建 Gitea），同步 GitHub 源码至 v1.43.2。
+
+---
+
+## v1.43.1 — 2026-10-18（**已出包 · 未发布**）
+
+### 已完成
+- **修复：编辑堆栈「LABELS」自动识别 WebUI 后，容器管理「打开 WebUI」需手动点「应用」才生效**（用户指令：「编辑堆栈的WebUI URL自动识别后，在容器管理的打开webui打不开，只有在编辑堆栈的LABELS页面应用后在容器管理的打开webui才能点击」）：
+  - **根因**：容器管理的「打开 WebUI」按钮依赖 `container.webuiUrl`，而该字段**只**由 `src/App.tsx`（L364-397 交叉引用）从**服务端** `stacks.webuiLabels` 派生；堆栈编辑弹窗的 WebUI 自动识别（`src/pages/Stacks.tsx#StackEditorModal` 切到 webui/LABELS 页时的 `useEffect`）只更新弹窗内本地 `webuiLabels` state，**未落盘**，故必须手动点「应用」（`saveStackSettingsApi`）持久化后，服务端才有数据、交叉引用才会填 `container.webuiUrl`。
+  - **改法**：自动识别追加缺失条目后**即时落盘**——`setWebuiLabels(next)` 后调用 `saveStackSettingsApi(engineId, stack.name, { webuiLabels: next })`（服务端 `saveStackSettings` 为合并写 `{...existing, ...settings}`，只更新 webuiLabels 字段，不冲掉 icon/description/settings），成功后 `onRefresh?.()` 触发 App 重新拉取并刷新交叉引用。保留「只追加缺失、不覆盖已有配置」语义，且 `missing.length === 0` 时不产生任何写盘。
+  - 涉及文件：`src/pages/Stacks.tsx`（移除从未被读取的 `autoDetectedRef` 死代码，改用 `webuiLabelsRef` 同步最新 state 以避免 `useEffect` 闭包陈旧值）；`src/api.ts#saveStackSettingsApi`（既有复用）、`server/docker.ts#saveStackSettings`（既有合并写，无需改）。
+  - 验证：`tsc`(src) 0 错误；全套门禁 **16 组 0 FAIL**（cpu-load-split 46/0，EXIT=0）；SEA 重建后 `dist/assets/index-*.js` 含 `saveStackSettingsApi` 调用路径、前端段解码确认「打开 WebUI」文案与 `webuiLabels` 字段；zip/deb 内二进制与 SEA 宿主 SHA 逐字节一致。
+
+- **登录会话策略：绝对过期 → 空闲超时（滑动窗口）**（用户指令：「改成『空闲超时』」）：
+  - 服务端 `server/auth.ts#getSessionUser`：命中有效会话时把 `expiresAt` 滑动刷新为「当前时间 + TTL」，任何请求都会续期；停止请求满 TTL 才失效。新增 `schedulePersistSessions()` 节流落盘（5s），避免高频请求每次写盘。
+  - 前端 `src/App.tsx` 会话心跳重构：监听真实用户活动（mousemove/mousedown/keydown/pointerdown/wheel/touchstart）更新 `lastActivity`，活动时节流（30s/次）发 `/api/auth/me` 续期；纯空闲检测定时器每 10s 检查，idle 达到 TTL 即主动登出。续期责任交给用户活动与业务请求，避免「页面开着但人离开」仍一直续期。
+  - TTL 仍取 `settings.user.sessionTimeout`（默认 30 分钟），服务端 5s 缓存、前端实时读取，改设置后对新会话/续期立即生效。
+  - 验证：`tsc`(src) + `tsc`(server) 0 错误；全套门禁 **16 组 0 FAIL**（cpu-load-split 46/0，EXIT=0）。
+
+### 未完成 / 已知限制
+- 无
+
+### 下一步
+- 出包并双源发布（GitHub + 自建 Gitea），同步 GitHub 源码至 v1.43.1。
+
+---
+
+## v1.42.27 — 2026-10-17（**已出包 · 未发布**）
+
+### 已完成
+- **通知中心列表上限收紧为 100 条**（用户指令：「通知页面最多显示 100 条通知，操作记录最多显示 100 条」）：
+  - 通知（活动日志）：`server/docker.ts` 的 `getActivityLogs` 取最近条目由 `slice(0, 20)` 改为 `slice(0, 100)`（数据源为容器/镜像状态派生，服务端聚合后截断，前端按 props 全量渲染，故上限在此生效）。
+  - 操作记录（本地 localStorage）：`src/opLog.ts` 的 `MAX_ENTRIES` 由 `500` 改为 `100`，新写入超量时 `logs.length = MAX_ENTRIES` 截断，沿用既有 unshift 顺序（最新在前）。
+  - 验证：`tsc`(src) 0 错误；全套门禁 0 FAIL；SEA 重建后前端段解码确认「最多显示」相关文案不变（纯数值变更，无新增中文串）。
+
+### 未完成 / 已知限制
+- 无
+
+---
+
+## v1.42.26 — 2026-10-16（**已出包 · 未发布**）
+
+### 已完成
+- **堆栈管理容器子表：点击「状态」格跳转容器详情**（用户指令：「堆栈管理-容器子表，点击状态的运行中跳转到容器详情」）：
+  - `StackContainersModal`：状态格改为可点击按钮（与容器管理页状态列一致的 hover 蓝圈样式，`title=点击状态查看容器详情`）；新增可选 `onOpenContainerDetail` 回调，不传时行为不变（仪表盘「堆栈」磁贴复用同一张子表，本次未接线，保持原状）。
+  - 跨页导航链路：`Stacks` 增 `onOpenContainerDetail(containerName)` → `App.handleNavigate` 扩展可选 `{ focusContainerName }` 载荷 → `Containers` 增 `focusContainerName` / `onFocusContainerConsumed` 两 props，按名称命中后自动打开详情（`detailTab="info"`）；数据未就绪时等 containers 更新后重试，消费后即清空避免刷新重复打开。
+  - 验证：`tsc`(src) 0 错误；全套门禁 0 FAIL。
+
+### 未完成 / 已知限制
+- 无
+
+---
+
+
+
+### 已完成
+- **容器详情基本信息新增「持久化目录映射」**（用户指令：「端口映射下方增加持久化目录映射」）：
+  - 数据链路：`transformContainers` 从 Docker `Mounts` 提取 bind / volume 两类挂载 ⇒ `Container.volumes: VolumeMapping[]`（bind = 宿主路径；volume = 命名卷，宿主侧显示卷名；`RW=false`/`Mode=ro` ⇒ ro，其余 rw）；`VolumeMapping` 增可选 `type` 字段（缺省 bind，模板等旧数据兼容）。
+  - 展示：端口映射块下方新增「持久化目录映射」块，每行 `宿主路径/卷名 → 容器路径` + 类型 Tag（bind=蓝 / volume=紫）+ 权限 Tag（rw=绿 / ro=灰）；无挂载显示「无目录映射」。
+  - 验证：`tsc`(src) 0 错误；全套门禁 0 FAIL；SEA 重建后前端段解码确认「持久化目录映射」×1、「无目录映射」×1。
+
+---
+
+## v1.42.24 — 2026-10-16（**已出包 · 未发布**）
+
+### 已完成
+- **系统概览磁贴布局优化**（用户指令：「运行时间优化下布局；移除 Docker 28.5.2 · 12 逻辑核显示」）：
+  - 移除磁贴副标题「Docker <版本> · <N> 逻辑核」（`SystemTile` 的 `subtitle` 不再传；Docker 版本与逻辑核在处理器磁贴 tooltip / 详情处仍有展示，无信息丢失）。
+  - 「运行时间」不再独占整行（原 `col-span-2`），与「启动时间」并排成 2×2 网格（主机名称 | 主机地址 / 启动时间 | 运行时间），消除左列双行、右列空置的割裂。
+  - 验证：`tsc`(src) 0 错误；全套门禁 0 FAIL；SEA 重建后前端段解码确认「逻辑核」副标题模板串归零、「运行时间」仍存在。
+
+---
+
+## v1.42.23 — 2026-10-16（**已发布 · GitHub + 自建 Gitea 双源**）
+
+### 已完成
+- **硬件信息页标签修正：「系统类型」重命名为「架构」**（用户指令：「系统类型 重命名为 架构」）：
+  - 回滚 v1.42.22 在硬件信息标识卡片把「架构」改名为「系统类型」的改动；该卡片现显示「架构」(`arch`)，与仪表盘原「系统类型」语义同数据，标签归位。
+  - 仪表盘「系统概览」原三项（发行版本 / 内核版本 / 系统类型）已整体移至硬件信息页（v1.42.22），本版仅调整硬件信息页该标签文案，不影响数据链路。
+  - 验证：`tsc`(src + server) 均 0 错误；全套门禁 0 FAIL；SEA 重建后前端段解码确认硬件信息页「架构」×1、原「系统类型」×0。
+- **发布 + 清理旧包**（用户指令：「发布且清空 1.40.x 之前的包」）：
+  - 双源发布 `v1.42.23`：GitHub `yanziruxue/docker-manager`（REST 通道，gh 缺失自动回退；资产＝版本化 zip + `dockermanagementyanzi-linux-x64.zip` 别名 + `quick-install.sh`）+ 自建 Gitea `yanzi/dockermanagementyanzi`（资产＝zip + 别名 + `dockermanagementyanzi_1.42.23_amd64.deb` + `quick-install.sh`；rpm 未构建跳过）；两处匿名 `releases/latest` 均回读指向 v1.42.23。
+  - 清空两处 `< v1.40.0` 的全部 release 及其资产：**GitHub 删除 45 个**（v1.2.1…v1.39.2）、**Gitea 删除 9 个**（v1.36.0…v1.39.2），均 0 失败。Gitea 保留 `v1.42.3`（patch=3 < 23 ⇒ 仍低于本次，但其 ≥1.40.0 不在清理范围）；GitHub 清完后仅剩 v1.42.23。
+  - 说明：仅删 release（下载包），未删 git tag ref；如需连 tag 一并清除请另行下令。
+
+### 未完成 / 已知限制
+- 无
+
+---
+
+## v1.42.22 — 2026-10-16（**已出包 · 未发布**）
+
+### 已完成
+- **仪表盘「系统概览」三项移至「系统设置 → 硬件信息」页，消除重复显示**（用户原话：「发行版本 / 内核版本 / 系统类型 移动到系统设置硬件信息页面 重复的不再重复显示」）：
+  - 仪表盘 `SystemTile` 移除「发行版本 / 内核版本 / 系统类型」三项（保留 主机名称 / 主机地址 / 启动时间 / 运行时间）。
+  - 硬件信息页（`ActivityPanel` 硬件信息标识卡片）：原「架构」重命名为「系统类型」（同数据 `arch`）；原「系统」组合串（`Linux <内核> (<发行版>)`）替换为「发行版本」(`osName` = `/etc/os-release` PRETTY_NAME) +「内核版本」(`kernelVersion` = `os.release()` / uname -r) 两项，与仪表盘原口径一致，且不再与新增字段重复。
+  - 服务端 `TelemetryStatus` 新增 `osName` / `kernelVersion` 两字段（`getTelemetryStatus()` 实时采集，端点 `/api/telemetry/status` 直接透传）；前端 `src/api.ts` 类型同步。
+  - 验证：`tsc`(src + server) 均 0 错误；全套门禁 0 FAIL；SEA 重建后前端段解码确认「发行版本 / 内核版本 / 系统类型」出现在硬件信息页、仪表盘不再含此三项。
+
+### 未完成 / 已知限制
+- 无
+
+---
+
+## v1.42.21 — 2026-10-16（**已出包 · 未发布**）
+
+### 已完成
+- **修复处理器磁贴「宿主 0% / 条全琥珀」割裂（采样伪影）**（用户原话：「多核轻载时会出现『整体负载 0% / 条全琥珀』的割裂是什么意思」）：
+  - 根因：`splitCpuLoad` 两个输入源精度差约 5 个数量级——宿主负载来自 `/proc/stat` 聚合行差分（USER_HZ tick 粒度 ≈ 10ms），多核轻载时整机繁忙不足 1 tick 被吞成 `0%` 假零；容器负载来自 Docker stats cgroup 纳秒级计数，0.1% 也采真。容器是宿主子集（`host ≥ c` 恒成立），`host < c` 必为宿主侧采样伪影。
+  - 修复：`splitCpuLoad` 内 `hostPct < containerPct` 时取 `max(hRaw, c)` 为下界（蓝段归零、宿主读数始终 ≥ 容器读数），消除「宿主 0% / 条全琥珀」观感割裂；正常 `host > c` 不误修。曲线「宿主负载」序列同步应用同一 `max(hv, 容器值)` 修正，消除曲线 0 尖峰，与横条同口径。
+  - 涉及文件：`src/pages/Dashboard.tsx`（`splitCpuLoad` + `CpuTile` 曲线序列）。
+  - 验证：`scripts/check-cpu-load-split.mjs` 由 43 项增至 **46 项**（新增 v1.42.21 三用例：假零 0%/0.3% ⇒ 修正 0.3%、0.2%<0.625% ⇒ 修正 0.625%、正常 42%/6.25% 不误修）；负向自检：临时还原 `max` 修正 ⇒ r8/r9 ❌ exit 1，还原后全绿；**全套 16 组 0 FAIL（EXIT=0）**。
+
+### 未完成 / 已知限制
+- 仅消除显示层割裂；`/proc/stat` tick 粒度盲区本身未根除（彻底根治需改读 cgroup v2 根 `cpu.stat` 微秒级，见 v1.42.20 讨论的方案 C，本次未采纳——回归面大）。盲区阈值 ≈ `10ms ÷ (窗口秒 × 核数)`（8 核 1s ≈ 0.125%）。
+
+### 下一步
+- 无（等用户下令发布 Gitea/GitHub）。
+
+---
+
+
+## v1.42.20 — 2026-10-16（**已出包 · 未发布**）
+
+### 已完成
+- **处理器磁贴「宿主负载 / 容器负载」两段口径**（用户原话：「整体负载分两种颜色显示，整体负载（不包括容器负载）+容器负载，反映宿主机整机负荷；宿主负载 16.7% / 容器负载 12.7% / 100%」；后续澄清「宿主负载不是宿负载」⇒ 文案统一为「宿主负载」）：
+  - `server/docker.ts`：`sampleHostCpuCores` ⇒ `sampleHostCpu`——同一次读 `/proc/stat`，除逐核行 `cpuN` 差分外新增**聚合行 `cpu ` 差分** ⇒ `hostPercent`（宿主机整机 0–100%，覆盖全部进程含非容器；首采无基线为 null）。`getEngineResourceStats` 返回值与 `recordResourceSample` 历史样本新增 `hostCpuPercent`（仅本机 socket 引擎；远程 tcp/ssh 为 null/undefined）。
+  - `src/pages/Dashboard.tsx`：新增纯函数 `splitCpuLoad(containerSum, hostPct, ncpu)`——**容器负载 = Σ cpuPercent ÷ ncpu**（`cpuPercent` 是「占单核百分比」，8 核跑满 = 800%，除核数得整机口径，与各核横条 0–100% 同量纲）；蓝段（宿主不含容器）= max(0, host − container)；两段之和恒等于宿主负载。新增 `StackedBar` 两段堆叠组件（蓝 `#3b82f6` = 宿主不含容器、琥珀 `#f59e0b` = 容器负载，与内存磁贴「Docker 占用」同色系）。
+  - 展示：副标题 `宿主负载 16.7% / 容器负载 12.7% / 100%`；常驻横条两段堆叠 + 右侧双数字 `16.7% / 12.7%`；曲线改**双序列**（宿主负载 + 容器负载，同内存磁贴双曲线形态）；折叠态常驻部分同步；`statsToSample` 透传 `hostCpuPercent`。
+  - **远程引擎回落**：读不到 `/proc/stat`（`hostCpuPercent` 为 null）时**完全保持旧展示**（单蓝条 = 容器合计 clamp 0–100、副标题旧格式 `整体负载 X% / 100%`、单序列曲线、旧图例文案），零行为变化。
+  - 数据兼容：历史样本缺 `hostCpuPercent` 时曲线传 `NaN`，LineChart 沿用上一个有效值（既有逻辑）；服务端重启后历史自然刷新，无迁移。
+  - 新门禁 `scripts/check-cpu-load-split.mjs` **43 项**（`splitCpuLoad` 用 `new Function` 跑真实实现 11 条用例——含用户样例 16.7/101.6⇒12.7/4.0、NaN、ncpu=0、负值、超界钳制、null 回落；聚合行采样 7 项；server 接线 5 项；types 双接口 2 项；CpuTile 展示 15 项），注册 `test:cpuload` ⇒ **16 组 574 项**；负向自检四轮（聚合行正则退化 / 容器公式加回 ×100 / 副标题回落旧格式 / statsToSample 丢透传，各 1+ 条 ❌ exit 1；还原 43/0、CR=0）。
+  - ★ 门禁首跑即抓到**真实 bug**：容器公式误写 `÷ ncpu × 100`（`cpuPercent` 本就是百分比，多乘 100 会恒饱和 100%）——已修，门禁用例（101.6÷8=12.7）锁定正确公式。
+- **未完成 / 已知限制**：宿主负载曲线在服务端重启后第一个点无基线（差分需要两次采样），与各核横条首采显示 0 的既有语义一致。
+- **下一步**：无。
+- **涉及文件**：`server/docker.ts`、`src/types.ts`、`src/pages/Dashboard.tsx`、`scripts/check-cpu-load-split.mjs`、`package.json`（升 1.42.20 + 注册门禁）、`docs/CHANGELOG.md`。
+- **验证**：`npx tsc --noEmit`（src）0 错、`npx tsc -p server/tsconfig.json --noEmit` 0 错；`npm run test:gates` 全绿 EXIT 0（**16 组 574 项 0 FAIL**）。
+
+
+## v1.42.19 — 2026-10-16（**已出包 · 未发布**）
+
+### 已完成
+- **镜像管理「SHA-256」列默认不显示**（用户原话：「默认不显示SHA-256」）：
+  - `src/pages/Images.tsx`：初始 `visibleColumns` 的全量默认分支剔除 `sha256`（`new Set(allColumns.filter(c => c.key !== "sha256").map(c => c.key))`）⇒ **未保存过列显隐设置的用户，镜像页默认不显示 SHA-256 列**；`stored` 分支不变 ⇒ 已在设置里保存过列选择的用户尊重其既有勾选（保存过 sha256 的仍显示），无需数据迁移。
+  - `src/pages/Settings.tsx`：列显隐卡片无 stored 时的默认勾选态与镜像页实际默认显示对齐——images 页 `defaultKeys` 剔除 `sha256`（`page.key === "images" ? allKeys.filter(k => k !== "sha256") : allKeys`），避免「设置页看着勾着、镜像页却不显示」的割裂；「全选」按钮不受限（用户主动全选仍可含 sha256）；分区说明补「镜像管理『SHA-256』列默认不显示（未保存过列设置时），需要时在本卡片或镜像页『列』下拉手动勾选即可」。
+  - 列本身未移除：`allColumns` 仍含 sha256 项、列头/单元格渲染条件保留 ⇒ 随时可在镜像页「列」下拉或设置页手动勾选恢复。
+  - 门禁 `scripts/check-images-repo-display.mjs` 增补第 ⑩ 组 **6 项**（默认分支剔除 + stored 分支保留 + allColumns 保留 + 列头渲染条件保留 + 设置页默认态对齐 + 说明文案），43 ⇒ **49 项**；负向自检两轮（默认分支恢复全量 / 设置页去掉 images 特判，各 1 条 ❌ exit 1；还原 49/0）。
+- **未完成 / 已知限制**：无（已保存过列设置且含 sha256 的用户需手动取消一次，属预期——尊重用户既有选择）。
+- **下一步**：无。
+- **涉及文件**：`src/pages/Images.tsx`、`src/pages/Settings.tsx`、`scripts/check-images-repo-display.mjs`、`package.json`（升 1.42.19）、`docs/CHANGELOG.md`。
+- **验证**：`npx tsc --noEmit`（src）0 错、`npx tsc -p server/tsconfig.json --noEmit` 0 错；`npm run test:gates` 全绿 EXIT 0（**15 组 531 项 0 FAIL**）。
+
+## v1.42.18 — 2026-10-16（**已出包 · 未发布**）
+
+### 已完成
+- **镜像管理页工具栏「列」下拉新增「仓库 registry 地址」项**（用户原话：「镜像管理页工具栏『列』下拉 增加『仓库名隐藏 registry 地址』项，命名为『仓库 registry 地址』」）：
+  - `src/pages/Images.tsx`：「列」下拉面板在列勾选列表下方新增独立开关项 **「仓库 registry 地址」**（带分隔线，与列项视觉区分）。语义与该面板其他列项一致——**勾选 = 显示完整仓库地址（含 registry 前缀，如 `docker.1panel.live/gitea/gitea`）；不勾选 = 隐藏前缀只显示短名（如 `gitea/gitea`）**；悬停项有双形态说明。
+  - 状态为**会话级**：`hideRepoRegistryInit` prop（原 `hideRepoRegistry`，取自 `settings.imagesDisplay.hideRegistryPrefix`，缺省 true ⇒ 默认不勾选）仅作初值，页内切换 `setHideRepoRegistry` 只改本地 state，**不写服务端**——持久化入口仍是 设置 → 列显隐 → 镜像管理 卡片开关（v1.42.15）。缩短 / 悬停完整地址 / 搜索双匹配逻辑随 state 实时联动，无需改动。
+  - `src/App.tsx`：传参随 prop 改名 `hideRepoRegistryInit={settings?.imagesDisplay?.hideRegistryPrefix ?? true}`。
+  - `src/pages/Settings.tsx`：列显隐分区说明补一句「镜像管理页工具栏『列』下拉内也有同名控制项『仓库 registry 地址』（勾选显示完整地址，会话级切换，不写本设置）」。
+  - 门禁 `scripts/check-images-repo-display.mjs` 增补第 ⑨ 组 **6 项**（label 存在 + 勾选取反语义 + onChange 切换 + title 双形态说明 + 不在 allColumns 内 + 设置页说明指向），36 ⇒ **43 项**；负向自检四轮（删 label / 勾选取反写反 / App 传参改回旧名 / useState 写死 true，各 1 条 ❌ exit 1；还原 43/0）。
+- **未完成 / 已知限制**：无（「列」下拉内为会话级，刷新页面回到 settings 初值——与面板内其他列项行为一致）。
+- **下一步**：无。
+- **涉及文件**：`src/pages/Images.tsx`、`src/App.tsx`、`src/pages/Settings.tsx`、`scripts/check-images-repo-display.mjs`、`package.json`（升 1.42.18）、`docs/CHANGELOG.md`。
+- **验证**：`npx tsc --noEmit`（src）0 错、`npx tsc -p server/tsconfig.json --noEmit` 0 错；`npm run test:gates` 全绿 EXIT 0（**15 组 525 项 0 FAIL**）。
+
+## v1.42.17 — 2026-10-16（**已出包 · 未发布**）
+
+### 已完成
+- **镜像管理「仓库名」列常驻显示，移除该列的显隐勾选**（用户原话：「我要的是仓库名隐藏 registry 地址显隐，不是仓库名……『仓库名』列勾选框不该存在：仓库名是镜像主标识，应常驻，唯一可调的只是列内 registry 地址显不显示」）：
+  - `src/pages/Settings.tsx`：COLVIS_PAGES.images 移除 `["repository", "仓库名"]` 勾选项；列显隐分区说明补「『仓库名』为镜像主标识列，常驻显示、不可隐藏；可调的只是列内 registry 地址显不显示」。
+  - `src/pages/Images.tsx`：页内工具栏「列」下拉移除「仓库名」项（`allColumns` 不再含 repository）；初始 `visibleColumns` 强制包含 `repository`（`defaultSet.add("repository")`）⇒ **旧设置里曾被取消勾选该列的用户，重新进入镜像页自动恢复显示**；列头 / 单元格渲染条件保留（恒真）。
+  - 设置列显隐的保存逻辑自带清理：旧 `columnVisibility.images` 数组里的 `"repository"` 残留键在下次任意列勾选时被自然过滤，无需数据迁移。
+  - **「仓库名隐藏 registry 地址」开关（v1.42.15）保持不动**——缩短逻辑、悬停看完整地址、搜索双匹配全部保留；至此「仓库名」相关控制只剩这一个：列常驻，可调的只有列内 registry 地址显不显示。
+  - 门禁 `scripts/check-images-repo-display.mjs` 增补第 ⑧ 组 **5 项**（两处均无 repository 勾选 + 初始集合强制补回 + 列头渲染条件保留 + 分区说明文案），31 ⇒ **36 项**；负向自检三轮（加回设置勾选 / 加回页内下拉项 / 删掉强制补回，各 1 条 ❌ exit 1；还原 36/0）。
+- **涉及文件**：`src/pages/Settings.tsx`、`src/pages/Images.tsx`、`scripts/check-images-repo-display.mjs`、`package.json`（升 1.42.17）、`docs/CHANGELOG.md`。
+- **验证**：`npx tsc --noEmit`（src）0 错、`npx tsc -p server/tsconfig.json --noEmit` 0 错；`npm run test:gates` 全绿 EXIT 0（**15 组 518 项 0 FAIL**）。
+
+### 未完成 / 已知限制
+- 无。
+
+### 下一步
+- 待用户下令发布到 Gitea / GitHub；端到端可确认：镜像管理页「仓库名」列始终显示（含旧设置曾隐藏该列的场景），设置 → 列显隐 → 镜像管理已无「仓库名」勾选、仅剩「仓库名隐藏 registry 地址」开关。
+
+---
+
+## v1.42.16 — 2026-10-15（**已出包 · 未发布**）
+
+### 已完成
+- **通知中心「清空」按钮改为只清当前页面、不删除内容**（用户原话：「清空记录按钮只清空当前页面，不删除内容，清空记录改名为清空；通知增加清空按钮只清空当前页面，不删除内容」）：
+  - `src/pages/Notifications.tsx` **操作记录 Tab**：「清空记录」⇒ **「清空」**；`handleClearOps` 去掉 `clearOpLogs()`（不再删 localStorage 实际内容），只 `setOpLogs([])` + `setOpsCleared(true)`；重进本 Tab 时 useEffect 重新 `getOpLogs()` 并 `setOpsCleared(false)` ⇒ **离开本页再进入即恢复**；清空后空状态显示「当前页面显示已清空 / 实际内容未删除，离开本页再进入即可恢复」。
+  - **通知 Tab**：标题行新增「清空」按钮（与「全部已读」并排）；`handleClearNotifs` 只把当前页面通知 id 写入本地 `clearedNotifIds`，`visibleNotifs` 据此过滤 ⇒ **props / 已读状态 / 实际内容均不动，之后到达的新通知仍正常显示**；未读角标、计数、筛选、空状态（「当前页面显示已清空 / 实际内容未删除，新通知到达后仍会显示」）全部改基于 `visibleNotifs`。
+  - 两个按钮均带 `title="仅清空当前页面显示，不删除实际内容"`；移除 `clearOpLogs` 导入（`src/opLog.ts` 的导出保留，供将来需要真删除时使用）。
+- **新增门禁** `scripts/check-notifications-clear.mjs`（**20 项**：禁删断言 + 两个 Tab 的按钮/状态/过滤/空状态/恢复逻辑），已注册 `test:notifclear` 并入 `test:gates`；负向自检两轮（加回 `clearOpLogs()` ⇒ 2 条 ❌ exit 1；按钮改回「清空记录」⇒ 1 条 ❌ exit 1；还原后 20/0）。
+- **涉及文件**：`src/pages/Notifications.tsx`、`scripts/check-notifications-clear.mjs`、`package.json`（升 1.42.16 + 注册门禁）、`docs/CHANGELOG.md`。
+- **验证**：`npx tsc --noEmit`（src）0 错、`npx tsc -p server/tsconfig.json --noEmit` 0 错；`npm run test:gates` 全绿 EXIT 0（**15 组 513 项 0 FAIL**）；前端段解码核验「清空」按钮文案、「当前页面显示已清空」「实际内容未删除」命中、`clearOpLogs` 调用零残留、`1.42.16` 命中 / `1.42.15` 归零。
+
+### 未完成 / 已知限制
+- 无（若将来需要「真正删除」操作记录，可另行加带二次确认的按钮调 `clearOpLogs()`）。
+
+### 下一步
+- 待用户下令发布到 Gitea / GitHub；可在通知中心端到端确认：两个 Tab 点「清空」后列表清空、离开页面再进入内容恢复、通知 Tab 清空后新通知仍会弹出。
+
+---
+
+## v1.42.15 — 2026-10-15（**已出包 · 未发布**）
+
+### 已完成
+- **镜像管理「仓库名」列新增 registry 地址隐藏**（设置 → 列显隐 → 镜像管理卡片内开关「仓库名隐藏 registry 地址」，**默认开启**）：
+  - 判定沿用 Docker 自身规则——仓库名 `/` 前首段含「.」或「:」、或为 `localhost` 即视为 registry 主机名并剥掉：`docker.1panel.live/gitea/gitea` ⇒ `gitea/gitea`、`registry:5000/foo/bar` ⇒ `foo/bar`、`localhost/foo` ⇒ `foo`；`gitea/gitea` / `nginx` / `library/nginx` 原样显示；`<none>`、空串、剥完为空（`localhost/`）原样返回，绝不显示空仓库名。
+  - `src/pages/Images.tsx`：新增纯函数 `stripRegistryHost(repo)`；仓库名单元格按 `hideRepoRegistry` prop 条件缩短，**被缩短时悬停 `title` 显示完整地址**；搜索框同时匹配完整名与短名（表头显示短名时按看到的文案也能搜到）。
+  - 新增配置段 `settings.imagesDisplay.hideRegistryPrefix`（默认 true）：`src/types.ts` 加 `ImagesDisplayConfig` 接口与 `SystemSettings.imagesDisplay` 字段；`server/settings.ts` 加默认值与二级合并（旧 `settings.json` 无该段时继承默认开启）；`src/App.tsx` 取数 `settings?.imagesDisplay?.hideRegistryPrefix ?? true` 传入 `<Images>`。
+  - `src/pages/Settings.tsx`：列显隐分区总说明补一句；镜像管理卡片复选框网格下方新增开关行（含判定规则说明）。
+  - 与列可见性（`columnVisibility.images` 数组）相互独立：那个管「整列显隐」，这个管「列内文案形态」。
+- **新增门禁** `scripts/check-images-repo-display.mjs`（**31 项**：纯函数 12 条真实执行用例 + Images/App/Settings/server/types 五处接线断言），已注册 `test:imagerepo` 并入 `test:gates`；负向自检两轮（主机名判定恒 false ⇒ 5 条 ❌ exit 1；App 缺省改 false ⇒ 1 条 ❌ exit 1；还原后 31/0）。
+- **涉及文件**：`src/pages/Images.tsx`、`src/pages/Settings.tsx`、`src/App.tsx`、`src/types.ts`、`server/settings.ts`、`scripts/check-images-repo-display.mjs`、`package.json`（升 1.42.15 + 注册门禁）、`docs/CHANGELOG.md`。
+- **验证**：`npx tsc --noEmit`（src）0 错、`npx tsc -p server/tsconfig.json --noEmit` 0 错；`npm run test:gates` 全绿 EXIT 0（**14 组 493 项 0 FAIL**）；前端段解码核验「仓库名隐藏 registry 地址」「docker.1panel.live/gitea/gitea」「stripRegistryHost」命中、`1.42.15` 命中 / `1.42.14` 归零。
+
+### 未完成 / 已知限制
+- CSV 导出、拉取 / 检查更新 / 删除等操作的引用仍用完整仓库名（`repo:tag` 是 Docker 权威引用，不做缩短）——仅列表显示层缩短。
+
+### 下一步
+- 待用户下令发布到 Gitea / GitHub；可在镜像管理页端到端确认：带 registry 前缀的仓库名显示为短名、悬停见完整地址、搜索短名可命中、设置页开关可切回完整显示。
+
+---
+
+## v1.42.14 — 2026-10-15（**已出包 · 未发布**）
+
+### 已完成
+- **移除镜像 / 数据卷 / 网络三页表格上方的右键提示行**：v1.42.13 为可发现性加的三行 `<p>` 提示（「提示：右键列表行可打开操作菜单（…）」）按用户要求全部移除，表格上方不再占一行灰色提示；行右键菜单本身、`cursor-context-menu` 光标与 `title` 说明保留不变（发现性收敛为纯交互式）。
+- **涉及文件**：`src/pages/Images.tsx`、`src/pages/Volumes.tsx`、`src/pages/NetworkManager.tsx`、`package.json`（升 1.42.14）、`docs/CHANGELOG.md`。
+- **验证**：`npx tsc --noEmit`（src）0 错；`npm run test:gates` 全绿（EXIT 0）；前端段解码核验三页「提示：右键列表行」零命中、`1.42.14` 命中 / `1.42.13` 归零。
+
+### 未完成 / 已知限制
+- 无。
+
+### 下一步
+- 待用户下令发布到 Gitea / GitHub。
+
+---
+
+## v1.42.13 — 2026-10-15（**已出包 · 未发布**）
+
+### 已完成
+- **镜像 / 数据卷 / 网络三页「操作列」改为右键调用**（统一为行右键菜单，与堆栈页一致）：
+  - `src/pages/Images.tsx`：移除「操作」列（`<th>` / `<td>` / `ColumnKey` / `allColumns` / 列选择器条目），原 `ActionDropdown` 全部条目（拉取 / 下载镜像 / 检查更新 / 锁定（解除锁定）/ 删除）迁入新增 `getImageMenuItems()`；行加 `onContextMenu` + `cursor-context-menu` + `title="右键打开操作菜单"`；删 `ActionDropdown` / `ActionItem` 导入。
+  - `src/pages/Volumes.tsx`：移除「操作」列（右键菜单 `getVolumeMenuItems` 早已存在，本次仅删列与 `ActionDropdown` 导入、清理失效 `Eye` 导入）。
+  - `src/pages/NetworkManager.tsx`：移除「操作」列，新增 `contextMenu` 状态 + `getNetworkMenuItems()`（编辑 / 删除）+ `ContextMenu` 渲染；行加 `onContextMenu` + `cursor-context-menu`；删 `ActionDropdown` 导入。
+- **可发现性**：三个表格上方各加一行提示（如「提示：右键列表行可打开操作菜单（拉取 / 下载镜像 / 检查更新 / 锁定 / 删除）」）；行 hover 光标变为 `cursor-context-menu`，行 `title` 亦说明右键。
+- **设置页同步**：`src/pages/Settings.tsx` 列显隐分区——images / volumes 的 `fixed` 由 `["actions"]` 改为 `[]`（操作列已不存在，不再作为固定列持久化进 `columnVisibility`）；「固定列（始终显示）」 chips 段落在无固定列时不再渲染；分区说明文案更新（注明三页操作改右键）。
+- **数据兼容**：旧 `settings.columnVisibility.images` 里若存有 `"actions"`，因表格不再消费该 key 而自然失效，无需迁移。
+- **涉及文件**：`src/pages/Images.tsx`、`src/pages/Volumes.tsx`、`src/pages/NetworkManager.tsx`、`src/pages/Settings.tsx`、`package.json`（升 1.42.13）、`docs/CHANGELOG.md`。
+- **验证**：`npx tsc --noEmit`（src）0 错、`npx tsc -p server/tsconfig.json --noEmit` 0 错；`npm run test:gates` 全绿（EXIT 0）；前端段解码核验三页右键菜单文案命中、「操作」列表头消失、`1.42.13` 命中 / `1.42.12` 归零。
+
+### 未完成 / 已知限制
+- 容器管理 / 堆栈管理两页仍保留行内「操作」下拉（用户未要求改动，其 `fixed` 列显隐项保持原样）。
+
+### 下一步
+- 待用户下令发布到 Gitea / GitHub；可在三个页面端到端确认：右键行弹出菜单、条目与原下拉一致、表格列宽因少一列而变宽。
+
+---
+
+## v1.42.12 — 2026-10-15（**已出包 · 未发布**）
+
+### 已完成
+- **仪表盘「磁盘」磁贴曲线区新增两个并排下拉**（放在「磁盘速率曲线」折叠开关旁）：
+  - **磁盘下拉**（`DiskSelect`）：选某块盘看单盘曲线，「全部（合计）」= 所有盘读写求和 + 平均繁忙度（默认，保留原合计口径，无回归）；
+  - **指标下拉**（`DiskMetricSelect`，用户要求「放读的上边」故「全部」置顶）：**全部 / 读 / 写 / 繁忙度** 四项。
+- **「全部」= 读 + 写 + 繁忙度三条曲线**（读/写走左轴 MB/s 面积图，繁忙度走右轴 % 虚线，按选中盘/合计取数）——即 v1.42.11 原三曲线视图。
+- **「读 / 写 / 繁忙度」= 该指标下每块盘各一条曲线**（多盘对比视图，固定展示**所有硬盘**）：`disks.map` 逐盘生成序列（`perDiskSeries` 取 `ResourceSample.disks[dev]` 历史值，read/write 保留 2 位小数、busy 1 位），配色板 `DISK_LINE_COLORS`（10 色循环）保证多盘可区分；图例按盘列当前值（盘名 + 读/写速率或繁忙度 %）。此视图下选盘无意义 ⇒ **磁盘下拉自动禁用**（置灰 + title 说明，切回「全部」恢复）。
+- **状态与回落**：指标选择按磁贴持久化（`dm.chart.disk.metric`，默认 `all`）；旧值（如中间版的 `"rw"`）或脏数据一律回落 `all`；磁盘选择仍按 `dm.chart.disk.dev` 持久化，盘热插拔消失自动回落合计。
+- **数据源不变**：仍取 `ResourceSample.disks`（`/proc/diskstats` 逐盘），未新增后端接口；远程引擎（无 /proc/diskstats）行为不变。
+- **门禁**：`scripts/check-disk-select.mjs` 由 18 → **39** 项（新增选项顺序断言「全部在读上边」、四选项、归一化用例含旧值回落、all 三曲线分支、每盘一曲线分支、配色板、禁用接线、轴参数/图例切换），负向自检通过（调换选项顺序→exit 1、去掉 disabled 接线→exit 1、还原→39/0）。
+- **涉及文件**：`src/pages/Dashboard.tsx`、`scripts/check-disk-select.mjs`、`package.json`（升 1.42.12）、`docs/CHANGELOG.md`。
+- **验证**：`npx tsc --noEmit`（src）0 错、`npx tsc -p server/tsconfig.json --noEmit` 0 错；`npm run test:gates` 全绿（EXIT 0）；前端段解码核验「全部」「读」「写」「繁忙度」option 与「磁盘速率曲线」命中、`1.42.12` 命中 / `1.42.11` 归零。
+
+### 未完成 / 已知限制
+- 远程引擎（读不到 /proc/diskstats）磁盘磁贴仍显示「本机磁盘数据不可用」，无下拉（与既有一致）。
+
+### 下一步
+- 待用户下令发布到 Gitea / GitHub；可在真实仪表盘端到端确认：切「读 / 写 / 繁忙度」时每块盘各出一条曲线、磁盘下拉置灰；切「全部」恢复三曲线 + 可选盘。
+
+---
+
+## v1.42.11 — 2026-10-15（**已出包 · 未发布**）
+
+### 已完成
+- **仪表盘「磁盘」磁贴新增磁盘选择下拉（类似网卡速率）**：`src/pages/Dashboard.tsx` 新增 `DiskSelect` 组件，放在「磁盘速率曲线」折叠开关旁；曲线区可按盘绘制**单块盘**的读/写速率 + 利用率曲线，「全部（合计）」= 所有盘读写求和 + 平均利用率（与原合计口径一致，**默认**，无回归）。
+- **选择持久化 + 回落**：`DiskTile` 新增 `useStoredString("dm.chart.disk.dev", "")`；选中盘若已不存在（热插拔 / 切换引擎）自动回落合计口径；曲线（`seriesFor`）、当前值（`sel`）、图例标签（`利用率 / 平均利用率`）均按选中盘切换。
+- **数据源不变**：仍取 `ResourceSample.disks`（`/proc/diskstats` 逐盘），单盘分支读 `m[activeDev]`，合计分支保留 `for k in m` 求和——未新增后端接口。
+- **门禁**：新增 `scripts/check-disk-select.mjs`（18 项：DiskSelect 组件、「全部（合计）」option、activeDev 回落逻辑用 `new Function` 跑真实用例、曲线/图例按盘渲染、接线），`package.json` 加 `test:diskselect` 并接入 `test:gates`；负向自检通过（注入回归→exit 1→还原→18/0）。
+- **涉及文件**：`src/pages/Dashboard.tsx`、`scripts/check-disk-select.mjs`、`package.json`（升 1.42.11）、`docs/CHANGELOG.md`。
+- **验证**：`npx tsc --noEmit`（src）0 错；`npm run test:gates` 全绿（新增 `check-disk-select.mjs` 18/0）；前端段解码核验「全部（合计）」「磁盘速率曲线」命中、`1.42.11` 命中 / `1.42.10` 归零。
+
+### 未完成 / 已知限制
+- 远程引擎（读不到 /proc/diskstats）磁盘磁贴仍显示「本机磁盘数据不可用」，无下拉（与既有一致）。
+
+### 下一步
+- 待用户下令发布到 Gitea / GitHub；可在真实仪表盘端到端确认：展开「磁盘速率曲线」后用下拉切到某块盘，曲线/图例随之变为该盘读数。
+
+---
+
+## v1.42.10 — 2026-10-14（**已出包 · 未发布**）
+
+### 已完成
+- **仪表盘「网络」磁贴网口下拉移除「全部（容器合计）」**：`src/pages/Dashboard.tsx` 的 `IfaceSelect` 删掉 `<option value="">全部（容器合计）</option>`，改为始终展示某个真实网卡；无网卡可选（远程 TCP / SSH 读不到 /proc/net/dev）时显示禁用占位「无可用网卡」并整体禁用下拉。
+- **分类只分「物理网卡 / 虚拟网卡」**：optgroup 由「网口 / Docker 虚拟网卡」改名为「物理网卡 / 虚拟网卡」；`src/pages/Settings.tsx`「网络曲线默认网卡」下拉的选项标签同步改为「（物理网卡）/（虚拟网卡）」，并删掉「全部（容器合计）」选项与远程引擎说明里的「全部」措辞。
+- **resolveIface 决策收敛**：有网卡时绝不返回空串——`__all__`（已废弃哨兵）按「自动」处理；无物理网卡则挑第一个虚拟网卡；仅完全无网卡（远程引擎）才回落容器合计口径（`netRxKBps`/`netTxKBps`，避免远程引擎网络曲线空白回归）。
+- **涉及文件**：`src/pages/Dashboard.tsx`、`src/pages/Settings.tsx`、`src/types.ts`、`server/settings.ts`、`scripts/check-net-iface.mjs`、`package.json`（升 1.42.10）、`docs/CHANGELOG.md`。
+- **验证**：`npx tsc --noEmit`（src）0 错、`npx tsc -p server/tsconfig.json --noEmit` 0 错；`npm run test:gates` 全绿（`check-net-iface.mjs` 由 28→**34** 项：决策矩阵改预期 + 新增「已移除全部」「分组改名」「禁用占位」断言）；前端段解码核验「物理网卡」「虚拟网卡」命中、「全部（容器合计）」清零、`1.42.10` 命中 / `1.42.9` 归零。
+
+### 未完成 / 已知限制
+- 远程引擎（读不到 /proc/net/dev）仍回落「容器合计」曲线（唯一可用数据源），下拉显示禁用「无可用网卡」——这是有意的兜底，非回归。
+
+### 下一步
+- 待用户下令发布到 Gitea / GitHub；可在真实登录后的仪表盘端到端确认网口下拉只剩物理/虚拟两组、默认落到第一块物理网卡。
+
+---
+
+## v1.42.9 — 2026-10-14（**已出包 · 未发布**）
+
+### 已完成
+- **系统设置「弹窗设置」改名为「页面设置」**：`src/pages/Settings.tsx` 侧栏分区 label、分区标题、描述统一改为「页面设置」（数据仍存于 `settings.modal`，key 不变，旧配置免迁移）；`server/settings.ts` / `src/types.ts` 注释同步。门禁 `check-backup-naming.mjs` 侧栏顺序数组、`check-net-iface.mjs` 段标题同步改名。
+- **新增「登录后默认显示页面」选项**（v1.42.9）：`ModalConfig` 增加 `defaultPage: PageKey`（默认 `dashboard`）；设置页「页面设置」分区新增下拉，可选项为 8 个导航页（仪表盘 / 容器管理 / 堆栈管理 / 镜像管理 / 数据卷管理 / 网络管理 / 通知中心 / 系统设置）。
+- **登录落地逻辑**：`src/App.tsx` 在 `authState=authed` 且 settings 加载完成后，将当前页跳转到 `settings.modal.defaultPage`（仅校验合法 PageKey，否则回落 dashboard）；仅登录/刷新时生效，不覆盖当次会话内的手动导航。`settings.ts` 默认值 `defaultPage:"dashboard"`，`DEFAULT_SETTINGS.modal` 展开合并保证旧配置自动回填。
+- **涉及文件**：`src/types.ts`、`server/settings.ts`、`src/App.tsx`、`src/pages/Settings.tsx`、`scripts/check-backup-naming.mjs`、`scripts/check-net-iface.mjs`、`package.json`（升 1.42.9）、`docs/CHANGELOG.md`。
+- **验证**：`npx tsc --noEmit`（src）0 错、`npx tsc -p server/tsconfig.json --noEmit` 0 错；`npm run test:gates` 全绿（`check-net-iface.mjs` 28/0 含 4 条新增「默认显示页面」断言、`check-backup-naming.mjs` 47/0 含改名断言）；前端本地默认 `modal.defaultPage:"dashboard"` 已补。
+
+### 未完成 / 已知限制
+- 无（仅设置页 UI + 登录落地，无后端接口新增）。
+
+### 下一步
+- 待用户下令发布到 Gitea / GitHub；可在真实登录流程端到端验证「默认显示页面」生效。
+
+---
+
+## v1.42.8 — 2026-10-14（**已出包 · 未发布**）
+
+### 已完成
+- **日志保留 UI 一致性**：`src/pages/Settings.tsx` 应用日志（app）分区的「保留天数 / 总大小上限」输入提示，由旧的「超期的最先清理 / 超出后从最旧开始删」改为与通知日志、操作记录一致的「默认 365 天 / 默认 1024 MB」；三频道「独立管理（默认 365 天 / 1024 MB）」标注与默认值提示现已完全统一。
+- 后端 `server/applogs.ts#getRetentionConfig` 应用日志默认仍为 365 天 / 1024 MB（v1.42.7 起三频道独立、互不继承），本版仅修正前端提示文案，行为不变。
+- **涉及文件**：`src/pages/Settings.tsx`、`package.json`（升 1.42.8）、`docs/CHANGELOG.md`。
+- **验证**：`tsc -p server/tsconfig.json --noEmit` 0 错；ELF 头 `7f454c46` + e_machine=62；二进制内 `1.42.8` 命中、`1.42.7` 归零；base64 段解码核验前端嵌入含「默认 365 天 / 默认 1024 MB」、旧提示文案清零。
+
+### 未完成 / 已知限制
+- 无（仅文案一致性修正，无功能变更）。
+
+### 下一步
+- 待用户下令发布到 Gitea / GitHub。
+
+---
+
+## v1.42.7 — 2026-10-14（**已出包 · 未发布**）
+
+**日志保留策略：保留天数 / 总大小上限改为每频道独立管理（不再跟随「应用日志」）**
+
+- **已完成**：用户要求通知日志 / 操作记录两频道的「保留天数」「总大小上限」独立设置、互不跟随，各自默认 365 天 / 1024 MB。改动三处：① `server/applogs.ts#getRetentionConfig` 移除 `{ ...顶层, ...频道 }` 的合并逻辑——`notify` / `oplog` 现在只读取自身子段、字段缺失时**各自 fallback 到 365 天 / 1024 MB**，而非继承「应用日志」；② `src/pages/Settings.tsx` 日志保留 UI 删除「另外两类未填时跟随这里」「跟随「应用日志」」「已单独设置」「恢复跟随」等跟随相关文案与按钮，三个频道均显示各自独立输入框、提示「独立管理（默认 365 天 / 1024 MB）」、hint 改为「默认 365 天」「默认 1024 MB」；③ `server/settings.ts` 注释同步（notify/oplog 子段刻意不给默认值 = 各自 fallback，而非继承）。主开关 `enabled` 仍为顶层统一控制（该字段 UI 仅暴露 maxDays/maxTotalMB）。验证：`npx tsc -p server/tsconfig.json --noEmit` 0 错误；`scripts/check-log-channels.ts` 30/0（断言改名「各自独立、互不继承」，值不变：notify/oplog 默认仍 1024/365，单独覆盖 maxDays=7 生效、其余走自身默认）；`scripts/check-log-pack.mjs` 44/0（默认 maxDays=365 / maxTotalMB=1024 断言保持）。
+- **未完成 / 已知限制**：无。
+- **下一步**：无。
+
+---
+
+
+## v1.42.6 — 2026-10-14（**已出包 · 未发布**）
+
+**设备信息卡文案与字号统一**
+
+- **已完成**：`src/components/ActivityPanel.tsx` 三处调整：① 设备信息卡「硬盘」标签改为「硬盘（系统盘）」（用户要求，明确该字段读的是系统盘信息）；② 修复温度卡「硬盘温度（N 块设备）」标题此前用 `text-xs`、与设备卡 `text-sm` 标签字号不一致的问题，统一为 `text-sm`（同卡「CPU 温度」标题本就是 text-sm）；③ 修复设备卡内**「标识文件 / 主板 / 产品序列号 / 系统UUID」四个值**字号偏小——它们走 `Row` 组件的 `mono` 分支，原类名带 `text-xs`，与其余行（text-sm）不一致；去掉该 `text-xs`，仅保留 `font-mono` 等宽字体、字号与其它行统一。验证：`tsc --noEmit` 0 错误；从交付二进制 SEA blob 解出内嵌前端 index.js 核验：含「硬盘（系统盘）」、`font-mono text-xs` 在 Row 值 span 已消除、Row 值 span 类名为 `text-slate-700 truncate text-right${mono?" font-mono":""}`。
+- **③ deb 安装交互化**（`deploy/linux/make-deb.py` 的 `POSTINST`）：原先 deb 的 `postinst` 强制非交互——写死默认目录 `/opt/dockermanagementyanzi` 且自动选首个 UID≥1000 登录用户，与手工 `install.sh` 的「目录选择 / 用户选择」提示不一致。改为双路径：终端交互安装（`dpkg -i` 在 tty 执行）时**完全透传 stdin 给 `install.sh`**，由它自行询问安装目录与服务运行账户（含 Docker 依赖检查），与手工一致；仅在非交互环境（apt / `DEBIAN_FRONTEND=noninteractive` / CI）回退自动选取首个登录用户 + `--ignore-docker`，避免无人值守安装失败。`/etc/default/dockermanagementyanzi` 仍可设 `APP_INSTALL_DIR` / `APP_RUN_AS_USER` 覆盖。验证：`sh -n` 对提取出的 postinst 语法校验通过；重建 deb 后解析出 `control.tar.gz` 含更新后的 postinst。
+- **未完成 / 已知限制**：无。
+- **下一步**：无。
+
+---
+
+## v1.42.5 — 2026-10-14（**已出包 · 未发布**）
+
+**修复：设备卡片「主板」（序列号）行显示「—」**
+
+- **已完成**：`.service` 的 `ExecStartPre` DMI 镜像副本此前只覆盖 `board_name / product_serial / product_uuid` 三个字段，**漏了 `board_serial`**；而 `server/telemetry.ts` 的 `collectBoardId()` 直读 `/sys/class/dmi/id/board_serial`（内核 0400 仅 root 可读），无镜像兜底 → 非 root 服务永远读不到 → 「主板」行恒为「—」。修复两处：① `deploy/linux/dockermanagementyanzi.service` ExecStartPre 增加 `board_serial` 镜像（第 4 个字段）；② `collectBoardId()` 读取链改为「镜像副本 → sysfs 原文件 → dmidecode」双层兜底（product_uuid 兜底同样补镜像路径）。验证：`server tsc --noEmit` 0 错误；`test:gates` 12 组 483 项 0 FAIL。
+- **未完成 / 已知限制**：⚠️ 改过 `.service` ⇒ **OTA 升级不会更新单元文件，已部署机器必须重跑 `install.sh`**（或用「系统更新」页的一键修复命令重建单元）后才生效；仅 OTA 换二进制时「主板」行仍为「—」（镜像文件由 ExecStartPre 在启动前生成）。另注：部分 mini 主机 DMI 的 `board_name` 本身填的是序列号样式串（如截图 `212412181246`），「主板型号」显示该值属机器 DMI 事实，非本 bug。
+- **下一步**：无。
+
+---
+
+## v1.42.4 — 2026-10-14（**已出包 · 未发布**）
+
+**① 堆栈名称前端校验（创建 / 编辑弹窗）**
+
+- **已完成**：新增模块级规则 `STACK_NAME_RE = /^[a-z0-9_-]+$/`，堆栈名称只允许小写字母、数字、横线、下划线。创建弹窗（Web 编辑器 / 上传文件 / 堆栈备份三入口）与编辑弹窗的「堆栈名称」字段，输入非法字符时输入框实时变红框 + 红字提示「堆栈名称只能包含小写字母、数字、横线(-)和下划线(_)」，并禁用对应主按钮（创建弹窗「创建」、编辑弹窗「确定」「应用」）；`handleSave` / `handleCreate` / `handleCreateFromBackup` 加防御性守卫。上传 compose 文件自动派生的默认名也强制 `.toLowerCase()` + 仅保留 `[a-z0-9_-]`，避免自动填入即违规。涉及文件 `src/pages/Stacks.tsx`。验证：`tsc --noEmit` 全绿。
+- **未完成 / 已知限制**：仅前端校验；服务端若也接受非法名需另加后端校验（本次未动）。现存名称本身含大写/中文的堆栈，打开编辑后会被判非法、按钮禁用，需改成合规名才能保存（主动合规化，符合需求）。
+- **下一步**：如需服务端侧硬约束，下个版本在 Docker engine 调用前加同名正则预检。
+
+**② 修复编辑堆栈弹窗点击遮罩误关闭**
+
+- **已完成**：`StackEditorModal` 原先显式传 `dismissable`（=true），点击弹窗外部遮罩会直接关闭并丢失未保存的编辑内容。改为 `dismissable={false}`，与创建弹窗一致——只能点右上角 X 或底部「确定 / 应用 / 取消」关闭，避免误触丢失编辑。涉及文件 `src/pages/Stacks.tsx:1400`。验证：`tsc --noEmit` 全绿。
+- **未完成 / 已知限制**：无。
+- **下一步**：无。
+
+---
+
+## v1.42.3 — 2026-10-11（**已出包 · 未发布**）
+
+**移除安装成功末尾的「升级时请沿用本次安装目录」提示**（用户指令：移除这句话）。
+
+**为什么该移除**
+
+该提示仅在自定义安装目录时打印（`INSTALL_DIR != /opt/dockermanagementyanzi`），但**自 v1.41.4 起脚本已能自动探测旧安装目录**（读已安装单元的 `WorkingDirectory=`），升级时交互提示直接回车即沿用：
+
+```
+━━━ 选择安装目录 ━━━
+检测到本机已安装在 /vol1/1000/appdata/dockermanagementyanzi（回车升级）或者手动输入新路径:
+```
+
+所以那行「请沿用本次安装目录（或设 `APP_INSTALL_DIR=…`）」**是冗余的，且会误导** —— 它暗示升级需要用户手动干预，实际回车就够了。
+
+**已完成**
+
+- `deploy/linux/install.sh`：删掉安装成功尾部的 `提示: 升级时请沿用本次安装目录…` 及其外层 `if [ "$INSTALL_DIR" != "$DEFAULT_INSTALL_DIR" ]` 判断（原为该判断的唯一用途）。保留「更新 / 管理命令 / 卸载」等其余段落。**旧目录自动探测逻辑一行未动**。
+- `scripts/check-service-unit.mjs`：新增 2 条 —— ① 反向断言该 `log` 行不得再出现；② 正向断言**旧目录自动探测仍在**（`grep -E '^WorkingDirectory='` ＋ `OLD_INSTALL_DIR`），钉死「移除提示的前提是自动探测仍生效」，防将来探测被改坏而提示也没了、用户两头落空。门禁 **78 → 80 项**。
+
+**验证**
+
+- 实跑安装成功尾部渲染：自定义目录下不再出现该行，其余段落（安装成功 / 安装目录 / 管理命令 / 更新 / 卸载）完整。
+- `bash -n install.sh` OK；`test:service` **80 项 0 FAIL**；全量 `test:gates` **12 组 485 项 0 FAIL**；src + server `tsc` 均 0 错误。
+- **出包**：`build-upload/dockermanagementyanzi-linux-x64-v1.42.3.zip` **43,055,353 B** / SHA-256 `91a44cc62985faaac230bf35cf23e656397ed77fb337a5ca5e05cefbfda64d84`；`build-upload/dockermanagementyanzi_1.42.3_amd64.deb` **42,772,042 B** / SHA-256 `95811f98d49acddf790a408066130fbc4b81c290a6d4f79c7f88b9336fe80822`。zip 5 成员（install.sh 39,272 → **39,511 B**，增的是解释性注释）、内嵌二进制与源逐字节一致、内部版本 `1.42.3`×2 / `1.42.2` 归零；deb `Version: 1.42.3`、md5sums 与三个维护脚本语法全通过。
+- `docs/发布与OTA升级指南.md` 中「升级时请沿用同一目录（或显式传 `APP_INSTALL_DIR`）」**保持原样** —— 那句描述的是「换目录会发生什么」这一客观事实，仍然准确，不是本次要删的安装尾部提示。
+
+⚠️ 本版**改了 `install.sh`** ⇒ 已装机器 OTA 升级后**必须重跑 `install.sh`**。
+
+---
+
+## v1.42.2 — 2026-10-11（**已出包 · 未发布**）
+
+**候选服务账户列表隐藏系统服务账户 ＋ 修 GECOS 描述的 `,,,` 脏输出**（用户真机反馈）。
+
+**问题**（真机输出）
+
+```
+[INFO]  可用系统用户（输入序号或直接输入用户名）:
+[INFO]    1) yanzi
+[INFO]    —— 以下为系统服务账户（无登录 shell），一般不要选 ——
+[INFO]    2) libvirt-qemu（Libvirt Qemu,,,）
+[INFO]    3) wsdd2（Dynamic User）
+```
+
+① **系统服务账户仍被列出**（v1.40.5 只做了「分段 + 标注」，并未隐藏）—— 用户要求直接隐藏：这类 Dynamic User 账户本就不该当服务运行账户，列出来只会诱导误选。② **`（Libvirt Qemu,,,）` 的尾随逗号**是脏输出。
+
+**已完成**
+
+- `deploy/linux/install.sh`：
+  - **删除 `CANDIDATE_SERVICE` 与整个「系统服务账户」分段**（含 `—— 以下为系统服务账户 ——` 提示行）；`CANDIDATE_ALL="$CANDIDATE_USERS"`，**序号映射与展示列表严格一致**（隐藏的账户不参与编号，避免「显示 1 个、选 2 却选到隐藏账户」的错位）。
+  - **仍可直接输入用户名**选用这类账户 —— 「序号或用户名」两条输入路径都保留，隐藏的只是**默认列表**，不是能力。
+  - 新增 `user_desc()`：**只取 GECOS 第一个逗号前的全名**（GECOS 格式为 `fullname,room,workphone,homephone,other`，空字段会留成 `Libvirt Qemu,,,` 这种尾随逗号串），并去首尾空白。`getent` / `/etc/passwd` 两条读取路径都覆盖。
+  - 「无可用用户」提示改为「未检测到可用的**登录**系统用户（UID 1000-65533 且非 nologin）」，与新筛选口径一致。
+- `scripts/check-service-unit.mjs`：原「分段列出」断言改为**反向断言**（`CANDIDATE_SERVICE` 不得存在、分段提示行不得存在）＋ 新增 3 条（GECOS 截逗号、序号映射与展示一致）。门禁 **75 → 78 项**。
+
+**验证**
+
+- 用真实 `/etc/passwd` 格式样本（含 `libvirt-qemu` GECOS=`Libvirt Qemu,,,`、`wsdd2` GECOS=`Dynamic User`、两个登录用户）实跑筛选与渲染：改前 `libvirt-qemu（Libvirt Qemu,,,）`；改后列表只剩 `1) yanzi（Yanzi）`、`2) zhang（Zhang San）`，**服务账户消失、`,,,` 消失**。
+- `bash -n install.sh` OK；`test:service` **78 项 0 FAIL**；全量 `test:gates` **12 组 483 项 0 FAIL**；src + server `tsc` 均 0 错误。
+- **出包**：`build-upload/dockermanagementyanzi-linux-x64-v1.42.2.zip` **43,055,500 B** / SHA-256 `923acaf6125ab638762790842bff0216370d0aea058bf5f57b7bb8d059b01f56`；`build-upload/dockermanagementyanzi_1.42.2_amd64.deb` **42,771,740 B** / SHA-256 `ac483043879718b81c72227a3be1896bdff8bb0f38d749be25c02e8257e7e10a`。zip 5 成员（install.sh 39,569 → **39,272 B**）、内嵌二进制与源逐字节一致、内部版本 `1.42.2`×2 / `1.42.1` 归零；deb `Version: 1.42.2`、md5sums 与三个维护脚本语法全通过。
+
+⚠️ 本版**改了 `install.sh`** ⇒ 已装机器 OTA 升级后**必须重跑 `install.sh`**。
+
+---
+
+## v1.42.1 — 2026-10-11（**已出包 · 未发布**）
+
+**安装目录提示语按「有无旧版本」分别措辞**（用户真机反馈：提示信息重复且夹带当前场景不用的分支）。
+
+**问题**（真机输出）
+
+```
+━━━ 选择安装目录 ━━━
+[INFO]  检测到本机已安装在 /vol1/1000/appdata/dockermanagementyanzi（回车沿用该路径升级安装）
+请输入安装目录（有旧版本回车使用旧版本路径，否则回车使用 /opt/dockermanagementyanzi）:
+```
+
+两处毛病：① **`[INFO]` 行与提示行说同一件事**（同一句话连说两遍，纯噪音）；② 提示行里塞了**「否则回车使用 /opt/dockermanagementyanzi」** —— 本机已装在 `/vol1/1000/...`，「否则」那个分支**根本不会走到**，纯干扰。
+
+**已完成**
+
+- `deploy/linux/install.sh`：新增 `PROMPT_TEXT` 变量，提示语按场景分别赋值 ——
+  · **有旧版本**：`检测到本机已安装在 <旧路径>（回车升级）或者手动输入新路径`（即用户给定文案）
+  · **无旧版本**：`请输入安装目录（回车使用默认 /opt/dockermanagementyanzi）`
+  · `read -r -p "${PROMPT_TEXT}: "`，`PROMPT_DEFAULT` 与校验/迁移逻辑**一行未动**。
+- **删掉重复的 `log "检测到本机已安装在 …（回车沿用该路径升级安装）"` 行** —— 信息已完整落在提示语里。
+- `scripts/check-service-unit.mjs`：改 1 条旧断言（原文案已不存在）＋ **新增 3 条**钉死新行为：两种场景的提示语分别断言、**旧版本场景不得再混入「否则回车使用」**、**不得再出现重复的 log 行**。门禁 **73 → 75 项**。
+
+**验证**
+
+- 抽出提示语拼装逻辑实跑两种场景，渲染文案与预期逐字一致（有旧版本 → `/vol1/1000/appdata/dockermanagementyanzi`；无旧版本 → `/opt/dockermanagementyanzi`）。
+- `bash -n install.sh` OK；`test:service` **75 项 0 FAIL**；全量 `test:gates` **12 组 480 项 0 FAIL**（service-unit 73 → **75**）；src + server `tsc` 均 0 错误。
+- **出包**：`build-upload/dockermanagementyanzi-linux-x64-v1.42.1.zip` **43,055,093 B** / SHA-256 `38ec6e265c88511c44d713ac9b8458fb3222fb6756758a27052010bd8aef3ccd`；`build-upload/dockermanagementyanzi_1.42.1_amd64.deb` **42,771,776 B** / SHA-256 `4640b349eecaf450d7adb309b6f55eabe57aeace98a960ca5d0568592c5f2215`。zip 5 成员（install.sh 由 39,225 → **39,569 B**，即本版改动已入包）、内嵌二进制与源逐字节一致、内部版本 `1.42.1`×2 / `1.42.0` 归零；deb `Version: 1.42.1`、md5sums 与三个维护脚本语法全通过。
+
+⚠️ 本版**改了 `install.sh`** ⇒ 已装机器 OTA 升级后**必须重跑 `install.sh`**（OTA 只换二进制，不更新安装脚本）。
+
+---
+
+## v1.42.0 — 2026-10-11（**已出包 · 未发布**）
+
+**设置页重组（备份分区瘦身 / 应用信息合并 / 侧栏重排）＋ 备份命名规则统一 ＋ 退役推测性权限预检＋ 日志每周打包 ＋ 网络曲线默认物理网卡**（Minor：本版含 3 项新功能 —— 日志每周打包、网络默认网卡可选、deb 包）。
+
+**① 应用信息卡片合并进「系统更新 → 当前版本」（用户：合并后位置在系统更新-当前版本卡片）**
+
+- `src/pages/Settings.tsx`：删除「备份管理」页的独立「应用信息」卡片；把它的运行态内容（版本号 + `channel` 徽标 + 运行用户 / 进程 PID / Node / 平台 / 启动时间 / 已运行 / 活跃引擎 / 引擎数量 共 8 个 `InfoRow`）整体搬进「当前版本」卡片，置于原「安装目录 + 版本号」那行之下、`border-t` 分隔的次级区域。
+- 「当前版本」卡片新增**刷新按钮**（`IconButton` ＋ `appInfoLoading` 转圈），沿用原应用信息卡片的交互。
+- `loadAppInfo` 的触发分区由 `backup` 改为 **`update`**（进系统更新页即加载运行态）；`backupLabel` 等备份页逻辑不受影响。
+- `AppInfo` 接口与 `GET /api/system/app-info` **服务端未动**。
+
+**② 备份管理页移除「安装位置与目录」与「目录镜像」（用户：安装位置与目录卡片、目录镜像移除）**
+
+- 删除「安装位置与目录」卡片（六个目录的路径 / 文件数 / 占用 + 一键复制）与「目录镜像」整块（标题说明、两个源的卡片、开关、目标路径输入、运行态、「立即同步」按钮）。
+- 连带清理随之失效的前端代码：`copyDirPath` / `copiedDirKey`（目录复制）、`mirrorStates` / `mirrorLoading` / `mirrorError` / `mirrorSyncing`、`loadMirror`（含 **15 秒轮询** effect）、`handleMirrorSyncNow`，以及 import `fetchMirrorStatusApi` / `syncMirrorNowApi` / 类型 `MirrorRuntimeState` / 图标 `FolderOpen` + `Info`。
+- **服务端全部保留**：`server/mirror.ts`、`/api/mirror/*` 路由、`settings.mirror` 配置段（含默认值）均未删 —— 只移除 UI，需要时从 git 历史取回即可。
+
+**③ 备份文件命名规则统一（用户规则）**
+
+| 类型   | 新命名                                                    | 生成处                                             |
+| ---- | ------------------------------------------------------ | ----------------------------------------------- |
+| 全量备份 | `dockermanagementyanzi_all_YYYYMMDD_HHMMSS.zip`           | `server/backup.ts` `createFullBackup("manual")` |
+| 堆栈备份 | `dockermanagementyanzi_<堆栈名>_YYYYMMDD_HHMMSS.zip`         | `server/docker.ts` `backupStack()`              |
+| 自动备份 | `dockermanagementyanzi_auto-<档位>_YYYYMMDD_HHMMSS.zip`     | `createFullBackup("auto", key)`                 |
+| 配置导出 | `dockermanagementyanzi_config-export_YYYYMMDD_HHMMSS.zip` | `exportConfigArchive()`                         |
+
+- 新增导出常量 **`BACKUP_NAME_PREFIX = "dockermanagementyanzi"`**（`server/backup.ts`，前端 `Settings.tsx` 同步定义同名常量）。
+- **`tsCompact()` 改造**：由 ISO（`2026-09-14T13-05-55`，UTC）改为 **`YYYYMMDD_HHMMSS`（本地时间）**，并从私有改为**导出**（`docker.ts` 此前自行拼了一套同样的 ISO 字符串，现统一复用）。
+- ★ **`scheduler.ts` 分档保留清理前缀必须同步改**：`pruneBackups("auto-<key>_")` → `pruneBackups(`${BACKUP_NAME_PREFIX}_auto-${key}_`)`。否则新命名的自动备份永远匹配不上旧前缀，滚动清理静默失效、历史包无限堆积。
+- 前端 `backupLabel()` 重写：先剥统一前缀，再按「`auto-` / `all` / `config-export` / 其余为堆栈名」分类，并**兼容两种时间戳**（新 `_\d{8}_\d{6}` 与历史 ISO `_YYYY-MM-DDTHH-MM-SS`）—— 老机器备份目录里的历史包仍能正常显示标签。
+
+**④ 退役推测性权限预检（用户：检查「检测到 17 个文件权限异常」现在还需要吗 —— 结论：不再需要）**
+
+- **判据与事实**：该提示来自只读体检 `scanPermIssues(COMPOSE_DIR, uid)`，判据是「**属主 ≠ 服务运行用户 或 模式位不足**」—— 属于**推测**。现实中大量文件属主是 `root`、模式已开放读（`0644`/`0755`），备份其实**读得到**，却被判为异常。用户实测弹「17 个文件权限异常，备份时会被跳过」即属此类**假警报**。
+- **备份侧早已自愈并回报真实结果**：`copyFileMaybeHeal()` 在 `autoFixReadPerm`（默认开）下会给「属于自己的」文件补 `u+r` 后重试；仍失败的才进 `skipped`，且 `POST /api/backups` 通过 `skipped` / `skippedDetails` / `fixed` **逐条回报**。这份回执才是事实。
+- **改动**：前端移除 `permCheck` state、`loadPermCheck()`、进入备份页时的自动体检、备份/恢复后的 `loadPermCheck(true)` 刷新、「重新检测」按钮；提示条改为**只信 `backupIssues`**（有跳过才提示「上次备份跳过 N 项（权限不足）」，无跳过但有自愈则提示「备份已自动补正下列文件的属主读权限」），修复命令也只取 `backupIssues.fixCommand`（不再回落体检）。
+- **服务端保留**：`GET /api/system/permission-check` 与 CLI `permission-check` 未删（排障、`deploy/linux/README.md` 运维用法仍引用）。副作用收益：进备份页不再白跑一遍 `maxDepth 6` / `maxEntries 5000` 的磁盘扫描。
+
+**⑤ 日志「保留策略」卡片：默认 365 天 / 1G ＋ 每周打包一次**（用户指令：系统设置-日志，保留策略卡片，保留天数默认 365 天，总上限大小 1G，每周打包一次）
+
+- **默认值核对：`maxDays = 365`、`maxTotalMB = 1024`（1G）本来就已正确**（`server/settings.ts` 的 `logRetention` 顶层、`getRetentionConfig()` 兜底、前端四处 `?? 365` / `?? 1024` 自 v1.38.0 起即如此），且实测现有 `settings.json` **无 `logRetention` 覆盖段** ⇒ 界面显示的就是 365 / 1G。**本版只补断言钉死，防止后续被误改**（门禁 ⑨）。
+- **新增「每周打包一次」**（真正的新增能力），三项设计决策已与用户确认：
+  1. **打包成功后删除被归档的原始文件** —— 日志目录长期只留最近一周散文件 ＋ 历史压缩包，避免 365 天 × 3 频道 ≈ 1000 个小文件堆积。
+  2. **滚动间隔**（`距上次打包 ≥ packIntervalDays`，默认 7 天）—— 不固定星期，执行时刻由服务启动时间决定。
+  3. **压缩包自身同样受「365 天 / 1G」约束** —— 不另设第二套保留规则。
+- **`server/settings.ts`**：`logRetention` 增 `packEnabled: true` / `packIntervalDays: 7`。★ 二级合并 `...DEFAULT_SETTINGS.logRetention` 已覆盖这两个新字段 ⇒ **旧 settings.json 无需迁移**即得默认值；`notify`/`oplog` 子段**刻意不给默认值**（沿用既有铁律：子段写死默认值会让顶层改动无法传导）。
+- **`server/applogs.ts`（386 → 743 行）**：
+  - `LOG_ARCHIVE_RE = /^logs-(\d{8})-(\d{8})\.zip$/` ＋ `listLogArchives()` / `resolveLogArchive()` / `deleteLogArchive()`：与日志散文件**同一套白名单 + `path.resolve` 双重防穿越**。
+  - `packLogs()`：只打包**已结束**的文件（当天文件永不进包，正在写入）→ 暂存目录 → `zipDirectory` → **先 `statSync` 验证压缩包非空可读** → `renameSync` 落入 `LOG_DIR` → **才逐个删原始文件**。★ 这个顺序是刻意的：**打包失败绝不丢日志**（宁可重复也不丢数据）。同名包已存在时加序号，**绝不覆盖既有归档**。包内附 `pack-manifest.txt` 便于对账。
+  - 单包源文件上限 `PACK_MAX_SOURCE_BYTES = 512 MB`（可由 `logRetention.packMaxSourceMB` 覆盖）：超限则本轮放弃并**保留全部原始文件**，避免单包无限膨胀。
+  - `packLogsIfDue()`：滚动间隔判定；**`lastPackAt` 从未写过时只记基准、不产出空包**（首轮不制造空归档）。状态落 `log-pack-status.json`（放日志目录**旁**，避免被日志清理误删）。
+  - `pruneLogs()` 增第三步 `pruneArchives()`：归档包**不归属任何频道**，按顶层（「应用日志」那一档）策略清理；期限按**文件名里的区间起点**判定，容量**从最旧开始删**。
+  - ★ **`logsTotalBytes()` 口径改为「散文件 + 归档包」** —— 否则 1G 上限会被压缩包**隐形突破**（散文件统计不到包 ⇒ 包只增不减 ⇒ 真正可用的散文件空间被悄悄吃掉）。这正是用户选择「压缩包同样受 1G 约束」的技术前提。
+- **路由**（⚠️ 均注册在 `/api/applogs/:name` **之前**，否则 `pack` / `archive` 会被当成日志文件名）：`POST /api/applogs/pack`（立即打包，忽略间隔）、`DELETE /api/applogs/archive/:name`；`GET /api/applogs` 响应新增 `pack` 与 `archives`，`totalBytes` 改用 `logsTotalBytes()`。
+- **前端**：保留策略卡片新增「每周打包一次」区块（开关 ＋ 间隔天数 ＋ 上次/下次打包时间 ＋ 「立即打包」按钮 ＋ 已归档压缩包列表与逐个删除），`Settings.tsx` 新增 `handlePackLogs` / `handleDeleteLogArchive` 与 `packingLogs` / `deletingLogArchive` 状态；`src/types.ts` 新增 `LogPackConfig` / `LogArchiveInfo` / `LogPackResult` 并给 `LogRetentionConfig` 补 `packEnabled?` / `packIntervalDays?`；`src/api.ts` 新增 `packAppLogsApi` / `deleteAppLogArchiveApi`。
+
+**⑥ 系统设置侧栏分区顺序按用户指定重排**（用户逐条列出：用户 / 列显隐 / 引擎配置 / 标签管理 / Compose管理 / 弹窗设置 / 镜像更新 / 备份管理 / 通知 / 日志 / 硬件信息 / 系统更新）
+
+- `src/pages/Settings.tsx` 的 `sections` 数组重排为：**用户 → 列显隐 → 引擎配置 → 标签管理 → Compose 管理 → 弹窗设置 → 镜像更新 → 备份管理 → 通知 → 日志 → 硬件信息 → 系统更新**（原顺序为 引擎配置 / 用户 / 标签管理 / Compose 管理 / 弹窗设置 / 通知 / 备份管理 / 镜像更新 / 硬件信息 / 系统更新 / 日志 / 列显隐）。
+- ★ **纯展示顺序调整，不涉及任何行为变更**，三点安全性依据：① 各分区 **key 一律未改**（`user`/`colvis`/`docker`/`tags`/`compose`/`modal`/`scheduler`/`backup`/`notifications`/`applogs`/`activity`/`update`），而所有跳转与加载逻辑（`setActiveSection("docker")`、`loadBackups`/`loadAppInfo`/`loadLogs`/notify 自检的 `activeSection === "xxx"` 判定）**全部按 key 而非下标**；② 下方各分区 JSX 是**互相独立的 `{activeSection === "x" && (...)}` 三元**，渲染顺序与侧栏数组无关，故**不需要搬动 JSX**；③ `sections` 数组只被侧栏 `.map()` 消费一处。
+- 默认落地分区仍为 `docker`（引擎配置），未改。
+
+**验证**
+
+- 新增门禁 **`scripts/check-backup-naming.mjs`（40 项）**，已并入 `npm run test:gates`（新增 `test:backup`）：四组断言 —— ① 后端命名规则（含**反向断言**：`scheduler.ts` 不得再出现裸 `auto-${key}_`、`docker.ts` 不得再自行拼 ISO）；② `backupLabel` 新旧两种时间戳都能解析；③ 卡片归属（按**实际 JSX 分区顺序** backup → scheduler → update → applogs 切片，断言三张卡片不在备份页、且在更新页）；④ 预检退役（含**反向断言**：服务端 `permission-check` 端点必须仍在）。
+- 新增门禁 **`scripts/check-log-pack.mjs`（44 项）**，已并入 `test:gates`（新增 `test:logpack`）：**真实临时 LOG_DIR ＋ 真实 `zipDirectory`** 跑打包/保留全流程 —— ① 归拢成 `logs-<起>-<止>.zip`（校验 PK 魔数）且原始文件被删；② **当天文件永不打包/不删**；③ 源总量超单包上限时**原始文件完整保留**；④ 归档包**超期/超容量都被清理**；⑤ `logsTotalBytes()` 含压缩包；⑥ 归档名白名单与**路径穿越防线**（`../`、绝对路径、伪装名全拒）；⑦ 滚动间隔语义；⑧ 对外状态字段；⑨ **默认值钉死 365 / 1024 / 7 天**。★ **两次负向自检已实测**：注入「当天文件也进包」⇒ 38/6 变红；注入「压缩包不计入容量上限」⇒ 42/2 变红（均还原后 44/0 全绿）。
+- `check-backup-naming.mjs` 增第 ⑤ 组 **7 条**侧栏顺序断言（**40 → 47 项**）：顺序与用户列表逐项比对、**分区数量仍为 12**、**key 集合未变**（排序 ≠ 改 key）、**每个 key 都有对应 JSX 分支**（防「点了侧栏出空白页」）、默认 `activeSection="docker"` 仍有效。★ **负向自检已实测**：把「日志 / 硬件信息」对调 ⇒ 46/1 变红（还原后 47/0 全绿）。
+- `npm run test:gates` **11 组 452 项 0 FAIL / exit 0**（hooks 35 · notify 40 · secrets 30 · auth-render 41 · auth-wiring 75 · restart 18 · thermal 15 · install 34 · service 73 · backup-naming 47 · **log-pack 44**）。
+- 根 `tsc --noEmit` 与 `tsc -p server/tsconfig.json --noEmit` 均 **0 错误**（`noUnusedLocals:false`，故额外用门禁钉死「删干净的 import/state 不得复活」）。
+- `docs/权限一致性诊断与修复方案.md`：§4.5 加 v1.41.5 退役说明与移除原因；示例 `backupName` 更新为新命名；改动清单标注前端已不再调用。
+
+**未完成 / 已知限制**
+
+- **本版已出包**（`package.json` = `1.42.0`，SEA 交叉构建重建二进制）：`build-upload/dockermanagementyanzi-linux-x64-v1.42.0.zip` **43,055,172 B** / SHA-256 `b3c372f41dd6e2e11fb58f6f03f19f885b628b171e0ce2b20c19d75c13d6c1e3`；`build-upload/dockermanagementyanzi_1.42.0_amd64.deb` **42,771,400 B** / SHA-256 `b825a8cedaf029b1a8a48fdd2b83ae6a147f3fa1579b38844cc7c8774ad03ae9`。⚠️ 本版**未改 `install.sh` 与 `.service`** ⇒ 已装机器 OTA 升级后**无需**重跑安装脚本。
+- 历史备份包文件名为旧规则（`all_2026-…` / `auto-weekly_…` / `<栈名>_2026-…`），仍能被新版 `backupLabel` 正确识别，但**不会被重命名**（保持历史事实）。
+- ★ `pruneBackups` 前缀变更后，**旧命名的自动备份不再被分档清理命中**（会一直留着）。属可接受：年备本就永久保存，旧包量级有限；若要清理需一次性手动删旧名自动包。
+- ⚠️ **日志每周打包首轮不会立即产出压缩包**：`lastPackAt` 从未写过时只记基准时间（`packLogsIfDue()` 直接返回），避免升级后立刻打出一个只含历史文件的空包。**首次打包发生在服务启动满 7 天后**，或用户点「立即打包」。
+- ⚠️ 归档包按**文件名里的日期区间**判超期（`logs-<起>-<止>.zip` 取起点），而非 mtime —— 打包不改 mtime 的话 mtime 会失真，用日期区间更符合「这份包覆盖哪段日志」的语义。
+
+**下一步**：出包 v1.41.6（zip + deb，均落 `build-upload/`）；真机验证备份列表新命名与「应用信息」在系统更新页的展示。
+
+---
+
+## v1.41.5 — 2026-10-11（**已出包 · 未发布**）
+
+**全局重命名应用部署身份 `docker-manager-yanzi` → `dockermanagementyanzi`**（用户指令：整个应用的部署身份全局重命名）。
+
+**已完成**
+
+- **覆盖面（哨兵三步批量重命名法：`yanzi/docker-manager-yanzi`→`yanzi/__DMY__` 保护仓库 slug → `docker-manager-yanzi`→`dockermanagementyanzi` → `yanzi/__DMY__`→`yanzi/docker-manager-yanzi` 还原）**：
+  - **systemd 单元**：`deploy/linux/docker-manager-yanzi.service` → `git mv` 为 `dockermanagementyanzi.service`，内容同步重命名（`RuntimeDirectory=dockermanagementyanzi`、`ExecStartPre` 的 `/run/dockermanagementyanzi/dmi-*`、`ExecStart=__INSTALL_DIR__/dockermanagementyanzi`、注释 `/opt/dockermanagementyanzi`）。
+  - **二进制 / 安装目录默认名**：`APP_NAME="dockermanagementyanzi"`、`DEFAULT_INSTALL_DIR="/opt/dockermanagementyanzi"`、二进制名 `dockermanagementyanzi`；zip 内结构 `dockermanagementyanzi/dockermanagementyanzi` + install.sh + uninstall.sh + `dockermanagementyanzi.service` + README.md。
+  - **代码硬编码身份**：`server/unit-status.ts`（`UNIT_NAME`/`APP_NAME`/`DMI_MIRROR_DIR=/run/dockermanagementyanzi`）、`server/updater.ts`（`ASSET_APP_NAME="dockermanagementyanzi"`、User-Agent）、`scripts/build-binary.mjs`（`SERVICE_NAME="dockermanagementyanzi.service"`）、`scripts/check-service-unit.mjs`（`UNIT` 路径 + `ExecStart` 断言）。
+  - **前端品牌文案**：`src/components/auth/LoginPage.tsx` 的 `docker-manager-yanzi · 本地部署` → `dockermanagementyanzi · 本地部署`。
+  - **文档 / Docker 镜像名**（`deploy/docker/*`、`README.md`、`docs/*`）：`docker-manager-yanzi:latest` → `dockermanagementyanzi:latest` 等。
+- **★ 保留 Gitea 仓库 slug `yanzi/docker-manager-yanzi` 不变**：它是 OTA 下载源与 quick-install 源（`server/updater.ts` 的 `GITEA_REPO_DEFAULT`、`scripts/{quick-install.sh,push-gitea.sh,publish-gitea-release.mjs}`），破坏即让已部署机器收不到更新。仅 `APP_NAME`/`ZIP`/`GITEA_REPO` 变量**名**随产品名变，其**值**（仓库 owner/repo）原样保留。
+- **★ 必须重建二进制**（不能像 v1.41.4 那样复用旧二进制）：二进制内嵌 systemd 模板且用 `path.basename(process.execPath) !== APP_NAME` 自检测，重命名后旧二进制仍叫 `docker-manager-yanzi` 会触发「身份不匹配」误判。SEA 交叉构建（`useCodeCache:false` 可移植 blob + Windows 端 postject 注入 Linux node 基座）产出新 ELF。
+- **★ 旧名称机器平滑升级**：`install.sh` 新增「旧名称安装迁移」块——若检测到 `/etc/systemd/system/docker-manager-yanzi.service` 且新名单元不存在，则 `systemctl stop docker-manager-yanzi` → `mv` 旧单元为新名 → `daemon-reload`，随后被「检测旧版本」段当作已装版本走原地升级（沿用旧 `WorkingDirectory` ⇒ 数据不丢）。
+
+**验证**
+
+- 二进制字节扫描：ELF `7f454c46`、EI_CLASS=2（64-bit）、e_machine=62（x86-64）；内含 `dockermanagementyanzi`×27、仓库 slug `yanzi/docker-manager-yanzi`×1 保留、**独立** `docker-manager-yanzi`×0（除 slug 外零残留）；`1.41.5`×2、`1.41.4`=0。
+- 包：`deploy/linux/dockermanagementyanzi-linux-x64-v1.41.5.zip` **43,052,293 B** / SHA-256 `7f9e068a279ce3aa26d5750db9744ab457f1042845796a78a3b8c9f9da518051`（**5 成员**：二进制 0755/130,354,368 ＋ install.sh 0755/40,290 ＋ uninstall.sh 0755/4,831 ＋ `dockermanagementyanzi.service` 0644/3,806 ＋ README.md 0644/9,619）。
+- 重建 `server/dist/*.js`（消除陈旧编译产物残留旧名）；`bash -n install.sh` OK；根 `tsc` + `tsc -p server/tsconfig.json --noEmit` 均 **0 错误**；`npm run test:gates` **9 组 73 项 0 FAIL / exit 0**（service 70→73 含新增旧名称迁移断言）。
+- 状态：**已出包 · 未发布**。
+- ⚠️ 本版改了 `install.sh` + `.service` + 重建二进制 ⇒ 已装机器 OTA 升级后**必须重跑 `install.sh`**（会自动把旧 `docker-manager-yanzi.service` 迁移为新名并刷新单元）。
+
+**未完成 / 已知限制**
+
+- 历史旧名 zip（`deploy/linux/docker-manager-yanzi-linux-x64-v1.35.11~v1.41.4` 及无版本 alias）仍带旧名，按惯例保留为历史发布物、未清理；文档里指向这些历史包的旧名引用属历史事实、保持原样。
+- 挂起未做任务（自 v1.41.3 起）：「移除目录镜像 UI、安装位置与目录 section、应用信息合并到系统更新页」—— **已在 v1.41.6 执行完毕**。
+
+**下一步**：待用户在真机升级时确认 —— 已装 `docker-manager-yanzi` 的机器 OTA 后重跑 `install.sh` 应自动迁移单元并刷新，数据不丢。
+
+---
+
+## v1.41.4 — 2026-10-11（**已出包 · 未发布**）
+
+**安装时先检测旧版本安装目录，存在则优先询问「是否按旧路径升级安装」（默认 Y 原地升级）；拒绝后再要求输入新路径**（用户诉求：升级安装时沿用旧路径，避免另起目录）。
+
+**已完成**
+
+- **根因 / 旧行为**：原脚本「先选安装目录、后探测旧目录并询问迁移」两步割裂 —— 即便本机已装在默认 `/opt/docker-manager-yanzi`，也要先手输路径、再被告知「有旧目录在别处」。升级场景不符合直觉。
+- **`deploy/linux/install.sh` 重构安装目录选择顺序**：把「旧版本探测」（读 systemd 单元 `WorkingDirectory=`，单元是唯一事实来源）**提前到「选择安装目录」段之前**，并据此分流：
+  1. **旧版本存在**：交互环境先问 `检测到本机已安装在 <OLD>。是否按该路径升级安装？[Y/n]` —— 回车或 `Y` ⇒ `INSTALL_DIR=OLD`（原地升级）；输入 `n` ⇒ 进入「输入新的安装目录」循环（复用 `validate_install_dir()` 路径白名单校验，非法路径反复提示直到合法）。非交互环境（CI/自动化）默认沿用旧路径原地升级；若显式给了 `APP_INSTALL_DIR` 则忽略旧路径、以该变量为准。
+  2. **无旧版本**：维持原行为（交互回车默认 `/opt/<APP_NAME>`，或 `APP_INSTALL_DIR` 指定）。
+- **旧目录数据迁移段改为复用顶部探测结果**：迁移提示仅在「本次所选目录 ≠ 旧目录」时触发（`if [ -n "$OLD_INSTALL_DIR" ] && [ "$OLD_INSTALL_DIR" != "$INSTALL_DIR" ]`），不再重复探测；原地升级（沿用旧路径）时不再弹出无意义的「迁移到同目录」询问。其余迁移 / 保留 / `DELETE` 二次确认逻辑不变。
+- **`scripts/check-service-unit.mjs`**：⑥ 段新增 3 条防回归断言，钉死新行为 —— ① 旧版本探测必须位于「选择安装目录」之前；② 旧版本存在时必须有「是否按该路径升级安装」提示且默认 Y；③ 拒绝后必须有「请输入新的安装目录」。门禁 **70 → 73 项**。
+- **`package.json`**：版本 `1.41.3 → 1.41.4`。
+
+**验证**
+
+- 用真实脚本代码抽出「安装目录选择」决策块做 8 场景冒烟（伪终端强制交互 + 非交互）：
+    
+  ① 旧存在+`Y`→`INSTALL_DIR=旧路径`；② 旧存在+`n`+新合法路径→新路径；③ 旧存在+回车（空=Y）→旧路径；④ 旧存在+`n`+非法路径再合法→循环后取合法新路径；⑤ 无旧+回车→默认 `/opt/docker-manager-yanzi`；⑥ 旧存在+非交互无 `APP_INSTALL_DIR`→沿用旧路径；⑦ 旧存在+非交互+`APP_INSTALL_DIR`→覆盖旧路径；⑧ 无旧+非交互→默认。**全部符合预期**。
+- `bash -n install.sh` OK；`npm run test:gates` **9 组 361 项 0 FAIL / exit 0**（service 70→73）；根 `tsc` + `tsc -p server/tsconfig.json --noEmit` 均 **0 错误**（本版未改 TS，沿用 v1.41.3 编译结果）。
+- 包：`deploy/linux/docker-manager-yanzi-linux-x64-v1.41.4.zip` **43,220,317 B** / SHA-256 `cffb1ec0e407e0153172369655a26c42f757d3722b52a1097d6f2639ba4f96fa`（**5 成员**：二进制 0755/130,813,120 ＋ install.sh 0755/**38,901** ＋ uninstall.sh 0755/4,833 ＋ .service 0644/3,818 ＋ README.md 0644/9,689）。
+- 二进制：**本版仅改 `install.sh`（未触动前端/后端代码），故直接沿用 v1.41.3 的 Linux SEA 二进制**（130,813,120 B / SHA-256 `d440e92dbd3975f62b3e40ebfe4944860cbfbf6dcf7eb6ec40768eba0dab0740`，ELF `7f454c46`、内部版本号仍为 `1.41.3`；下次改动前端/后端代码时再重建二进制即可同步版本号）。
+- 状态：**已出包 · 未发布**。
+- ⚠️ 本版只改 `install.sh` ⇒ 已装机器直接解压覆盖并重跑 `sudo bash install.sh` 即可生效；无需重装服务单元（单元未变）。
+
+**未完成 / 已知限制**：无（功能闭环）。
+
+**下一步**：待用户在真机升级时确认 —— 已装在 `/opt/docker-manager-yanzi` 的机器重跑 `install.sh` 应直接提示「按该路径升级安装」并默认原地升级；另选路径时应先问迁移。
+
+---
+
+## v1.41.3 — 2026-10-11（**已出包 · 未发布**）
+
+**修复 `checkServiceUnit` 的「一键修复」命令会把未解析占位符写进 systemd 单元，导致服务起不来；并让 install.sh 成为单元的唯一权威自动修复入口**（用户真机反馈：单元文件残留 `User=__SERVICE_USER__ Group=__SERVICE_GROUP__`）。
+
+**已完成**
+
+- **根因**：`server/unit-status.ts` 的 `checkServiceUnit()` 生成 `fixCommand` 时只还原了 `__INSTALL_DIR__`，**漏还原 `__SERVICE_USER__` / `__SERVICE_GROUP__`**。后果二连：
+  1. 用户从「硬件信息」卡片**复制修复命令、以 root 执行** ⇒ 把 `User=__SERVICE_USER__` 原样 tee 进 `/etc/systemd/system/docker-manager-yanzi.service` ⇒ 服务启动即 `216/GROUP`（单元文件本身看不出问题）；
+  2. 比对时模板的 `User=__SERVICE_USER__` 永远对不上已安装单元的 `User=yanzi` ⇒ **一直误报「系统服务单元落后」**（即便安装正常）。
+- **修复 `server/unit-status.ts`**：新增统一的 `resolveUnitTemplate(raw, installDir, installedText)` 与 `resolveUnitUserGroup(installedText)`。三类占位符（`__INSTALL_DIR__` / `__SERVICE_USER__` / `__SERVICE_GROUP__`）全部还原后才做「缺失指令比对」与「生成修复命令」——比对与修复用同一份已还原模板，杜绝上述两坑。账户/主组取值优先级：**已安装单元里当前生效的 `User=` / `Group=`（最权威，也能救回被写成占位符的单元）→ 否则取运行进程身份**（`os.userInfo().username` + `id -gn <用户>`，拿不到回退用户名）。
+- **`deploy/linux/install.sh`**：单元安装段明确为「**自动刷新 / 修复单元**」——每次运行都无条件从模板重新生成并解析全部占位符 ⇒ **重跑本脚本即自动修复该单元**（刷新 OTA 后残留的落后指令，也救回被误写成占位符的单元）。日志点明「OTA 后重跑本脚本即自动同步最新单元」。★ 这与用户诉求「执行安装脚本时自动执行」一致：install.sh 本就是唯一权威修复入口。
+- **`src/components/ActivityPanel.tsx`**：「系统服务单元落后」卡片新增提示「也可直接重新执行 `sudo bash install.sh`（会自动刷新并修复该单元，无需手动复制命令）」。
+- **`scripts/check-service-unit.mjs`**：⑦ 段改为断言 `resolveUnitTemplate` 还原全部三类占位符（含账户/主组取自已安装单元）；新增**防回归断言**——单元模板只允许这三类已知占位符，杜绝新引入未还原的 `__X__`。门禁 **65 → 70 项**。
+- 版本 `1.41.2 → 1.41.3`。
+
+**验证**
+
+- `resolveUnitTemplate` 端到端模拟（真实模板 + 已安装单元 `User=yanzi/Group=Users`）：解析后**剩余占位符=无**，`User=yanzi` / `Group=Users` / `WorkingDirectory` / `ExecStart` 全部正确；仅当单元确缺 DMI 两条指令（`RuntimeDirectory` + `ExecStartPre`）时才报「缺少 2 条指令」（与用户现场吻合）。
+- `bash -n install.sh` OK；根 `tsc` + `tsc -p server/tsconfig.json --noEmit` 均 **0 错误**；`npm run test:gates` **9 组 358 项 0 FAIL / exit 0**（service 65→70）。
+- 包：`build-upload/docker-manager-yanzi-linux-x64-v1.41.3.zip` **43,219,833 B** / SHA-256 `52e89b26569f4018a894f0419b5465de477f246472d18f35bf7f69129e03dadc`（**5 成员**：二进制 0755/130,813,120 ＋ install.sh 0755/**36,582** ＋ uninstall.sh 0755/4,833 ＋ .service 0644/3,818 ＋ README.md 0644/9,689）。
+- 二进制：130,813,120 B / SHA-256 `d440e92dbd3975f62b3e40ebfe4944860cbfbf6dcf7eb6ec40768eba0dab0740`（ELF `7f454c46`、`1.41.3`、`resolveUnitUserGroup`×3、`__SERVICE_USER__` 在模板内 2 处，运行期解析；`__INSTALL_DIR__`×1）。
+- 状态：**已出包 · 未发布**。
+- ⚠️ 本版改了 `install.sh` 与后端/前端 ⇒ 已装机器部署新包后**重跑 `install.sh` 即自动修复单元**（无需手动复制修复命令）。
+
+**未完成 / 已知限制**：无。
+
+**下一步**：待用户真机重跑 `install.sh`（应自动修复单元、不再显示 `User=__SERVICE_USER__`、落后卡片仅在确缺指令时出现）后，可安排发布双端。
+
+---
+
+## v1.41.2 — 2026-10-11（**已出包 · 未发布**）
+
+**取消 v1.41.1 的「改安装目录双关卡」；顺带修掉一个被它触发暴露的 `set -u` 崩溃**（用户真机反馈）。
+
+**已完成**
+
+- **修 `install.sh` 崩溃（真机报 `line 401: SERVICE_USER: unbound variable`）**：脚本是 `set -euo pipefail`。「检查 Docker 依赖」段里一条告警写的是 `然后重新执行本脚本（会一并把 ${SERVICE_USER} 加入 docker 组）`，而 `${SERVICE_USER}` 要到后面「配置服务运行账户」段才赋值。该分支**只在 docker 守护进程未运行时**才走到 —— 而 v1.41.1 新增的「关卡① 必须先停 Docker」恰好强制把 docker 停掉 ⇒ **两个功能自相矛盾，安装必崩**。修：文案改为不含变量的固定表述（「服务运行账户」）；并加门禁双重断言钉死（`SERVICE_USER` 赋值行须晚于该段 + 该段内不得出现该变量）。
+- **取消关卡①「必须先手动停止 Docker」**：删除 `docker_running()` 只读探测与「守护进程运行中即中止」的硬门槛。改安装目录不再要求先停 Docker（用户自行决定何时起停 docker）。
+- **取消关卡②「校验系统登录密码」**：删除 `verify_login_password()` / `pick_verify_user()` / `confirm_by_typing()` 三个函数及三通道（`su` / `pamtester` / `python3+pam`）真校验、降级显式确认、`su` 免密探测等全部代码，合计 **134 行**。
+- 同步修正脚本头部注释、段落注释与 `--help` 文本（不再出现「两道关卡 / 高危操作 / 登录密码」）。
+- **`scripts/check-service-unit.mjs`**：⑥ 段由「双关卡断言」改为**反向断言**（不再要求停 Docker、不再要求密码且相关函数已删净；「**绝不代停/代启 docker**」这条铁律的反向断言保留），并新增 2 条 `SERVICE_USER` 顺序与作用域断言。门禁 **68 → 65 项**。
+- **文档**：`deploy/linux/README.md`、`docs/发布与OTA升级指南.md` §3.3 同步改为「自定义目录只需过路径白名单」。
+- **`package.json`**：版本 `1.41.1 → 1.41.2`。
+
+**保留不变**：安装目录可选（交互回车默认 + `APP_INSTALL_DIR`）、路径白名单校验、旧安装目录探测/迁移/`DELETE` 二次确认、单元占位符替换与自检、`uninstall.sh` 从单元读目录。
+
+**为什么按 Patch**：纯安装脚本与门禁改动，不改应用行为与数据格式。
+
+**验证**：`bash -n install.sh` OK；`scripts/check-service-unit.mjs` ⑥ 段改造后 **65 项 0 FAIL**；根 `tsc` 与 `tsc -p server/tsconfig.json --noEmit` 均 **0 错误**；全量 `npm run test:gates` **9 组 353 项 0 FAIL / exit 0**（hooks 35 · notify 40 · secrets 30 · auth-render 41 · auth-wiring 75 · restart 18 · thermal 15 · install-drivetemp 34 · service 65）。包内 `install.sh` 逐项核对：`docker_running` / `verify_login_password` / `pick_verify_user` / `confirm_by_typing` / `pamtester` / `read -r -s -p` / `检测到 Docker 守护进程仍在运行` / `stop docker` **全为 0**；保留项全命中（`validate_install_dir`×4、`DENY_EXACT`×2、`DENY_PREFIX`×2、`APP_INSTALL_DIR`×8、`确认删除请输入 DELETE`×1、`cp -a -n`×1、`chown -R "${SERVICE_USER}:${SERVICE_GROUP}"`×1、`序号或用户名`×1、`nologin|false`×4、`226/NAMESPACE`×4、`服务运行账户加入 docker 组`×1、`INSTALL_DIR_SED`×3、`__INSTALL_DIR__`×5）。
+
+**未完成 / 已知限制**：无。
+
+**下一步**：待用户真机重跑 `install.sh`，验证自定义目录安装全流程（v1.41.1 引入、Windows 开发机无法端到端实测的部分）。
+
+| 项       | 值                                                                                                                                                |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 包       | `build-upload/docker-manager-yanzi-linux-x64-v1.41.2.zip` **43,218,888 B**                                                                       |
+| SHA-256 | `58923176f22445fae2d2b9fbdc9d4f00ae3e996c8ff817d7e733aae82223962e`                                                                               |
+| 二进制     | 130,813,120 B / SHA-256 `4a34e618d77918abbb4a4353ba3e62f3e61c1b67b41e3e84669f9cded97b40f4`；ELF `7f454c46`、`bundle.js` 含 `1.41.2`×2、`1.41.0` 残留 0 |
+| 包内成员    | **5 个**（二进制 0755/130,813,120 ＋ install.sh 0755/**36,013** ＋ uninstall.sh 0755/4,833 ＋ .service 0644/3,818 ＋ README.md 0644/9,689）                |
+| 门禁      | 9 组 **353 项** 0 FAIL（`test:service` **65 项**，由 68 减 3；src + server tsc 0 错误）                                                                     |
+
+> ⚠️ **升级必读**：本版只改 `install.sh` 与门禁/文档，**未改** `.service`、`uninstall.sh`、后端与前端 ⇒ 已装机器可直接 OTA 换二进制；但若你此前跑的是 **v1.41.1**（且用它成功装过），本版把「两道关卡」删了，重跑 `install.sh` 即不再要求停 Docker / 输密码。
+
+---
+
+## v1.41.1 — 2026-10-11（**已出包 · 未发布**）
+
+**安装目录可选（回车默认 `/opt/docker-manager-yanzi`）；改目录属高危操作，须过两道关卡**（用户 2026-10-11 需求）。
+
+**已完成**
+
+- **`deploy/linux/install.sh` —— 安装目录交互选择**：新增「选择安装目录」段落。交互执行时提示 `请输入安装目录（回车使用默认 /opt/docker-manager-yanzi）`；非交互环境用环境变量 `APP_INSTALL_DIR=<绝对路径>` 指定。`DATA_DIR/LOG_DIR/CONFIG_DIR` 改为在目录定稿后计算。
+- **路径白名单校验 `validate_install_dir()`**（安装目录要进 systemd 单元、过 sed、当 ReadWritePaths 的 bind-mount 目标，必须绝对安全）：
+  - 必须绝对路径、不允许 `..` 回溯、至少两级（拒 `/data` 这种根级目录）；
+  - 字符白名单 `[A-Za-z0-9._/-]` —— 空格会让 systemd 把路径切断，\`& | " ' $ \`\` 会被 sed/shell/systemd 二次解释；
+  - `DENY_EXACT` 拒等于系统目录（`/opt`、`/var`、`/usr`…）；`DENY_PREFIX` 拒落在系统关键子树下；
+  - ★ 明确拒 `/home/`（单元 `ProtectHome=yes` 会把 `/home` 换成空目录）、`/root/`、`/tmp/`（tmpfs 重启即清）；★ **放行 `/mnt/`、`/media/`**（NAS 数据盘常挂在那里，是真实诉求）。
+- **关卡 ① Docker 必须先停（硬门槛）**：新增只读探测 `docker_running()`（`systemctl is-active docker` / `docker info`）。非默认目录且 Docker 仍在运行时**直接中止安装**，打印 `systemctl stop docker` 让用户手动停。★ **绝不代为启停** —— 与 v1.39.4 的「只检测不代管用户的 systemd 服务」铁律一致，门禁有反向断言钉死。
+- **关卡 ② 系统登录密码真校验（PAM）**：新增 `verify_login_password()`，三条通道依次尝试、每条最多 3 次：
+  1. `su`（util-linux 自带，最通用）—— 先以 `</dev/null` **探测它对该用户是否真的要密码**（非交互直接成功 = 同用户免密 ⇒ 这条通道没有校验能力，跳到下一条，防"假通过"）；
+  2. `pamtester`（若已安装）；
+  3. `python3` + `pam` 模块（若已安装）；
+       
+     三条都不可用 ⇒ `confirm_by_typing()` **降级为显式确认**（要求把登录用户名原样敲一遍）+ 醒目告警，**绝不静默放行**。密码输入一律不回显（`read -s` 或交给 `su` 自己读），不落命令行参数、不写日志。
+- **旧安装目录处理**：非默认目录且本机已装在别的目录时，从 **systemd 单元的 `WorkingDirectory=`** 探测旧目录（单元是事实来源，比自建记录文件不易失同步；骨架占位符与不存在的目录都视作"无旧安装"）。提示是否迁移 `data/ logs/ config/`（`cp -a -n`，**不覆盖**新目录已有文件，失败给出手动命令）；迁移完成后询问是否保留旧目录；选择不保留须输入 `DELETE` 二次确认才 `rm -rf`（并挡住空值与 `/`）。非交互环境一律跳过迁移。
+- **`deploy/linux/docker-manager-yanzi.service`**：`WorkingDirectory` / `DOCKER_CONFIG` / `ExecStart` / `ReadWritePaths` 四处改为 `__INSTALL_DIR__` 占位符，由 install.sh 安装期统一替换。★ 替换后**自检占位符清零 + WorkingDirectory 已指向实际目录**，漏替换直接 `err` 中止 —— 宁可就地失败，也不装出起不来的服务。
+- **`deploy/linux/uninstall.sh`**：安装目录改为「先读 systemd 单元的 `WorkingDirectory=`，读不到（无单元/残留占位符）回退默认 `/opt/<APP_NAME>`」，支持 `APP_INSTALL_DIR` 覆盖 ⇒ 自定义目录也能卸干净；`UNIT_FILE` 变量统一。
+- **`scripts/check-service-unit.mjs`**：③ 段由「WorkingDirectory 必须等于 INSTALL_DIR」改为**占位符形态断言**（四处占位符 + 不再硬编码 + 默认值 + sed 替换 + 自检）；新增 ⑥ 段「安装目录可选 + 高危改动双关卡」：交互询问、`APP_INSTALL_DIR`、路径校验三连（含拒系统目录）、**Docker 硬门槛 + 绝不代停/代启的反向断言**、密码真校验三通道、`read -s`、降级显式确认、su 免密探测、旧目录探测/迁移不覆盖/保留询问/`DELETE` 二次确认、uninstall 读单元；新增 ⑦ 段「服务端必须还原占位符」。门禁 **33 → 68 项**。
+- ★★ **两个被占位符带出来的既有缺陷（本次一并修掉，都是会把服务写坏的坑）**：
+  - **`server/unit-status.ts`（单元一致性自检）**：它把**构建期嵌入的单元模板**与已安装单元逐行比对、算「缺失指令」，并把模板**原样**作为「一键修复命令」给前端复制执行。模板改成 `__INSTALL_DIR__` 后：① `WorkingDirectory=__INSTALL_DIR__` 与已安装单元的真实路径永远对不上 ⇒ **前端一直误报「服务单元落后」**；② 更糟的是这条修复命令会把**未替换的占位符**直接 `tee` 进 `/etc/systemd/system/` ⇒ **服务起不来**。修法：新增 `resolveInstallDir()` —— SEA 二进制部署时取 `path.dirname(process.execPath)`（就是安装目录）并还原占位符；**开发模式拿不到目录 ⇒ `applicable=false`，不做任何判定、不给修复命令**（宁可不提示也绝不写坏单元）。
+  - **`server/daemon-config.ts`（无权限时的修复提示）**：旧提示用 `sed` 把 `ReadWritePaths=` 整行改写成硬编码 `ReadWritePaths=/opt/docker-manager-yanzi … ${DAEMON_DIR}` —— ① 自定义安装目录的部署照抄后，**面板目录变成不可写**（OTA/日志/数据全挂）；② **丢掉 `-` 前缀** ⇒ 重新引入 v1.39.3 刚修掉的 226/NAMESPACE；③ 只替换第一条 `ReadWritePaths=`，剩下三条原样留着。改为写 **drop-in**（`/etc/systemd/system/docker-manager-yanzi.service.d/10-allow-etc-docker.conf`，只追加 `NoNewPrivileges=no` 与 `ReadWritePaths=-${DAEMON_DIR}`）：不改动原单元、**不含任何安装目录**、每条带 `-`、`ReadWritePaths=` 累加语义 ⇒ 默认/自定义目录一律安全。
+- **`server/config.ts`**：注释说明自 v1.41.1 起安装目录可由 install.sh 指定，`process.cwd()`（= systemd `WorkingDirectory`）无需硬编码。
+- **`package.json`**：版本 `1.41.0 → 1.41.1`。
+- **文档**：`docs/发布与OTA升级指南.md` 安装章节补「安装目录可选 + 两道关卡」；`deploy/linux/README.md` 说明默认目录与自定义方式。
+
+**为什么按 Patch**：纯安装脚本/单元/门禁改动，不改应用行为与数据格式；无破坏性接口变更。
+
+**验证**：`bash -n install.sh` / `bash -n uninstall.sh` 均 OK；抽出 `validate_install_dir` 做**行为测试 32 项 0 FAIL**（含 `/opt`、`/`、`opt/x`、`/data/../etc/x`、`/data/my app`、`/data/my&app`、`/usr/bin/dm`、`/home/yanzi/dm`、`/tmp/dm`、`/data` 全被拒；`/opt/docker-manager-yanzi`、`/data/…`、`/mnt/disk1/…`、`/volume1/…` 放行），并模拟 sed 替换确认四处路径一致、占位符清零；`npm run test:service` **68 项 0 FAIL**；src 与 server 的 `tsc --noEmit` 均 **0 错误**；全量 `npm run test:gates` **9 组 356 项 0 FAIL / exit 0**。
+
+**未完成 / 已知限制**：① 密码校验三通道在本机（Windows 开发机）无法端到端实测，真机行为待用户验证；② `su` 同用户是否免密因发行版/配置而异，脚本用 `</dev/null` 探测自适应，若某发行版 `su` 直接放行则自动落到 pamtester/python-pam 通道，三条全无时降级为显式确认；③ 迁移只搬 `data/ logs/ config/`，不搬旧二进制（新二进制本就装到新目录）；④ 单元一致性自检（`unit-status`）的占位符还原依赖 SEA 构建，**开发模式下不做该判定**（拿不到安装目录 ⇒ `applicable=false`，这是刻意的保守行为）。
+
+**下一步**：出包 v1.41.1；用户真机验证安装目录选择 + 两道关卡 + 旧目录迁移。
+
+| 项       | 值                                                                                                                                                                                                                               |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 包       | `build-upload/docker-manager-yanzi-linux-x64-v1.41.1.zip` **43,220,434 B**                                                                                                                                                      |
+| SHA-256 | `a26e487b3774996d89fc3587d6f9ca63deb5db7460a6ccadd5211bcf9d89b000`                                                                                                                                                              |
+| 二进制     | 130,813,120 B / SHA-256 `2f926c5208695582b9e984476a2bd3ea3218e6be1215029bb07e5f06ed578743`；ELF `7f454c46`、`1.41.1`（4 处）、`1.41.0` 残留 0、`resolveInstallDir` 3 处、drop-in 名称 1 处、`__INSTALL_DIR__` 6 处、`ReadWritePaths=/opt/` **0** |
+| 包内成员    | **5 个**（二进制 0755/130,813,120 ＋ install.sh 0755/41,173 ＋ uninstall.sh 0755/4,833 ＋ .service 0644/3,818 ＋ README.md 0644/9,882）                                                                                                   |
+| 门禁      | 9 组 **356 项** 0 FAIL（`test:service` **68 项**，由 33 增至 68；src + server tsc 0 错误）                                                                                                                                                  |
+
+**包内 install.sh / 单元逐项核对**：新增项全命中（`DEFAULT_INSTALL_DIR="/opt/${APP_NAME}"`×1、`validate_install_dir`×2、`DENY_EXACT`×2、`DENY_PREFIX`×2、`docker_running`×2、`verify_login_password`×2、`pamtester`×4、`confirm_by_typing`×4、`read -r -s -p`×2、`OLD_INSTALL_DIR`×25、`cp -a -n`×1、`确认删除请输入 DELETE`×1、`__INSTALL_DIR__`×5、`INSTALL_DIR_SED`×3）；旧防线仍在（`chown -R "${SERVICE_USER}:${SERVICE_GROUP}"`×1、`序号或用户名`×1、`nologin|false`×5、`226/NAMESPACE`×5）；镜像项归零（`MIRROR_AS_USER`×0、`ReadWritePaths=/opt/`×0；`dms-mirror-exec`×1 为历史残留清理常量）。单元文件 `__INSTALL_DIR__`×5（4 条指令 ＋ 1 处注释）、`__SERVICE_USER__`/`__SERVICE_GROUP__` 各 ×1、`/opt/docker-manager-yanzi` 仅剩 1 处注释说明默认值。
+
+> ⚠️ **升级必读**：本版改了 `install.sh` 与 `.service` ⇒ OTA 后**必须重跑 `install.sh`**（OTA 只换二进制）。重跑时会重写单元、把 `__INSTALL_DIR__` 替换为实际目录；若这次选择的目录与当前不同，会提示是否迁移数据。
+
+---
+
+## v1.41.0 — 2026-10-11（**已出包 · 未发布**）
+
+**移除「异盘容灾镜像」功能——整块回退到 v1.39.2 的目录镜像语义**（用户 2026-10-11 拍板：v1.40.0/1.40.2/1.40.3 那条链不要了）。
+
+被移除的是三层里除「基础目录镜像」外的全部：① `sudo` 提权执行器（以目标目录属主身份写入）；② compose 双向三路合并；③ 备份目录事件驱动 + 每日 00:00 校验。
+
+**已完成**
+
+- **删除文件**：`deploy/linux/dms-mirror-exec.sh`（提权执行器）、`server/mirror-bidir-core.ts`（双向三路合并纯函数）、`scripts/check-mirror-exec.mjs`、`scripts/check-mirror-bidir.ts`。
+- **`server/mirror.ts`**：**整文件回退**到 v1.39.2（888 → **425 行**）。移除计划模式、`applyDirect`/`applyViaExecutor` 双后端、errno 分级、`computeMirrorOps`、`getMirrorWriteIdentity`、`probeTargetWritable`、`onBackupCreated`、`scheduleDailyVerify`、基线文件读写。目录镜像恢复为：**单向真镜像 + 文件监听（1 秒防抖）+ 60 秒轮询兜底 + 进程内直写**。
+- **`deploy/linux/install.sh`**：移除 `MIRROR_AS_USER` 校验与拒绝 root、sudoers 镜像条目、执行器安装（含 `jq` 检测）、`mirror-source.conf` / `mirror-identity.conf` 生成、`chown -R` 后的 root 属主重置段；**新增历史残留清理**（幂等、best-effort：删 `/usr/local/libexec/dms-mirror-exec.sh` 与上述两份 conf）。★ **保留** v1.39.4（守护进程醒目告警 / 203 自愈 / 226 专项诊断）、v1.40.1（服务账户跟随系统用户）、v1.40.4（`SERVICE_GROUP` 归属 + 候选用户列表）、v1.40.5（登录/服务账户分段）。
+- **`deploy/linux/make-package.py`**：`FILES` 移除执行器 ⇒ **包成员回到 5 个**。
+- **`server/index.ts`**：删除 `GET /api/mirror/write-identity`、`POST /api/mirror/probe`，以及 `POST /api/backups` 中的 `onBackupCreated()` 调用；`./mirror.js` 导入收敛回 4 个符号。**保留** v1.40.6 的 `serviceUsername()` 与 `/auth/init` 覆盖前端用户名逻辑。
+- **`server/scheduler.ts`**：回退（移除 `onBackupCreated` 导入与调用）。
+- **前端**：`src/types.ts`（移除 `MirrorWriteIdentity`/`MirrorProbeResult` 与 `MirrorState.triggerMode`/`bidir`、`MirrorRuntimeState.usedExec`）、`src/pages/Settings.tsx`（移除「镜像写入身份」只读卡、双模式 bullets 与按 `triggerMode`/`bidir` 分色）、`src/api.ts`（移除 `fetchMirrorWriteIdentityApi`/`probeMirrorTargetApi`）—— 均**整文件/逐处回退到 v1.39.2**。
+- **`package.json`**：移除 `test:mirror` / `test:bidir`，`test:gates` 由 11 组回到 **9 组**；版本 `1.40.6 → 1.41.0`。
+- **文档**：`docs/发布与OTA升级指南.md` 删除 §4.5.1「异盘镜像的权限模型」。
+
+**为什么按 Minor 且不回退版本号**：① 铁律「每次出包必升版本号、绝不重出同版本包」；② v1.39.3~v1.40.6 全部未发布，需要一条正式记录声明「这些版本带的异盘镜像功能已作废」。
+
+**验证**：`npx tsc --noEmit`（src）与 `npx tsc -p server/tsconfig.json --noEmit` 均 **0 错误**；`bash -n install.sh` OK；全量 `npm run test:gates` **9 组 321 项 0 FAIL / exit 0**；源码全量扫描 `MirrorWriteIdentity|MirrorProbeResult|applyViaExecutor|computeBidirOps|writeIdentity|write-identity|usedExec|triggerMode|onBackupCreated|scheduleDailyVerify|isBidirectional|isEventTriggered|mirror-bidir-core|dms-mirror-exec|MIRROR_AS_USER|mirror-source` **零命中**。
+
+**未完成 / 已知限制**：v1.40.2/v1.40.3 遗留的「提权路径尚未真机实测」随本次移除一并作废（该功能已不存在）。已装过 v1.40.x 的机器若曾落地执行器与 sudoers，**重跑新版 `install.sh` 即自动清理**（sudoers 文件整份重写 + 残留文件清理）。
+
+**下一步**：出包 v1.41.0；用户决定发布时机（GitHub / Gitea 双端）。
+
+| 项       | 值                                                                                                                                                                                                          |
+| ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 包       | `build-upload/docker-manager-yanzi-linux-x64-v1.41.0.zip` **43,213,450 B**                                                                                                                                 |
+| SHA-256 | `d01733eeb8c87073736c2d5a15f2860193501fd9ad1157a71ded2146daf1a596`                                                                                                                                         |
+| 二进制     | 130,813,120 B / SHA-256 `a2e1213cbfd5a2eaafecc78944878879706c5545066f9bbe094504f83fa03569`；ELF `7f454c46`、含 `1.41.0`（3 处）、`1.40.6` 残留 0、`serviceUsername` 5 处、`applyViaExecutor`/`dms-mirror-exec` **均 0** |
+| 包内成员    | **5 个**（二进制 0755/130,813,120 ＋ install.sh 0755/25,835 ＋ uninstall.sh 0755/4,135 ＋ .service 0644/3,555 ＋ README.md 0644/7,545）                                                                              |
+| 门禁      | 9 组 **321 项** 0 FAIL                                                                                                                                                                                       |
+
+**包内 install.sh 逐项核对**：保留项全部命中（`chown -R "${SERVICE_USER}:${SERVICE_GROUP}"`×1、`序号或用户名`×1、`nologin|false`×4、`226/NAMESPACE`×3、`203/USER`×2、`LEGACY_MIRROR_EXEC`×4、`APP_RUN_AS_USER`×13、`getent passwd`×5）；镜像项全部清零（`MIRROR_AS_USER`×0；`mirror-source.conf`/`mirror-identity.conf`/`dms-mirror-exec` 各 1 处，**均在历史残留清理块内**；`ALL=(` 仅剩 daemon.json 那条合法授权）。
+
+> ⚠️ **升级必读**：本版改了 `install.sh` ⇒ OTA 后**必须重跑 `install.sh`**（OTA 只换二进制）。曾安装过 v1.40.x「异盘镜像」的机器，重跑即清理旧执行器/配置与 sudoers 镜像条目。
+
+---
+
+## v1.40.6 — 2026-10-11（**已出包 · 未发布**）
+
+**初始设置页用户名锁定为安装时选定的服务运行账户，不可修改**（用户需求：用户名跟随 install.sh 选定的账户）。
+
+- **服务端**：`GET /api/auth/init-status` 新增 `serviceUsername` 字段 —— 由 `os.userInfo().username` 得出。**服务进程本身即以该账户运行**（v1.40.1 起 install.sh 跟随系统用户、写进 `.service` 的 `User=`），故无需额外落盘配置文件，也不会与实际运行身份脱节。uid 为 0（root）或取不到时返回**空串**，前端降级为「可自由输入」，不锁死。
+- **服务端强制**：`POST /api/auth/init` **忽略前端传入的用户名**，一律以服务端解析出的安装账户为准（`finalUsername = fixed || 前端值`）。前端只读只是显示层，这里再兜一层 —— 防止有人直接打 API 改成别的名字，导致 Web 登录身份与系统运行身份不一致（影响审计、排障、sudoers 对应）。
+- **前端**：`SetupWizard` 新增 `lockedUsername` prop。**create 模式**下非空即把用户名输入框设为 `disabled` 并预填该值，hint 提示「即安装时选定的服务运行账户（与系统进程身份一致），不可修改」；**reinit 模式不受影响**（账号已存在，仍允许改名）。`App.tsx` 新增 `lockedUsername` state，在 `authState === "setup"` 分支透传。
+- **门禁**：`check-auth-render.mjs` 新增 `createLocked` 渲染变体 ＋ 5 条断言（锁定值渲染 / 输入框 disabled / 提示文案 / 未传时**不** disabled / reinit 不受影响），36 → **41**；`check-auth-wiring.mjs` 新增 6 条（Props 声明 / App 透传 / 服务端 os.userInfo / init-status 字段 / root 降级 / `/auth/init` 覆盖前端值），69 → **75**。**全量 11 组 392 项 0 FAIL**，src + server tsc 均 0 错误。
+- ★ 门禁断言踩坑：`Input` 的 className 里含 `disabled:bg-slate-50 disabled:text-slate-400` 字样 ⇒ 用裸 `/disabled/` 匹配 input 标签会**误判为已禁用**。必须匹配真正的属性 `disabled=""`（React SSR 的布尔属性渲染形式）。
+
+| 项       | 值                                                                          |
+| ------- | -------------------------------------------------------------------------- |
+| 包       | `build-upload/docker-manager-yanzi-linux-x64-v1.40.6.zip` **43,228,888 B** |
+| SHA-256 | `23a5a233e3f6991102825c955df6a43c79d8005f382ad44edb7700b7947d745c`         |
+| 二进制     | ELF、含 `1.40.6`（3 处）、`1.40.5` 残留 0；`serviceUsername` 特征串 4 处；包内 6 成员        |
+| 门禁      | 11 组 **392 项** 0 FAIL（auth-render 36→41、auth-wiring 69→75）                 |
+
+> ⚠️ **升级必读**：**已初始化的部署不受影响**（账号已存在，走登录页）。本功能只在**全新安装**（尚无任何账号）时生效 —— 首次进入初始设置页时用户名自动锁定为服务运行账户。若你已用 v1.40.5 之前版本完成过初始化，账号名保持原样、不会被追溯改名。
+
+---
+
+## v1.40.5 — 2026-10-11（**已出包 · 未发布**）
+
+**候选用户分段呈现 ＋ 修源根配置权限日志文案**（用户 v1.40.4 安装成功后的反馈）。
+
+- **候选系统用户分段列出**：原先只按 UID 1000-65533 筛选，导致系统服务账户（`libvirt-qemu` UID 106、`wsdd2` "Dynamic User"）与真实登录用户混列，用户可能误选。现在按 **shell 是否为 nologin/false** 分两段：登录用户列前（附 GECOS 描述），系统服务账户列后并加「一般不要选」提示行，序号仍连续。
+- **修日志文案**：源根配置实际已是 `chmod 644`（v1.40.2 起，非 root 执行器需能读），但 `log` 仍打印「root:root 0600」⇒ 误导排查。改为与实际一致的 **0644**（仅文案，实际权限一直正确）。
+- **门禁**：`check-service-unit.mjs` 新增 1 条防回归断言（分段呈现 / nologin 过滤），service **32 → 33**。**全量 11 组 378 项 0 FAIL**。
+
+| 项       | 值                                                                          |
+| ------- | -------------------------------------------------------------------------- |
+| 包       | `build-upload/docker-manager-yanzi-linux-x64-v1.40.5.zip` **43,228,981 B** |
+| SHA-256 | `05f255830ec79869f7131c6bd78b66711b281c59573f3bc021ac3dbe60c5a67b`         |
+| 二进制     | ELF、含 `1.40.5`（3 处）、`1.40.4` 残留 0；包内 6 成员                                  |
+| 门禁      | 11 组 **378 项** 0 FAIL（service 32→33）                                       |
+
+> ⚠️ **升级必读**：本版只改 `install.sh` ⇒ OTA 后必须重跑 `install.sh`（OTA 只换二进制）。
+
+---
+
+## v1.40.4 — 2026-10-11（**已出包 · 未发布**）
+
+**修 `chown: invalid group` 导致安装中断 ＋ 服务运行账户改为列表选择**（用户真机安装 v1.40.3 时暴露）。
+
+- **P0 修 `chown: invalid group: 'yanzi:yanzi'`**：install.sh 递归归属写的是 `"${SERVICE_USER}:${SERVICE_USER}"`，但很多系统**没有与用户名同名的组**（Debian 上用户 `yanzi` 的主组是 `Users`）⇒ chown 报 invalid group，`set -e` 让安装**中断在「部署文件」阶段**（服务未安装、无任何提示）。改为 `chown -R "${SERVICE_USER}:${SERVICE_GROUP}"`（用 `id -gn` 取到的真实主组），并加两道兜底：`id -gn` 失败不再中断（`|| true` ＋ 空值回退用户名）；组名解析不出时改用数字 gid ＋ fail-soft 警告，不再让整次安装崩掉。
+- **服务运行账户交互改为列表选择**：不再提示「默认 `yanzi`」（空回车即取 `SUDO_USER`），改为用 `getent passwd | awk '$3>=1000 && $3<65534'` 列出**全部可登录系统用户**并附 GECOS 描述，**输入序号或直接输入用户名**均可；序号越界给出明确错误（并提示候选总数）；无候选用户时降级为直接输入。非交互（`APP_RUN_AS_USER`）路径行为不变。
+- **门禁**：`check-service-unit.mjs` 新增 3 条防回归断言（29 → **32**）：交互列出候选用户、**递归归属用实际主组而非用户名**（反向断言禁止 `user:user`）、组名解析 fail-soft。**全量 11 组 377 项 0 FAIL**。
+- **校验**：包内 `install.sh` 逐项核对 —— `默认 `=0（默认值已移除）、含「序号或用户名」、`chown -R "${SERVICE_USER}:${SERVICE_GROUP}"`=1、`user:user` 残留 **0**。
+
+| 项       | 值                                                                          |
+| ------- | -------------------------------------------------------------------------- |
+| 包       | `build-upload/docker-manager-yanzi-linux-x64-v1.40.4.zip` **43,228,386 B** |
+| SHA-256 | `354f4de5b84658e8e7bc67a05f5331b6e5d176ffee4853b236ec4affb124b0a1`         |
+| 二进制     | ELF、含 `1.40.4`（3 处）、`1.40.3` 残留 0；包内 6 成员                                  |
+| 门禁      | 11 组 **377 项** 0 FAIL（service 29→32）                                       |
+
+> ⚠️ **升级必读**：本版只改 `install.sh` ⇒ **OTA 后必须重跑 `install.sh`**（OTA 只换二进制）。你当前机器 v1.40.3 安装在 chown 处中断，需用本版包重新解压跑一次 `sudo bash install.sh` 才会装完服务。
+
+---
+
+## v1.40.3 — 2026-10-11（**已出包 · 未发布**）
+
+**目录镜像双模式改造**：备份目录改事件驱动单向、Compose 目录改双向实时同步，并补基线追踪与提权执行器的双向源范围。
+
+- **备份目录 → 事件驱动单向**：不再文件监听、不进 60 秒轮询。改为**每次备份完成后**（`POST /api/backups` 手动备份 ＋ 三级自动备份 `runBackup` 均调用新导出的 `onBackupCreated()`，带 1 秒防抖合并）触发，并**每日 00:00 校验**（`scheduleDailyVerify` 在 `startMirror` 内 arm，事件键到点对账）。
+- **Compose 目录 → 双向实时同步**：任一侧的增/改/删都同步到对侧。新增 `syncOneBidirectional()`：先读基线 `CONFIG_DIR/mirror-compose-baseline.json`，三路合并（侧A快照 / 侧B快照 / 上次基线），再按接收方所在根分派后端（能直写直写，否则经 sudo 提权执行器）。
+- **新增基线追踪 `server/mirror-bidir-core.ts`（纯函数、可单测）**：删除双向传播靠基线判定「一侧删、另一侧未动」；首启无基线时做**并集合并、绝不误删**；冲突按 **mtime 新者胜**；一侧改一侧删时改侧胜（重建）。★ 路径拼接用**平台无关 POSIX**（不用 `node:path.join`，它会把 `/` 转 `\` 并吞掉目录键尾斜杠，导致同一份数据跨平台得到不同路径）。
+- **提权执行器放开源读取范围**：`dms-mirror-exec.sh` 的 copy/mkdir 源校验由「仅 SOURCE_ROOT」放宽为「不在 SOURCE_ROOT **且**不在白名单才拒绝」——双向时 donor 可能在白名单内的另一侧根；仍受「只写白名单内路径」约束。门禁 `check-mirror-exec.mjs` 同步更新断言并新增 1 项。
+- **门禁**：新增 `scripts/check-mirror-bidir.ts`（`npm run test:bidir`，并入 `test:gates`），15 项覆盖首启合并 / 删除传播 / 冲突 mtime / 未变更 / 目录合并 / POSIX 平台无关 / 防回归。**门禁 11 组 373 项 0 FAIL**；`tsc -p server/tsconfig.json` 与根 `tsc` 均 0 错误。
+- **顺带修复 v1.40.2 遗留类型错误**：`computeMirrorOps` 把 `[...prepDeletes, ...ops, extraDeletes]` 直接放进带返回类型注解的对象字面量，触发 TS 5.9 数组 spread 推断缺陷（TS2322/TS2739）。改用中间变量 `merged` 聚合，并在 `test:bidir` ⑨ 加防回归静态断言（此前门禁只跑根 `tsc`（`include:["src"]`），从不检查 `server/`，故漏检）。
+
+| 项       | 值                                                                                                                                                                                            |
+| ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 包       | `build-upload/docker-manager-yanzi-linux-x64-v1.40.3.zip` **43,227,299 B**                                                                                                                   |
+| SHA-256 | `95b83df3f538ae99b0dedfbbb99b551ba48a8c9223880636134eb8a23ecc6843`                                                                                                                           |
+| 二进制     | ELF `7f454c46`、含 `1.40.3`（3 处）、`1.40.2` 残留 0；双向特征串 `onBackupCreated`(4) / `daily-verify`(1) / `contentSame`+`newBaseline`(bundle 内) 均已嵌入                                                     |
+| 包内成员    | 6 个（二进制 `0755`/130,813,120 B ＋ `install.sh` `0755`/26,753 B ＋ `uninstall.sh` `0755`/4,135 B ＋ `.service` `0644`/3,555 B ＋ `dms-mirror-exec.sh` `0755`/15,295 B ＋ `README.md` `0644`/7,545 B） |
+
+> ⚠️ **升级必读**：本版改了 `deploy/linux/dms-mirror-exec.sh`（源读取范围放宽为白名单并集）⇒ 已装机器走 OTA（只换二进制）后**必须重跑 `install.sh`** 刷新执行器，否则双向跨用户目录的提权复制会因旧执行器只认 SOURCE_ROOT 而被拒。
+
+---
+
+## v1.40.2 — 2026-10-11（**已出包 · 未发布**）
+
+> **用户需求**：优化今天的目录镜像代码；并接通 v1.40.0 设计的「sudo 提权执行器」——此前它从未被任何代码调用，跨用户目录写入能力在运行态实际没生效。
+
+### 改动
+
+| 文件                                | 改动                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `server/mirror.ts`                | **接通执行器**：`syncOne` 重构为「先 `computeMirrorOps` 算差异 → 按后端执行」；面板用户对目标有写权限走**进程内直写**（快），否则且「镜像写入身份可用」时写计划文件 → `spawnSync("sudo", ["-u", 身份, dms-mirror-exec.sh])` **以目标属主身份提权写入**（真正落实异盘容灾）。`validateTarget` 在身份可用且 `EACCES` 时放行（不再误拦跨用户目录）；`getMirrorWriteIdentity` 加 **10s TTL 缓存**（设置页每次输入 probe 不再重复读 sudoers/身份文件）；`probeTargetWritable` 探测可写性改为**只在父目录**测试（不再主动 `mkdir` 目标本身、避免误建真实目录），并返回 `code`(errno)；错误累计只保留首条；`MirrorState` 增加 `usedExec` |
+| `deploy/linux/dms-mirror-exec.sh` | **修复自洽矛盾**：去掉「必须以 root 运行」硬要求（sudoers 本就以目标用户身份运行 `(${MIRROR_AS_USER})`，且 0644 配置非 root 可读），改为「拒绝直接以 root 运行」；源根配置权限校验从「末位非 0 即拒」放宽为「只拒 other 可写/可执行（末位 2/3/6/7）」，允许 other 只读（0644）                                                                                                                                                                                                                                                             |
+| `deploy/linux/install.sh`         | `mirror-source.conf` 生成与 chown 重置两处 `chmod 600` → **`chmod 644`**（非 root 执行器需读取；仅 root 可写 ⇒ 面板仍无法伪造源范围）                                                                                                                                                                                                                                                                                                                                         |
+| `scripts/check-mirror-exec.mjs`   | 第 109 行断言从「必须以 root 运行」翻转为「不经 sudo 直接以 root 运行会被拒绝」                                                                                                                                                                                                                                                                                                                                                                                             |
+| `src/types.ts`                    | `MirrorProbeResult` 增加 `code` 字段；`MirrorRuntimeState` 增加 `usedExec`                                                                                                                                                                                                                                                                                                                                                                             |
+| `package.json`                    | 版本 `1.40.1 → 1.40.2`                                                                                                                                                                                                                                                                                                                                                                                                                            |
+
+### 门禁
+
+`npm run test:gates` 现 **10 组 359 项 PASS / FAIL 0**（mirror 53 含执行器修复断言）。`tsc --noEmit` **0 错误**。
+
+### 交付包
+
+| 项    | 值                                                                                                                                                                                      |
+| ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 包    | `build-upload/docker-manager-yanzi-linux-x64-v1.40.2.zip` **43,223,841 B** / SHA-256 `3b030aef8eed255e1dfca83a2c2c98eb358d13bd9bd1de7fe9b605445bee382c`                                |
+| 二进制  | 130,813,120 B / ELF `7f454c46`、含 `CURRENT_VERSION="1.40.2"`（固定串 `1.40.1` = 0，无旧版本残留）                                                                                                   |
+| 包内成员 | 6 个（二进制 `0755` ＋ `install.sh` `0755`/**26,753** B ＋ `uninstall.sh` `0755`/4,135 B ＋ `.service` `0644`/3,555 B ＋ `dms-mirror-exec.sh` `0755`/**14,953** B ＋ `README.md` `0644`/7,545 B） |
+
+### ⚠️ 升级必读
+
+**本版改了 `install.sh` 与 `dms-mirror-exec.sh`**（源根配置 0644 ＋ 执行器去 root 要求）⇒ 已装机器 OTA 升级后**不会**获得新安装逻辑与执行器，**必须重跑 `install.sh`**。OTA 只替换二进制。
+
+### 已知限制 / 设计权衡
+
+- 提权路径要求 sudoers 已写入镜像条目（`install.sh` 生成 `/etc/sudoers.d/docker-manager-yanzi` 的 `${SERVICE_USER} ALL=(${MIRROR_AS_USER}) NOPASSWD: /usr/local/libexec/dms-mirror-exec.sh`）；该条目由安装期 `MIRROR_AS_USER` 定死，运行期不可切换。
+- 执行器源根 `mirror-source.conf` 默认 = `${INSTALL_DIR}/data`；备份/compose 目录是其子目录 ⇒ 源路径校验通过。若 `DATA_DIR` 经环境变量覆盖为其它路径，需同步改源根（root 拥有，面板不可改）。
+- 目标目录仍需在 `mirror-allow.txt` 白名单内（面板首次同步时自动追加），执行器校验前缀防越界。
+
+---
+
+## v1.40.1 — 2026-10-11（**已出包 · 未发布**）
+
+> **用户决策**：服务运行账户改为**跟随系统用户**，安装时交互输入账户名、必须与已存在的系统用户匹配才放行；**不再单独创建专属账户** `docker-manager-yanzi`。
+
+### 改动
+
+| 文件                                          | 改动                                                                                                                                                                                                                                                                      |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `deploy/linux/install.sh`                   | ① 删除 `useradd`/`groupadd` 建账户段；② 新增「配置服务运行账户」段落：**交互输入**（`read -r -p`）或 `APP_RUN_AS_USER=<用户>` 非交互指定；`getent passwd` 校验必须是**已存在的非 root 系统用户**，不匹配则循环提示（非交互直接 `err` 退出）；`id -gn` 取主组；③ 安装 `.service` 时用 `sed` 把单元里的 `User=`/`Group=` 占位符替换为实际账户（`-t 0` 检测 TTY，交互/非交互双路径） |
+| `deploy/linux/docker-manager-yanzi.service` | `User=`/`Group=` 由写死 `docker-manager-yanzi` 改为占位符 `__SERVICE_USER__` / `__SERVICE_GROUP__`（install 期填充，sed 幂等）                                                                                                                                                          |
+| `scripts/check-service-unit.mjs`            | ① 第 46 行从硬断言 `User=docker-manager-yanzi` 放宽为「`User=` 已声明且非 root」＋ 新增 `Group=` 声明断言；② 原「仍会创建服务用户（useradd -r）」断言**翻转**为「不再单独创建服务账户（无 useradd -r）」＋ 新增「`APP_RUN_AS_USER` 指定」「`getent passwd` 校验」「拒绝 root」三条                                                                |
+| `deploy/linux/uninstall.sh`                 | 删除 `userdel`/`groupdel` 段（v1.40.1 起服务跟随系统用户，卸载**不删除**该系统用户 / 组，避免误删用户原有登录账户）                                                                                                                                                                                            |
+| `package.json`                              | 版本 `1.40.0 → 1.40.1`                                                                                                                                                                                                                                                    |
+
+### 门禁
+
+`npm run test:gates` 现 **10 组 359 项 PASS / FAIL 0**（hooks 35 · notify 40 · logs 30 · auth-render 36 · auth-wiring 69 · restart 18 · thermal 15 · install 34 · service **29**（原 25，新增 4 条账户校验断言）· mirror 53）。service 组翻转后无回归。
+
+### 交付包
+
+| 项    | 值                                                                                                                                                                                  |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 包    | `build-upload/docker-manager-yanzi-linux-x64-v1.40.1.zip` **43,221,742 B** / SHA-256 `6e56cef813f20e9bcd08fac498fbe6d2647a87d62e8e25dba2c7703cc1b22800`                            |
+| 二进制  | 130,813,120 B / ELF `7f454c46`、含 `CURRENT_VERSION="1.40.1"`（固定串 `1.40.0` = 0，无旧版本残留）                                                                                               |
+| 包内成员 | 6 个（二进制 `0755` ＋ `install.sh` `0755`/**26,764** B ＋ `uninstall.sh` `0755`/4,135 B ＋ `.service` `0644`/3,555 B ＋ `dms-mirror-exec.sh` `0755`/14,489 B ＋ `README.md` `0644`/7,545 B） |
+
+### ⚠️ 升级必读
+
+**本版改了 `install.sh` 与 `.service`**（账户跟随系统用户 + 单元占位符替换）⇒ 已装机器 OTA 升级后**不会**获得新安装逻辑，**必须重跑 `install.sh`**（重跑时会交互要求输入系统用户）。OTA 只替换二进制。
+
+### 已知限制 / 设计权衡
+
+- **P0 安全权衡（用户已接受）**：放弃独立无登录账户 `docker-manager-yanzi` 的权限隔离，服务以系统用户（如 `yanzi`）身份运行；NAS 单机单用户场景可接受，代价是进程被攻破即拥有该用户的权限。
+- 二进制内嵌的 `.service` 模板保留 `__SERVICE_USER__` 占位符（编译期无法预知运行账户）；**实际安装单元来自包内文件、由 install.sh sed 填充**，不受影响。
+- 从 v1.40.0（曾建 `docker-manager-yanzi` 账户）升级到 v1.40.1 后，旧 `docker-manager-yanzi` 账户会残留（成为孤儿），可手动 `userdel` 清理，不影响功能。
+
+---
+
+## v1.40.0 — 2026-10-11（**已出包 · 未发布**）
+
+> **用户需求**：异盘容灾 —— 把配置 / compose / 备份目录**跨存储池**镜像到另一块盘做灾备；但 `/vol1/1000/appdata` 权限 `000`（root 独占）、服务用户 `docker-manager-yanzi` 无法直接写入，且目标盘可能属于其它系统用户。需要「非 root 主进程」能跨盘、跨用户写。
+
+**版本号判定**：新增一整条「异盘容灾镜像」能力（特权执行器 ＋ sudoers 精确授权 ＋ 设置页只读身份卡）⇒ 新功能模块 ⇒ **Minor（第二位）**：`1.39.4 → 1.40.0`。
+
+### 现场事实
+
+- 目标存储池 `/vol1/1000/appdata` 权限 `d---------`（000）、owner `yanzi` ⇒ 服务用户 `docker-manager-yanzi` **无任何写权限**（最初误报 `EROFS`，实则是 `EACCES`，已在 v1.40.0 按 errno 重新分级）。
+- `yanzi` 用户能写进去 ⇒ 容灾写入身份**必须**是目标盘属主用户（方案 1B：只接受非 root 目标用户，代码显式拒绝 `root`）。
+- App 主进程以非 root 运行（安全铁律），故跨盘写入必须借 **sudo 提权到目标用户** 的特权执行器完成。
+
+### 改动
+
+| 文件                                          | 改动                                                                                                                                                                                                                                                                                                                                                |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `deploy/linux/dms-mirror-exec.sh`（新增，261 行） | **特权执行器**：10 条安全契约（见下）。`set -euo pipefail`（失败即整体中止）；不接收命令行参数（防注入）；源根从 root 所有的 `mirror-source.conf` 读（面板不可伪造）；路径校验**先 `lstat` 后 `realpath`**（防符号链接逃逸）；权限跟随源（`chmod` 取源文件权限，新建目录取源目录权限）；删除三重防护（挡空 / 挡 `/` / `--` 分隔符）；计划执行完即焚（防重放）；必须以 root 运行；sudoers 精确授权单一脚本                                                                                    |
+| `scripts/check-mirror-exec.mjs`（新增）         | 镜像执行器门禁 **53 项**（已并入 `test:gates`）                                                                                                                                                                                                                                                                                                                |
+| `deploy/linux/install.sh`                   | ① sudoers 拆两段（`daemon.json` 段 `(root)` ＋ 镜像段 `docker-manager-yanzi ALL=(yanzi) NOPASSWD: /usr/local/libexec/dms-mirror-exec.sh`）；② 安装执行器 `root:root 0755`；③ 生成 `mirror-source.conf`（root:root 0600，含 `SOURCE_ROOT`）；④ 生成 `mirror-identity.conf`；⑤ **拒绝 `MIRROR_AS_USER=root`**；⑥ 检测 `jq`（缺则提示而非静默跳过）；⑦ `chown -R` 后**重置源根配置属主**（防把 root 配置交给服务用户） |
+| `server/mirror.ts`                          | 新增 `getMirrorWriteIdentity()`、`probeTargetWritable()`（errno 分级 `EACCES`/`EROFS`/`ENOSPC`）、`validateTarget` 返回结构化 `reason`；`imports CONFIG_DIR`                                                                                                                                                                                                    |
+| `server/index.ts`                           | 新增 `POST /api/mirror/write-identity`                                                                                                                                                                                                                                                                                                              |
+| `src/types.ts`                              | 新增 `MirrorWriteIdentity`、`MirrorProbeResult`                                                                                                                                                                                                                                                                                                      |
+| `src/api.ts`                                | 新增 `fetchMirrorWriteIdentityApi()`                                                                                                                                                                                                                                                                                                                |
+| `src/pages/Settings.tsx`                    | 新增「镜像写入身份」**只读**卡（位于「目录镜像」标题下方）：展示身份 ＋ 可用状态 ＋ **OTA 限制提示**（应用内系统更新装不上这一项，OTA 只替换二进制，必须重跑安装脚本）                                                                                                                                                                                                                                                     |
+| `package.json`                              | 版本 `1.39.4 → 1.40.0`；新增 `test:mirror`；并入 `test:gates`                                                                                                                                                                                                                                                                                             |
+| `docs/发布与OTA升级指南.md`                        | 新增 **§4.5.1 异盘镜像权限模型**                                                                                                                                                                                                                                                                                                                            |
+
+★ **安全契约（执行器 10 条）**：① 源范围不可由面板伪造（root 所有固定配置 ＋ 校验属主/other 不可写 ＋ 拒绝源根 `/`）；② 路径校验先 `lstat` 后 `realpath`（防符号链接逃逸到白名单外）；③ 拒绝相对路径 / `..` / 文件系统根 / 白名单外路径，白名单为空 fail-closed；④ 源必须落在源根内（copy 与 mkdir 分支均校验）；⑤ 写入目标逐段符号链接检查；⑥ 权限跟随源（不写死 `0644`/`0755`）；⑦ 删除三重防护（挡空 / 挡 `/` / `--` 分隔符 / 拒绝删根）；⑧ 缺 `jq` 拒绝（不降级解析）、计划版本必须为 1、条目数上限、执行完即焚、属主须等于 `SUDO_USER`、必须以 root 运行、未知操作即拒绝；⑨ sudoers 不给 `NOPASSWD: ALL`，精确到单一脚本；⑩ 明确拒绝 `root` 作为镜像写入身份。
+
+### 门禁
+
+新增 `scripts/check-mirror-exec.mjs` 53 项（并入 `test:gates`）。`npm run test:gates` 现 **10 组 355 项 PASS / FAIL 0**：hooks 35 · notify 40 · secrets 40 · logs 30 · auth(render 36 ＋ wiring 69) · restart 18 · thermal 15 · install 34 · service 25 · mirror 53。
+
+**负向自检**：`check-mirror-exec.mjs` 注入「源根越界不校验」「符号链接检查在 realpath 之后」「sudoers 给 ALL」等回归 ⇒ 命中对应断言变红 ⇒ 还原 ⇒ 回绿，确认门禁真的会红。
+
+### 交付包
+
+| 项    | 值                                                                                                                                                                                                          |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 包    | `build-upload/docker-manager-yanzi-linux-x64-v1.40.0.zip` **43,221,453 B** / SHA-256 `22ec75c663fdb74faedd43c0011ad086b60aacf3c60d6eb2039f75a9b38348c2`                                                    |
+| 二进制  | 130,813,120 B / ELF `7f454c46`、含 `CURRENT_VERSION="1.40.0"`（固定串 `1.39.4` = 0，确无旧版本残留；先前一次 `grep` 误报系 `.` 被当正则通配，已用 `-F` 固定串复核）                                                                             |
+| 包内成员 | 6 个（二进制 `0755` ＋ `install.sh` `0755`/**25,686** B ＋ `uninstall.sh` `0755`/4,790 B ＋ `.service` `0644`/3,466 B ＋ **`dms-mirror-exec.sh` `0755`/14,489 B（v1.40.0 新增，异盘镜像执行器）** ＋ `README.md` `0644`/7,545 B） |
+
+★ **出包修正（2026-10-11 08:48 重建）**：首版 zip 漏打 `dms-mirror-exec.sh` ⇒ 目标机 install.sh 报 `包内缺少 dms-mirror-exec.sh，跳过异盘镜像功能`。已将执行器加入 `make-package.py` 的 `FILES` 清单（0755）并重建，SHA 由 `4dab5e07…` 变更为 `22ec75c6…`。**已用首版包装过机器的，须重新解压覆盖安装才能拿到执行器**。
+
+**硬校验**：`bundle.js` 5.36 MB（已嵌入含「镜像写入身份」只读逻辑的前端 ＋ 单元模板 2,478 B）→ `sea-prep.blob` 6,041,076 B → postject `💉 Injection done!` → ELF `7f454c46` ✓。`test:gates` 10 组 355 项 0 FAIL。
+
+### ⚠️ 升级必读
+
+**本版改了 `install.sh`（新增 `dms-mirror-exec.sh` 安装 ＋ sudoers 镜像授权段）** ⇒ 已装机器 OTA 升级后**不会**获得执行器与 sudoers 规则，**必须重跑 `install.sh`**（或手工部署执行器 ＋ 授权）。OTA 只替换二进制。设置页的「镜像写入身份」是**只读**的，想改身份只能重跑安装步骤 —— 这是刻意设计（最小权限 ＋ 防止面板伪造提权）。
+
+### 未完成 / 已知限制
+
+- ✅ **已出包**（`build-upload/`），**未发布**（GitHub / Gitea 待用户下令发）。
+- 镜像写入身份在安装期固化，UI 只读；改身份必须重跑 `install.sh`（无法 OTA）。
+- 源根范围由 root 所有的 `mirror-source.conf` 决定（方案乙：面板不可改），属预期安全设计。
+- 无浏览器端真实点击取证（沙箱无 Docker / 无跨盘环境）；权限模型与门禁为源码级 ＋ 脚本级保证。
+
+### 下一步
+
+1. 用户实测异盘容灾（跨存储池同步删除 / 权限跟随源 / 失败即整体中止）。
+2. 实测通过后发布到 **GitHub ＋ Gitea 双端**（沿用「每次发布都发两个地方」规约）。
+
+---
+
+## v1.39.4 — 2026-10-11（**已出包 · 未发布**）
+
+> **用户反馈**：安装时检查 docker 状态；`docker-manager-yanzi` 用户还没有创建。
+
+### 现场事实
+
+- `ls -l /run/docker.sock` 两条都 `No such file`、`/etc/docker` 存在 ⇒ **226 的直接原因**；
+- 用户手动启动 Docker 后（06:33）socket 出现（`srw-rw---- root:docker`）⇒ **验证了根因判断**；
+- `docker-manager-yanzi` 用户不存在 ⇒ 当时是**手工解压部署、没跑 `install.sh`**（会进一步导致 203/USER）。
+
+### 改动（3 处，均在 `deploy/linux/install.sh`）
+
+| # | 改动                                                                                                                                                                        | 理由                                                                      |
+| - | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| 1 | Docker 守护进程未运行时，提示**升级为醒目告警**：点明「会导致 226/NAMESPACE」＋解释机制（socket 不存在 → ReadWritePaths 备不出 → systemd 放弃）＋ 给出 `systemctl start docker && systemctl enable docker` 命令，并提示重跑脚本 | 原文案只说「容器管理会显示未连接：systemctl start docker」，**把症状说轻了** —— 真实后果是**服务根本起不来** |
+| 2 | 新增 **203/USER 自愈提示**：安装末尾 `id -u $SERVICE_USER` 判空，不存在则明确告知「手工解压部署会导致 203/USER，请重跑 install.sh」                                                                            | 用户本次的第二个卡点，原脚本完全没覆盖手工部署场景                                               |
+| 3 | 重补 **226/NAMESPACE 专项诊断**（读 `systemctl show -p ReadWritePaths` 逐条 `[ -e ]` 探测并点名缺失项）                                                                                      | v1.39.3 开发时的改动随一次 `git checkout` 被回退，此处补回                               |
+
+★ **铁律守住了：只检测、绝不代管**。我最初想「主动 `systemctl start docker`」被用户明确否掉 —— 与「安装脚本绝不代装 Docker」同源，安装脚本不应改动用户的系统服务状态。改为一律**醒目提示 + 给命令**，由用户自己执行。门禁里专门加了一条**反向断言**钉死这点。
+
+### 门禁
+
+`scripts/check-service-unit.mjs` 25 项（v1.39.3 是 19 项），新增第 ⑤ 组 6 条：
+
+- 226 提示含机制说明与 `systemctl start docker` 命令；
+- ★ **反向断言：绝不出现 `systemctl start docker 2>/dev/null`**（防止后人“好心”改成自动启动）；
+- 203/USER 提示 ＋ 提示重跑 install.sh ＋ 仍会 `useradd -r`。
+
+**负向自检**：往 install.sh 注入 `systemctl start docker 2>/dev/null` ⇒ 25/0 变 **24/1**（命中铁律那条）⇒ 还原 ⇒ 回到 25/0。
+
+### 交付包
+
+| 项         | 值                                                                                                                                                       |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 包         | `build-upload/docker-manager-yanzi-linux-x64-v1.39.4.zip` **43,211,127 B** / SHA-256 `dca51b9cd8929c7ee97e3d41614bda32c84360cb8f850b4099d84b1b46aaf7d2` |
+| latest 别名 | 同字节同哈希                                                                                                                                                  |
+| 二进制       | 130,813,120 B / SHA-256 `5df0b7e6707505eb3a063459388d5305b361d588d0212b262d2819e87c44e68c`（ELF `7f454c46`）                                              |
+| 包内成员      | 5 个（二进制 0755 ＋ install.sh 0755/**19,845** ＋ uninstall.sh 0755/4,790 ＋ .service 0644/3,466 ＋ README.md 0644/7,545）                                       |
+
+**硬校验**（手写 zip 解析器解出包内 install.sh 逐项断言，7/7 命中）：`203/USER` 提示、`226/NAMESPACE` 提示、`systemctl start docker && systemctl enable docker` 命令、`不代为启动 docker` 声明、socket 不存在提示、`id -u $SERVICE_USER` 检查、ReadWritePaths 缺失点名。二进制内检出 `ReadWritePaths=-/run/docker.sock` / `226/NAMESPACE` / `1.39.4`。
+
+---
+
+## v1.39.3 — 2026-10-10（**已出包 · 未发布**）
+
+> **用户报障**：`Job for docker-manager-yanzi.service failed` + `status=226/NAMESPACE`，journal 只有 DMI 那串命令、没有程序输出。
+
+**版本号判定**：服务完全无法启动（部署阻断级）⇒ 缺陷修复 ⇒ **Patch（第三位）**：`1.39.2 → 1.39.3`。
+
+### 根因
+
+`ReadWritePaths=` 的**每一项都会被 systemd 逐个 bind-mount 到 `unit-root`，路径不存在直接 226 退出**（不同于 `EnvironmentFile=` 的 `-` 可选语义）：
+
+```
+Failed to set up mount namespacing: /run/systemd/unit-root/run/docker.sock: No such file or directory
+Failed at step NAMESPACE spawning /bin/sh: No such file or directory
+```
+
+失败发生在**挂载 namespace 阶段**，**早于 `ExecStartPre=`** ⇒ 日志里没有任何程序输出，`Active: activating (auto-restart)` 反复刷，极易误判成程序故障。目标机器未装 Docker（无 `/run/docker.sock`）即触发。
+
+### 改动
+
+| 文件                                          | 改动                                                                                                                                                                                  |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `deploy/linux/docker-manager-yanzi.service` | `ReadWritePaths=` 四条路径**全部加 `-` 前缀**（拆成多行便于审阅）＋ 补注释说明为何必须带前缀、为何选「忽略」而非 fail-loud                                                                                                    |
+| `deploy/linux/install.sh`                   | ① socket **不存在**时也给出 WARN（「面板可正常打开，但引擎显示离线」）—— `-` 前缀会静默忽略，不能让用户蒙在鼓里；② 启动失败时**新增 226/NAMESPACE 专项诊断**：遍历 `systemctl show -p ReadWritePaths`，逐条 `[ -e ]` 探测，直接点名**是哪几条路径不存在**并给出修复命令 |
+| `scripts/check-service-unit.mjs`（新增）        | systemd unit 门禁 **19 项**（已并入 `test:gates`）                                                                                                                                          |
+| `package.json`                              | 新增 `test:service` 脚本，挂进 `test:gates`；版本 1.39.2 → **1.39.3**                                                                                                                         |
+| `docs/发布与OTA升级指南.md`                        | 新增 **§4.6 服务启动失败速查（systemd）**：226/NAMESPACE、216/GROUP、OTA 不更新单元文件、日志只有 DMI 命令四种现象对照表                                                                                                |
+
+★ **安全性说明**：选「路径不存在即忽略」而非 fail-loud 是安全的 —— socket 缺失时程序对引擎**优雅降级**（显示离线，不影响面板其它功能），真正的权限边界是 `User=` / `Group=docker`，不是这三条路径。同时 install.sh 的 WARN 保证不会静默掩盖配置错误。
+
+### 交付包
+
+| 项         | 值                                                                                                                                                       |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 交付包       | `build-upload/docker-manager-yanzi-linux-x64-v1.39.3.zip` **43,210,819 B** / SHA-256 `55fdae1c3cb7c5465ddee2d0006fa01d046d30fa05cdb1804c8a5685b6b19bac` |
+| latest 别名 | `build-upload/docker-manager-yanzi-linux-x64.zip` **同字节同哈希**                                                                                            |
+| 内置二进制     | 130,813,120 B / SHA-256 `0aa96e7d06ca2bf032f704c39db4430a1f4ab96d75cb38a5c99871c68cbb3ee7`（ELF `7f454c46`、含 `1.39.3` ×4）                                |
+| 包内成员      | 5 个（二进制 `0755` ＋ `install.sh` `0755`/18,980 B ＋ `uninstall.sh` `0755`/4,790 B ＋ `.service` `0644`/3,466 B ＋ `README.md` `0644`/7,545 B）                 |
+
+**硬校验**：`bundle.js` 5.35 MB（**已嵌入含 `-` 前缀的单元模板 2,478 B**）→ `sea-prep.blob` 6,041,052 B → postject `💉 Injection done!` → ELF `7f454c46` ✓。★ **二进制内直接检出 `ReadWritePaths=-/run/docker.sock` 与 `226/NAMESPACE`**（证明修复真的进了包，不只是改了源码）。
+
+### ⚠️ 升级必读
+
+**OTA 只换二进制，不更新 `.service` / `install.sh`** ⇒ 已装机器升级后\*\*必须重跑 `install.sh`（或手工改单元后 `systemctl daemon-reload && systemctl restart docker-manager-yanzi`），否则 226 依旧。
+
+### 门禁
+
+新增 `scripts/check-service-unit.mjs` 把三条不变量钉死：
+
+1. **`ReadWritePaths=` 每项必须带 `-` 前缀**，且四条关键路径一个都不能删（防止「为通过门禁而把路径删干净」）；
+2. **`WorkingDirectory` 与 `install.sh` 的 `INSTALL_DIR` 展开一致**（两者漂移 ⇒ 二进制找不到）；
+3. install.sh 的 socket 缺失提示 / 226 专项诊断 / 216 防线 / `NoNewPrivileges=no` 均在位。
+
+**顺手修 `scripts/check-log-channels.ts` 一处假红**：起步清理只删硬编码的 5 个 `2020-01-0x.log` 文件，而真实写入用的是**当天日期** ⇒ 上一轮残留的当天/隔日文件让「今天是 3 个文件」计数断言假红（实测实得 6）。改为按 `/^(app|notify|oplog)-\d{4}-\d{2}-\d{2}\.log$/` 正则清全频道，幂等且不递归删目录。
+
+**负向自检**：把 `-/run/docker.sock` 的前缀去掉 ⇒ 19/0 变 **16/3**（命中「全部带前缀」「该项可选语义」「仍声明该路径」三条）⇒ 逐字节还原 ⇒ 回到 **19/0**，确认门禁真的会红。
 
 ---
 
@@ -56,12 +1792,12 @@
 
 ### 交付包
 
-| 项 | 值 |
-|---|---|
-| 交付包 | `build-upload/docker-manager-yanzi-linux-x64-v1.39.2.zip` **43,209,245 B** / SHA-256 `299d1203d55aa354fd28f3387dc71ab1ef605aaac7dcd9900c5f4f71b54a22f4` |
-| latest 别名 | `build-upload/docker-manager-yanzi-linux-x64.zip` **同字节同哈希** |
-| 内置二进制 | 130,813,120 B / SHA-256 `8101ae2dbd82072de9d263174505a7dc9a724f899cb5847a1a4173edf7d26cf7`（ELF `7f454c46`、含 `1.39.2`） |
-| 包内成员 | 5 个（二进制 `0755` ＋ `install.sh` `0755` ＋ `uninstall.sh` `0755` ＋ `.service` `0644` ＋ `README.md` `0644`） |
+| 项         | 值                                                                                                                                                       |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 交付包       | `build-upload/docker-manager-yanzi-linux-x64-v1.39.2.zip` **43,209,245 B** / SHA-256 `299d1203d55aa354fd28f3387dc71ab1ef605aaac7dcd9900c5f4f71b54a22f4` |
+| latest 别名 | `build-upload/docker-manager-yanzi-linux-x64.zip` **同字节同哈希**                                                                                            |
+| 内置二进制     | 130,813,120 B / SHA-256 `8101ae2dbd82072de9d263174505a7dc9a724f899cb5847a1a4173edf7d26cf7`（ELF `7f454c46`、含 `1.39.2`）                                   |
+| 包内成员      | 5 个（二进制 `0755` ＋ `install.sh` `0755` ＋ `uninstall.sh` `0755` ＋ `.service` `0644` ＋ `README.md` `0644`）                                                  |
 
 ### 下一步
 
@@ -71,26 +1807,24 @@
 
 ### 自建 Gitea 入口迁移（2026-10-08）
 
-用户指令：「git.ziruxue.top 换成 http://192.168.24.16:8024/yanzi/docker-manager-yanzi」。实测结论 + 处置：
+用户指令：「git.ziruxue.top 换成 <http://192.168.24.16:8024/yanzi/docker-manager-yanzi」。实测结论> + 处置：
 
-| 项 | 实测结果 |
-|---|---|
-| **旧域名 `git.ziruxue.top`** | ❌ **已完全不通** —— 本机 `curl` 返 `000`，**Node `fetch` 亦 `fetch failed`**（不再只是「curl 不通、Node 通」的老问题） |
+| 项                                   | 实测结果                                                                                                                                                                      |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **旧域名 `git.ziruxue.top`**           | ❌ **已完全不通** —— 本机 `curl` 返 `000`，**Node `fetch` 亦 `fetch failed`**（不再只是「curl 不通、Node 通」的老问题）                                                                              |
 | **新入口 `http://192.168.24.16:8024`** | ✅ 可用 —— `GET /api/v1/repos/yanzi/docker-manager-yanzi/releases/latest` **HTTP 200 / 0.21s**；仓库 `private:false` `internal:false`（**匿名可读**，满足 OTA 与安装脚本前置条件）；zip 直链 **206** |
-| 新入口 release 覆盖度 | ⚠️ **发补前只到 v1.38.3**（6 条：v1.36.0 / v1.37.0 / v1.38.0~3），v1.39.0 / v1.39.1 / v1.39.2 均未发 → **已于当日补齐**（见下方「补发结果」） |
-| `releases/latest/download/<file>` | ❌ Gitea **不支持**该快捷路径（实测 **404**）；带 tag 的 `releases/download/<tag>/quick-install.sh` 正常（**200 / 12,365 B**） |
+| 新入口 release 覆盖度                     | ⚠️ **发补前只到 v1.38.3**（6 条：v1.36.0 / v1.37.0 / v1.38.0~3），v1.39.0 / v1.39.1 / v1.39.2 均未发 → **已于当日补齐**（见下方「补发结果」）                                                           |
+| `releases/latest/download/<file>`   | ❌ Gitea **不支持**该快捷路径（实测 **404**）；带 tag 的 `releases/download/<tag>/quick-install.sh` 正常（**200 / 12,365 B**）                                                                |
 
 **处置（用户拍板「先补齐缺失版本」＋最终指令「`http://192.168.24.16:8024` 可以覆盖」）：**
 
 - ★ **四处默认值全部改为内网入口 `http://192.168.24.16:8024`** —— 旧决策「不改默认值，只写文档」已被后续指令推翻：
-
-  | 位置 | 变量 |
-  |---|---|
-  | `server/updater.ts` | `GITEA_BASE_DEFAULT` |
-  | `scripts/quick-install.sh` | `GITEA_BASE` |
-  | `scripts/push-gitea.sh` | `GITEA_BASE` |
-  | `scripts/publish-gitea-release.mjs` | `GITEA_BASE` |
-
+  | 位置                                  | 变量                   |
+  | ----------------------------------- | -------------------- |
+  | `server/updater.ts`                 | `GITEA_BASE_DEFAULT` |
+  | `scripts/quick-install.sh`          | `GITEA_BASE`         |
+  | `scripts/push-gitea.sh`             | `GITEA_BASE`         |
+  | `scripts/publish-gitea-release.mjs` | `GITEA_BASE`         |
   ⚠️ **默认值指向内网 ⇒ 外网部署必须覆盖环境变量**（`UPDATE_GITEA_BASE` / `GITEA_BASE`），否则 Gitea 源不可达、自动回退 GitHub（**功能不中断**，仅更新时效依赖 GitHub）。覆盖机制本就存在 ⇒ **无需重新打包**。
 - **`scripts/publish-gitea-release.mjs` 改造**（支持补历史发布）：
   - 新增 `--version 1.39.0`（支持 `v` 前缀），缺省仍用 `package.json` 版本 ⇒ 可补发任意历史版本；
@@ -107,12 +1841,12 @@
 
 用户随后提供 `GITEA_TOKEN`，四步全部完成：
 
-| 步骤 | 结果 |
-|---|---|
-| 令牌校验 | `GET /api/v1/user` → **HTTP 200**，`login=yanzi` / `id=1` / **`visibility=public`**（正是仓库能保持匿名可读、不会被强制 `internal` 的前提） |
-| `publish-gitea-release.mjs --version 1.39.0` | ✅ 3 资产：zip 43,210,376 B / latest 别名同字节 / quick-install.sh 12,798 B；匿名 `latest` → `v1.39.0` |
-| `--version 1.39.1` | ✅ 3 资产：zip 43,210,344 B / 别名同字节 / quick-install.sh；匿名 `latest` → `v1.39.1` |
-| `--version 1.39.2`（最后发） | ✅ 3 资产：zip 43,209,245 B / 别名同字节 / quick-install.sh；**匿名 `latest` → `v1.39.2`**（`published_at=2026-10-08T18:21:12+08:00`、`draft=false`、`prerelease=false`） |
+| 步骤                                                 | 结果                                                                                                                                                                                                   |
+| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 令牌校验                                               | `GET /api/v1/user` → **HTTP 200**，`login=yanzi` / `id=1` / **`visibility=public`**（正是仓库能保持匿名可读、不会被强制 `internal` 的前提）                                                                                 |
+| `publish-gitea-release.mjs --version 1.39.0`       | ✅ 3 资产：zip 43,210,376 B / latest 别名同字节 / quick-install.sh 12,798 B；匿名 `latest` → `v1.39.0`                                                                                                           |
+| `--version 1.39.1`                                 | ✅ 3 资产：zip 43,210,344 B / 别名同字节 / quick-install.sh；匿名 `latest` → `v1.39.1`                                                                                                                           |
+| `--version 1.39.2`（最后发）                            | ✅ 3 资产：zip 43,209,245 B / 别名同字节 / quick-install.sh；**匿名 `latest` → `v1.39.2`**（`published_at=2026-10-08T18:21:12+08:00`、`draft=false`、`prerelease=false`）                                            |
 | `bash scripts/push-gitea.sh -m "release: v1.39.2"` | ✅ commit **`0245266`**（17 files changed, +1010/−744，含新增 `scripts/publish-gitea-release.mjs`）→ `gitea/main`（`8544e0d..0245266`），远端 URL 自愈到 `http://192.168.24.16:8024/yanzi/docker-manager-yanzi.git` |
 
 **发布中发现并修复的脚本缺陷**：`POST /api/v1/repos/{o}/{r}/releases` **缺 `Content-Type: application/json`**，Gitea 返 **422 `[]: Unsupported Content-Type`** —— 该路径此前从未被真正执行过（只在错误路径上验过），所以门禁没覆盖。修法：把原来的位置参数改为 `{ body: {...}, contentType: "application/json" }`（`api()` 本就支持 `contentType` 透传，只是创建 Release 这处没传）。
@@ -143,7 +1877,9 @@
 
 - **修复「列显隐」保存后刷新即丢失（根因在服务端持久化）**（`server/settings.ts` + `src/App.tsx`）：
   - **根因（两处叠加）**：
+      
     ① `getSettings()` 在**每次读取**时执行 v1.38.1 的「清空列显隐配置」逻辑（`if (Object.keys(mergedColumns).length > 0) mergedColumns = {}`），本应只作为一次性升级迁移。v1.39.0 复活列显隐后，用户保存的配置在下次 `GET /api/settings` 被无条件清空为 `{}` ⇒ 前端拿到全部列可见 ⇒ 表现即「刷新回退」。
+      
     ② `DEFAULT_SETTINGS` 无 `defaultsVersion` 字段，版本戳只在 `getSettings()` 的「文件已存在」分支补；**全新安装**首次保存后磁盘 `defaultsVersion` 为 `undefined`，回读时 `parsed.defaultsVersion !== DEFAULTS_VERSION` 命中「旧版迁移」分支再次清空列显隐 ⇒ 全新安装同样必现。
   - **改法**：
     - 移除 `getSettings()` 的 per-read 无条件清空；列显隐保留只在 `defaultsVersion` 不符时做一次迁移性清空（仅针对真正旧版配置）。
@@ -157,21 +1893,21 @@
 
 ### 交付包
 
-| 项 | 值 |
-|---|---|
-| 交付包 | `build-upload/docker-manager-yanzi-linux-x64-v1.39.1.zip` **43,210,344 B** / SHA-256 `9ffc1fc9ceee8ac36533592d8f3c2c3755563b4ff454482f205596933e3f22dd` |
-| 内置二进制 | 130,813,120 B / SHA-256 `6140b970181ddebe69fc629453b796deb4bfd091423fed97a086a3d26689b6c4`（ELF `7f454c46`、`CURRENT_VERSION = "1.39.1"`） |
-| 包内成员 | 5 个（二进制 + `install.sh` + `uninstall.sh` + `.service` + `README.md`） |
+| 项     | 值                                                                                                                                                       |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 交付包   | `build-upload/docker-manager-yanzi-linux-x64-v1.39.1.zip` **43,210,344 B** / SHA-256 `9ffc1fc9ceee8ac36533592d8f3c2c3755563b4ff454482f205596933e3f22dd` |
+| 内置二进制 | 130,813,120 B / SHA-256 `6140b970181ddebe69fc629453b796deb4bfd091423fed97a086a3d26689b6c4`（ELF `7f454c46`、`CURRENT_VERSION = "1.39.1"`）                 |
+| 包内成员  | 5 个（二进制 + `install.sh` + `uninstall.sh` + `.service` + `README.md`）                                                                                     |
 
 ### 发布记录（2026-10-07）
 
-| 项 | 值 |
-|---|---|
-| Tag | `v1.39.1` |
-| GitHub Release | [yanziruxue/docker-manager/releases/tag/v1.39.1](https://github.com/yanziruxue/docker-manager/releases/tag/v1.39.1)（createdAt 2026-10-07T14:07:04Z；3 资产：版本化 zip `docker-manager-yanzi-linux-x64-v1.39.1.zip` 43,210,344 B / latest 别名 `docker-manager-yanzi-linux-x64.zip` 同字节 / `quick-install.sh` 12,365 B） |
-| 自建 Gitea Release | 待本地推送回填（git.ziruxue.top 本沙箱不可达；用户本机执行 `bash scripts/push-gitea.sh -m "release: v1.39.1"` 与 `node scripts/publish-gitea-release.mjs`） |
-| 源码 commit | `35530db01d1178ffa6cddb002fee8e1d224f7c86`（经 `scripts/push-via-api.mjs` 推 GitHub `main`；本地 `git` HEAD 仍滞后，未 commit 本地 git） |
-| ★ OTA 双源核验 | GitHub 端通过：`gh release view v1.39.1` 确认 `latest`=v1.39.1 且含 2 个 `/linux-x64.*\.zip$/i` 匹配资产（版本化 + latest 别名），App「系统更新」可发现；Gitea 端待本机发布后回填 |
+| 项                | 值                                                                                                                                                                                                                                                                                                             |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tag              | `v1.39.1`                                                                                                                                                                                                                                                                                                     |
+| GitHub Release   | [yanziruxue/docker-manager/releases/tag/v1.39.1](https://github.com/yanziruxue/docker-manager/releases/tag/v1.39.1)（createdAt 2026-10-07T14:07:04Z；3 资产：版本化 zip `docker-manager-yanzi-linux-x64-v1.39.1.zip` 43,210,344 B / latest 别名 `docker-manager-yanzi-linux-x64.zip` 同字节 / `quick-install.sh` 12,365 B） |
+| 自建 Gitea Release | 待本地推送回填（git.ziruxue.top 本沙箱不可达；用户本机执行 `bash scripts/push-gitea.sh -m "release: v1.39.1"` 与 `node scripts/publish-gitea-release.mjs`）                                                                                                                                                                          |
+| 源码 commit        | `35530db01d1178ffa6cddb002fee8e1d224f7c86`（经 `scripts/push-via-api.mjs` 推 GitHub `main`；本地 `git` HEAD 仍滞后，未 commit 本地 git）                                                                                                                                                                                    |
+| ★ OTA 双源核验       | GitHub 端通过：`gh release view v1.39.1` 确认 `latest`=v1.39.1 且含 2 个 `/linux-x64.*\.zip$/i` 匹配资产（版本化 + latest 别名），App「系统更新」可发现；Gitea 端待本机发布后回填                                                                                                                                                                     |
 
 ### 已知限制
 
@@ -217,21 +1953,21 @@
 
 ### 交付包
 
-| 项 | 值 |
-|---|---|
-| 交付包 | `build-upload/docker-manager-yanzi-linux-x64-v1.39.0.zip` **43,210,376 B** / SHA-256 `08a9ac871ae0a2a8587437a123d634a298bb9c9d40fdbc5656522a76fd3fa6a7` |
-| 内置二进制 | 130,813,120 B / SHA-256 `e916f799d31694037a9b44581244e6209d906664f139f1fbc6f4975f55487e4d`（ELF `7f454c46`、`CURRENT_VERSION = "1.39.0"`） |
-| 包内成员 | 5 个（二进制 + `install.sh` + `uninstall.sh` + `.service` + `README.md`） |
+| 项     | 值                                                                                                                                                       |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 交付包   | `build-upload/docker-manager-yanzi-linux-x64-v1.39.0.zip` **43,210,376 B** / SHA-256 `08a9ac871ae0a2a8587437a123d634a298bb9c9d40fdbc5656522a76fd3fa6a7` |
+| 内置二进制 | 130,813,120 B / SHA-256 `e916f799d31694037a9b44581244e6209d906664f139f1fbc6f4975f55487e4d`（ELF `7f454c46`、`CURRENT_VERSION = "1.39.0"`）                 |
+| 包内成员  | 5 个（二进制 + `install.sh` + `uninstall.sh` + `.service` + `README.md`）                                                                                     |
 
 ### 发布记录（2026-10-05）
 
-| 项 | 值 |
-|---|---|
-| Tag | `v1.39.0` |
-| GitHub Release | [v1.39.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.39.0) —— REST API 通道；3 资产（版本化 zip / `latest` 别名同字节 / `quick-install.sh`） |
+| 项                | 值                                                                                                                                                      |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Tag              | `v1.39.0`                                                                                                                                              |
+| GitHub Release   | [v1.39.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.39.0) —— REST API 通道；3 资产（版本化 zip / `latest` 别名同字节 / `quick-install.sh`）        |
 | 自建 Gitea Release | [v1.39.0](https://git.ziruxue.top/yanzi/docker-manager-yanzi/releases/tag/v1.39.0) —— 同 3 资产且 **size 与 GitHub 逐字节一致**；匿名 `releases/latest` → `v1.39.0` |
-| 源码 commit | GitHub `main` `f99dd2478a9606cbff0aa830622294739108ac7a`；自建 Gitea `main` 待本地推送回填（本环境 git.ziruxue.top 不可达） |
-| ★ OTA 双源核验 | **GitHub 已核验 · Gitea 待本地推送**（两端匿名 `latest` → `v1.39.0`；首个匹配资产＝版本化 zip；GitHub 资产大小 43,210,376 B 与本地构建逐字节一致（本地 zip 头 `PK`/`504b` 已验），range 实拉因沙箱网络未做）|
+| 源码 commit        | GitHub `main` `f99dd2478a9606cbff0aa830622294739108ac7a`；自建 Gitea `main` 待本地推送回填（本环境 git.ziruxue.top 不可达）                                              |
+| ★ OTA 双源核验       | **GitHub 已核验 · Gitea 待本地推送**（两端匿名 `latest` → `v1.39.0`；首个匹配资产＝版本化 zip；GitHub 资产大小 43,210,376 B 与本地构建逐字节一致（本地 zip 头 `PK`/`504b` 已验），range 实拉因沙箱网络未做）    |
 
 ### 已知限制
 
@@ -252,14 +1988,15 @@
 
 `src/components/auth/SetupWizard.tsx`（首次部署初始化页，共 4 处）：
 
-| 位置 | 之前 | 现在 |
-|---|---|---|
+| 位置     | 之前                                                         | 现在                          |
+| ------ | ---------------------------------------------------------- | --------------------------- |
 | 用户名默认值 | `useState(initialUsername \|\| "admin")` —— **预填 `admin`** | `\|\| ""` ⇒ **不再预填**，由用户自己填 |
-| 用户名输入框 | `placeholder="admin"` | **已移除** |
-| 密码框 | `placeholder="••••••••"` | **已移除** |
-| 确认密码框 | `placeholder="••••••••"` | **已移除** |
+| 用户名输入框 | `placeholder="admin"`                                      | **已移除**                     |
+| 密码框    | `placeholder="••••••••"`                                   | **已移除**                     |
+| 确认密码框  | `placeholder="••••••••"`                                   | **已移除**                     |
 
 **刻意保留（非漏改）**：
+
 - **`reinit`（账号重新设置）模式仍预填「当前用户名」** —— 用户是来改密码的，不该让他重打用户名。
 - **找回码框的占位符**（`18~24 位字母或数字`）保留 —— 是有用的长度提示，且用户只提了用户名与密码。
 - **登录页（`LoginPage.tsx`）的密码占位符未动** —— 用户指令限定「初始化时」。
@@ -273,21 +2010,21 @@
 
 ### 交付包
 
-| 项 | 值 |
-|---|---|
-| 交付包 | `build-upload/docker-manager-yanzi-linux-x64-v1.38.3.zip` **43,211,523 B** / SHA-256 `ec72570582917602bd2efb6d2bfb084d6697b00d8bb3de781a7225f98ed0b299` |
-| 内置二进制 | 130,813,120 B / SHA-256 `6da6613b3b99774a9003892d86fce9a58d55c064a552ddde0c0037ad0d24c590`（ELF `7f454c46`、`CURRENT_VERSION = "1.38.3"`） |
-| 包内成员 | 5 个（二进制 + `install.sh` + `uninstall.sh` + `.service` + `README.md`） |
+| 项     | 值                                                                                                                                                       |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 交付包   | `build-upload/docker-manager-yanzi-linux-x64-v1.38.3.zip` **43,211,523 B** / SHA-256 `ec72570582917602bd2efb6d2bfb084d6697b00d8bb3de781a7225f98ed0b299` |
+| 内置二进制 | 130,813,120 B / SHA-256 `6da6613b3b99774a9003892d86fce9a58d55c064a552ddde0c0037ad0d24c590`（ELF `7f454c46`、`CURRENT_VERSION = "1.38.3"`）                 |
+| 包内成员  | 5 个（二进制 + `install.sh` + `uninstall.sh` + `.service` + `README.md`）                                                                                     |
 
 ### 发布记录（2026-10-05）
 
-| 项 | 值 |
-|---|---|
-| Tag | `v1.38.3` |
-| GitHub Release | [v1.38.3](https://github.com/yanziruxue/docker-manager/releases/tag/v1.38.3) —— REST API 通道；3 资产（版本化 zip 43,211,523 B / `latest` 别名同字节 / `quick-install.sh` 12,365 B） |
-| 自建 Gitea Release | [v1.38.3](https://git.ziruxue.top/yanzi/docker-manager-yanzi/releases/tag/v1.38.3) —— 同 3 资产且 **size 与 GitHub 逐字节一致**；匿名 `releases/latest` → `v1.38.3` |
-| 源码 commit | GitHub `main` `66559d60e0e82bec16b311dc4172ed7875258ec7`（3 文件）；自建 Gitea `main` 已推 |
-| ★ OTA 双源核验 | **6/0** —— 两端匿名 `latest` 均 → `v1.38.3`；首个匹配资产＝版本化 zip；直链 range **206** 且前 2 字节 `504b`；两端 zip 字节数相等 |
+| 项                | 值                                                                                                                                                                     |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tag              | `v1.38.3`                                                                                                                                                             |
+| GitHub Release   | [v1.38.3](https://github.com/yanziruxue/docker-manager/releases/tag/v1.38.3) —— REST API 通道；3 资产（版本化 zip 43,211,523 B / `latest` 别名同字节 / `quick-install.sh` 12,365 B） |
+| 自建 Gitea Release | [v1.38.3](https://git.ziruxue.top/yanzi/docker-manager-yanzi/releases/tag/v1.38.3) —— 同 3 资产且 **size 与 GitHub 逐字节一致**；匿名 `releases/latest` → `v1.38.3`                |
+| 源码 commit        | GitHub `main` `66559d60e0e82bec16b311dc4172ed7875258ec7`（3 文件）；自建 Gitea `main` 已推                                                                                     |
+| ★ OTA 双源核验       | **6/0** —— 两端匿名 `latest` 均 → `v1.38.3`；首个匹配资产＝版本化 zip；直链 range **206** 且前 2 字节 `504b`；两端 zip 字节数相等                                                                    |
 
 ### 已知限制
 
@@ -318,21 +2055,21 @@
 
 ### 交付包
 
-| 项 | 值 |
-|---|---|
-| 交付包 | `build-upload/docker-manager-yanzi-linux-x64-v1.38.2.zip` **43,211,596 B** / SHA-256 `8a2515519178b67079940048b0b70a5964955213e4e21144aedd10e3a31145be` |
-| 内置二进制 | 130,813,120 B / SHA-256 `2516e70e08e1d6abc9b61dad621cd9e8940c7e16f531b9c9dc95fc2a09c107c1`（ELF `7f454c46`、`CURRENT_VERSION = "1.38.2"`） |
-| 包内成员 | 5 个（二进制 + `install.sh` + `uninstall.sh` + `.service` + `README.md`） |
+| 项     | 值                                                                                                                                                       |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 交付包   | `build-upload/docker-manager-yanzi-linux-x64-v1.38.2.zip` **43,211,596 B** / SHA-256 `8a2515519178b67079940048b0b70a5964955213e4e21144aedd10e3a31145be` |
+| 内置二进制 | 130,813,120 B / SHA-256 `2516e70e08e1d6abc9b61dad621cd9e8940c7e16f531b9c9dc95fc2a09c107c1`（ELF `7f454c46`、`CURRENT_VERSION = "1.38.2"`）                 |
+| 包内成员  | 5 个（二进制 + `install.sh` + `uninstall.sh` + `.service` + `README.md`）                                                                                     |
 
 ### 发布记录（2026-10-05）
 
-| 项 | 值 |
-|---|---|
-| Tag | `v1.38.2` |
-| GitHub Release | [v1.38.2](https://github.com/yanziruxue/docker-manager/releases/tag/v1.38.2) —— REST API 通道；3 资产（版本化 zip 43,211,596 B / `latest` 别名同字节 / `quick-install.sh` 12,365 B） |
-| 自建 Gitea Release | [v1.38.2](https://git.ziruxue.top/yanzi/docker-manager-yanzi/releases/tag/v1.38.2) —— 同 3 资产且 **size 与 GitHub 逐字节一致**；匿名 `releases/latest` → `v1.38.2` |
-| 源码 commit | GitHub `main` 见推送回执；自建 Gitea `main` `13abb226b6c022649f659136d67b0756b9429f71` |
-| ★ OTA 双源核验 | **6/0** —— 两端匿名 `latest` 均 → `v1.38.2`；首个匹配资产＝版本化 zip；直链 range **206** 且前 2 字节 `504b`；两端 zip 字节数相等 |
+| 项                | 值                                                                                                                                                                     |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tag              | `v1.38.2`                                                                                                                                                             |
+| GitHub Release   | [v1.38.2](https://github.com/yanziruxue/docker-manager/releases/tag/v1.38.2) —— REST API 通道；3 资产（版本化 zip 43,211,596 B / `latest` 别名同字节 / `quick-install.sh` 12,365 B） |
+| 自建 Gitea Release | [v1.38.2](https://git.ziruxue.top/yanzi/docker-manager-yanzi/releases/tag/v1.38.2) —— 同 3 资产且 **size 与 GitHub 逐字节一致**；匿名 `releases/latest` → `v1.38.2`                |
+| 源码 commit        | GitHub `main` 见推送回执；自建 Gitea `main` `13abb226b6c022649f659136d67b0756b9429f71`                                                                                        |
+| ★ OTA 双源核验       | **6/0** —— 两端匿名 `latest` 均 → `v1.38.2`；首个匹配资产＝版本化 zip；直链 range **206** 且前 2 字节 `504b`；两端 zip 字节数相等                                                                    |
 
 ### 已知限制
 
@@ -353,17 +2090,16 @@
   - 「应用日志」→「**日志**」
   - 「通知配置」→「**通知**」
   - 「列显隐默认值」→「**列显隐**」
-  （三处的 `sections` 标签与页内 `<h2>` 一并改）
+      
+    （三处的 `sections` 标签与页内 `<h2>` 一并改）
 - **③ 移除「密钥存储方式」卡片**：通知页里那张说明卡（加密落盘 / 只写不读 / env 优先 / 边界说明）整块删除；`ShieldCheck` 图标随之从导入移除。**加密与脱敏行为完全不变**（仅是说明文案卡片不再展示）。
 - **④ 容器子表全显示、移除其默认配置**：
   - 项目内「容器子表」指 `columnVisibility.stacks`（栈页点状态列弹出的容器列表，经 `App.tsx` 的 `defaultSubColumns` 传入 `components/StackContainersModal.tsx`；该组件在**无配置时用 `STACK_SUB_COLUMNS` 全量渲染**）。
   - 处理：从 `DEFAULT_SETTINGS.columnVisibility` 移除 `stacks` 默认值、`src/types.ts` 的 `ColumnVisibility.stacks` 改为**可选**、并加一条迁移**删除已存的 `stacks` 键** ⇒ 老配置也回落到**全部列可见**。
   - 设置页「列显隐」里的容器子表分组**保留**（仍可自定义；不配置时即全显示，7 列全部勾选）。
-
 - **⑤ 容器子表状态列文字「竖着」修复**（用户追加指令：「容器子表页面状态列的文字是竖着的，要求横着」）：
   - **根因**：`src/components/Badge.tsx#StatusBadge` 是 `inline-flex` 徽章，**没有 `whitespace-nowrap`**；当表格把状态列挤窄时，徽章内的中文标签（如「运行中」）会**逐字换行**，视觉上就是竖着的。
   - **修复**：① 徽章本身加 `whitespace-nowrap` —— 这是根因，**全站所有用到 `StatusBadge` 的地方（容器管理页 / 容器子表 / 仪表盘）一起修好**；② `src/components/StackContainersModal.tsx` 的状态单元格加 `whitespace-nowrap`，避免该列被长列（容器名 / 镜像）挤压。列宽不足时改由外壳的 `overflow-x-auto` 横向滚动，不再把文字压弯。
-
 - **⑥ ★ 列显隐整体改版：所有表格默认全显示，「列显隐」分区从系统设置移除**（用户追加指令：「列显隐默认全显示，不在系统设置-列显隐控制，在容器子表弹窗保留可以手动控制显隐」）：
   - **默认全显示**：`DEFAULT_SETTINGS.columnVisibility` 改为 **空对象 `{}`**（`src/pages/Settings.tsx` 的默认值同步）；`ColumnVisibility` 五个字段**全部改为可选**。各表格组件在各处配置缺失时本就回落为「全部列」，故空对象即全显示（`Containers.tsx`、`StackContainersModal.tsx`、`Stacks.tsx` 等）。
   - **移除系统设置分区**：侧栏「列显隐」项与对应的整个分区 JSX（**108 行**）一并删除；`Columns` 图标随之从导入移除。
@@ -380,23 +2116,24 @@
 
 - **已存的日志保留策略不会被强制改写**：本次只改**默认值**；此前保存过 `logRetention` 的实例沿用自己配置（可在「日志」页改成 365 / 1024）。
 - **容器子表的删除是**无条件**的**：迁移会删掉已存的 `stacks` 键（即使用户曾自定义过容器子表列）⇒ 回落到全显示；如需保留自定义，请在「列显隐」里重新勾选。
+
 ### 交付包
 
-| 项 | 值 |
-|---|---|
-| 交付包 | `build-upload/docker-manager-yanzi-linux-x64-v1.38.1.zip` **43,211,062 B** / SHA-256 `8bc7e910c6030eb44022eca0bdcfdb69c92a1984b62bfced0e83ebd45d4e57e9` |
-| 内置二进制 | 130,813,120 B / SHA-256 `70e540b0032c27c75844f195f20d4a075a2293441769ac0c6850598a9f36d9a9`（ELF `7f454c46`、`CURRENT_VERSION = "1.38.1"`） |
-| 包内成员 | 5 个（二进制 + `install.sh` + `uninstall.sh` + `.service` + `README.md`） |
+| 项     | 值                                                                                                                                                       |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 交付包   | `build-upload/docker-manager-yanzi-linux-x64-v1.38.1.zip` **43,211,062 B** / SHA-256 `8bc7e910c6030eb44022eca0bdcfdb69c92a1984b62bfced0e83ebd45d4e57e9` |
+| 内置二进制 | 130,813,120 B / SHA-256 `70e540b0032c27c75844f195f20d4a075a2293441769ac0c6850598a9f36d9a9`（ELF `7f454c46`、`CURRENT_VERSION = "1.38.1"`）                 |
+| 包内成员  | 5 个（二进制 + `install.sh` + `uninstall.sh` + `.service` + `README.md`）                                                                                     |
 
 ### 发布记录（2026-10-05）
 
-| 项 | 值 |
-|---|---|
-| Tag | `v1.38.1` |
-| GitHub Release | [v1.38.1](https://github.com/yanziruxue/docker-manager/releases/tag/v1.38.1) —— REST API 通道；3 资产（版本化 zip 43,211,062 B / `latest` 别名同字节 / `quick-install.sh` 12,365 B） |
-| 自建 Gitea Release | [v1.38.1](https://git.ziruxue.top/yanzi/docker-manager-yanzi/releases/tag/v1.38.1) —— 同 3 资产且 **size 与 GitHub 逐字节一致**；匿名 `releases/latest` → `v1.38.1` |
-| 源码 commit | GitHub `main` `04e7c2ff42b8877759c3e21dd8dbb8322b8434dd`（9 文件）；自建 Gitea `main` `e53d9eff753efe7fe05a14b3974ab9a4750ca502` |
-| ★ OTA 双源核验 | **6/0** —— 两端匿名 `latest` 均 → `v1.38.1`；首个匹配资产＝版本化 zip；直链 range **206** 且前 2 字节 `504b`；两端 zip 字节数相等 |
+| 项                | 值                                                                                                                                                                     |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tag              | `v1.38.1`                                                                                                                                                             |
+| GitHub Release   | [v1.38.1](https://github.com/yanziruxue/docker-manager/releases/tag/v1.38.1) —— REST API 通道；3 资产（版本化 zip 43,211,062 B / `latest` 别名同字节 / `quick-install.sh` 12,365 B） |
+| 自建 Gitea Release | [v1.38.1](https://git.ziruxue.top/yanzi/docker-manager-yanzi/releases/tag/v1.38.1) —— 同 3 资产且 **size 与 GitHub 逐字节一致**；匿名 `releases/latest` → `v1.38.1`                |
+| 源码 commit        | GitHub `main` `04e7c2ff42b8877759c3e21dd8dbb8322b8434dd`（9 文件）；自建 Gitea `main` `e53d9eff753efe7fe05a14b3974ab9a4750ca502`                                             |
+| ★ OTA 双源核验       | **6/0** —— 两端匿名 `latest` 均 → `v1.38.1`；首个匹配资产＝版本化 zip；直链 range **206** 且前 2 字节 `504b`；两端 zip 字节数相等                                                                    |
 
 **已知限制（补充）**
 
@@ -426,7 +2163,9 @@
 
 - 前后端 `tsc` **双 exit 0**；`lint:hooks` PASS（45 文件）。
 - **新增门禁 `npm run test:logs`**（`scripts/check-log-channels.ts`，已并入 `test:gates`）：**PASS=30 / FAIL=0 · exit 0** ——
+    
   三频道**真写文件且互不串台**；白名单接受三频道并**拒绝 6 类非法名**（含 `../../etc/passwd`、`../notify-…`、`app.log`、`other-…`）；列表每条带 `channel`；
+    
   **分频道策略的继承与独立**（默认继承顶层；只写 `maxDays` 时 `maxTotalMB` 仍继承顶层）；**按频道各自上限裁剪 + 禁用频道不裁 + 当天文件三频道一律保留**。
 
 ### 已知限制
@@ -434,31 +2173,34 @@
 - **★ `notify` / `oplog` 子段刻意不给默认值**（`settings.ts` 注释已写明「切勿给子段写死默认值」）：首版在 `DEFAULT_SETTINGS` 里写了 `notify:{maxTotalMB:200}`，而二级合并**先填默认值** ⇒ 用户改顶层「应用日志」时子频道**不跟随**，与「可单独设置」的语义正相反。改成子段默认 `{}` + `getRetentionConfig()` 做 `{...顶层, ...该频道}` 合并后才正确。**这是本项目第二次栽在「二级合并的默认值顺序」上**（前一次是 `notifications` 缺子段导致整段取不到新增字段）。
 - **操作记录只覆盖路由层**：`apiLog`（38 处）已归入 `oplog`；`backup.ts` / `mirror.ts` / `scheduler.ts` 的后台任务日志仍在 `app` 频道（属后台调度，非用户直接操作）。
 - **频道不可自定义**：目前固定三类，未做「新增频道」能力。
+
 ### 交付包
 
-| 项 | 值 |
-|---|---|
-| 交付包 | `build-upload/docker-manager-yanzi-linux-x64-v1.38.0.zip` **43,214,327 B** / SHA-256 `3a2728bc1e5bb8f74e5a08ec965f9ce0e20a6b284a8599a629d2054ed88d6e3b` |
-| 内置二进制 | 130,813,120 B / SHA-256 `1122285405105167b50072cec07ffcd16e6f40959c66f53b02f3aa48ffefa973`（ELF `7f454c46` 已校验、`CURRENT_VERSION = 1.38.0`） |
-| 包内成员 | 5 个（二进制 + `install.sh` + `uninstall.sh` + `.service` + `README.md`） |
+| 项     | 值                                                                                                                                                       |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 交付包   | `build-upload/docker-manager-yanzi-linux-x64-v1.38.0.zip` **43,214,327 B** / SHA-256 `3a2728bc1e5bb8f74e5a08ec965f9ce0e20a6b284a8599a629d2054ed88d6e3b` |
+| 内置二进制 | 130,813,120 B / SHA-256 `1122285405105167b50072cec07ffcd16e6f40959c66f53b02f3aa48ffefa973`（ELF `7f454c46` 已校验、`CURRENT_VERSION = 1.38.0`）               |
+| 包内成员  | 5 个（二进制 + `install.sh` + `uninstall.sh` + `.service` + `README.md`）                                                                                     |
 
 ### 发布记录（2026-10-05）
 
-| 项 | 值 |
-|---|---|
-| Tag | `v1.38.0` |
-| GitHub Release | [v1.38.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.38.0) —— REST API 通道（`gh` 不可用自动回退）；3 资产（版本化 zip 43,214,327 B / `latest` 别名同字节 / `quick-install.sh` 12,365 B） |
-| 自建 Gitea Release | [v1.38.0](https://git.ziruxue.top/yanzi/docker-manager-yanzi/releases/tag/v1.38.0) —— 同 3 资产且 **size 与 GitHub 逐字节一致**；匿名 `releases/latest` → `v1.38.0` |
-| 源码 commit | GitHub `main` `965dd189725f4940d270cfae2f8e13db234534ba`（**10 文件，用「未跟踪 ∪ 已修改」完整清单**）；自建 Gitea `main` `79a634b57f6de45d90821728b5f040229f4bce3b` |
-| notes | 329 行 / 31,278 字符（`--merge-from v1.37.0`，仅含本版） |
-| ★ OTA 双源核验 | **6/0** —— 两端匿名 `releases/latest` 均 → `v1.38.0`；首个匹配 `/linux-x64.*\.zip$/i` 的资产＝版本化 zip；直链 range **206** 且前 2 字节 `504b`；两端 zip 字节数相等 |
+| 项                | 值                                                                                                                                                                                   |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tag              | `v1.38.0`                                                                                                                                                                           |
+| GitHub Release   | [v1.38.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.38.0) —— REST API 通道（`gh` 不可用自动回退）；3 资产（版本化 zip 43,214,327 B / `latest` 别名同字节 / `quick-install.sh` 12,365 B） |
+| 自建 Gitea Release | [v1.38.0](https://git.ziruxue.top/yanzi/docker-manager-yanzi/releases/tag/v1.38.0) —— 同 3 资产且 **size 与 GitHub 逐字节一致**；匿名 `releases/latest` → `v1.38.0`                              |
+| 源码 commit        | GitHub `main` `965dd189725f4940d270cfae2f8e13db234534ba`（**10 文件，用「未跟踪 ∪ 已修改」完整清单**）；自建 Gitea `main` `79a634b57f6de45d90821728b5f040229f4bce3b`                                     |
+| notes            | 329 行 / 31,278 字符（`--merge-from v1.37.0`，仅含本版）                                                                                                                                      |
+| ★ OTA 双源核验       | **6/0** —— 两端匿名 `releases/latest` 均 → `v1.38.0`；首个匹配 `/linux-x64.*\.zip$/i` 的资产＝版本化 zip；直链 range **206** 且前 2 字节 `504b`；两端 zip 字节数相等                                                |
 
 ## v1.37.0 — 2026-10-05（**已出包 · 已发布 2026-10-05** · 并入 v1.36.1）
 
 > **版本号说明**：v1.36.1（全站曲线平滑）**从未出包、从未发布**，按约定「**同发取最高级**」并入本版 ⇒ 本版同时包含「**全部曲线平滑**」与「**系统设置三个新页面**」两组改动；v1.36.1 段落保留在下方仅供追溯。
+>   
 > **版本级别**：Minor（新增功能模块 / 新页面 —— 设置页一次性新增「应用详情 / 应用日志 / 目录镜像」三个页面）。
 
-**主题：系统设置新增三个页面 —— ①「应用详情」（应用安装位置与六个目录的真实路径 / 文件数 / 占用）；②「应用日志」（列表 · 尾部查看 · 单文件下载 · 打包 zip 导出 · 保留策略「天数 + 容量」双上限）；③「目录镜像」（备份目录与 compose 目录**实时另存**到其他路径；语义为**真镜像**，源删 ⇒ 目标同步删）。另并入 v1.36.1 的**全站曲线单调三次平滑（PCHIP，无过冲）**。**
+**主题：系统设置新增三个页面 —— ①「应用详情」（应用安装位置与六个目录的真实路径 / 文件数 / 占用）；②「应用日志」（列表 · 尾部查看 · 单文件下载 · 打包 zip 导出 · 保留策略「天数 + 容量」双上限）；③「目录镜像」（备份目录与 compose 目录**实时另存**到其他路径；语义为**真镜&#x50CF;**，源删 ⇒ 目标同步删）。另并入 v1.36.1 的**全站曲线单调三次平滑（PCHIP，无过冲）**。**
+
 
 ### 已完成
 
@@ -492,12 +2234,10 @@
 - **删除保护**：`deleteLogFile()` 对**当天文件**直接拒绝（返回 `false` ⇒ 400），历史文件才允许删。
 - **zip 导出**：`EXPORT_MAX_BYTES = 128 MB` 总量上限（超出置 `partial: true` 并在归档内 `export-manifest.txt` 清单中标明），归档内含清单文件；下载响应结束后 `cleanupExport()` **自动删除临时文件**（`res.download(..., () => cleanupExport(outFile))`，异常分支同样清理）。
 - **★ 异步清理修复（HTTP 冒烟抓出的真实缺陷）**：`cleanupExport()` 原用 **`fs.rmSync(dir, { recursive: true })`** 递归同步删临时目录 —— 该函数挂在 `res.download` 的**完成回调**上，**同步递归删除会阻塞 Node 事件循环**。实测本机一次导出把服务**卡住 21,140 ms**（期间所有请求无响应，冒烟里 `GET /api/auth/init-status` 用了 **21,140ms**）。改为 **`fs.rm(dir, { recursive: true, force: true }, cb)`** 异步删除（清理属尽力而为，删不掉无副作用）。**探针对照证据**（同一台机器、同一目录形态）：
-
-  | 删法 | 调用处阻塞事件循环 | 实际删除完成 |
-  |---|---|---|
-  | `fs.rmSync(recursive)` | **21,301 ms** | 同上（同步） |
-  | `fs.rm(recursive)`（修复后） | **0 ms** | 133 ms 后回调 |
-
+  | 删法                      | 调用处阻塞事件循环     | 实际删除完成     |
+  | ----------------------- | ------------- | ---------- |
+  | `fs.rmSync(recursive)`  | **21,301 ms** | 同上（同步）     |
+  | `fs.rm(recursive)`（修复后） | **0 ms**      | 133 ms 后回调 |
   加固后同一冒烟复跑：慢请求 **1 → 0**，四项断言仍全绿。
 - **前端**：「应用日志」分区（图标 `FileText`）—— 日志列表（文件名 / 大小 / 修改时间）+ **尾部查看 Modal**（行数 500 / 1000 / 2000 / 5000 可选）+ 单文件下载 + 全量 zip 导出 + 「立即清理」+ 保留策略表单（开关 / 天数 / 容量）。
 
@@ -535,13 +2275,11 @@
 - **版本号说明**：本次是 **UI 交互小改动**（按规则本应升 Patch 到 `1.37.1`），但 **v1.37.0 从未出包** ⇒ 不存在「同版本重出包」冲突，故**并入 v1.37.0 一次性发布**，不单独占一个版本号。
 - **第一步只做登录页 3 个框**（用户原始指令只点名登录页）：登录密码 + 重置密码的「新密码 / 确认新密码」（`RecoveryForm` 与登录页同一组件内切换）。
 - **用户随后拍板扩到全部密码框**（两项都选：「首次设置/账号重设向导」+「设置页改密码对话框」）⇒ 最终覆盖 **9 个密码框 / 3 个文件**：
-
-  | 页面 | 文件 | 密码框 | 锁图标 |
-  |---|---|---|---|
-  | 登录页 | `src/components/auth/LoginPage.tsx` | 登录密码 + 新密码 + 确认新密码 = **3** | 有（原有） |
-  | 首次设置 / 账号重设向导 | `src/components/auth/SetupWizard.tsx` | 密码 + 确认密码 = **2** | 有（原有） |
-  | 设置页（改密码对话框 + 找回码重设） | `src/pages/Settings.tsx` | 原密码 + 新密码 + 确认新密码 + 当前密码 = **4** | **无**（原本就没有，见下） |
-
+  | 页面                  | 文件                                    | 密码框                              | 锁图标             |
+  | ------------------- | ------------------------------------- | -------------------------------- | --------------- |
+  | 登录页                 | `src/components/auth/LoginPage.tsx`   | 登录密码 + 新密码 + 确认新密码 = **3**       | 有（原有）           |
+  | 首次设置 / 账号重设向导       | `src/components/auth/SetupWizard.tsx` | 密码 + 确认密码 = **2**                | 有（原有）           |
+  | 设置页（改密码对话框 + 找回码重设） | `src/pages/Settings.tsx`              | 原密码 + 新密码 + 确认新密码 + 当前密码 = **4** | **无**（原本就没有，见下） |
 - **★ 提为跨页共享组件 `src/components/PasswordInput.tsx`（新增）**：第一步它只是 `LoginPage.tsx` 内的局部函数；扩到三个页面时**必须提取**——否则第二个页面就会复制一份，第二份就没人维护（小眼睛可用性会「改一处漏两处」）。左侧锁图标 + 右侧小眼睛，`type={visible ? "text" : "password"}`，图标按状态在 `Eye` / `EyeOff` 间切换（沿用项目既有写法，见 `ActivityPanel.tsx` 的设备标识显示/隐藏）。
 - **`lockIcon` 开关（默认 `true`）**：设置页那 4 个框**原本就没有锁图标**（`<Input type="password">` 裸用），若统一加上会凭空多出 `pl-9` 缩进、改变对话框观感 ⇒ 这 4 处显式传 `lockIcon={false}`，只加小眼睛、**不动既有布局**。
 - **九个显示状态各自独立**：`showPassword` ×3（登录密码 / 向导密码 / 设置页当前密码）、`showNew` ×2、`showConfirm` ×3、`showOld` ×1 —— **初值一律 `false`**（默认掩码，**绝不默认亮明文**）；**同一组件内不共用状态**（否则点一个眼睛会连带影响同框的其它密码框）。
@@ -567,14 +2305,12 @@
   - **★ 选型依据**：先验证 **esbuild 能否把它打进 SEA bundle**（`build-binary.mjs` 走 `platform=node` + `format=cjs`）—— 实测 **exit 0、无告警、+约 400 KB**，故选成熟库而非自研 SMTP 客户端（协议边界情况多，且自研无法在本机离线验证）。
   - **★ 循环依赖的坑**：`docker.ts` 要发「更新完成」通知，而容器巡检又需要 `docker.ts` 的 `getContainers()` ⇒ 直接互相 import 成环。**断开办法**：把取数函数**注入**（`startContainerWatch(fetchTargets)`），由 `index.ts` 组装并传入。
 - **四个事件的触发源**：
-
-  | 事件 | 触发点 | 说明 |
-  |---|---|---|
-  | `containerDown` | **新增** `startContainerWatch()`：启动后 30 秒跑首轮、之后每 60 秒 | ★ **后端原本没有任何容器状态变化检测**，本次新增「快照 diff」：只在「运行中 → 非运行中」转变时通知，首轮只建基线不发；引擎取数失败时**不更新基线**，下轮继续比对；优先巡检活跃引擎、最多 3 个 |
-  | `updateAvailable` | `scheduler.checkEngineImages()` | **只对本次新出现的更新发**（对比上次缓存），否则每天/每小时的重复检查会把同一条更新反复推成骚扰 |
-  | `updateComplete` | `docker.ts` 新增 `finishPullSuccess()` | ★ 本地 CLI / 远程 CLI / dockerode API **三条拉取路径原本各自内联同样的三行**，任何新增路径都可能漏发或重复发 ⇒ **统一收口**到 helper，门禁断言裸写只剩 1 处 |
-  | `buildFailed` | **无触发源** | ★ 本项目**没有镜像构建功能**（`buildImageRef` 只是拼镜像名），开关保留但**显式标注「暂无触发源」**（后端 `EVENTS_WITHOUT_SOURCE` + 前端 UI 说明），不假装可用 |
-
+  | 事件                | 触发点                                                 | 说明                                                                                                          |
+  | ----------------- | --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+  | `containerDown`   | **新增** `startContainerWatch()`：启动后 30 秒跑首轮、之后每 60 秒 | ★ **后端原本没有任何容器状态变化检测**，本次新增「快照 diff」：只在「运行中 → 非运行中」转变时通知，首轮只建基线不发；引擎取数失败时**不更新基线**，下轮继续比对；优先巡检活跃引擎、最多 3 个   |
+  | `updateAvailable` | `scheduler.checkEngineImages()`                     | **只对本次新出现的更新发**（对比上次缓存），否则每天/每小时的重复检查会把同一条更新反复推成骚扰                                                          |
+  | `updateComplete`  | `docker.ts` 新增 `finishPullSuccess()`                | ★ 本地 CLI / 远程 CLI / dockerode API **三条拉取路径原本各自内联同样的三行**，任何新增路径都可能漏发或重复发 ⇒ **统一收口**到 helper，门禁断言裸写只剩 1 处     |
+  | `buildFailed`     | **无触发源**                                            | ★ 本项目**没有镜像构建功能**（`buildImageRef` 只是拼镜像名），开关保留但**显式标注「暂无触发源」**（后端 `EVENTS_WITHOUT_SOURCE` + 前端 UI 说明），不假装可用 |
 - **配置字段补齐**（`server/settings.ts`）：新增 `webhookSecret` / `emailPassword` / `emailFrom` / `emailTo`；★ 并给 `notifications` 段**补上二级合并** —— 此前 `getSettings()` 里 `...parsed` 会让旧 `settings.json` **整段取不到新增字段**（前端拿到 `undefined`、输入框失控、通知模块读不到）。
 - **前端修掉历史死输入框**（`src/pages/Settings.tsx`）：SMTP 密码改绑真实 `emailPassword` + 复用 `PasswordInput`（带小眼睛、显式 `type="button"` 不会误提交）；补「发件人 / 收件人 / Webhook 签名密钥」；保存前校验补「密码必填 / 收件人必填」；新增「**发送测试通知**」按钮（★ **先保存再发**，且 `handleSave()` 改为返回 `boolean`，校验没过就中止 —— 否则会拿旧配置去发，表现为「测试失败」但配置其实是对的）；`buildFailed` 行内标注无触发源。
 - **两个新接口**：`POST /api/notify/test`（force，忽略开关与去重）、`GET /api/notify/status`（两通道是否配齐 + 无源事件列表）。
@@ -586,15 +2322,13 @@
 > **追加指令（逐字）**：「拉取进度弹窗没有自动关闭，加入自动关闭」。
 
 - **改动**：`src/pages/Images.tsx`。拉取任务进入终态后**倒计时 5 秒自动关闭弹窗**，并刷新镜像列表（此前无论成功失败都必须手点「关闭」）。
-- **★ 失败态刻意不自动关**：`error` 时弹窗里有**失败原因**和**「重试」按钮**，自动关掉等于把用户刚要看的错误收走、还得重新拉一次。规则抽成纯函数 `shouldAutoClosePullModal(status)` 便于断言：
-
-  | 任务状态 | 是否自动关闭 | 理由 |
-  |---|---|---|
-  | `success` 拉取成功 | ✅ 关（5 秒） | 结果不会丢：左侧任务列表仍显示该任务状态，关闭时还会 `onRefresh()` 刷新镜像列表 |
-  | `canceled` 已取消 | ✅ 关（5 秒） | 用户主动取消，没有需要阅读的信息 |
-  | `error` 拉取失败 | ❌ **不关** | 保留失败原因与「重试」入口 |
-  | `pulling` / 空 / 未知 | ❌ 不关 | — |
-
+- **★ 失败态刻意不自动关**：`error` 时弹窗里有**失败原因**&#x548C;**「重试」按钮**，自动关掉等于把用户刚要看的错误收走、还得重新拉一次。规则抽成纯函数 `shouldAutoClosePullModal(status)` 便于断言：
+  | 任务状态               | 是否自动关闭   | 理由                                              |
+  | ------------------ | -------- | ----------------------------------------------- |
+  | `success` 拉取成功     | ✅ 关（5 秒） | 结果不会丢：左侧任务列表仍显示该任务状态，关闭时还会 `onRefresh()` 刷新镜像列表 |
+  | `canceled` 已取消     | ✅ 关（5 秒） | 用户主动取消，没有需要阅读的信息                                |
+  | `error` 拉取失败       | ❌ **不关** | 保留失败原因与「重试」入口                                   |
+  | `pulling` / 空 / 未知 | ❌ 不关     | —                                               |
 - **不搞「突然消失」**：关闭前在按钮左侧显示「N 秒后自动关闭」（`tabular-nums` 不抖动），并提供「**立即关闭**」。
 - **手动与自动关闭走同一个 `closePullModal()`**（`useCallback`）——原先关闭逻辑是内联在 `onClick` 里的，现在自动关闭复用同一条路径，避免两处漂移。
 - **★ 用「关闭时刻戳」而非「递减计数器」驱动**：`setAutoCloseLeft((n) => … closePullModal())` 这类写法把副作用放在 `setState` 更新函数里，**React 严格模式下更新函数可能被调用两次** ⇒ 关闭与 `onRefresh` 会重复执行。改为「effect ① 设定 `autoCloseAt` 时间戳 + effect ② 每 500ms 算剩余秒数、归零后关闭」。
@@ -618,6 +2352,7 @@
 - **⑤ 环境变量覆盖**：`DMS_SMTP_PASSWORD` / `DMS_WEBHOOK_SECRET` **优先于** `settings.json`（沿用项目 `UPDATE_GITEA_BASE` 等 env 覆盖先例）。systemd 可放 `EnvironmentFile=/etc/docker-manager-yanzi/secrets.env`（0600 仅 root 可读）⇒ **密钥根本不落 app 配置目录、也不进备份包**。`/api/notify/status` 新增 `secretSource`（`env`/`file`/`none`）与 `secretsEncrypted`，界面显示「已由环境变量 X 覆盖 —— 这里的设置会被忽略」（只读提示）。
 - **界面**：新增「密钥存储方式」卡片，把上述能力**与边界**如实写进 UI（含「主密钥丢失/换机后密文无法解密，需重填」的提醒）。
 - 涉及文件：**新增** `server/secret-store.ts`、`scripts/check-secrets.ts`；**改** `server/settings.ts`、`server/index.ts`、`server/notify.ts`、`src/types.ts`、`src/pages/Settings.tsx`、`.gitignore`、`package.json`（新增 `test:secrets` 并入 `test:gates`）；**`git rm --cached`** `server/settings.json`、`server/config/settings.json`。
+
 
 ### 验证（全部实测）
 
@@ -645,7 +2380,7 @@
   - **★ 负向自检（两道门禁各自独立抓红）**：把共享组件的 `type="button"` 注入回归为 `type="submit"` ⇒ 渲染门禁 **PASS 34 / FAIL 1 · `exit 1`**（回显 `共 5 个，异常 5 个：<button type="submit" aria-label="显示密码" …>`）；单独跑接线门禁 **PASS 65 / FAIL 1 · `exit 1`**（`<<< submit`）—— 证明这两条断言**不是摆设**。`cp` 还原后 `cmp` **逐字节一致**，两门禁回到 **35/0 + 66/0 · `exit 0`**。
   - **★ 交付物**：`renderToStaticMarkup` 渲**真身组件** + 内联**本次真实构建 CSS** 产出静态快照 `.workbuddy/artifacts/v1.37.0-登录页小眼睛.html`（登录页 + 首次设置向导两屏，8 项自检全过）—— 不是手绘示意图。
 - **★ 通知双通道（Webhook + 邮件）**：
-  - **真实发送 e2e（`.tmp-notify-test.ts`，9 节 / **PASS=43 FAIL=0 · exit 0**）** —— **桩 SMTP 服务器 + 桩 Webhook 接收端，真发真收**：
+  - **真实发送 e2e（`.tmp-notify-test.ts`，9 节 / PASS=43 FAIL=0 · exit 0）** —— **桩 SMTP 服务器 + 桩 Webhook 接收端，真发真收**：
     - SMTP 走完 `EHLO → AUTH LOGIN → MAIL FROM → RCPT TO → DATA → QUIT` 真实对话；**用户名 / 密码都真的送到了桩端**；两个收件人都在；发件人用配置的 `emailFrom`。
     - 邮件主题解码后为 `[更新完成] 镜像已更新：nginx:latest — yanzi14s`（nodemailer 用 **Q 编码 + 折行**，断言前须展开折行并按 RFC 2047 解码）；正文含镜像名；**★ 密码未出现在邮件内容里**（只用于认证）。
     - Webhook 桩收到 JSON，`event`/`eventLabel`/`title`/`summary` 逐项核对；**★ 签名头用同一密钥重算 HMAC 比对一致**（不是只看有没有这个头）。
@@ -673,14 +2408,14 @@
 
 ### 交付包
 
-| 项 | 值 |
-|---|---|
-| 交付包 | `build-upload/docker-manager-yanzi-linux-x64-v1.37.0.zip` **43,211,848 B** / SHA-256 `d2409d1753410f8664901eaeca8a859910cb8e48a808a7c7b8ad218e2558c932` |
-| latest 别名 | `build-upload/docker-manager-yanzi-linux-x64.zip`（同字节） |
-| 内置二进制 | 130,813,120 B / SHA-256 `52b64363e66b28ac7ee95bfdc1f560ec9fcc173c4556be1cfa86e8cfe3fe7982`（ELF `7f454c46` 已校验、`CURRENT_VERSION = true ? "1.37.0" : "0.0.0-dev"`） |
-| 前端资产 | `dist/assets/index-DDCM49KO.js`（1,112,657 B）、`index-40zctq-V.css`（47,718 B） |
-| 包内成员 | 5 个（二进制 + `install.sh` + `uninstall.sh` + `.service` + `README.md`），权限位已校验（二进制与脚本 755） |
-| `bundle.js` | 5,620,565 B（含 `nodemailer` 打包，较上版约 +400 KB） |
+| 项           | 值                                                                                                                                                                |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 交付包         | `build-upload/docker-manager-yanzi-linux-x64-v1.37.0.zip` **43,211,848 B** / SHA-256 `d2409d1753410f8664901eaeca8a859910cb8e48a808a7c7b8ad218e2558c932`          |
+| latest 别名   | `build-upload/docker-manager-yanzi-linux-x64.zip`（同字节）                                                                                                           |
+| 内置二进制       | 130,813,120 B / SHA-256 `52b64363e66b28ac7ee95bfdc1f560ec9fcc173c4556be1cfa86e8cfe3fe7982`（ELF `7f454c46` 已校验、`CURRENT_VERSION = true ? "1.37.0" : "0.0.0-dev"`） |
+| 前端资产        | `dist/assets/index-DDCM49KO.js`（1,112,657 B）、`index-40zctq-V.css`（47,718 B）                                                                                      |
+| 包内成员        | 5 个（二进制 + `install.sh` + `uninstall.sh` + `.service` + `README.md`），权限位已校验（二进制与脚本 755）                                                                           |
+| `bundle.js` | 5,620,565 B（含 `nodemailer` 打包，较上版约 +400 KB）                                                                                                                      |
 
 **★ 真包冒烟 24/0（跑 `deploy/linux/bundle.js`，不是源码）** —— 本版最大运行时风险是 **nodemailer 经 esbuild 打包后能否正常工作**，故在真包上逐项验过：
 
@@ -710,16 +2445,16 @@
 
 ### 发布记录（2026-10-05）
 
-| 项 | 值 |
-|---|---|
-| Tag | `v1.37.0` |
-| GitHub Release | [v1.37.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.37.0) —— `draft=false`、`prerelease=false`（`releases/latest` 已指向本版）；3 资产（版本化 zip 43,211,848 B / `latest` 别名同字节 / `quick-install.sh` 12,365 B）；三条直链 **200**；`/linux-x64.*\.zip$/i` 首个匹配＝版本化 zip |
-| 自建 Gitea Release | [v1.37.0](https://git.ziruxue.top/yanzi/docker-manager-yanzi/releases/tag/v1.37.0) —— **id=13**、`draft=false`、`prerelease=false`；同 3 资产且 **size 与 GitHub 逐字节一致**；**匿名** `releases/latest` → `v1.37.0`；直链 range **206**（zip 前 2 字节 `504b`、`quick-install.sh` 前 2 字节 `2321`） |
-| 源码 commit | GitHub `main` `5c31a92e279ef35e590e5d0b2797684824b264ca`（3 次推送，25 文件）；自建 Gitea `main` `9a1e12d354ec74c0b6d579bd7c506d6b3a7f0758`（整仓提交 `022cda3..9a1e12d`） |
-| notes | 446 行 / 48,499 字符（含「v1.37.0 升级须知」前置块；**`--merge-from v1.36.1`** —— v1.36.0 已于 2026-09-30 发布，若从 `v1.36.0` 起合并会把它的段落**重复带上**，实测确认后改起点） |
-| 发布通道 | GitHub：**REST API**（`gh` 探测失败自动回退，日志已注明）；Gitea：**Node `fetch` 打 REST API**（本机 curl 访问该站恒 `000`） |
-| ★ 真包冒烟 | **24/0**（跑 `deploy/linux/bundle.js`，不是源码）—— 启动成功；内嵌前端 asset 名与 **逐字节大小**均等于本次 `dist/`；版本 `1.37.0`；**加密落盘与脱敏在真二进制内生效**；**Webhook 真发到桩端且 HMAC 签名重算一致**；**无 `Dynamic require` 失败**（本版最大风险＝nodemailer 经 esbuild 打包后能否运行） |
-| ★ OTA 双源核验 | **14/0** —— 两端匿名 `releases/latest` 均 → `v1.37.0`；两端首个匹配资产＝版本化 zip；直链 range **206** 且魔数正确（`504b` / `2321`）；两端 zip 与 `quick-install.sh` 字节数**逐项相等** |
+| 项                  | 值                                                                                                                                                                                                                                                                                                    |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tag                | `v1.37.0`                                                                                                                                                                                                                                                                                            |
+| GitHub Release     | [v1.37.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.37.0) —— `draft=false`、`prerelease=false`（`releases/latest` 已指向本版）；3 资产（版本化 zip 43,211,848 B / `latest` 别名同字节 / `quick-install.sh` 12,365 B）；三条直链 **200**；`/linux-x64.*\.zip$/i` 首个匹配＝版本化 zip                                 |
+| 自建 Gitea Release   | [v1.37.0](https://git.ziruxue.top/yanzi/docker-manager-yanzi/releases/tag/v1.37.0) —— **id=13**、`draft=false`、`prerelease=false`；同 3 资产且 **size 与 GitHub 逐字节一致**；**匿名** `releases/latest` → `v1.37.0`；直链 range **206**（zip 前 2 字节 `504b`、`quick-install.sh` 前 2 字节 `2321`）                           |
+| 源码 commit          | GitHub `main` `5c31a92e279ef35e590e5d0b2797684824b264ca`（3 次推送，25 文件）；自建 Gitea `main` `9a1e12d354ec74c0b6d579bd7c506d6b3a7f0758`（整仓提交 `022cda3..9a1e12d`）                                                                                                                                            |
+| notes              | 446 行 / 48,499 字符（含「v1.37.0 升级须知」前置块；**`--merge-from v1.36.1`** —— v1.36.0 已于 2026-09-30 发布，若从 `v1.36.0` 起合并会把它的段落**重复带上**，实测确认后改起点）                                                                                                                                                                 |
+| 发布通道               | GitHub：**REST API**（`gh` 探测失败自动回退，日志已注明）；Gitea：**Node `fetch` 打 REST API**（本机 curl 访问该站恒 `000`）                                                                                                                                                                                                      |
+| ★ 真包冒烟             | **24/0**（跑 `deploy/linux/bundle.js`，不是源码）—— 启动成功；内嵌前端 asset 名与 **逐字节大小**均等于本次 `dist/`；版本 `1.37.0`；**加密落盘与脱敏在真二进制内生效**；**Webhook 真发到桩端且 HMAC 签名重算一致**；**无 `Dynamic require` 失败**（本版最大风险＝nodemailer 经 esbuild 打包后能否运行）                                                                                 |
+| ★ OTA 双源核验         | **14/0** —— 两端匿名 `releases/latest` 均 → `v1.37.0`；两端首个匹配资产＝版本化 zip；直链 range **206** 且魔数正确（`504b` / `2321`）；两端 zip 与 `quick-install.sh` 字节数**逐项相等**                                                                                                                                                    |
 | ⚠️ 发布流程缺陷（本次发现并修正） | `push-via-api.mjs` **只枚举未跟踪文件**（`git ls-files --others`，即便传 `--files-from` 也只按清单走）⇒ 首次推送后**远端 17 个已修改文件仍是旧内容**（例如 `server/index.ts` 会引用尚未上传的模块）。本次改用 `ls-files --others` **∪** `diff --name-only --diff-filter=d HEAD` 生成完整清单重推；并为远端 2 个误入库的 `settings.json` 补了一次 `sha:null` 删除提交。**后续发布请沿用该清单生成方式** |
 
 ### 下一步
@@ -762,18 +2497,19 @@
 
 ## 开发进度总览
 
-> 最后更新：2026-10-05
+ > 最后更新：2026-10-17
+
 
 ### 当前状态
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.39.2**（**已出包 · 已发布 2026-10-08 · GitHub + Gitea 双端**）：**容器文件管理器「下载」按钮移入工具栏置于「上传」右侧、未选中时灰显不可点；原「打包下载/重命名/权限/删除」整条选中操作条移除**（`src/pages/Containers.tsx` `ContainerFilesTab`，1711 → **1586** 行）。用户拍板「只留下载，重命名/改权限/删除三个功能直接删掉」⇒ 连带清理 5 个 `useState`（`showRename`/`renameName`/`showChmod`/`chmodValue`/`deleteTarget`）、3 个 async 处理函数（`doRename`/`doDelete`/`doChmod`）、3 块弹窗 JSX（重命名 Modal / 权限 Modal / 删除 ConfirmDialog）与 5 个失效 import（`Pencil`、`KeyRound`、`renameContainerPathApi`、`removeContainerPathApi`、`chmodContainerPathApi`）；**服务端路由与 `src/api.ts` 封装未删**，需要可从 git 历史取回。下载按钮 `disabled={!selectedEntry || busy}` ＋ `disabled:text-slate-300 disabled:border-slate-100 disabled:bg-slate-50 disabled:cursor-not-allowed`，选中目录显示「打包下载」、选中文件显示「下载」。**附带修 `scripts/check-auth-render.mjs` 一条自 v1.38.3 起失效的假红断言**（`mode 缺省用户名默认 admin` ⇒ 改为两条「不预填占位内容」断言）。验证＝前端 `tsc` **exit 0** + `test:gates` **exit 0**（8 组 277 项 PASS / FAIL 0：hooks 35 · notify 40 · secrets 30 · auth-render 36 · auth-wiring 69 · restart 18 · thermal 15 · install-drivetemp 34）+ 删 `dist/` 重跑 `vite build` **exit 0** + **SEA 交叉构建**（`bundle.js` 5,607,027 B → `sea-prep.blob` 6,039,688 B → postject 注入 `💉 Injection done!`）+ **真包冒烟 10/0**（asset 逐字节一致、缓存头正确、`/api/*` 401）。**交付包 `build-upload/docker-manager-yanzi-linux-x64-v1.39.2.zip` 43,209,245 B / SHA-256 `299d1203d55aa354fd28f3387dc71ab1ef605aaac7dcd9900c5f4f71b54a22f4`（内嵌二进制 130,813,120 B / `8101ae2dbd82072de9d263174505a7dc9a724f899cb5847a1a4173edf7d26cf7`，ELF `7f454c46`、含 `1.39.2`）；latest 别名同字节。**Gitea 已发布**（commit `0245266`，v1.39.0/1/2 三版均已补齐、匿名 `releases/latest` → `v1.39.2`、OTA 实测 `source=gitea` 且 downloadUrl 206 可下载）；**GitHub 端亦已发布**（Release id=406702682，commit `8a8511a9`）。**—— 上一已发布版本 **v1.39.1**（**已出包 · 已发布 2026-10-07**）：**修复列显隐保存后刷新回退（服务端 per-read 清空 + 全新安装 defaultsVersion 戳缺失）** —— 上一版 v1.39.0＝备份三级策略 + 列显隐集中页复活 —— ① 备份管理页改为周/月/年三级策略，由单个总开关 `autoBackupEnabled` 统一控制、移除旧「模式 2」，年末档永久保存不自动删除（`server/scheduler.ts`+`server/settings.ts`+`src/types.ts`+`src/pages/Settings.tsx`）；② 复活「系统设置 → 列显隐」集中页（容器/堆栈/镜像/数据卷 4 页，写入 `settings.columnVisibility.*`，留空＝全列可见，`src/pages/Settings.tsx`）。验证＝前后端 `tsc` **双 exit 0** + `lint:hooks` **PASS（45 文件）**。 ①「**应用详情**」（新增 `server/appinfo.ts`，183 行；应用安装位置 + 六个目录真实路径 / 文件数 / 占用；受限遍历 `MAX_ENTRIES=200_000` + 30 秒缓存 + 符号链接跳过）②「**应用日志**」（新增 `server/applogs.ts`，360 行；列表 / 尾部查看 / 单文件下载 / zip 导出 / 保留策略「天数 `maxDays` + 容量 `maxTotalMB`」双上限**先到先清**且**永不删当天文件**；文件名白名单 `^app-\d{4}-\d{2}-\d{2}\.log$` + `path.resolve` 双重防穿越；`/api/applogs/export` 必须注册在 `/:name` 之前）③「**目录镜像**」（新增 `server/mirror.ts`，425 行；备份与 compose 目录**实时另存**到其他路径，语义＝**真镜像**「源删 ⇒ 目标同步删」，目标路径严格拒绝 6 类非法值（含**「是源的上级」**）；触发＝`fs.watch`（1 秒防抖）+ **60 秒全量对账**兜底；增量判据 `size` 相同且 `\|mtimeMs 差\| < 1000ms`，复制后 `utimesSync` **回写 mtime**）。合计新增 **9 条路由**（`/api/system/app-info` + 6 条 `/api/applogs*` + 2 条 `/api/mirror*`）、**10 个前端类型**、**9 个 API 封装**；设置持久化新增 `mirror` / `logRetention` 两段（旧配置缺段时继承默认）。验证＝前后端 `tsc` **双 exit 0** + `test:gates` **exit 0**（120 项 PASS / FAIL 0）+ **真实文件系统 harness 14 段 70/0**（含真镜像删除、真实 `fs.watch` 事件触发、日志穿越防线、天数与容量双上限裁剪、zip 的 PK 魔数）+ **HTTP 层端到端冒烟 60/0**（真实 Express + 真实 HTTP；含**路由顺序的区分性断言**——`/api/applogs/export` 返回 zip 而非被 `/:name` 吞掉；并抓出 `cleanupExport` 用 `rmSync` 递归同步删目录**阻塞事件循环 21,140 ms** ⇒ 改 `fs.rm` 异步后复跑**慢请求归零**）+ **静态接线审计**（10 处理器 / 9 封装 / 11 处 JSX 挂载点全部落位）。**另含两组独立加固**：**通知真实现**（Webhook + nodemailer 邮件，真实发送 e2e **43/0**，新增 `lint:notify` 门禁）+ **密钥安全**（AES-256-GCM 加密落盘 / 不回传前端 / env 覆盖 / 堵住 `settings.json` 的 git 泄漏，新增 `test:secrets` 门禁 **40/0**）。全量 `test:gates` **7 组 246 项 PASS / FAIL 0**。**并入 v1.36.1**（**未出包 · 未发布**）：**全部曲线改为单调三次平滑（PCHIP，无过冲）** —— `src/components/LineChart.tsx` 新增 `smoothPathD()` 与 `smooth`（默认 `true`），全站 8 处图表零改动生效；曲线仍穿过每个真实采样点、tooltip 与量程不变。验证＝`tsc` 双 0 + `test:gates` exit 0 + 纯函数断言 **9/0**（含 Catmull-Rom 负向对照 **7.376 px 过冲**）+ 真实组件渲染断言 **14/0**。上一已发布版本 **v1.36.0**（**已发布 2026-09-30**）：**OTA 与一键安装改双源 —— 自建 Gitea 优先、GitHub 保底**。新增 `checkGiteaUpdate()`（8 秒超时、匿名）、`UpdateInfo.source`、**跨源下载保底**（Gitea 候选全失败 ⇒ 自动追加 GitHub 资产再跑一轮）、环境变量 `UPDATE_GITEA_BASE` / `UPDATE_GITEA_REPO` 覆盖；`quick-install.sh` 同步双源（`GITEA_BASE` / `GITEA_REPO`）并修掉「`ASSET_SIZE` 在函数定义前调用 ⇒ 包大小恒 0、进度无百分比」的顺序 bug。**发布规约：每次发布都发两个地方。** 上一已发布版本 **v1.35.11**（**已发布 2026-09-30**）：**`upapi` 改由 `device_uuid` 是否变化决定** —— `resolveUpapi(trigger, reportInstall)` → **`resolveUpapi(state, deviceId)`**：`!installReported \|\| lastDeviceId !== deviceId` ⇒ `install`，否则 `heartbeat`。**每次进程启动 / systemd restart 不再报 `install`**（ID 未变即 `heartbeat`），只有首次安装 / 身份真的变了才 `install` ⇒ **`install` 计数 ≈ 去重设备数**。运行态新增 **`lastDeviceId`**（每次成功上报都写，`reportOnce` 与 `reportOnToggle` 两处）；`ReportTrigger` 降级为「只决定要不要强制发」；24h 限流（`reportInstall` / `lastRebuildAt`）退化为**观测标记**（旧限流防的「同机反复改写刷安装量」现已由身份判据天然覆盖）。**上传开关切换仍恒 `install`**（按用户要求保留的唯一例外）。升级兼容：无 `lastDeviceId` ⇒ 保守补发一次 `install`。涉及客户端 `server/telemetry.ts`、`docs/上报触发与接口及上报内容.md`、`package.json`；**服务端 `yanzi/api` 与 `server/index.ts` 均无需改动**。验证＝前后端 `tsc` 双 0 + `test:gates` exit 0 + 删 `dist/` 重跑 `vite build` + 源码 harness（同 ID 重启 ⇒ `heartbeat`；换 ID ⇒ `install`）+ 真包冒烟。上一版 **v1.35.10**（已出包 · 未发布 · **包自本版起作废**）：**按触发源决定** —— 新增唯一判据 `resolveUpapi(trigger, reportInstall)`：`startup`（进程启动 / systemd restart）⇒ `install`，`periodic`（12h）/ `retry`（失败后 10 分钟）/ `manual`（页面「立即上报」）⇒ `heartbeat`，`reportOnToggle`（开关开↔关点 APPLY）**恒** `install`；`needInstall` 退化为「**只决定要不要发**」。`reportOnce(force = false)` → `reportOnce(trigger: ReportTrigger)`、`scheduleNext(delayMs, force)` → `scheduleNext(delayMs, trigger)`、`startTelemetryHeartbeat()` 传 `"startup"`、`POST /api/telemetry/report` 传 `"manual"`。**根因**＝旧 `upapi = needInstall ? "install" : "heartbeat"`，而 `installReported` **只在 2xx 成功时置位**、端点 NXDOMAIN ⇒ 所有触发退化成 `install`（真包 + 桩远端双向复现：500 ⇒ 全 `install`；200 ⇒ 首报 `install` 后转 `heartbeat`）。涉及客户端 `server/telemetry.ts`、`server/index.ts`、`docs/上报触发与接口及上报内容.md`、`package.json`；**服务端 `yanzi/api` 本次无需改动**（载荷仍是 15 个顶层字段，`resolveEvent` 的 `install`/`heartbeat` 分支不变）。验证＝前后端 `tsc` 双 `exit 0` + `npm run test:gates` exit 0 + 删 `dist/` 重跑 `vite build` + 真包六场景取证。⚠️ **新增语义**：同一设备**每次重启都会收到一条 `install`**，服务端去重请改为 **`device_uuid` upsert ＋ 比对 `installedAt`**。上一版 **v1.35.9**（已出包 · 未发布 · **包自本版起作废** · 2026-09-29）：**上报字段收敛** —— 把「常量 `event` + 布尔 `install`」两个冗余字段合并为单字段 **`upapi: "install" \| "heartbeat"`**（信息量严格等价）；运行态 `lastReportAt` / `lastActiveAt` 合并为 **`lastReportAt`**（`readState` 兼容读旧文件）；`hw_fingerprint` 字段与 DB 列**跨两仓彻底删除**（服务端幂等 `ALTER TABLE telemetry_devices DROP COLUMN hw_fingerprint`）；修掉「关闭上传开关后每 10 分钟空转」（`!cfg.enabled` ⇒ `fatal:true`，退回 12h 周期）。服务端 `resolveEvent` 三代兼容归一（`body.event \|\| body.upapi`，`install`→装 / `active`\|`heartbeat`→心跳 / `report`→看 `body.install`，其余 400）。涉及客户端 `server/telemetry.ts`、`src/api.ts`、`docs/上报触发与接口及上报内容.md`、`docs/上报.json`；服务端 `yanzi/api/src/{telemetry,db,routes}.js`、`yanzi/api/scripts/*`、`yanzi/api/README.md`、`yanzi/backstage/src/app.js`、`yanzi/docs/api-yanzi-docker-event.md`。验证＝服务端回归 `verify-telemetry.mjs` **78/0**（含删列幂等）+ 前后端 `tsc` 双 0 + `test:gates` **exit 0**（hooks 44 + auth 24/0 & 29/0 + restart 18/0 + thermal 15/0 + install 34/0）+ `vite build`（新资产 `assets/index-d-CniirZ.js`，js 内 `"1.35.9"`×1 / `"1.35.8"`×0）。⚠️ **部署顺序＝服务端 `yanzi/api` 必须先上**：现役 ECS1 只认 `event: install\|active`，不认 `upapi`/`heartbeat`/`report`，而 400 在客户端判为非致命（仅 401/403 fatal）⇒ 客户端先上会每 10 分钟无限重试；删列不可逆，执行前备份 `yanzi/api/data/yanzi-admin.db`。上一版 **v1.35.8**（已出包 · 未发布）：累计承接 **v1.35.3**（所有曲线 X 轴时间刻度）→ **v1.35.4**（容器目录打包下载 tar.gz）→ **v1.35.5**（仪表盘改造：系统概览 7 字段 / 磁盘卡片文件系统列 / 曲线默认折叠）→ **v1.35.6**（处理器·内存图标提示改**卡片式自定义 tooltip**）→ **v1.35.8**（温度能力落地：仪表盘磁盘卡片**显示温度**（读 sysfs hwmon **零提权**）+ **「利用率」列去掉进度条**；设置页**新增「温度」卡片**（CPU + 各盘 + `drivetemp` 检测）并把「本机设备」**改名「硬件信息」**；**`install.sh` 安装时自动加载 `drivetemp`**（`modprobe` + 写 `/etc/modules-load.d/drivetemp.conf` 持久化，`--no-drivetemp` 跳过，`uninstall.sh` 按归属标记清理）+ 新增**温度采集门禁** `scripts/check-thermal.mjs` 与**安装脚本门禁** `scripts/check-install-drivetemp.sh`；按用户要求不做 S.M.A.R.T.）。涉及 `src/pages/Dashboard.tsx`、`src/pages/Settings.tsx`、`src/components/ActivityPanel.tsx`、`src/lib/thermal.ts`、`server/docker.ts`、`server/index.ts`、`server/settings.ts`、`server/telemetry.ts`、`server/unit-status.ts`、`src/types.ts`、`src/api.ts`、`scripts/check-thermal.mjs`、`scripts/check-install-drivetemp.sh`、`deploy/linux/install.sh`、`deploy/linux/uninstall.sh`、`deploy/linux/README.md`、`package.json`。验证＝`lint:hooks` PASS（44 文件）+ 前后端 `tsc` 双 0 + `build:frontend`/`vite build` PASS + 路由层 13/13（v1.35.4）+ **`test:gates` 全绿（hooks 44 + auth 24/0 & 29/0 + restart 18/0 + thermal 15/0 + install 34/0）** + agent-browser 组件级实测（v1.35.6：`[role=tooltip]`×2 + hover `opacity 0→1`；v1.35.8 仪表盘：温度表头 6 列 + 阈值配色 + `null`→「—」+ **利用率去进度条**（表内 `<div>` 归零）；v1.35.8 设置页：`h2`=硬件信息 + 卡片标题「温度/硬件信息标识」+ 三场景（缺 drivetemp 提示条 1 条 / 已加载 0 条 / 全无传感器）+ CPU 62℃ 红加粗，均无 console error）。⚠️ **v1.35.6 及更早的包已从 `build-upload/`、`deploy/linux/` 清除，勿部署**；⚠️ 版本号语义：UI / 交互小改动走 **Patch**（`1.35.3 → … → 1.35.9`） |
+| 当前版本 | **v1.43.7**（**已改代码 2026-10-18 · 未出包**，Patch）：**① 清理未使用镜像弹窗清单回退干净两字段 `仓库名:标签`（撤销 v1.43.5 四段式，删 `splitImageRef`/`formatCleanListName` 死代码）；② 上传更新包后展示原始包名**（根因：服务端固定重命名 `pending-update.zip` 致 `fileName` 恒为 `pending-update.zip`，新增 `pending-update.meta.json` sidecar + 前端 `X-File-Name` Header 透传真实包名）。同版含 **v1.43.6**（**已出包 2026-10-18 · 未发布**，Patch）：**「清理未使用镜像」确认弹窗宽度改为「按内容自适应、封顶当前 2 倍」**（`Modal#fitWidth`＝`w-fit max-w-[896px] min-w-[448px]`，`ConfirmDialog#wide` 接 `fitWidth`，宽弹窗清单项 `whitespace-nowrap`+`overflow-auto`）。同版含 **v1.43.5**（**已出包 2026-10-18 · 未发布**，Patch）：**镜像管理页「清理未使用镜像」确认弹窗镜像名改为「注册表 / 命名空间 / 仓库 : 标签」四段式显示**（`splitImageRef`+`formatCleanListName`，无显式 registry 默认补 `docker.io`，dangling 回退 `sha256:短摘要`；删除逻辑仍走 `buildImageRef` 不受影响）。同版含 **v1.43.4**（**已出包 2026-10-18 · 未发布**，Patch）：**镜像管理页「清理未使用镜像」确认弹窗逐条列出将清理的镜像清单**（复用 `ConfirmDialog#list` 新增可选 prop，`Images.tsx` 派生去重清单传入）。同版含 **v1.43.3**（**已出包 2026-10-18 · 未发布**，Patch）：**镜像管理页官方镜像保留 `library/` 命名空间（只省略 `docker.io`）**（Docker API 默认省略，已补回）。同版含 **v1.43.2**（**已出包 2026-10-18 · 未发布**，Patch）：**修复空闲超时策略误将「正在操作」用户踢出登录**（前端「双权威」本地 idle 计时误踢 → 改为纯服务端权威：删除前端本地 idle 主动登出定时器、保留活动节流 `/api/auth/me` 续期、新增 `/api/auth/ping` 只读探活（60s，401 经全局兜底登出）；服务端 `auth.ts#peekSessionUser` 只读不续期）。同版含 **v1.43.1**：修复编辑堆栈 LABELS 自动识别 WebUI 后容器管理「打开 WebUI」需手动应用才生效；**v1.43.0**：登录会话策略改为空闲超时（滑动窗口）。
 | 版本号规则 | Major 人工发布；Minor ＝ **新增功能模块 / 新页面**；Patch ＝ 修复/优化/**UI 与交互小改动**（如 `1.35.0 → 1.35.1`）。v1.22.0 因新增「镜像更新→通知中心」与「硬件指纹作主键」两项新能力归为 Minor |
-| 最新 Release | [v1.39.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.39.0)（**2026-10-05 GitHub 发布 · Gitea 待本地推送**）＋ **自建 Gitea [v1.37.0](https://git.ziruxue.top/yanzi/docker-manager-yanzi/releases/tag/v1.37.0)**（**id=13**；两端 3 资产 **size 逐字节一致**）—— 主题＝**通知真实现（Webhook + 邮件）+ 密钥加密存储与不回传前端 + 拉取弹窗自动关闭 + 设置页三页 + 密码框小眼睛**；双源 OTA 核验 **14/0**、真包冒烟 **24/0**；上一已发布版本 [v1.36.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.36.0)（**2026-09-30 发布** · 主题＝OTA / 一键安装改双源（自建 Gitea 优先、GitHub 保底），确立「**每次发布都发两个地方**」的发布规约）；上一已发布版本 [v1.35.11](https://github.com/yanziruxue/docker-manager/releases/tag/v1.35.11)（**2026-09-30 发布** · 累积发布 **v1.32.0 → v1.35.11**：容器文件管理 / 温度能力 / 详情页与仪表盘演进 / 遥测 `upapi` 三代迭代；assets＝版本化 zip + latest 别名 + `quick-install.sh`，均 `uploaded`；notes 合并 **v1.32.0 → v1.35.11 共 15 个开发版本**；⚠️ 部署顺序＝**服务端 `yanzi/api` 先上**；⚠️ 本版改了 `install.sh`，启用 drivetemp 自动加载需重跑一次）；上一版 [v1.31.1](https://github.com/yanziruxue/docker-manager/releases/tag/v1.31.1) |
-| 源码分支 | `main`（当前发布点 **GitHub** `f99dd2478a9606cbff0aa830622294739108ac7a`（v1.39.0，**7 文件**：4 源文件 + package.json + CHANGELOG + push-via-api.mjs 修正）；**自建 Gitea** 待本地推送（本环境 git.ziruxue.top 不可达），分 3 次 Git Database API 推送：`f4888d77` 先推 8 个新文件 → `5cfd3412` **补齐 17 个已修改文件** → `5c31a92e` 删除误入库的 2 个 `settings.json`）；**自建 Gitea** `9a1e12d354ec74c0b6d579bd7c506d6b3a7f0758`（整仓提交推送 `022cda3..9a1e12d`）；上一版 `7ec0a17894e84dae7f83b58685caa6a7433fa654`（v1.35.11）；自建 Gitea 镜像 `yanzi/docker-manager-yanzi` @ `73e2063`） |
+| 最新 Release | [v1.42.23](https://github.com/yanziruxue/docker-manager/releases/tag/v1.42.23)（**2026-10-16 GitHub + 自建 Gitea 双源发布**）＋ **自建 Gitea [v1.42.23](http://192.168.24.10:8024/yanzi/dockermanagementyanzi/releases/tag/v1.42.23)**（资产＝版本化 zip + latest 别名 zip + `dockermanagementyanzi_1.42.23_amd64.deb` + `quick-install.sh`，两端 SHA 逐字节一致）；两处匿名 `releases/latest` 均指向 v1.42.23；清理＝删除两处 `< v1.40.0` 的全部 release（GitHub 45 + Gitea 9，0 失败），Gitea 保留 `v1.42.3`（≥1.40.0）；⚠️ 本次发布仅 release 资产，`push-via-api.mjs` 同步源码至 GitHub 仓库**尚未执行**；上一已发布版本 [v1.36.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.36.0)（**2026-09-30 发布** · 主题＝OTA / 一键安装改双源（自建 Gitea 优先、GitHub 保底），确立「**每次发布都发两个地方**」的发布规约）；上一已发布版本 [v1.35.11](https://github.com/yanziruxue/docker-manager/releases/tag/v1.35.11)（**2026-09-30 发布** · 累积发布 **v1.32.0 → v1.35.11**：容器文件管理 / 温度能力 / 详情页与仪表盘演进 / 遥测 `upapi` 三代迭代；assets＝版本化 zip + latest 别名 + `quick-install.sh`，均 `uploaded`；notes 合并 **v1.32.0 → v1.35.11 共 15 个开发版本**；⚠️ 部署顺序＝**服务端 `yanzi/api` 先上**；⚠️ 本版改了 `install.sh`，启用 drivetemp 自动加载需重跑一次）；上一版 [v1.31.1](https://github.com/yanziruxue/docker-manager/releases/tag/v1.31.1) |
+| 源码分支 | `main`（当前发布点 **GitHub** `f99dd2478a9606cbff0aa830622294739108ac7a`（v1.39.0，**7 文件**：4 源文件 + package.json + CHANGELOG + push-via-api.mjs 修正）；**自建 Gitea** `yanzi/dockermanagementyanzi` @ `192.168.24.10:8024`（v1.42.23 release 资产已发布、匿名 `releases/latest` 指向 v1.42.23；旧域名 `git.ziruxue.top` 已不通），源码经 Git Database API 同步 GitHub 仓库另走 `push-via-api.mjs`（**尚未执行**，GitHub 源码仍停在 v1.39.0 `f99dd247`），分 3 次 Git Database API 推送：`f4888d77` 先推 8 个新文件 → `5cfd3412` **补齐 17 个已修改文件** → `5c31a92e` 删除误入库的 2 个 `settings.json`）；**自建 Gitea** `9a1e12d354ec74c0b6d579bd7c506d6b3a7f0758`（整仓提交推送 `022cda3..9a1e12d`）；上一版 `7ec0a17894e84dae7f83b58685caa6a7433fa654`（v1.35.11）；自建 Gitea 镜像 `yanzi/docker-manager-yanzi` @ `73e2063`） |
 | 部署注意 | **v1.35.9 ⚠️ 部署顺序＝服务端 `yanzi/api` 必须先上、再发客户端**：现役 ECS1 服务端只认 `event: install\|active`，不认新的 `upapi` / `heartbeat` / `report`；而 400 在客户端被判为**非致命**（仅 401/403 fatal）⇒ 客户端先上会**每 10 分钟无限重试**。服务端升级含 DB 迁移（幂等 `ALTER TABLE … DROP COLUMN hw_fingerprint`，不可逆），执行前备份 `yanzi/api/data/yanzi-admin.db`。**v1.35.10 / v1.35.11 沿用该顺序**（客户端载荷字段集合与 v1.35.9 完全一致，仅 `upapi` **取值语义**变化）。**改过 `deploy/linux/*.service` 的版本，OTA 后必须重跑 `install.sh`**（或在「设置 → 硬件信息」页复制一键修复命令）——OTA 只替换二进制，不更新单元文件。**v1.35.8 另改了 `install.sh`**（新增 `drivetemp` 自动加载）⇒ 老部署升级后若看重磁盘温度，建议重跑一次 `install.sh`，或按「设置 → 硬件信息 → 温度」提示条里的命令手动 `modprobe drivetemp` + 写 `/etc/modules-load.d/drivetemp.conf` |
-| 交付包 | **当前 tip = v1.39.2（已出包 2026-10-08 · GitHub + Gitea 双端已发布）**：`build-upload/docker-manager-yanzi-linux-x64-v1.39.2.zip` **43,209,245 B** / SHA-256 `299d1203d55aa354fd28f3387dc71ab1ef605aaac7dcd9900c5f4f71b54a22f4`（内嵌二进制 130,813,120 B / `8101ae2dbd82072de9d263174505a7dc9a724f899cb5847a1a4173edf7d26cf7`，ELF `7f454c46` 已校验、含 `1.39.2`、**`1.39.1` 0 处**）+ 无版本号 `latest` 别名同字节（`build-upload/docker-manager-yanzi-linux-x64.zip` 43,209,245 B / 同 SHA-256）；前端资产 `assets/index-Dq1XtKap.js`（1,102,121 B）；`bundle.js` 5,607,027 B；`sea-prep.blob` 6,039,688 B；**真包冒烟 10/0**（asset 逐字节一致、缓存头 `/`=no-cache,must-revalidate 与 `/assets/*`=max-age=3600、`/api/*` 未登录 401）。**上一已发布 v1.39.1（已发布 2026-10-07）**：`build-upload/docker-manager-yanzi-linux-x64-v1.39.1.zip` **43,210,344 B** / SHA-256 `9ffc1fc9ceee8ac36533592d8f3c2c3755563b4ff454482f205596933e3f22dd`（内嵌二进制 130,813,120 B / `6140b970181ddebe69fc629453b796deb4bfd091423fed97a086a3d26689b6c4`，ELF `7f454c46` 已校验、`CURRENT_VERSION="1.39.1"`）+ 无版本号 `latest` 别名同字节：`build-upload/docker-manager-yanzi-linux-x64-v1.37.0.zip` **43,211,848 B** / SHA-256 `d2409d1753410f8664901eaeca8a859910cb8e48a808a7c7b8ad218e2558c932`（内嵌二进制 130,813,120 B / `52b64363e66b28ac7ee95bfdc1f560ec9fcc173c4556be1cfa86e8cfe3fe7982`，ELF `7f454c46` 已校验、`CURRENT_VERSION="1.37.0"`）+ 无版本号 `latest` 别名同字节；前端资产 `assets/index-DDCM49KO.js`（1,112,657 B）；`bundle.js` 5,620,565 B（含 `nodemailer`，约 +400 KB）；**真包冒烟 24/0**。**上一版 v1.36.0（已发布 2026-09-30）**：`build-upload/docker-manager-yanzi-linux-x64-v1.36.0.zip` **43,034,593 B** / SHA-256 `ae8752213ed928600d843a321b4f64c97e9a0dd76f659b4dfb336d0058b2507e`（内嵌二进制 130,092,224 B / `e798e940f9bb9b765ea3cb4777f25956ef500860dd8583a5bef16498fc818cad`，ELF `7f454c46` 已校验、`CURRENT_VERSION="1.36.0"`）+ 无版本号 `latest` 别名同字节；前端资产 `assets/index-gKErWW9k.js`（1,085,514 B）。**上一版 v1.35.11（已发布 2026-09-30）**：`build-upload/docker-manager-yanzi-linux-x64-v1.35.11.zip` **43,032,814 B** / SHA-256 `bfbd557e71ec60c148c6ca068d85f87832f2851db29346e3003ebcf50ffe21ad`（内嵌二进制 **130,092,224 B** / SHA-256 `d68f4ef38cf9db70b335936609f6d9c1ffbbf829832f4cd812ddd68e6d22752e`，ELF `7f454c46` 已校验、`CURRENT_VERSION="1.35.11"`、含 `resolveUpapi` 与 `lastDeviceId`）+ 无版本号 `latest` 别名同字节；前端资产 `assets/index-CDpmlpm-.js`（1,085,357 B）。**上一版 v1.35.10 的包 `build-upload/docker-manager-yanzi-linux-x64-v1.35.10.zip` 43,032,780 B / SHA-256 `7b6f80359a0d3af194908e9dfbf80c5bddc746f6a5442633c35a4b397884eeb7`（内嵌二进制 130,092,224 B / `e4284a6a15e0e48a8a9630dc29d326c4ecd99f209975e5cc27b6ad39a0c20b62`、ELF `7f454c46`、`CURRENT_VERSION="1.35.10"`）自本版起作废并已删除**。更早的 **v1.35.9**（`…-v1.35.9.zip` 43,032,672 B / `0571cb86933268523c26bf909f4d252dee17ef6617a0e976d569949473df36d1`，内嵌二进制 `cc320b778a0a975e46a569acf68a8fded3694f43b6b18b18ef27c23379a864ee`）**已删除**；**v1.35.8**（`…-v1.35.8.zip` 43,032,727 B / `d2f5216362d8c75c73e1bccdadc7205b10e54a4cee512f9ef9b80f6f4ab6bd06`，内嵌二进制 `3800a5d064e69181db122c4f29f014f4a548cd56b5b34a6adab470995ae3d33a`）**已删除**；**v1.35.6**（`…-v1.35.6.zip` 43,027,762 B / `b2de2716…`，内嵌二进制 `90dea067…`）**已作废并删除**。**Windows 交叉构建路径**：`scripts/build-binary.mjs` → 以 `/tmp/sea-build/node-v22.22.2-linux-x64/bin/node`（**Linux node**）为 base 生成 blob → `postject` 注入 → `make-package.py` 打 zip（⚠️ **不要用 `deploy/linux/build.sh`**，那是「在 Linux 上」的构建路径、用本机 `command -v node`，在 Windows 上会拿 Windows node 当 base）。`scripts/` 不在交付包成员内 |
+| 交付包 | **当前 tip = v1.43.7（已改代码 2026-10-18 · 未出包）**：两处修正——A 清理弹窗清单回退 `仓库名:标签` 两字段（删 `splitImageRef`/`formatCleanListName`）；B 上传更新包展示原始包名（新增 `pending-update.meta.json` sidecar + 前端 `X-File-Name` Header）。待出包补 SHA。上一版 **tip = v1.43.6（已出包 2026-10-18 · 未发布）**：`build-upload/dockermanagementyanzi-linux-x64-v1.43.6.zip` **43,062,864 B** / SHA-256 `49b712be72130aecd4bca2bd8bb57715d1688b4eb073485e876b038ab2c99799`（无版本别名 `dockermanagementyanzi-linux-x64.zip` 同字节）＋ `build-upload/dockermanagementyanzi_1.43.6_amd64.deb` **42,778,118 B** / SHA-256 `（deb 内二进制同 zip，deb 自身校验见 md5sums）`；内嵌二进制 SEA 交叉构建 130,419,904 B、ELF `7f454c46` / e_machine=62、内部版本 `1.43.6` ×2 / `1.43.5` 归零 / `__APP_VERSION__` 已替换；前端改动经 bundle.js 解码核验「清理清单格式说明文案（注册表 / 命名空间 / 仓库 : 标签）」+ `w-fit max-w-[896px] min-w-[448px]` 自适应宽 + `fitWidth` 接线编入；zip/deb 内二进制与 SEA 产物 SHA 逐字节一致（`49b712be…b2c99799`）；门禁 **16 组全绿 0 FAIL**。上一版 **tip = v1.43.5（已出包 2026-10-18 · 未发布）**：`build-upload/dockermanagementyanzi-linux-x64-v1.43.5.zip` **43,062,776 B** / SHA-256 `3f4f09c2ca5d96e0844f10e5cd421f61f24b47967880b9021f191c1532b2f937`（无版本别名 `dockermanagementyanzi-linux-x64.zip` 同字节）＋ `build-upload/dockermanagementyanzi_1.43.5_amd64.deb` **42,778,046 B** / SHA-256 `（deb 内二进制同 zip，deb 自身校验见 md5sums）`；内嵌二进制 SEA 交叉构建 130,419,904 B、ELF `7f454c46` / e_machine=62、内部版本 `1.43.5` ×2 / `1.43.4` 归零 / `__APP_VERSION__` 已替换；前端改动经 bundle.js 解码核验「清理清单格式说明文案」+ `docker.io` 默认 registry 逻辑（`splitImageRef` 编译为 `r||(r="docker.io")`）编入；zip/deb 内二进制与 SEA 产物 SHA 逐字节一致（`3f4f09c2…b2f937`）；门禁 **16 组全绿 0 FAIL**。上一版 **tip = v1.43.4（已出包 2026-10-18 · 未发布）**：  `build-upload/dockermanagementyanzi-linux-x64-v1.43.4.zip` **43,062,359 B** / SHA-256 `33d9a86f4bc4a383c87642af0b377d71304f6a53de1310aab4a1bb2753dad9fe`（无版本别名 `dockermanagementyanzi-linux-x64.zip` 同字节）＋ `build-upload/dockermanagementyanzi_1.43.4_amd64.deb` **42,777,602 B** / SHA-256 `（deb 内二进制同 zip，deb 自身校验见 md5sums）`；内嵌二进制 SEA 交叉构建 130,419,904 B、ELF `7f454c46` / e_machine=62、内部版本 `1.43.4` ×2 / `1.43.3` 归零 / `__APP_VERSION__` 已替换；前端改动经 bundle.js 解码核验「下方为本次将清理的镜像清单：」+ `list:` 接线编入；zip/deb 内二进制与 SEA 产物 SHA 逐字节一致（`33d9a86f…dad9fe`）；门禁 **16 组全绿 0 FAIL**。上一版 **tip = v1.43.3（已出包 2026-10-18 · 未发布）**：  `build-upload/dockermanagementyanzi-linux-x64-v1.43.3.zip` **43,061,677 B** / SHA-256 `0eaa2a5c2447982453cc6c957814f4268709411a8751c0cff150ebc980a3b173`（无版本别名 `dockermanagementyanzi-linux-x64.zip` 同字节）＋ `build-upload/dockermanagementyanzi_1.43.3_amd64.deb` **42,776,894 B** / SHA-256 `421073ff2617a90d3c9ac3fd1ca7efd65fecba8b8275e2a04b3d0b3da5ca9ec6`（install.sh 39,511 B；内嵌二进制 SEA 交叉构建 130,419,904 B、ELF `7f454c46` / e_machine=62、内部版本 `1.43.3` ×2 / `1.43.2` 归零 / `__APP_VERSION__` 已替换；前端改动经 `dist/assets/index-*.js` 核验「library/」×3、「includes("/")」×1、「scratch」×1（官方镜像补全命名空间逻辑编入）；功能单测 7/7 PASS（官方镜像 `node:22-alpine`→`library/node` 等、第三方 `gitea/gitea`/`docker.1panel.live/...` 与 `<none>`/`scratch` 不动）；zip/deb 内二进制与 SEA 产物 SHA 逐字节一致（内嵌二进制 SHA-256 `7fa8e2e7367d1a6ed6f5d49a5f1a246b0dbb4554ea86287a441567b63867b1b7`）；门禁 **16 组全绿 0 FAIL**）。上一版 **tip = v1.43.2（已出包 2026-10-18 · 未发布）**： `build-upload/dockermanagementyanzi-linux-x64-v1.43.2.zip` **43,061,629 B** / SHA-256 `1e97cf0ff7c1d3749b9067ae99b6d2681605e1767348119beb0f4eac0e72f78c`（无版本别名 `dockermanagementyanzi-linux-x64.zip` 同字节）＋ `build-upload/dockermanagementyanzi_1.43.2_amd64.deb` **42,776,834 B** / SHA-256 `1923f4f15b549b59cc12b22babfbc776c120c039f206502c71c40cb67a284944`（install.sh 39,511 B；内嵌二进制 SEA 交叉构建 130,419,904 B、ELF `7f454c46` / e_machine=62、内部版本 `1.43.2` ×2 / `1.43.1` 归零 / `__APP_VERSION__` 已替换；前端改动经 `dist/assets/index-*.js` 核验「mousemove」×24（活动监听保留）、「auth/ping」×1（新增 ping 调用）、旧本地 idle 计时 `lastActivity.t` 归零（esbuild 把前端 dist 全量 base64 嵌入 bundle.js，明文搜不到属正常）；zip/deb 内二进制与 SEA 产物 SHA 逐字节一致（内嵌二进制 SHA-256 `0188a189300ecb41ef6317799c2684eabac79286c11a2617d8885a63986b9cc0`）；门禁 **16 组全绿 0 FAIL**）。上一版 **tip = v1.43.1（已出包 2026-10-18 · 未发布）**： `build-upload/dockermanagementyanzi-linux-x64-v1.43.1.zip` **43,061,864 B** / SHA-256 `9d01ad0145351629080ed211081f185944ab45caa6213f653d03f6ca98534bd9`（无版本别名 `dockermanagementyanzi-linux-x64.zip` 同字节）＋ `build-upload/dockermanagementyanzi_1.43.1_amd64.deb` **42,777,124 B** / SHA-256 `a1dec08fd7f27540e9d151fa654e934a844af132f184bdb2a9e6f47bd0127e01`（install.sh 39,511 B；内嵌二进制 SEA 交叉构建 130,419,904 B、ELF `7f454c46` / e_machine=62、内部版本 `1.43.1` ×2 / `1.43.0` 归零 / `__APP_VERSION__` 已替换；前端改动经 `dist/assets/index-*.js` 核验「webuiLabels」×7、旧死代码 `autoDetectedRef` 与旧 `setWebuiLabels((prev)` 均归零（esbuild 把局部变量/参数重命名为短名，故 `saveStackSettingsApi`/`onRefresh` 字面量不保留，改动的包含性以「src 改→tsc 0→dist 重建→SEA 重建、二进制 SHA 由 1.43.0 的 `82820835…` 变为 `732c0b92…`」为证）；zip/deb 内二进制与 SEA 产物 SHA 逐字节一致（内嵌二进制 SHA-256 `732c0b924716274df4827a579566c08c888cf76b0e5a80fa7f16d2fde48980f6`）；门禁 **16 组全绿 0 FAIL**）。 `build-upload/dockermanagementyanzi-linux-x64-v1.43.0.zip` **43,061,858 B** / SHA-256 `edc5623369ff9a587e68ed74f1bcf64dcddb085585c9547a481d4c82723e01a8`（无版本别名 `dockermanagementyanzi-linux-x64.zip` 同字节）＋ `build-upload/dockermanagementyanzi_1.43.0_amd64.deb` **42,777,116 B** / SHA-256 `6ef7d294ad9c25b2f29ddd55c281260a7d939e615e6c3bdad4c2a4038415fe2f`（install.sh 39,511 B；内嵌二进制 SEA 交叉构建 130,419,904 B、ELF `7f454c46` / e_machine=62、内部版本 `1.43.0` ×2 / `1.42.27` 归零 / `__APP_VERSION__` 已替换；前端改动经 `dist/assets/index-*.js` 核验「mousemove」×5（SEA blob 内前端以 base64 嵌入，长段解码脚本有截断局限，最终以 dist 产物＋SHA 一致为准）；zip/deb 内二进制与 SEA 产物 SHA 逐字节一致（内嵌二进制 SHA-256 `82820835be6d313fb590233a039e010df37820e1e466d2e755ef5b8229e1f93b`）；门禁 **16 组全绿 0 FAIL**）。上一版 **tip = v1.42.27（已出包 2026-10-17 · 未发布）**： `build-upload/dockermanagementyanzi-linux-x64-v1.42.27.zip` **43,061,367 B** / SHA-256 `ddf568889c24f6b7a45d659c4a94d08f3b2da6b988e0db0131ca325117991b78`（无版本别名 `dockermanagementyanzi-linux-x64.zip` 同字节）＋ `build-upload/dockermanagementyanzi_1.42.27_amd64.deb` **42,776,676 B** / SHA-256 `31179e54e1d613cba3ed3d65af4327d511a87975ce918ce9e3d8cd79a63bc8af`（install.sh 39,511 B；内嵌二进制 SEA 交叉构建 130,419,904 B、ELF `7f454c46` / e_machine=62、内部版本 `1.42.27` ×1 / `1.42.26` 归零 / `1.42.25` 归零；前端段解码「点击状态查看容器详情」×1、「持久化目录映射」×1、「无目录映射」×1、「端口映射」×6；zip/deb 内二进制与 SEA 产物 SHA 逐字节一致（内嵌二进制 SHA-256 `e6261e83e5ed21a768a043de0d5d0a9dd7dbd4ee35b30cd20be19806faabc63c`）；门禁 **16 组全绿 0 FAIL**）。上一版 `build-upload/dockermanagementyanzi-linux-x64-v1.42.25.zip` **43,060,792 B** / SHA-256 `1d299c517ca8730c1b07b1fae1528746e785c446bf1676a12e05d88f94343c47`（无版本别名 `dockermanagementyanzi-linux-x64.zip` 同字节）＋ `build-upload/dockermanagementyanzi_1.42.25_amd64.deb` **42,776,104 B** / SHA-256 `1e8463aefb0d8d72820f9ededc9bf0303d3792c38640df3426978d9ab8e41d80`（install.sh 39,511 B；内嵌二进制 SEA 交叉构建 130,354,368 B、ELF `7f454c46` / e_machine=62、内部版本 `1.42.25` ×2 / `1.42.24` 归零；前端段解码「持久化目录映射」×1、「无目录映射」×1、「端口映射」×6；zip/deb 内二进制与 SEA 产物 SHA 逐字节一致（内嵌二进制 SHA-256 `8fce44009c0f50c8c5b50673058167efc0c052efed7671f77bf37ef6043a0f6e`）；门禁 **16 组全绿 0 FAIL**）。上一版 **v1.42.24（已出包 2026-10-16 · 未发布）**：`build-upload/dockermanagementyanzi-linux-x64-v1.42.24.zip` **43,059,922 B** / SHA-256 `5f3cc70a2adcd72c73fd0286f85965c030c5f39a95e6400983feec2fe471bccb`（无版本别名 `dockermanagementyanzi-linux-x64.zip` 同字节）＋ `build-upload/dockermanagementyanzi_1.42.24_amd64.deb` **42,775,682 B** / SHA-256 `14684fbce7d7f16fcf2abb76c347d13e5233fec831ff507daf6e741192f5b906`（install.sh 39,511 B；内嵌二进制 SEA 交叉构建 130,354,368 B、ELF `7f454c46` / e_machine=62、内部版本 `1.42.24` ×2 / `1.42.23` 归零；前端段解码「系统概览」×1、「运行时间」×1、「启动时间」×2、「逻辑核」×2（副标题模板已删、处理器等处保留）；zip/deb 内二进制与 SEA 产物 SHA 逐字节一致（内嵌二进制 SHA-256 `4200818e3e4dcf57b0eb448b675e2fe714da49542f7c9628fc6725543e525157`）；门禁 **16 组全绿 0 FAIL**）。上一版 **v1.42.23（已发布 2026-10-16 · 双源）**：`build-upload/dockermanagementyanzi-linux-x64-v1.42.23.zip` **43,060,260 B** / SHA-256 `aae3d74e0d860a4363cae2c9cec7216741c75dd42977e08f86e231a2381ea527`（无版本别名 `dockermanagementyanzi-linux-x64.zip` 同字节）＋ `build-upload/dockermanagementyanzi_1.42.23_amd64.deb` **42,775,820 B** / SHA-256 `0002a5dc4b907196092008d1a6b25abd02c3d3229c7573c255db0a1aabe9f94d`（install.sh 39,511 B；内嵌二进制 SEA 交叉构建 130,354,368 B、ELF `7f454c46` / e_machine=62、内部版本 `1.42.23` ×2 / `1.42.22` 归零；前端段解码「发行版本」×1、「架构」×1、「内核版本」×1、「系统类型」×0、「硬件信息标识」×1（三项已迁至硬件信息页、仪表盘系统概览不再含此三项）；zip/deb 内二进制与 SEA 产物 SHA 逐字节一致（内嵌二进制 SHA-256 `88f4952cc4ec19b6f2de2b17de4cedba0c2db1b9803442cfff0daf72558dc49e`）；门禁 **16 组全绿 0 FAIL**）。上一版 **v1.42.21（已出包 2026-10-16 · 未发布）**：`build-upload/dockermanagementyanzi-linux-x64-v1.42.21.zip` **43,060,261 B** / SHA-256 `159e63c19eaf83369fb548634fe314ab2e2470c6250a58d4c9443ab8dfea6cf8`（无版本别名 `dockermanagementyanzi-linux-x64.zip` 同字节）＋ `build-upload/dockermanagementyanzi_1.42.21_amd64.deb` **42,775,804 B** / SHA-256 `87ffeb7b969cc3f932ebec86f18cbd1f0d615709d1c85b56b7d8ea924bdd84b9`（install.sh 39,511 B；内嵌二进制 SEA 交叉构建 130,354,368 B、ELF `7f454c46` / e_machine=62、内部版本 `1.42.21` ×2 / `1.42.20` 归零（另 1 处 `1.42.15` 为 server/settings.ts 历史注释）；前端段解码「宿主负载」×5、「容器负载」×3、「宿主负载曲线」×1、「整体负载」×4（回落文案）、`hostCpuPercent`×4、「宿负载」**0**（改名彻底）、压缩形态 `clamp(m.cpuPercent/f,0,100)`＝Σ÷ncpu 无 ×100 且 `cpuPercent*100` 零命中、`hostOnlyPct`×2 / `containerPct`×5（两段结构在包内可见）；zip/deb 内二进制与 SEA 产物 SHA 逐字节一致（内嵌二进制 SHA-256 `b2a3e85c707fba5a8f88fd97c5ad5e37ac2eaf6169fc8f32001026bce7d67c80`）；门禁 **16 组全绿 0 FAIL**）。上一版 **v1.42.19（已出包 2026-10-16 · 未发布）**：`build-upload/dockermanagementyanzi-linux-x64-v1.42.19.zip` **43,059,267 B** / SHA-256 `75df296311ded7083c6afc0751957d355d32f9aa9525bf9de8956f7d9d989bd1`（无版本别名 `dockermanagementyanzi-linux-x64.zip` 同字节）＋ `build-upload/dockermanagementyanzi_1.42.19_amd64.deb` **42,775,006 B** / SHA-256 `bfe16e15e409533884f5ad40d1701fdd849e8d3a22efe08bf7fc5f6da0f8f41b`（install.sh 39,511 B；内嵌二进制 SEA 交叉构建 130,354,368 B、内部版本 `1.42.19` ×2 / `1.42.18` 归零（另 1 处 `1.42.15` 为 server/settings.ts 历史注释，非构建残留）；前端段解码「镜像管理『SHA-256』列默认不显示」×1、压缩形态 `!=="sha256"` ×2（两处剔除逻辑随包出货，标识符被 minify 改名属预期）、`sha256` ×24、`SHA-256` ×5、仓库 registry 地址相关文案保留；zip/deb 内二进制与 SEA 产物 SHA 逐字节一致；门禁 **15 组 531 项 0 FAIL**）。上一版 **v1.42.18（已出包 2026-10-16 · 未发布）**：`build-upload/dockermanagementyanzi-linux-x64-v1.42.18.zip` **43,059,091 B** / SHA-256 `1649dd7809d0fdbfaf83f15a2781c043781187704427dee1751cc6acb8f349d1`（无版本别名 `dockermanagementyanzi-linux-x64.zip` 同字节）＋ `build-upload/dockermanagementyanzi_1.42.18_amd64.deb` **42,774,868 B** / SHA-256 `d6697ccfc3fc027cf56a7a817c657786b902f1b913c802bd897a33418efef158`（install.sh 39,511 B；内嵌二进制 SEA 交叉构建 130,354,368 B、内部版本 `1.42.18` ×2 / `1.42.17` 归零（另 1 处 `1.42.15` 为 server/settings.ts 历史注释，非构建残留）；前端段解码「仓库 registry 地址」×2、「hideRepoRegistryInit」×2、「hideRegistryPrefix」×4、「仓库名隐藏 registry 地址」×2、「docker.1panel.live/gitea/gitea」×3、设置页指向文案 ×1；zip/deb 内二进制与 SEA 产物 SHA 逐字节一致；门禁 **15 组 525 项 0 FAIL**）。上一版 **v1.42.17（已出包 2026-10-16 · 未发布）**：`build-upload/dockermanagementyanzi-linux-x64-v1.42.17.zip` **43,058,465 B** / SHA-256 `451988b6695db10c1d78b1f6cd18dedf10fbd6f709803581ff50798262827369`（无版本别名 `dockermanagementyanzi-linux-x64.zip` 同字节）＋ `build-upload/dockermanagementyanzi_1.42.17_amd64.deb` **42,774,672 B** / SHA-256 `07ece25c2a1cb43ccc72a6aae4cb3cfb8d85156975abb689a31260d2c5f34a5b`（install.sh 39,511 B；内嵌二进制 SEA 交叉构建 130,354,368 B、内部版本 `1.42.17` ×2 / `1.42.16` 归零（另 1 处 `1.42.15` 为 server/settings.ts 历史注释，非构建残留）；前端段解码「仓库名隐藏 registry 地址」×2、「常驻显示」×1、「docker.1panel.live/gitea/gitea」×2、「hideRegistryPrefix」×4；zip/deb 内二进制与 SEA 产物 SHA 逐字节一致；门禁 **15 组 518 项 0 FAIL**）。上一版 **v1.42.16（已出包 2026-10-15 · 未发布）**：`build-upload/dockermanagementyanzi-linux-x64-v1.42.16.zip` **43,058,704 B** / SHA-256 `2c4fb0e55daae9820d3c7f723e5a5a0b413a0de12d3b4fb9bcc4c29faee385bc`（无版本别名 `dockermanagementyanzi-linux-x64.zip` 同字节）＋ `build-upload/dockermanagementyanzi_1.42.16_amd64.deb` **42,774,582 B** / SHA-256 `14e8e5146a03cdc8d6e5826cfccb9fe380bb4f3702cf22b6676eb84b416a00e8`（install.sh 39,511 B；内嵌二进制 SEA 交叉构建 130,354,368 B、内部版本 `1.42.16` ×2（另 1 处 `1.42.15` 为 server/settings.ts 历史注释，非构建残留）/ `clearOpLogs()` 调用 0；前端段解码「当前页面显示已清空」×2、两条恢复说明各 ×1、title ×2、「清空记录」0；zip/deb 内二进制与 SEA 产物 SHA 逐字节一致；门禁 **15 组 513 项 0 FAIL**）。上一版 **v1.42.15（已出包 2026-10-15 · 未发布）**：`build-upload/dockermanagementyanzi-linux-x64-v1.42.15.zip` **43,058,570 B** / SHA-256 `4efa2ef634e9bc96106fff6aeb76335d3b8341df58d039b31ec24f2916ea6da0` ＋ `build-upload/dockermanagementyanzi_1.42.15_amd64.deb` **42,774,478 B** / SHA-256 `43aedde4437e447e2fc59eb13224f467290865eea2f867e7409a22c1029e2c26`（前端段解码「仓库名隐藏 registry 地址」×2、「docker.1panel.live/gitea/gitea」×2、「hideRegistryPrefix」×4；zip/deb 内二进制与 SEA 产物 SHA 逐字节一致；门禁 14 组 493 项 0 FAIL）。历史 **v1.42.3（已出包 2026-10-11 · 未发布）**：`build-upload/dockermanagementyanzi-linux-x64-v1.42.3.zip` **43,055,353 B** / SHA-256 `91a44cc62985faaac230bf35cf23e656397ed77fb337a5ca5e05cefbfda64d84` ＋ `build-upload/dockermanagementyanzi_1.42.3_amd64.deb` **42,772,042 B** / SHA-256 `95811f98d49acddf790a408066130fbc4b81c290a6d4f79c7f88b9336fe80822`（install.sh 39,511 B；内嵌二进制 SEA 交叉构建 130,354,368 B、内部版本 `1.42.3`；门禁 12 组 485 项 0 FAIL）。上一版 **v1.42.2**：`build-upload/dockermanagementyanzi-linux-x64-v1.42.2.zip` **43,055,500 B** / SHA-256 `923acaf6125ab638762790842bff0216370d0aea058bf5f57b7bb8d059b01f56` ＋ `build-upload/dockermanagementyanzi_1.42.2_amd64.deb` **42,771,740 B** / SHA-256 `ac483043879718b81c72227a3be1896bdff8bb0f38d749be25c02e8257e7e10a`（install.sh 39,272 B；内嵌二进制 SEA 交叉构建 130,354,368 B、内部版本 `1.42.2`；门禁 12 组 483 项 0 FAIL）。上一版 **v1.42.1**：`build-upload/dockermanagementyanzi-linux-x64-v1.42.0.zip` **43,055,172 B** / SHA-256 `b3c372f41dd6e2e11fb58f6f03f19f885b628b171e0ce2b20c19d75c13d6c1e3`（无版本 alias `dockermanagementyanzi-linux-x64.zip` 同字节）＋ `build-upload/dockermanagementyanzi_1.42.0_amd64.deb` **42,771,400 B** / SHA-256 `b825a8cedaf029b1a8a48fdd2b83ae6a147f3fa1579b38844cc7c8774ad03ae9`。内嵌二进制为 **SEA 交叉构建新建** 130,354,368 B（Linux x64 ELF `7f454c46`、`e_machine=62`、内部版本 `1.42.0` ×2 / `1.41.5` 归零）；**zip 5 成员**：二进制 0755 ＋ install.sh 0755/39,225 ＋ uninstall.sh 0755/4,831 ＋ `dockermanagementyanzi.service` 0644/3,806 ＋ README.md 0644/9,615；**deb** 结构/权限/md5sums/`bash -n` 维护脚本全部校验通过。⚠️ 本版未改 `install.sh`/`.service` ⇒ OTA 升级后**无需**重跑安装脚本。上一版 **v1.41.5（已出包 2026-10-11 · 未发布）**：`deploy/linux/dockermanagementyanzi-linux-x64-v1.41.5.zip` **43,052,293 B** / SHA-256 `7f9e068a279ce3aa26d5750db9744ab457f1042845796a78a3b8c9f9da518051`（内嵌二进制**新建** 130,354,368 B / 重建 Linux SEA，ELF `7f454c46`、内部版本 `1.41.5`；**包内 5 成员**：二进制 0755/130,354,368 ＋ install.sh 0755/40,290 ＋ uninstall.sh 0755/4,831 ＋ `dockermanagementyanzi.service` 0644/3,806 ＋ README.md 0644/9,619）；门禁 **9 组 73 项** 0 FAIL（`test:service` 73 项）；包内 `install.sh` 新增旧名称 `docker-manager-yanzi.service` → `dockermanagementyanzi.service` 自动迁移块）。上一版 **v1.41.4（已出包 2026-10-11 · 未发布）**：`deploy/linux/docker-manager-yanzi-linux-x64-v1.41.4.zip` **43,220,317 B** / SHA-256 `cffb1ec0e407e0153172369655a26c42f757d3722b52a1097d6f2639ba4f96fa`（内嵌二进制 **沿用 v1.41.3 的 Linux SEA 二进制** 130,813,120 B / `d440e92dbd3975f62b3e40ebfe4944860cbfbf6dcf7eb6ec40768eba0dab0740`，ELF `7f454c46`、内部版本号仍为 `1.41.3`；**包内 5 成员**、install.sh 38,901 B、uninstall.sh 4,833 B、单元 3,818 B、README.md 9,689 B）；门禁 **9 组 361 项** 0 FAIL（`test:service` 73 项）；包内 `install.sh` 已改为「安装前先检测旧版本、默认按旧路径升级、拒绝后才要新路径」。**上一版 v1.41.3（已出包 2026-10-11 · 未发布）**：`deploy/linux/docker-manager-yanzi-linux-x64-v1.41.3.zip` **43,219,833 B** / SHA-256 `52e89b26569f4018a894f0419b5465de477f246472d18f35bf7f69129e03dadc`（内嵌二进制 130,813,120 B / `d440e92dbd3975f62b3e40ebfe4944860cbfbf6dcf7eb6ec40768eba0dab0740`，ELF `7f454c46`、`1.41.3`；`resolveUnitUserGroup`×3；**包内 5 成员**、install.sh 36,582 B、uninstall.sh 4,833 B、单元 3,818 B、README.md 9,689 B）；门禁 **9 组 358 项** 0 FAIL（`test:service` 70 项）；包内 `install.sh` 单元段已明确「自动刷新/修复」、含全部占位符替换自检。**上一版 v1.41.2（已出包 2026-10-11 · 未发布）**：`build-upload/docker-manager-yanzi-linux-x64-v1.41.2.zip` **43,218,888 B** / SHA-256 `58923176f22445fae2d2b9fbdc9d4f00ae3e996c8ff817d7e733aae82223962e`（内嵌二进制 130,813,120 B / `4a34e618d77918abbb4a4353ba3e62f3e61c1b67b41e3e84669f9cded97b40f4`，ELF `7f454c46`；**包内 5 成员**、install.sh 36,013 B、uninstall.sh 4,833 B、单元 3,818 B、README.md 9,689 B）；门禁 **9 组 353 项** 0 FAIL（`test:service` 65 项）；包内 `install.sh` 已确认无 `docker_running` / `verify_login_password` / `pamtester` / `read -r -s -p`。**上一版 v1.41.1（已出包 2026-10-11 · 未发布）**：`build-upload/docker-manager-yanzi-linux-x64-v1.41.1.zip` **43,220,434 B** / SHA-256 `a26e487b3774996d89fc3587d6f9ca63deb5db7460a6ccadd5211bcf9d89b000`（内嵌二进制 130,813,120 B / `2f926c5208695582b9e984476a2bd3ea3218e6be1215029bb07e5f06ed578743`，ELF `7f454c46`、含 `1.41.1`、`1.41.0` 残留 0、`resolveInstallDir` ×3、drop-in 名 ×1、`__INSTALL_DIR__` ×6；**包内 5 成员**、install.sh 41,173 B、单元 3,818 B）；门禁 **9 组 356 项** 0 FAIL（`test:service` 68 项）。**上一版 v1.41.0（已出包 2026-10-11 · 未发布）**：`build-upload/docker-manager-yanzi-linux-x64-v1.41.0.zip` **43,213,450 B** / SHA-256 `d01733eeb8c87073736c2d5a15f2860193501fd9ad1157a71ded2146daf1a596`（内嵌二进制 130,813,120 B / `a2e1213cbfd5a2eaafecc78944878879706c5545066f9bbe094504f83fa03569`，ELF `7f454c46`、含 `1.41.0`×3、`1.40.6` 残留 0；`applyViaExecutor`/`dms-mirror-exec` 均 **0**；**包内 5 成员**、install.sh 25,835 B）；门禁 **9 组 321 项** 0 FAIL。**上一版 v1.40.6（已出包 2026-10-11 · 未发布）**：`build-upload/docker-manager-yanzi-linux-x64-v1.40.6.zip` **43,228,888 B** / SHA-256 `23a5a233e3f6991102825c955df6a43c79d8005f382ad44edb7700b7947d745c`（ELF、含 `1.40.6`、`1.40.5` 残留 0；`serviceUsername`×4；包内 6 成员）；门禁 11 组 392 项 0 FAIL。（ELF、含 `1.40.5`、`1.40.4` 残留 0；包内 6 成员）；门禁 **11 组 378 项** 0 FAIL。**上一版 v1.40.4（已出包 2026-10-11 · 未发布）**：`build-upload/docker-manager-yanzi-linux-x64-v1.40.4.zip` **43,228,386 B** / SHA-256 `354f4de5b84658e8e7bc67a05f5331b6e5d176ffee4853b236ec4affb124b0a1`（ELF、含 `1.40.4`、`1.40.3` 残留 0；包内 6 成员）；门禁 11 组 377 项 0 FAIL。**上一版 v1.40.3（已出包 2026-10-11 · 未发布）**：`build-upload/docker-manager-yanzi-linux-x64-v1.40.3.zip` **43,227,299 B** / SHA-256 `95b83df3f538ae99b0dedfbbb99b551ba48a8c9223880636134eb8a23ecc6843`（ELF `7f454c46` 已校验、含 `1.40.3`、`1.40.2` 残留 0；`bundle.js` 5,630,263 B）；包内 6 成员（含 `dms-mirror-exec.sh` 0755/15,295 B）；门禁 11 组 373 项 0 FAIL。（ELF `7f454c46` 已校验、含 `1.40.3`、`1.40.2` 残留 0；`bundle.js` 5,630,263 B）；包内 6 成员（含 `dms-mirror-exec.sh` 0755/15,295 B）；门禁 **11 组 373 项 0 FAIL**。**上一版 v1.40.2（已出包 2026-10-11 · 未发布）**：`build-upload/docker-manager-yanzi-linux-x64-v1.40.2.zip` **43,223,841 B** / SHA-256 `3b030aef8eed255e1dfca83a2c2c98eb358d13bd9bd1de7fe9b605445bee382c`（内嵌二进制 130,813,120 B / `3b030aef…`，ELF `7f454c46` 已校验、含 `CURRENT_VERSION="1.40.2"`）；包内 6 成员（含 `dms-mirror-exec.sh` 0755/14,953 B）。**上一版 v1.40.1（已出包 2026-10-11 · 未发布）**：`build-upload/docker-manager-yanzi-linux-x64-v1.40.1.zip` **43,221,742 B** / SHA-256 `6e56cef813f20e9bcd08fac498fbe6d2647a87d62e8e25dba2c7703cc1b22800`（内嵌二进制 130,813,120 B / `6e56cef8…`，ELF `7f454c46` 已校验、含 `CURRENT_VERSION="1.40.1"`）；包内 6 成员（含 `dms-mirror-exec.sh` 0755/14,489 B）。**上一版 v1.40.0（已出包 2026-10-11 · 未发布）**：`build-upload/docker-manager-yanzi-linux-x64-v1.40.0.zip` **43,221,453 B** / SHA-256 `22ec75c663fdb74faedd43c0011ad086b60aacf3c60d6eb2039f75a9b38348c2`（**首版漏打执行器、08:48 重建**）。+ 无版本号 `latest` 别名同字节（`build-upload/docker-manager-yanzi-linux-x64.zip` 43,209,245 B / 同 SHA-256）；前端资产 `assets/index-Dq1XtKap.js`（1,102,121 B）；`bundle.js` 5,607,027 B；`sea-prep.blob` 6,039,688 B；**真包冒烟 10/0**（asset 逐字节一致、缓存头 `/`=no-cache,must-revalidate 与 `/assets/*`=max-age=3600、`/api/*` 未登录 401）。**上一已发布 v1.39.1（已发布 2026-10-07）**：`build-upload/docker-manager-yanzi-linux-x64-v1.39.1.zip` **43,210,344 B** / SHA-256 `9ffc1fc9ceee8ac36533592d8f3c2c3755563b4ff454482f205596933e3f22dd`（内嵌二进制 130,813,120 B / `6140b970181ddebe69fc629453b796deb4bfd091423fed97a086a3d26689b6c4`，ELF `7f454c46` 已校验、`CURRENT_VERSION="1.39.1"`）+ 无版本号 `latest` 别名同字节：`build-upload/docker-manager-yanzi-linux-x64-v1.37.0.zip` **43,211,848 B** / SHA-256 `d2409d1753410f8664901eaeca8a859910cb8e48a808a7c7b8ad218e2558c932`（内嵌二进制 130,813,120 B / `52b64363e66b28ac7ee95bfdc1f560ec9fcc173c4556be1cfa86e8cfe3fe7982`，ELF `7f454c46` 已校验、`CURRENT_VERSION="1.37.0"`）+ 无版本号 `latest` 别名同字节；前端资产 `assets/index-DDCM49KO.js`（1,112,657 B）；`bundle.js` 5,620,565 B（含 `nodemailer`，约 +400 KB）；**真包冒烟 24/0**。**上一版 v1.36.0（已发布 2026-09-30）**：`build-upload/docker-manager-yanzi-linux-x64-v1.36.0.zip` **43,034,593 B** / SHA-256 `ae8752213ed928600d843a321b4f64c97e9a0dd76f659b4dfb336d0058b2507e`（内嵌二进制 130,092,224 B / `e798e940f9bb9b765ea3cb4777f25956ef500860dd8583a5bef16498fc818cad`，ELF `7f454c46` 已校验、`CURRENT_VERSION="1.36.0"`）+ 无版本号 `latest` 别名同字节；前端资产 `assets/index-gKErWW9k.js`（1,085,514 B）。**上一版 v1.35.11（已发布 2026-09-30）**：`build-upload/docker-manager-yanzi-linux-x64-v1.35.11.zip` **43,032,814 B** / SHA-256 `bfbd557e71ec60c148c6ca068d85f87832f2851db29346e3003ebcf50ffe21ad`（内嵌二进制 **130,092,224 B** / SHA-256 `d68f4ef38cf9db70b335936609f6d9c1ffbbf829832f4cd812ddd68e6d22752e`，ELF `7f454c46` 已校验、`CURRENT_VERSION="1.35.11"`、含 `resolveUpapi` 与 `lastDeviceId`）+ 无版本号 `latest` 别名同字节；前端资产 `assets/index-CDpmlpm-.js`（1,085,357 B）。**上一版 v1.35.10 的包 `build-upload/docker-manager-yanzi-linux-x64-v1.35.10.zip` 43,032,780 B / SHA-256 `7b6f80359a0d3af194908e9dfbf80c5bddc746f6a5442633c35a4b397884eeb7`（内嵌二进制 130,092,224 B / `e4284a6a15e0e48a8a9630dc29d326c4ecd99f209975e5cc27b6ad39a0c20b62`、ELF `7f454c46`、`CURRENT_VERSION="1.35.10"`）自本版起作废并已删除**。更早的 **v1.35.9**（`…-v1.35.9.zip` 43,032,672 B / `0571cb86933268523c26bf909f4d252dee17ef6617a0e976d569949473df36d1`，内嵌二进制 `cc320b778a0a975e46a569acf68a8fded3694f43b6b18b18ef27c23379a864ee`）**已删除**；**v1.35.8**（`…-v1.35.8.zip` 43,032,727 B / `d2f5216362d8c75c73e1bccdadc7205b10e54a4cee512f9ef9b80f6f4ab6bd06`，内嵌二进制 `3800a5d064e69181db122c4f29f014f4a548cd56b5b34a6adab470995ae3d33a`）**已删除**；**v1.35.6**（`…-v1.35.6.zip` 43,027,762 B / `b2de2716…`，内嵌二进制 `90dea067…`）**已作废并删除**。**Windows 交叉构建路径**：`scripts/build-binary.mjs` → 以 `/tmp/sea-build/node-v22.22.2-linux-x64/bin/node`（**Linux node**）为 base 生成 blob → `postject` 注入 → `make-package.py` 打 zip（⚠️ **不要用 `deploy/linux/build.sh`**，那是「在 Linux 上」的构建路径、用本机 `command -v node`，在 Windows 上会拿 Windows node 当 base）。`scripts/` 不在交付包成员内 |
 | 架构 | REST + WS + SSE 三通道；Socket / TCP / SSH 三种引擎 |
 | 目标平台 | Linux x64（SEA 单可执行文件），Unraid / 自托管 NAS |
 
@@ -790,7 +2526,7 @@
 | 备份管理 | ✅ | 手动全量 + 堆栈级备份 / 恢复（含**上传备份文件直接恢复**）/ 导出（**zip** 格式，兼容历史 tar.gz）+ 自动备份调度器（周/月/年/Cron，含保留清理） |
 | 权限诊断与修复 | ✅ | 备份期自愈 `u+r` + 结构化诊断（属主/权限位/一条修复命令）+ `fix-perms` CLI + 启动体检与界面提示 |
 | 通知中心 | ✅ | 未读已读 + localStorage 持久化 |
-| 系统设置 | ✅ | Docker 配置 / Compose 模式 / 通知 / 备份 / **镜像更新**（原「更新调度器」）/ 列显隐 / **硬件信息**（原「本机设备」，v1.35.8 改名）：**温度卡片**（CPU 温度 + 各整盘温度，读 sysfs hwmon **零提权**；缺温度的 SATA 盘给 `drivetemp` 加载提示与一键复制命令；**v1.35.8 起 `install.sh` 安装时已自动加载并持久化**，在线升级不更新安装脚本、老部署需手动跑一次或重跑 `install.sh`）+ 硬件指纹 6 维 + 完整硬件详情卡片（含 **主板型号 / 产品序列号 / 系统UUID**，只读；**「上传安装数量统计」开关默认开启**，关闭后不发任何请求 + 「安装时间」一行）/ **应用详情**（v1.37.0 新增：应用安装位置 + 六个目录的真实路径 / 文件数 / 占用，只读）/ **应用日志**（v1.37.0 新增：列表 / 尾部查看 / 单文件下载 / zip 导出 / 「立即清理」/ 保留策略表单（开关 + 天数 + 容量））/ **目录镜像**（v1.37.0 新增：备份目录与 compose 目录实时另存，每源一卡：开关 + 目标路径 + 校验提示 + 运行态 + 「立即同步」，15 秒轮询） |
+| 系统设置 | ✅ | Docker 配置 / Compose 模式 / 通知 / 备份 / **镜像更新**（原「更新调度器」）/ 列显隐 / **硬件信息**（原「本机设备」，v1.35.8 改名）：**温度卡片**（CPU 温度 + 各整盘温度，读 sysfs hwmon **零提权**；缺温度的 SATA 盘给 `drivetemp` 加载提示与一键复制命令；**v1.35.8 起 `install.sh` 安装时已自动加载并持久化**，在线升级不更新安装脚本、老部署需手动跑一次或重跑 `install.sh`）+ 硬件指纹 6 维 + 完整硬件详情卡片（含 **主板型号 / 产品序列号 / 系统UUID**，只读；**「上传安装数量统计」开关默认开启**，关闭后不发任何请求 + 「安装时间」一行）/ **应用信息**（v1.37.0 新增为「应用详情」，v1.38.0 改名；**v1.41.6 起并入「系统更新 → 当前版本」卡片**；原「安装位置与目录」卡片同版移除）/ **应用日志**（v1.37.0 新增：列表 / 尾部查看 / 单文件下载 / zip 导出 / 「立即清理」/ 保留策略表单（开关 + 天数 + 容量））/ ~~**目录镜像**（v1.37.0 新增：备份目录与 compose 目录实时另存，每源一卡：开关 + 目标路径 + 校验提示 + 运行态 + 「立即同步」，15 秒轮询）~~ **v1.41.6 起设置页 UI 已移除**（`server/mirror.ts` 与 `/api/mirror/*` 保留） |
 | Web 终端 | ✅ | xterm.js + WebSocket + 多 Shell 检测 |
 | 登录鉴权 | ✅ | 单管理员 + scrypt + httpOnly 会话（绝对过期）+ 密码找回码（**18~24 位字母数字、区分大小写、10 分钟限流**；**历史记录按大写哈希者输入小写仍可用**，`legacyUpperVariants` 回退）+ **凭据版本 `credentialVersion`（本版要求 2）**：老记录登录后**强制重走「用户名 / 密码 / 找回码」**（`POST /api/auth/reinit`），期间除白名单外的全部 `/api` 返回 `403 REINIT_REQUIRED`，重设成功即作废该用户**全部会话** |
 | 镜像更新（原更新调度器） | ✅ | 后台定时检查镜像版本（每天 / 每周 / 每月，非 Cron）+ 结果落盘缓存 + 镜像页「检查更新」共用同一份数据 |
@@ -2480,6 +4216,7 @@ v1.27.1 当初漏掉这个 P0，就是因为 mock 直接给了非空数据、`lo
 
 > ① **镜像锁定**（新功能）：可锁定镜像，使其在「清理未使用」时被跳过，锁定状态由服务端持久化；② 镜像分类简化为「**使用中 / 未使用**」，悬空归入未使用，并显示已锁定数量；③ 资源监控仪表盘精简，移除「Docker 镜像占用」「Docker 数据卷占用」两个环形仪表；④ **仪表盘重构为 Unraid 式三列磁贴布局**（磁贴可折叠、**只折叠不移除**；处理器改横向条形、内存改双曲线磁贴；移除统计卡片与「最近活动」）；⑤ **处理器磁贴新增「整体负载曲线」**（可独立折叠；后端 `ResourceSample` 补采 `cpuPercent`），并把**处理器 / 内存 / 网络三处曲线的时间范围统一**为磁贴头下拉（10 秒~5 分钟，按磁贴持久化为 `dm.chart.<id>.range`，切换仅本地切片、不发请求）。
 
+
 ### ✅ 已完成
 
 - **Feature A — 镜像锁定：清理未使用时跳过**（新增 `server/image-locks.ts`；改 `server/docker.ts`、`server/index.ts`、`src/api.ts`、`src/types.ts`、`src/pages/Images.tsx`）
@@ -2571,6 +4308,7 @@ v1.27.1 当初漏掉这个 P0，就是因为 mock 直接给了非空数据、`lo
 > 用户可见改动：① 堆栈「格式化」支持平铺 YAML 自动补缩进（并修正触发时机）；② 新增「网络管理」独立导航（原在数据卷管理 tab 内，本次提至与数据卷管理同级侧边栏）；③ 网络管理 host 驱动网络全局仅允许创建 1 个；④ 仪表盘-资源监控改为**环形仪表盘**（CPU 各核小环 + 镜像/数据卷占用环）；⑤ 资源监控新增**内存双曲线图**（系统占用 + Docker 占用，下方显示最大支持 / 已安装大小）、**网络上下行双曲线图**（含 10 秒~5 分钟时间范围）与**磁盘利用率表格**；⑥ 堆栈「格式化」改为**数组写法**（`environment` / `labels` 映射 → `- K=V`；纯标量序列 → 行内 `[a, b]`）；⑦ 镜像**拉取任务**两端保留期统一 **30 分钟**，并在「详情」右侧新增 **×** 手动清理（前后端同时移除）——即「30 分钟自动清理」+「手动 × 清理」两种并存。
 >
 > **缺陷修复**：创建堆栈「上传文件」方法的上传区此前只是一个**装饰性 div**（没有 `onClick` / `onDrop` / 隐藏 file input），点击与拖拽都无反应；已补齐真实导入逻辑。
+
 
 ### ✅ 已完成
 
@@ -3122,6 +4860,7 @@ v1.27.1 当初漏掉这个 P0，就是因为 mock 直接给了非空数据、`lo
 - 资产：版本名 zip + latest 别名 `docker-manager-yanzi-linux-x64.zip` + `quick-install.sh`
 
 ---
+
 
 ## v1.21.2 — 2026-09-19
 

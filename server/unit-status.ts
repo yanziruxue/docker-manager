@@ -2,7 +2,7 @@
  * ============================================
  * systemd 服务单元一致性检查
  *
- * 背景（v1.23.5）：`deploy/linux/docker-manager-yanzi.service` 由 `install.sh`
+ * 背景（v1.23.5）：`deploy/linux/dockermanagementyanzi.service` 由 `install.sh`
  * 复制到 `/etc/systemd/system/`，而**在线升级（OTA）只替换二进制、从不碰这个文件**。
  * 于是任何「依赖新单元指令」的功能（如 `RuntimeDirectory` / `ExecStartPre`
  * 让 root 把 DMI 序列号镜像成世界可读副本）在旧部署上会**静默失效**，用户只看到「—」，
@@ -17,16 +17,41 @@
 
 import { existsSync, readFileSync, readdirSync } from "fs";
 import path from "path";
+import os from "os";
+import { execSync } from "child_process";
 
 /** 单元文件名（与 deploy/linux/ 下同名） */
-export const UNIT_NAME = "docker-manager-yanzi.service";
+export const UNIT_NAME = "dockermanagementyanzi.service";
+/** 应用名 = 二进制文件名（用于判断当前是否 SEA 二进制部署） */
+const APP_NAME = "dockermanagementyanzi";
 /** systemd 单元安装目录 */
 const UNIT_DIR = "/etc/systemd/system";
 /** 单元内 `RuntimeDirectory=` 对应的目录：DMI 镜像副本落在这里 */
-export const DMI_MIRROR_DIR = "/run/docker-manager-yanzi";
+export const DMI_MIRROR_DIR = "/run/dockermanagementyanzi";
 
 // BUILD_BINARY 由 esbuild define 注入，仅二进制构建时为 true（与 index.ts 同款保护）
 declare const BUILD_BINARY: boolean | undefined;
+
+/**
+ * 解析**实际安装目录**（v1.41.1 起安装目录可自定义，模板里是 `__INSTALL_DIR__` 占位符）。
+ *
+ * 为什么必须解析：单元模板里的路径占位符由 `install.sh` 安装期替换为实际安装目录，
+ * 后端拿到的却是**未替换的模板**。若不还原，`WorkingDirectory=__INSTALL_DIR__` 与已安装
+ * 单元里的真实路径永远对不上 ⇒ ① 前端一直误报「服务单元落后」；② 更糟的是「一键修复」
+ * 会把未替换的占位符原样写进 `/etc/systemd/system/`，服务直接起不来。
+ *
+ * 取值口径：SEA 二进制部署时 `process.execPath` 就是安装目录内的二进制
+ * （systemd 的 `WorkingDirectory` 也是这个目录）。
+ * 开发模式（`npm run dev:server`，execPath 是 node）或非二进制构建 ⇒ 返回 null，
+ * 调用方据此把 `applicable` 置为 false，**不做任何判定与修复提示** —— 宁可不提示，
+ * 也绝不给出会把单元写坏的"修复命令"。
+ */
+function resolveInstallDir(): string | null {
+  const isBinary = typeof BUILD_BINARY !== "undefined" && BUILD_BINARY === true;
+  if (!isBinary) return null;
+  if (path.basename(process.execPath) !== APP_NAME) return null;
+  return path.dirname(process.execPath);
+}
 
 /** 构建期嵌入的单元模板；非二进制构建回退读仓库内的 deploy/linux/ */
 function loadTemplate(): string | null {
@@ -44,6 +69,60 @@ function loadTemplate(): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * 解析单元模板里服务账户 / 主组占位符的真实值。
+ *
+ * 为什么不能只靠 `os.userInfo()`：`fixCommand` 由**正在运行的服**务进程（以 SERVICE_USER
+ * 身份）生成，此时 `os.userInfo().username` 就是服务运行账户 —— 本就正确；但若现场单元已被
+ * 写成字面量（手工改过 / 历史残留 `User=__SERVICE_USER__`），以「已安装单元里当前生效的
+ * `User=` / `Group=`」为准更稳妥，也能把**被错误写成占位符的单元**救回来（回退到进程身份）。
+ *
+ * 取值优先级（user / group 同款）：
+ *   1) 已安装单元里**非占位符**、非空的 `User=` / `Group=` 行（最权威，反映当前配置）
+ *   2) 否则：用户 = `os.userInfo().username`；组 = `id -gn <用户>`（拿不到则回退用户名）
+ */
+function resolveUnitUserGroup(installedText: string | null): { user: string; group: string } {
+  let user = "";
+  let group = "";
+  if (installedText) {
+    const um = installedText.match(/^User=(.*)$/m);
+    if (um && um[1] && !um[1].includes("__")) user = um[1].trim();
+    const gm = installedText.match(/^Group=(.*)$/m);
+    if (gm && gm[1] && !gm[1].includes("__")) group = gm[1].trim();
+  }
+  if (!user) {
+    try {
+      user = os.userInfo().username;
+    } catch {
+      user = "";
+    }
+  }
+  if (!group && user) {
+    try {
+      group = execSync(`id -gn ${user}`, { stdio: ["ignore", "pipe", "ignore"] })
+        .toString()
+        .trim();
+    } catch {
+      group = user;
+    }
+  }
+  if (!group) group = user;
+  return { user, group };
+}
+
+/**
+ * 把单元模板里的三类占位符全部还原为实际值，得到「与已安装单元可逐行比对」的版本。
+ * - `__INSTALL_DIR__`：安装目录（SEA 二进制部署时取 `process.execPath` 所在目录）
+ * - `__SERVICE_USER__` / `__SERVICE_GROUP__`：服务运行账户 / 主组（见 `resolveUnitUserGroup`）
+ * 未解析（开发模式 / 安装目录取不到）时对应占位符保留原样，由调用方把 `applicable` 置 false。
+ */
+export function resolveUnitTemplate(raw: string, installDir: string | null, installedText: string | null): string {
+  const withDir =
+    installDir != null ? raw.replace(/__INSTALL_DIR__/g, installDir) : raw;
+  const { user, group } = resolveUnitUserGroup(installedText);
+  return withDir.replace(/__SERVICE_USER__/g, user).replace(/__SERVICE_GROUP__/g, group);
 }
 
 function readIfExists(p: string): string | null {
@@ -119,8 +198,13 @@ export interface ServiceUnitStatus {
 /** 检查已安装的 systemd 单元是否与当前二进制内置模板一致 */
 export function checkServiceUnit(): ServiceUnitStatus {
   const unitPath = path.join(UNIT_DIR, UNIT_NAME);
-  const template = loadTemplate();
+  const rawTemplate = loadTemplate();
   const installedUnit = readIfExists(unitPath);
+  const installDir = resolveInstallDir();
+  // 三类占位符全部还原：安装目录 + 服务账户/主组。唯有已还原的模板才能与已安装单元
+  // 逐行比对（否则 `User=__SERVICE_USER__` 永远对不上 `User=yanzi` ⇒ 一直误报「落后」），
+  // 也唯有已还原的模板才能作为**有效的**一键修复命令（否则会把占位符原样写进 systemd）。
+  const template = rawTemplate ? resolveUnitTemplate(rawTemplate, installDir, installedUnit) : rawTemplate;
 
   // drop-in：`<unit>.d/*.conf` —— 现场只补差异的推荐做法，必须一并计入已安装指令
   const dropDir = `${unitPath}.d`;
@@ -143,11 +227,14 @@ export function checkServiceUnit(): ServiceUnitStatus {
     /* 目录不存在 */
   }
 
-  // 非 systemd 部署（Windows 开发机 / 容器内）不做判定，避免误报
-  const applicable = process.platform === "linux" && !!installedUnit && !!template;
+  // 非 systemd 部署（Windows 开发机 / 容器内）不做判定，避免误报；
+  // ★ 开发模式（非 SEA 二进制）拿不到安装目录 ⇒ 同样不适用：
+  //   此时模板里仍是未还原的 __INSTALL_DIR__，比对必然全不匹配、修复命令还会写坏单元。
+  const applicable =
+    process.platform === "linux" && !!installedUnit && !!template && installDir !== null;
 
   let missing: string[] = [];
-  if (template && installedUnit) {
+  if (applicable && template && installedUnit) {
     missing = missingDirectives(template, installedUnit + dropInText);
   }
 

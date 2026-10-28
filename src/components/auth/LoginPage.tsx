@@ -146,7 +146,7 @@ function LoginForm({
         </form>
 
         <p className="text-center text-[11px] text-slate-400 mt-4">
-          docker-manager-yanzi · 本地部署
+          dockermanagementyanzi · 本地部署
         </p>
       </div>
     </div>

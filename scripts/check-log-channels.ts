@@ -10,9 +10,14 @@ const LOGS = path.join(ROOT, "logs");
 const CFG = path.join(ROOT, "config");
 const DATA = path.join(ROOT, "data");
 for (const d of [LOGS, CFG, DATA]) fs.mkdirSync(d, { recursive: true });
-// 起步清理：只删本 harness 已知的文件（不递归删目录 —— 本机删除垫片会路由到回收站并阻塞）
-for (const f of ["app-2020-01-01.log", "notify-2020-01-01.log", "oplog-2020-01-01.log", "notify-2020-01-02.log", "oplog-2020-01-03.log"]) {
-  try { fs.unlinkSync(path.join(LOGS, f)); } catch {}
+// 起步清理：删掉本 harness 造过的**全部**日志文件（不递归删目录 —— 本机删除垫片会路由到回收站并阻塞）。
+// ⚠️ 不能只删下面那几个硬编码文件名：真实写入用的是**当天日期**（app-<today>.log 等），
+// 上一轮跑完留下的当天/隔日文件会让「今天是 3 个文件」这类计数断言假红（实测残留 6 个）。
+// 故按频道前缀 + 白名单日期正则清理，安全且幂等。
+for (const f of fs.readdirSync(LOGS)) {
+  if (/^(app|notify|oplog)-\d{4}-\d{2}-\d{2}\.log$/.test(f)) {
+    try { fs.unlinkSync(path.join(LOGS, f)); } catch {}
+  }
 }
 try { fs.unlinkSync(path.join(CFG, "settings.json")); } catch {}
 
@@ -67,7 +72,7 @@ try {
     files.map((f) => f.channel).sort().join(",") === "app,notify,oplog", files.map((f) => f.channel).join(","));
   ok("★ 只有今天的文件 current=true", files.every((f) => f.current === true), JSON.stringify(files.map((f) => [f.name, f.current])));
 
-  sec("⑤ 分频道保留策略：继承 + 独立");
+  sec("⑤ 分频道保留策略：各自独立、互不继承");
   const settings = await import("../server/settings.js");
   const base = settings.getSettings().logRetention;
   ok("默认含 notify / oplog 子段", !!base.notify && !!base.oplog, JSON.stringify(base));
@@ -75,13 +80,13 @@ try {
   const cl = applogs.getRetentionConfig("oplog");
   const ca = applogs.getRetentionConfig("app");
   ok("★ app 用顶层（1024MB / 365 天，v1.39.0 新默认）", ca.maxTotalMB === 1024 && ca.maxDays === 365, JSON.stringify(ca));
-  ok("★ notify 默认**继承顶层**（1024MB，不是写死默认）", cn.maxTotalMB === 1024 && cn.maxDays === 365, JSON.stringify(cn));
-  ok("★ oplog 默认**继承顶层**（1024MB）", cl.maxTotalMB === 1024, JSON.stringify(cl));
-  // 独立覆盖：只改 notify 的 maxDays，其余字段继承
+  ok("★ notify 默认**独立 365/1024**（非继承顶层，v1.42.7）", cn.maxTotalMB === 1024 && cn.maxDays === 365, JSON.stringify(cn));
+  ok("★ oplog 默认**独立 1024MB**", cl.maxTotalMB === 1024, JSON.stringify(cl));
+  // 独立覆盖：只改 notify 的 maxDays，其余字段走自身默认
   settings.saveSettings({ ...settings.getSettings(), logRetention: { ...base, notify: { maxDays: 7 } } });
   const cn2 = applogs.getRetentionConfig("notify");
   ok("★ notify.maxDays 覆盖为 7", cn2.maxDays === 7, JSON.stringify(cn2));
-  ok("★★ 只写 maxDays ⇒ 其余字段继承顶层（maxTotalMB=1024）", cn2.maxTotalMB === 1024, JSON.stringify(cn2));
+  ok("★★ 只写 maxDays ⇒ 其余字段用自身默认（maxTotalMB=1024，与 app 解耦）", cn2.maxTotalMB === 1024, JSON.stringify(cn2));
 
   sec("⑥ 分频道裁剪：永不删当天、按各自上限裁");
   // 造旧文件：notify 超期(2 天前) / oplog 超期 / app 未超期

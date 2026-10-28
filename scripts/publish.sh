@@ -70,19 +70,18 @@ npm run build:frontend
 "$NODE" scripts/build-binary.mjs
 
 # ---- 3. SEA 注入（交叉构建 Linux 二进制）----
-echo "==> [2/4] SEA 注入 -> $SEA_DIR/docker-manager-yanzi"
+echo "==> [2/4] SEA 注入 -> $SEA_DIR/dockermanagementyanzi"
 cp "$PROJECT/deploy/linux/bundle.js" "$SEA_DIR/"
 cd "$SEA_DIR"
 "$NODE" --experimental-sea-config sea-config.json
-cp node-v22.22.2-linux-x64/bin/node docker-manager-yanzi
-"$NODE" "$POSTJECT" docker-manager-yanzi NODE_SEA_BLOB "$BLOB" --sentinel-fuse "$FUSE"
+cp node-v22.22.2-linux-x64/bin/node dockermanagementyanzi
+"$NODE" "$POSTJECT" dockermanagementyanzi NODE_SEA_BLOB "$BLOB" --sentinel-fuse "$FUSE"
 
 # ---- 4. 打包 zip ----
-echo "==> [3/4] 打包 zip -> build-upload/docker-manager-yanzi-linux-x64.zip"
+echo "==> [3/4] 打包 zip -> build-upload/（版本化 + latest 别名，由 make-package.py 直接写入）"
 cd "$PROJECT/deploy/linux"
-cp "$SEA_DIR/docker-manager-yanzi" .
+cp "$SEA_DIR/dockermanagementyanzi" .
 "$PY" make-package.py
-cp docker-manager-yanzi-linux-x64.zip "$PROJECT/build-upload/"
 
 # ---- 5. 发布到 GitHub ----
 echo "==> [4/4] 发布到 GitHub Releases"
@@ -90,4 +89,4 @@ cd "$PROJECT"
 npm run release
 
 echo ""
-echo "✅ 发布完成：build-upload/docker-manager-yanzi-linux-x64.zip 已推送到 GitHub Releases"
+echo "✅ 发布完成：build-upload/dockermanagementyanzi-linux-x64.zip 已推送到 GitHub Releases"

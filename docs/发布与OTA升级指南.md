@@ -1,7 +1,7 @@
 # 发布与 OTA 升级指南
 
 > 适用版本：v1.2.1+（含 OTA 应用内升级）
-> 应用名：`docker-manager-yanzi`｜服务端口：`5024`｜安装目录：`/opt/docker-manager-yanzi`
+> 应用名：`dockermanagementyanzi`｜服务端口：`5024`｜安装目录：默认 `/opt/dockermanagementyanzi`（**v1.41.1 起可在安装时指定**）
 
 本文覆盖三条主线：**构建交付包 → 发布到 GitHub Releases → 应用内 OTA 升级**，并附手动部署、回滚与安全注意事项。
 
@@ -52,10 +52,10 @@ cp /d/AI/WorkBuddy/docker-unraid/deploy/linux/bundle.js .
 node --experimental-sea-config sea-config.json        # 产出 sea-prep.blob
 
 # 2) 复制对应版本的 Linux node 运行时作为二进制基底
-cp node-v22.22.2-linux-x64/bin/node docker-manager-yanzi
+cp node-v22.22.2-linux-x64/bin/node dockermanagementyanzi
 
 # 3) 将 blob 注入 node 二进制
-node node_modules/postject/dist/cli.js docker-manager-yanzi NODE_SEA_BLOB sea-prep.blob \
+node node_modules/postject/dist/cli.js dockermanagementyanzi NODE_SEA_BLOB sea-prep.blob \
   --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2
 ```
 
@@ -64,27 +64,27 @@ node node_modules/postject/dist/cli.js docker-manager-yanzi NODE_SEA_BLOB sea-pr
 ### 1.3 打包 zip 并交付
 
 ```bash
-cp /tmp/sea-build/docker-manager-yanzi /d/AI/WorkBuddy/docker-unraid/deploy/linux/
+cp /tmp/sea-build/dockermanagementyanzi /d/AI/WorkBuddy/docker-unraid/deploy/linux/
 
 cd /d/AI/WorkBuddy/docker-unraid/deploy/linux
-python make-package.py     # 产出 docker-manager-yanzi-linux-x64.zip（保留 Unix 权限位）
+python make-package.py     # 产出 dockermanagementyanzi-linux-x64.zip（保留 Unix 权限位）
 
 # 交付到项目 build-upload 目录
-cp docker-manager-yanzi-linux-x64.zip /d/AI/WorkBuddy/docker-unraid/build-upload/
+cp dockermanagementyanzi-linux-x64.zip /d/AI/WorkBuddy/docker-unraid/build-upload/
 ```
 
 **交付包校验要点**（OTA 能否找到包取决于此）：
 
 | 项目 | 要求 | 当前产物 |
 |------|------|----------|
-| 文件名 | 以 `linux-x64.zip` 结尾 | ✅ `docker-manager-yanzi-linux-x64.zip` |
-| zip 内二进制路径 | `docker-manager-yanzi/docker-manager-yanzi` | ✅（`make-package.py` 输出结构） |
+| 文件名 | 以 `linux-x64.zip` 结尾 | ✅ `dockermanagementyanzi-linux-x64.zip` |
+| zip 内二进制路径 | `dockermanagementyanzi/dockermanagementyanzi` | ✅（`make-package.py` 输出结构） |
 | 二进制权限 | `0o755`（解压后可执行） | ✅ |
 | 包内文件 | 二进制 + install.sh + uninstall.sh + .service + README.md | ✅ 5 个 |
 
 ```bash
 # 快速校验
-python -c "import zipfile; z=zipfile.ZipFile('build-upload/docker-manager-yanzi-linux-x64.zip'); print(z.testzip() or 'zip OK'); [print((z.getinfo(n).external_attr>>16)&0o7777, n) for n in z.namelist()]"
+python -c "import zipfile; z=zipfile.ZipFile('build-upload/dockermanagementyanzi-linux-x64.zip'); print(z.testzip() or 'zip OK'); [print((z.getinfo(n).external_attr>>16)&0o7777, n) for n in z.namelist()]"
 ```
 
 ---
@@ -109,7 +109,7 @@ python -c "import zipfile; z=zipfile.ZipFile('build-upload/docker-manager-yanzi-
 2. **Choose a tag**：填 `vX.Y.Z`（必须带 `v` 前缀，代码会正则去掉 `v` 再比对；必须与 `package.json` 版本号一致）
 3. 标题随意（如 `v1.2.1`）
 4. 正文写 Release notes（原样显示在前端「系统更新」卡片，截断 2000 字）
-5. 附件上传：`build-upload/docker-manager-yanzi-linux-x64.zip`
+5. 附件上传：`build-upload/dockermanagementyanzi-linux-x64.zip`
 6. 点 **Publish release**——**不要**勾选 Draft / Pre-release，否则 `releases/latest` 取不到
 
 > 私有仓库（Private）：Release 仍能被带 Token 的 API 读取（见 §4.1）；公开仓库则无需 Token。
@@ -128,7 +128,7 @@ GITHUB_TOKEN=xxx npm run release
 #      而发布 Release 本身只需 repo scope，故优先用 a/b 绕开）
 # 注：gh 不在 PATH 时脚本会自动探测 Windows 常见安装路径，无需手动加 PATH
 
-# 在已生成 build-upload/docker-manager-yanzi-linux-x64.zip 的前提下：
+# 在已生成 build-upload/dockermanagementyanzi-linux-x64.zip 的前提下：
 npm run release
 # 等价于：node scripts/publish-release.mjs
 ```
@@ -204,12 +204,12 @@ bash scripts/publish.sh
 
 ```bash
 # 本地
-scp build-upload/docker-manager-yanzi-linux-x64.zip user@服务器:/tmp/
+scp build-upload/dockermanagementyanzi-linux-x64.zip user@服务器:/tmp/
 
-# 服务器
-sudo mkdir -p /opt/docker-manager-yanzi
-sudo unzip /tmp/docker-manager-yanzi-linux-x64.zip -d /opt/   # 解压出 docker-manager-yanzi/ 顶层目录
-cd /opt/docker-manager-yanzi
+# 服务器（下面用默认安装目录；自定义目录见 §3.3）
+sudo mkdir -p /opt/dockermanagementyanzi
+sudo unzip /tmp/dockermanagementyanzi-linux-x64.zip -d /opt/   # 解压出 dockermanagementyanzi/ 顶层目录
+cd /opt/dockermanagementyanzi
 sudo bash install.sh
 ```
 
@@ -217,11 +217,35 @@ sudo bash install.sh
 
 ### 方式 B：服务器端从源码构建（备选）
 
-仅当已在 Linux 服务器上部署了源码时可用（`build.sh` 的 `APP_NAME` 已统一为 `docker-manager-yanzi`，与 `install.sh` 一致）：
+仅当已在 Linux 服务器上部署了源码时可用（`build.sh` 的 `APP_NAME` 已统一为 `dockermanagementyanzi`，与 `install.sh` 一致）：
 
 ```bash
 bash build.sh && sudo bash install.sh
 ```
+
+### 3.3 自定义安装目录（v1.41.1+）
+
+`install.sh` 会交互询问安装目录（**回车用默认 `/opt/dockermanagementyanzi`**）；非交互环境用
+`APP_INSTALL_DIR=<绝对路径>` 指定：
+
+```bash
+APP_INSTALL_DIR=/data/dockermanagementyanzi sudo bash install.sh
+```
+
+路径白名单：必须绝对路径、无 `..`、至少两级、只允许 `字母/数字/./_/-`（禁空格与 `& | " ' $`），
+且不许用系统目录（`/opt`、`/var`、`/usr`…）、`/home`（单元 `ProtectHome=yes`）、`/root`、`/tmp`；
+**`/mnt`、`/media` 允许**（NAS 数据盘常挂在那儿）。
+
+> **v1.41.2：原先「先停 Docker + 校验登录密码」两道关卡已取消**。原因：① 关卡① 与下面
+> 「检查 Docker 依赖」段自相矛盾 —— 停了 Docker 后那段反而告警「守护进程未运行」；
+> ② 真机上徒增摩擦。现在改目录只需过路径白名单。
+
+单元文件里的 `WorkingDirectory` / `DOCKER_CONFIG` / `ExecStart` / `ReadWritePaths` 四处是
+`__INSTALL_DIR__` 占位符，由 `install.sh` 统一替换成实际目录**并自检占位符清零**（漏替换直接中止安装）。
+`uninstall.sh` 会从单元的 `WorkingDirectory=` 读回实际目录，所以自定义目录也能卸干净。
+
+**升级时请沿用同一目录**（或显式传 `APP_INSTALL_DIR`）；若换了目录，脚本会提示是否把
+`data/ logs/ config/` 迁移过去，再询问是否保留旧目录（选不保留需输入 `DELETE` 二次确认）。
 
 ---
 
@@ -258,7 +282,7 @@ UPDATE_GITEA_BASE=https://git.example.com
 UPDATE_MIRROR=https://my-mirror.com/           # 额外下载镜像前缀（只对 GitHub 源拼接）
 ```
 
-写入位置：`/opt/docker-manager-yanzi/config/.env`（或 systemd `EnvironmentFile`）。
+写入位置：`/opt/dockermanagementyanzi/config/.env`（或 systemd `EnvironmentFile`）。
 
 > ⚠️ **`UPDATE_GITEA_BASE` 必须是「站点根」**（到端口为止，**不带** `/yanzi/docker-manager-yanzi`）。
 > 代码会用 `rewriteToGiteaBase()` 把 Gitea API 返回的 `browser_download_url` 按 base 做**协议 + 主机改写**，所以即使 Gitea 的 `ROOT_URL` 配成别的域名也能正确下载。
@@ -281,7 +305,7 @@ UPDATE_MIRROR=https://my-mirror.com/           # 额外下载镜像前缀（只�
                    → 异常 / 无可下载资产 ⇒ 回退 GitHub api.github.com/repos/{repo}/releases/latest
   → 下载 zip(update/apply 触发)：源内候选「直连 → UPDATE_MIRROR」（github 源再追加 gh-proxy）
                    → Gitea 源候选全失败 ⇒ 重新解析 GitHub 资产追加候选再跑一轮
-  → 解压校验(校验包内 docker-manager-yanzi/docker-manager-yanzi 存在)
+  → 解压校验(校验包内 dockermanagementyanzi/dockermanagementyanzi 存在)
   → 写 detached 升级脚本(stop → mv 新二进制覆盖 → start)
   → 进程退出
   → systemd Restart=always 自动重启
@@ -298,14 +322,25 @@ UPDATE_MIRROR=https://my-mirror.com/           # 额外下载镜像前缀（只�
 
 ### 4.5 约束与已知坑
 
-- **自替换用 `mv` 而非 `cp`**：`mv` 是 rename 语义，进程运行时替换不会触发 `ETXTBSY`；服务以 `docker-manager-yanzi` 用户运行、**无 root、不能 `systemctl`**，靠 `Restart=always` 完成重启
-- **`.service` 权限**：必须含 `ReadWritePaths=/opt/docker-manager-yanzi`，否则二进制无法被替换
+- **自替换用 `mv` 而非 `cp`**：`mv` 是 rename 语义，进程运行时替换不会触发 `ETXTBSY`；服务以 `dockermanagementyanzi` 用户运行、**无 root、不能 `systemctl`**，靠 `Restart=always` 完成重启
+- **`.service` 权限**：安装目录必须以 `ReadWritePaths=-<安装目录>` 声明（**v1.41.1 起是 `__INSTALL_DIR__` 占位符，由 install.sh 替换**），否则二进制无法被替换（OTA 会失败）
 - **出网要求**：检查更新**优先访问自建 Gitea**（**默认 `http://192.168.24.16:8024`**，⚠️ 旧默认域名 `git.ziruxue.top` 已不通；**外网部署须用 `UPDATE_GITEA_BASE` 覆盖**），失败才回退 `api.github.com`；内网环境至少放行其一
 - **⚠️ 默认入口指向内网地址**（2026-10-08 起）：内网部署开箱即用；**外网部署必须覆盖** `UPDATE_GITEA_BASE` 为公网可达地址，否则 Gitea 源不可达 → 自动回退 GitHub（**功能不中断**，仅更新时效依赖 GitHub）。`https://git.ziruxue.top` **已完全不通**（2026-10-08 实测：本机 curl 返 `000`，**Node `fetch` 亦 `fetch failed`** —— 不只是 curl 的问题）；域名恢复后改回默认值即可。
 - **⚠️ Gitea 源的版本上限由 `releases/latest` 决定**：若内网 Gitea 只发到 v1.38.3，而客户端已是 v1.39.x，则**永远收不到更新提示**（版本比对只认 latest，不会回溯中间版本）⇒ 每次发布**必须两端同步**，补历史版本后**再发一次最新版本**以修正 `latest` 指向。
 - **Gitea 不支持 `releases/latest/download/<file>` 快捷路径**（实测 **HTTP 404**）；`quick-install.sh` 走的是 Releases API 取 `browser_download_url`，故安装逻辑不受影响，但**文档/README 里若写 `curl …/releases/latest/download/quick-install.sh` 会 404** —— 改用 API 或带 tag 的完整路径 `…/releases/download/<tag>/quick-install.sh`（实测 200 / 12,365 B）。
-- **取包规则**：两端均取 `releases/latest`；Tag 去 `v` 前缀比对；Asset 文件名正则 `/linux-x64\.zip$/i`；包内二进制路径 `docker-manager-yanzi/docker-manager-yanzi`。**Gitea 返回的 `browser_download_url` 用的是其服务端 `ROOT_URL`** —— 若 `UPDATE_GITEA_BASE` 指向别的入口（IP:端口 / 内网域名），代码会把该 URL 的**协议 + 主机改写**成配置入口后再下载（`rewriteToGiteaBase()`）
+- **取包规则**：两端均取 `releases/latest`；Tag 去 `v` 前缀比对；Asset 文件名正则 `/linux-x64\.zip$/i`；包内二进制路径 `dockermanagementyanzi/dockermanagementyanzi`。**Gitea 返回的 `browser_download_url` 用的是其服务端 `ROOT_URL`** —— 若 `UPDATE_GITEA_BASE` 指向别的入口（IP:端口 / 内网域名），代码会把该 URL 的**协议 + 主机改写**成配置入口后再下载（`rewriteToGiteaBase()`）
 - **错误码**：私有仓库未填 Token → 404（提示确认已填 Token）；Token 无效/权限不足 → 401
+
+### 4.6 服务启动失败速查（systemd）
+
+| 现象 | 根因 | 处理 |
+|---|---|---|
+| `status=226/NAMESPACE` + `Failed to set up mount namespacing: /run/systemd/unit-root/<某路径>: No such file` | **`ReadWritePaths=` 里的路径在目标机器不存在**（最常见：未装 Docker ⇒ 无 `/run/docker.sock`）。systemd 在**挂载 namespace 阶段**就退出，**早于 `ExecStartPre`** ⇒ 日志里没有任何程序输出，极易误判成程序故障 | v1.39.3 起所有路径带 `-` 前缀（不存在即忽略）。老版本单元修复：`sed -i 's|^ReadWritePaths=/opt/dockermanagementyanzi \(.*\)|ReadWritePaths=-/opt/dockermanagementyanzi \1|' /etc/systemd/system/dockermanagementyanzi.service` 再 `daemon-reload`；或用 drop-in 覆写（`ReadWritePaths=` 置空再逐条以 `-` 前缀重列） |
+| `status=216/GROUP` + `Failed to determine supplementary groups` | 机器无 `docker` 组，而单元写了 `SupplementaryGroups=docker` | `groupadd docker && usermod -aG docker dockermanagementyanzi && systemctl daemon-reexec`；install.sh 已按探测结果自动裁剪该行 |
+| 升级后行为还是旧的 | **OTA 只换二进制，不更新 `.service` / `install.sh`** | 重跑 `install.sh`（或手工改单元后 `systemctl daemon-reload && systemctl restart dockermanagementyanzi`） |
+| 日志只有 DMI 那串命令、没有程序输出 | 同第一行（挂载阶段就挂了，"+" 提权的 `ExecStartPre` 根本没执行到） | 同第一行 |
+
+> 门禁 `npm run test:service`（已并入 `test:gates`）会把「ReadWritePaths 每项必须带 `-` 前缀」「WorkingDirectory 与 install.sh 的 INSTALL_DIR 一致」「无 docker 组时裁剪 SupplementaryGroups」钉死，防止回退。
 
 ---
 
@@ -319,8 +354,8 @@ UPDATE_MIRROR=https://my-mirror.com/           # 额外下载镜像前缀（只�
 
 ## 6. 回滚与卸载
 
-- **OTA 回滚**：升级前 `install.sh` 已备份旧二进制到 `/opt/docker-manager-yanzi.bak.<时间戳>`；异常时可停服务、用备份二进制覆盖、重启
-- **完全卸载**：`sudo bash /opt/docker-manager-yanzi/uninstall.sh`（支持 `--keep` 保留数据 / `--purge` 清数据）
+- **OTA 回滚**：升级前 `install.sh` 已备份旧二进制到 `/opt/dockermanagementyanzi.bak.<时间戳>`；异常时可停服务、用备份二进制覆盖、重启
+- **完全卸载**：`sudo bash /opt/dockermanagementyanzi/uninstall.sh`（支持 `--keep` 保留数据 / `--purge` 清数据）
 
 ---
 
@@ -333,11 +368,11 @@ rm -rf dist && npm run build:frontend && node scripts/build-binary.mjs
 # 2) SEA 注入（/tmp/sea-build 工作目录）
 cd /tmp/sea-build && cp /d/AI/WorkBuddy/docker-unraid/deploy/linux/bundle.js .
 node --experimental-sea-config sea-config.json
-cp node-v22.22.2-linux-x64/bin/node docker-manager-yanzi
-node node_modules/postject/dist/cli.js docker-manager-yanzi NODE_SEA_BLOB sea-prep.blob --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2
+cp node-v22.22.2-linux-x64/bin/node dockermanagementyanzi
+node node_modules/postject/dist/cli.js dockermanagementyanzi NODE_SEA_BLOB sea-prep.blob --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2
 
 # 3) 打包交付
-cp docker-manager-yanzi /d/AI/WorkBuddy/docker-unraid/deploy/linux/
+cp dockermanagementyanzi /d/AI/WorkBuddy/docker-unraid/deploy/linux/
 cd /d/AI/WorkBuddy/docker-unraid/deploy/linux && python make-package.py
-cp docker-manager-yanzi-linux-x64.zip /d/AI/WorkBuddy/docker-unraid/build-upload/
+cp dockermanagementyanzi-linux-x64.zip /d/AI/WorkBuddy/docker-unraid/build-upload/
 ```

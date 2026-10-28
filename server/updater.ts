@@ -11,7 +11,7 @@ export const CURRENT_VERSION =
   typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "0.0.0-dev";
 
 /** zip 包内的二进制相对路径（与 make-package.py 的输出结构一致） */
-const ASSET_APP_NAME = "docker-manager-yanzi";
+const ASSET_APP_NAME = "dockermanagementyanzi";
 const BINARY_IN_ZIP = path.join(ASSET_APP_NAME, ASSET_APP_NAME);
 /** 新二进制最小体积（40MB 左右，低于 50MB 视为异常） */
 const MIN_BINARY_SIZE = 50 * 1024 * 1024;
@@ -40,10 +40,25 @@ export function getPendingUploadPath(): string {
 }
 
 /**
+ * 已上传待应用包的元信息 sidecar（v1.43.7）：磁盘上的 zip 固定名为 `pending-update.zip`
+ * （`performUpdateFromUpload` 据此读取，不可改），但展示用的原始包名（如
+ * `dockermanagementyanzi-linux-x64-v1.43.6.zip`）需靠此文件保留，否则前端永远只看到 `pending-update.zip`。
+ */
+const PENDING_META = "pending-update.meta.json";
+
+function getPendingMetaPath(): string {
+  return path.join(getUpdateDir(), PENDING_META);
+}
+
+/**
  * 仅保存上传的 zip 包，不执行更新（上传与应用解耦：
  * 上传后需用户手动点击「更新」按钮才应用）。固定文件名，重复上传覆盖旧包。
+ * @param originalName 前端透传的原始文件名（Header `X-File-Name`），用于展示；缺省回退 `PENDING_ZIP`。
  */
-export function saveUploadPackage(buf: Buffer): { fileName: string; size: number; uploadedAt: string } {
+export function saveUploadPackage(
+  buf: Buffer,
+  originalName?: string
+): { fileName: string; size: number; uploadedAt: string } {
   if (!Buffer.isBuffer(buf) || buf.length < 1024) {
     throw new Error("未收到有效的更新包文件");
   }
@@ -55,7 +70,11 @@ export function saveUploadPackage(buf: Buffer): { fileName: string; size: number
   fs.mkdirSync(getUpdateDir(), { recursive: true });
   // 同步落盘（包已在前端内存中，写入量有限，且需确保后续手动「更新」前文件已就绪）
   fs.writeFileSync(zipPath, buf);
-  return { fileName: PENDING_ZIP, size: buf.length, uploadedAt: new Date().toISOString() };
+  const fileName = (originalName && originalName.trim()) || PENDING_ZIP;
+  const uploadedAt = new Date().toISOString();
+  // 记录原始包名等元信息，供查询接口返回真实名称（zip 仍是固定名）
+  fs.writeFileSync(getPendingMetaPath(), JSON.stringify({ fileName, size: buf.length, uploadedAt }));
+  return { fileName, size: buf.length, uploadedAt };
 }
 
 /** 待应用本地更新包自动销毁时限：上传后超过此时长仍未手动点击「更新」则自动清除 */
@@ -72,16 +91,29 @@ export function getPendingUpload(): {
 } {
   const zipPath = getPendingUploadPath();
   if (!fs.existsSync(zipPath)) return { exists: false };
+  // 优先读元信息（含前端上传时的原始包名）；无元信息时回退到固定名 + mtime
+  let fileName = PENDING_ZIP;
+  let size: number | undefined;
+  let uploadedAt: string | undefined;
+  try {
+    const meta = JSON.parse(fs.readFileSync(getPendingMetaPath(), "utf-8"));
+    if (meta && typeof meta.fileName === "string") fileName = meta.fileName;
+    if (typeof meta.size === "number") size = meta.size;
+    if (typeof meta.uploadedAt === "string") uploadedAt = meta.uploadedAt;
+  } catch {
+    /* 元信息缺失：走下方 stat 回退 */
+  }
   try {
     const st = fs.statSync(zipPath);
-    const uploadedAt = st.mtime.toISOString();
+    if (size == null) size = st.size;
+    if (!uploadedAt) uploadedAt = st.mtime.toISOString();
     return {
       exists: true,
-      fileName: PENDING_ZIP,
-      size: st.size,
+      fileName,
+      size,
       uploadedAt,
       ttlMs: PENDING_TTL_MS,
-      expiresAt: new Date(st.mtime.getTime() + PENDING_TTL_MS).toISOString(),
+      expiresAt: new Date(new Date(uploadedAt).getTime() + PENDING_TTL_MS).toISOString(),
     };
   } catch {
     return { exists: false };
@@ -92,6 +124,11 @@ export function getPendingUpload(): {
 export function clearPendingUpload(): void {
   try {
     fs.rmSync(getPendingUploadPath(), { force: true });
+  } catch {
+    /* 忽略清理失败 */
+  }
+  try {
+    fs.rmSync(getPendingMetaPath(), { force: true });
   } catch {
     /* 忽略清理失败 */
   }
@@ -246,13 +283,13 @@ function getRepo(): string {
 
 /**
  * 自建 Gitea：更新首选源。
- * 默认站点 http://192.168.24.16:8024、仓库 yanzi/docker-manager-yanzi（与 GitHub 双端同步发布）。
+ * 默认站点 http://192.168.24.10:8024、仓库 yanzi/dockermanagementyanzi（与 GitHub 双端同步发布）。
  *
  * 入口历史（勿回退）：
  *   · `https://git.ziruxue.top`（443）—— **已完全不通**（2026-10-08 实测：本机 curl 返 000，
  *     Node fetch 亦 fetch failed），故不再作为默认值；域名恢复后可改回。
  *   · `http://60.205.251.18:8024` —— 早前已超时废弃。
- *   · `http://192.168.24.16:8024`（当前默认）—— 内网入口，实测 API 200、仓库匿名可读。
+ *   · `http://192.168.24.10:8024`（当前默认）—— 内网入口，实测 API 200、仓库匿名可读。
  *
  * ⚠️ 默认值指向**内网地址**，外网部署必须用环境变量覆盖（否则 Gitea 源不可达，
  *    会自动回退 GitHub 保底源，功能不中断但更新时效依赖 GitHub）。
@@ -260,8 +297,8 @@ function getRepo(): string {
  *   UPDATE_GITEA_BASE  站点根地址（到端口为止，不带 /owner/repo），如 https://git.example.com
  *   UPDATE_GITEA_REPO  owner/repo
  */
-const GITEA_BASE_DEFAULT = "http://192.168.24.16:8024";
-const GITEA_REPO_DEFAULT = "yanzi/docker-manager-yanzi";
+const GITEA_BASE_DEFAULT = "http://192.168.24.10:8024";
+const GITEA_REPO_DEFAULT = "yanzi/dockermanagementyanzi";
 
 /** 自建 Gitea 站点根地址（去尾斜杠），可用 UPDATE_GITEA_BASE 覆盖 */
 function getGiteaBase(): string {
@@ -298,7 +335,7 @@ function rewriteToGiteaBase(url: string, base: string): string {
 function ghHeaders(extra?: Record<string, string>): Record<string, string> {
   return {
     Accept: "application/vnd.github+json",
-    "User-Agent": "docker-manager-yanzi",
+    "User-Agent": "dockermanagementyanzi",
     ...(extra || {}),
   };
 }
@@ -391,7 +428,7 @@ export async function checkGiteaUpdate(currentVersion: string): Promise<UpdateIn
   let res: Response;
   try {
     res = await fetch(apiUrl, {
-      headers: { Accept: "application/json", "User-Agent": "docker-manager-yanzi" },
+      headers: { Accept: "application/json", "User-Agent": "dockermanagementyanzi" },
       signal: AbortSignal.timeout(8000),
     });
   } catch (e: any) {

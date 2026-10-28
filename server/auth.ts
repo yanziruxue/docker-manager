@@ -9,15 +9,18 @@ import { dataPath } from "./paths.js";
 /**
  * 会话鉴权（单管理员模式）。
  * - 会话存内存 Map，键为 token 的 SHA-256 摘要（内存与落盘均不出现明文 token），
- *   并持久化到 <data>/sessions.json —— 服务重启（含 OTA 重启）后按**原到期时间**恢复，
- *   不会因重启而重置计时。
+ *   并持久化到 <data>/sessions.json —— 服务重启（含 OTA 重启）从落盘快照恢复。
  * - Cookie httpOnly + sameSite=lax，降低 XSS 窃取与 CSRF 风险。
  * - TTL 取自 settings.user.sessionTimeout（分钟），默认 30。
- * - **绝对过期**：会话在创建时刻即固定 expiresAt = 创建时间 + TTL，期间任何请求都不延长。
- *   无论有无请求，只要登录时长超过设定值就失效，需重新登录。
+ * - **空闲超时（仅真实用户活动续期）**：会话创建时固定初始 expiresAt = 创建时间 + TTL。
+ *   **只有前端在真实用户活动（mousemove/keydown 等）时调用的 `renewSession`（对应 /api/auth/me）
+ *   才会把 expiresAt 滑动刷新为「当前时间 + TTL」**；`getSessionUser`（requireAuth / 业务请求 /
+ *   后台数据轮询 / WS 握手）一律**只读校验、不续期**。这样即便页面开着、Dashboard 每 3s 轮询，
+ *   只要用户无操作满 TTL 仍会过期 → 空闲自动登出生效；而真实操作期间因活动节流每 ≤30s 续期，不会误踢。
+ *   落盘按 5s 节流，重启最多丢失 5s 的滑动量。
  */
 
-export const SESSION_COOKIE = "docker-manager-yanzi_session";
+export const SESSION_COOKIE = "dockermanagementyanzi_session";
 
 interface Session {
   userId: string;
@@ -100,6 +103,18 @@ function persistSessions(): void {
   }
 }
 
+// 滑动续期落盘节流：高频请求下避免每次都写盘
+let lastPersistAt = 0;
+const PERSIST_THROTTLE_MS = 5000;
+
+function schedulePersistSessions(): void {
+  const now = Date.now();
+  if (now - lastPersistAt >= PERSIST_THROTTLE_MS) {
+    lastPersistAt = now;
+    persistSessions();
+  }
+}
+
 loadSessions();
 
 // ---------- Cookie 解析 ----------
@@ -121,10 +136,72 @@ function parseCookies(req: CookieCarrier): Record<string, string> {
 }
 
 /**
- * 当前会话用户（无效/过期返回 null）。
- * 绝对过期：仅判断 expiresAt，命中有效会话也**不续期**。
+ * 当前会话用户（无效/过期返回 null）。**只读校验、不刷新 expiresAt**。
+ * 用于 requireAuth、业务请求、后台数据轮询、WS 握手等——这些都不应延长会话有效期，
+ * 否则页面后台轮询会永久维持会话，空闲超时失效。
+ * 会话续期只发生在 renewSession（前端真实用户活动触发）。
  */
 export function getSessionUser(req: CookieCarrier): { id: string; username: string; role: string } | null {
+  const raw = parseCookies(req)[SESSION_COOKIE];
+  if (!raw) return null;
+  const key = tokenHash(raw);
+  const s = sessions.get(key);
+  if (!s) return null;
+  if (s.expiresAt <= Date.now()) {
+    sessions.delete(key);
+    persistSessions();
+    return null;
+  }
+  const user = findUserById(s.userId);
+  if (!user) {
+    sessions.delete(key);
+    persistSessions();
+    return null;
+  }
+  // 只读校验：命中有效会话即返回，不刷新到期时间（续期见 renewSession）。
+  return { id: user.id, username: user.username, role: user.role };
+}
+
+/**
+ * 滑动续期（**仅在真实用户活动时调用**，对应前端 /api/auth/me）。
+ * 命中有效会话时把 expiresAt 刷新为「当前时间 + TTL」；其余逻辑与 getSessionUser 一致。
+ * 与 getSessionUser 的区别：会延长会话有效期，使「持续有真实活动」的用户不被登出；
+ * 后台数据轮询、WS 心跳等不得调用本函数，否则空闲超时失效。
+ */
+export function renewSession(req: CookieCarrier): { id: string; username: string; role: string } | null {
+  const raw = parseCookies(req)[SESSION_COOKIE];
+  if (!raw) return null;
+  const key = tokenHash(raw);
+  const s = sessions.get(key);
+  if (!s) return null;
+  if (s.expiresAt <= Date.now()) {
+    sessions.delete(key);
+    persistSessions();
+    return null;
+  }
+  const user = findUserById(s.userId);
+  if (!user) {
+    sessions.delete(key);
+    persistSessions();
+    return null;
+  }
+  // 空闲超时（滑动窗口）：仅在真实用户活动时刷新到期时间
+  const ttl = sessionTtlMs();
+  const newExpires = Date.now() + ttl;
+  if (newExpires > s.expiresAt) {
+    s.expiresAt = newExpires;
+    schedulePersistSessions();
+  }
+  return { id: user.id, username: user.username, role: user.role };
+}
+
+/**
+ * 只读会话检查（**不刷新** expiresAt）。用于前端「探活」心跳 /api/auth/ping：
+ * 人离开页面开着时，前端每 60s 探一次，会话真过期则服务端返回 401，前端据此登出；
+ * 该接口本身不参与滑动续期，不会维持会话。
+ * （getSessionUser 现同为只读校验；renewSession 才是唯一会滑动续期的入口。）
+ */
+export function peekSessionUser(req: CookieCarrier): { id: string; username: string; role: string } | null {
   const raw = parseCookies(req)[SESSION_COOKIE];
   if (!raw) return null;
   const key = tokenHash(raw);

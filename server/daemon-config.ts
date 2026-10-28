@@ -9,9 +9,9 @@ import { dataPath } from "./paths.js";
  * 目标：让「系统设置 → 镜像加速源」与 /etc/docker/daemon.json 的 registry-mirrors 双向同步，
  * 保存后提示是否重启 Docker，选「是」则执行 systemctl restart docker。
  *
- * 权限说明：服务默认以非 root 用户（docker-manager-yanzi）运行，写 /etc 与重启服务需要提权。
+ * 权限说明：服务默认以非 root 用户（dockermanagementyanzi）运行，写 /etc 与重启服务需要提权。
  * 提权优先级：root 直接执行 → sudo -n 免密 → 无能力（返回 hint 提示如何授权）。
- * install.sh 会写入 /etc/sudoers.d/docker-manager-yanzi 放开所需的最小命令集。
+ * install.sh 会写入 /etc/sudoers.d/dockermanagementyanzi 放开所需的最小命令集。
  */
 
 /**
@@ -115,11 +115,19 @@ export function refreshPrivileges() {
  * 无权限时回显给前端的修复建议：sudoers 授权 + systemd 放开 /etc/docker 可写。
  * 服务以非 root 运行且 systemd 开了 NoNewPrivileges=yes / ProtectSystem=strict 时，
  * sudo 会被 no_new_privs 拦截、/etc 只读，必须同时调整 service 才能写入。
+ *
+ * ★ v1.41.1 起改用 **drop-in**（`<unit>.d/*.conf`）而不是 `sed` 改写原单元：
+ *   ① 旧实现把 `ReadWritePaths=` 写成硬编码 `/opt/dockermanagementyanzi` ——
+ *      自定义安装目录的部署照抄后，面板目录会变成不可写（OTA/日志/数据全挂）；
+ *   ② 旧实现丢掉 `-` 前缀 ⇒ 重新引入 v1.39.3 修掉的 226/NAMESPACE（路径不存在即启动失败）；
+ *   ③ 旧实现只替换第一条 `ReadWritePaths=`，剩下三条原样留着，语义混乱。
+ *   drop-in 只追加「/etc/docker 可写 + NoNewPrivileges=no」，**不含任何安装目录**，
+ *   且 `ReadWritePaths=` 是累加语义、每条都带 `-` ⇒ 对默认/自定义目录一律安全。
  */
 export function buildSudoersHint(user: string): string {
   return [
     `# 1) 放开最小命令集（运行用户：${user}）`,
-    `sudo tee /etc/sudoers.d/docker-manager-yanzi >/dev/null <<'EOF'`,
+    `sudo tee /etc/sudoers.d/dockermanagementyanzi >/dev/null <<'EOF'`,
     `${user} ALL=(root) NOPASSWD: \\`,
     `  /usr/bin/cat ${DAEMON_JSON}, \\`,
     `  /usr/bin/tee ${DAEMON_JSON}, \\`,
@@ -127,12 +135,18 @@ export function buildSudoersHint(user: string): string {
     `  /usr/bin/systemctl restart docker, \\`,
     `  /usr/sbin/service docker restart`,
     `EOF`,
-    `sudo chmod 440 /etc/sudoers.d/docker-manager-yanzi`,
+    `sudo chmod 440 /etc/sudoers.d/dockermanagementyanzi`,
     ``,
     `# 2) 放开 systemd 限制（NoNewPrivileges 会拦截 sudo，ProtectSystem 会让 /etc 只读）`,
-    `sudo sed -i 's/^NoNewPrivileges=.*/NoNewPrivileges=no/' /etc/systemd/system/docker-manager-yanzi.service`,
-    `sudo sed -i 's|^ReadWritePaths=.*|ReadWritePaths=/opt/docker-manager-yanzi /run/docker.sock /var/run/docker.sock ${DAEMON_DIR}|' /etc/systemd/system/docker-manager-yanzi.service`,
-    `sudo systemctl daemon-reload && sudo systemctl restart docker-manager-yanzi`,
+    `#    用 drop-in 追加，不改动原单元；ReadWritePaths 是累加语义，且每条必须带 "-" 前缀`,
+    `#    （不存在即忽略，否则会 226/NAMESPACE 启动失败）。`,
+    `sudo mkdir -p /etc/systemd/system/dockermanagementyanzi.service.d`,
+    `sudo tee /etc/systemd/system/dockermanagementyanzi.service.d/10-allow-etc-docker.conf >/dev/null <<'EOF'`,
+    `[Service]`,
+    `NoNewPrivileges=no`,
+    `ReadWritePaths=-${DAEMON_DIR}`,
+    `EOF`,
+    `sudo systemctl daemon-reload && sudo systemctl restart dockermanagementyanzi`,
   ].join("\n");
 }
 

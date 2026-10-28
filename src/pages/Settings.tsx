@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   Container,
   User,
+  LayoutDashboard,
   Bell,
   Package,
   Clock,
@@ -48,12 +49,10 @@ import {
   Copy as CopyIcon,
   Send,
   Undo2,
-  Info,
   FileText,
-  FolderOpen,
   Eye,
 } from "lucide-react";
-import type { SystemSettings, DockerEngine, UpdateInfo, UpdateState, ResourceTag, ComposeTemplate, AppInfo, LogListResult, LogTailResult, MirrorRuntimeState, NotifyRuntimeStatus } from "../types";
+import type { SystemSettings, DockerEngine, UpdateInfo, UpdateState, ResourceTag, ComposeTemplate, AppInfo, LogListResult, LogTailResult, NetInterfaceOption, NotifyRuntimeStatus } from "../types";
 // 值导入（不是 type）：密钥「清除」哨兵值
 import { SECRET_CLEAR, LOG_CHANNEL_LABELS } from "../types";
 import { Card, FormField, Input, Select, Toggle, IconButton } from "../components/UI";
@@ -108,10 +107,8 @@ import {
   deleteBackupApi,
   downloadBackupApi,
   exportConfigApi,
-  checkPermissionsApi,
   type BackupFileInfo,
   type PermIssue,
-  type PermCheckResult,
   fetchTelemetryStatus,
   type TelemetryStatus,
   getSchedulerStatusApi,
@@ -123,8 +120,9 @@ import {
   exportAppLogsApi,
   deleteAppLogApi,
   pruneAppLogsApi,
-  fetchMirrorStatusApi,
-  syncMirrorNowApi,
+  packAppLogsApi,
+  deleteAppLogArchiveApi,
+  fetchNetInterfacesApi,
   testNotifyApi,
   fetchNotifyStatusApi,
 } from "../api";
@@ -185,6 +183,12 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
     </div>
   );
 }
+
+/**
+ * 备份文件名前缀（须与 server/backup.ts 的 BACKUP_NAME_PREFIX 保持一致）。
+ * 命名规则：`dockermanagementyanzi_all_<ts>.zip` / `dockermanagementyanzi_<堆栈名>_<ts>.zip`
+ */
+const BACKUP_NAME_PREFIX = "dockermanagementyanzi";
 
 /** 字节数 -> 人类可读（应用详情 / 应用日志页用） */
 function fmtSize(bytes: number): string {
@@ -254,7 +258,11 @@ function getDefaultSettings(): SystemSettings {
     tags: [],
     modal: {
       autoCloseDelay: 5,
+      // 登录后默认显示页面（v1.42.9）：空串/非法 ⇒ 回落 dashboard（由 App.tsx 守卫）
+      defaultPage: "dashboard",
       containerDetailStyle: "drawer",
+      // 网络曲线默认网卡："" = 自动选第一个物理网卡（网卡名因机器而异，不可硬编码）
+      defaultNetIface: "",
     },
     compose: {
       templates: [
@@ -262,16 +270,20 @@ function getDefaultSettings(): SystemSettings {
         { content: "restart: ", insert: "services" },
         { content: "container_name: ", insert: "services" },
       ],
+      // 编辑堆栈 LABELS 页自动识别 WebUI 端口（默认开）
+      autoDetectWebui: true,
     },
     // 默认开启上传安装数量统计（系统设置 → 硬件信息 可关闭）
     telemetry: { enabled: true },
+    // 镜像管理页显示选项：仓库名默认隐藏 registry 地址前缀（列显隐 → 镜像管理 可关）
+    imagesDisplay: { hideRegistryPrefix: true },
     // 目录镜像：默认关闭，目标路径留空（用户按需开启）
     mirror: {
       backups: { enabled: false, target: "" },
       compose: { enabled: false, target: "" },
     },
-    // 应用日志保留策略：默认开启（30 天 / 总上限 500 MB）
-      // 顶层三项 ＝ 应用日志，同时是 notify / oplog 的继承来源（子段留空即跟随）
+    // 应用日志保留策略：默认开启（365 天 / 总上限 1024 MB）
+      // 顶层三项 ＝ 应用日志；notify / oplog 子段留空即各自 fallback 365/1024（v1.42.7 起独立、互不继承）
       logRetention: { enabled: true, maxDays: 365, maxTotalMB: 1024, notify: {}, oplog: {} },
     defaultsVersion: 2,
   };
@@ -286,7 +298,7 @@ interface SettingsProps {
   onSaveSettings?: (settings: SystemSettings) => Promise<void>;
   /** （OTA）更新信息：由 App 统一持有，进入本页即展示已检测到的更新（与侧边栏角标同源） */
   updateInfo?: UpdateInfo | null;
-  /** 更新信息变化时回传（检查更新 / 忽略 / 更新完成），用于同步全局侧边栏「系统设置」角标 */
+  /** 更新信息变化时回传（检查更新 / 忽略 / 更新完成），用于同步全局侧边栏「设置中心」角标 */
   onUpdateInfoChange?: (info: UpdateInfo | null) => void;
   /** 当前登录用户（用于「用户」区块展示与改密） */
   currentUser?: AuthUser | null;
@@ -619,7 +631,9 @@ function RecoveryCodeForm() {
 
 // ============ 系统设置 → 列显隐（集中页） ============
 // 与 App.tsx 读取 settings.columnVisibility.{containers,stackList,images,volumes} 完全一致：
-// 数组为「可见列 key 列表」，留空（[] 或 undefined）⇒ 该表全部列可见。固定列（图标 / 操作）始终显示。
+// 数组为「可见列 key 列表」，留空（[] 或 undefined）⇒ 该表全部列可见。固定列始终显示、不可藏。
+// v1.42.13：镜像 / 数据卷 / 网络三页操作列已移除（改行右键菜单）⇒ 其 fixed 为空；
+//           仅容器 / 堆栈两表仍保留「操作」固定列（仍是行内下拉按钮）。
 interface ColVisPageDef {
   key: "containers" | "stackList" | "images" | "volumes";
   label: string;
@@ -632,7 +646,7 @@ const COLVIS_PAGES: ColVisPageDef[] = [
     label: "容器管理",
     fixed: ["icon", "actions"],
     cols: [
-      ["name", "容器名称"], ["status", "状态"], ["tags", "标签"], ["image", "镜像"],
+      ["name", "容器名称"], ["status", "状态"], ["tags", "标签"], ["stack", "堆栈"], ["image", "镜像"],
       ["ports", "端口映射"], ["network", "网络模式"], ["uptime", "运行时长"], ["restartPolicy", "重启策略"],
     ],
   },
@@ -648,16 +662,17 @@ const COLVIS_PAGES: ColVisPageDef[] = [
   {
     key: "images",
     label: "镜像管理",
-    fixed: ["actions"],
+    // 「仓库名」为镜像主标识列：常驻显示、不可隐藏（v1.42.17）——列内 registry 地址由卡片内开关控制
+    fixed: [],
     cols: [
-      ["repository", "仓库名"], ["tag", "标签"], ["id", "镜像ID"], ["size", "大小"],
+      ["tag", "标签"], ["id", "镜像ID"], ["size", "大小"],
       ["createdAt", "创建时间"], ["updateStatus", "更新状态"], ["associatedContainers", "关联容器"], ["sha256", "SHA-256"],
     ],
   },
   {
     key: "volumes",
     label: "数据卷管理",
-    fixed: ["actions"],
+    fixed: [],
     cols: [
       ["name", "卷名称"], ["driver", "驱动"], ["mountpoint", "挂载点"], ["size", "大小"],
       ["associatedContainers", "关联容器"], ["createdAt", "创建时间"],
@@ -788,9 +803,6 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
     fixed: PermIssue[];
     fixCommand?: string;
   } | null>(null);
-  /** 权限体检结果（只读扫描 compose 目录） */
-  const [permCheck, setPermCheck] = useState<PermCheckResult | null>(null);
-  const [permChecking, setPermChecking] = useState(false);
   /** 修复命令的复制反馈（成功 → 显示「已复制」，3 秒后复原） */
   const [copiedFixCmd, setCopiedFixCmd] = useState(false);
   const fixCmdRef = useRef<HTMLElement | null>(null);
@@ -806,24 +818,16 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
     }
   }, []);
 
-  /** 权限体检（refresh=true 绕过服务端 60s 缓存） */
-  const loadPermCheck = useCallback(async (refresh = false) => {
-    setPermChecking(true);
-    try {
-      setPermCheck(await checkPermissionsApi(refresh));
-    } catch {
-      setPermCheck(null);
-    } finally {
-      setPermChecking(false);
-    }
-  }, []);
-
   /**
    * 复制「唯一的修复命令」。
    * 不静默失败：成功给出「已复制」，失败则选中命令文本并提示手动 Ctrl+C。
+   *
+   * v1.41.5：不再回落到权限体检（`perm-check`）—— 体检是**推测**，会大量误报
+   * （属主不是服务用户但模式已开放可读的文件也会被判异常，而备份其实读得到）。
+   * 这里只信「上次备份的真实结果」`backupIssues`，它逐条对应实际被跳过的条目。
    */
   const handleCopyFixCmd = useCallback(async () => {
-    const cmd = backupIssues?.fixCommand || permCheck?.fixCommand || "";
+    const cmd = backupIssues?.fixCommand || "";
     if (!cmd) return;
     if (await copyText(cmd)) {
       setCopiedFixCmd(true);
@@ -832,7 +836,7 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
       selectNodeText(fixCmdRef.current);
       setToast({ type: "error", message: "浏览器不允许自动复制，已帮你选中命令，请按 Ctrl+C 手动复制" });
     }
-  }, [backupIssues?.fixCommand, permCheck?.fixCommand]);
+  }, [backupIssues?.fixCommand]);
 
   /** 复制任意文本并给出可见反馈（绝不静默失败） */
   const handleCopyText = async (text: string) => {
@@ -844,13 +848,13 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
     }
   };
 
-  // 切到「备份管理」Section 时加载备份列表 + 权限体检
+  // 切到「备份管理」Section 时加载备份列表
+  //（v1.41.5：不再自动跑权限体检 —— 备份本身已自愈并回报真实跳过项，见 handleCopyFixCmd 注释）
   useEffect(() => {
     if (activeSection === "backup") {
       loadBackups();
-      loadPermCheck();
     }
-  }, [activeSection, loadBackups, loadPermCheck]);
+  }, [activeSection, loadBackups]);
 
   const handleDeleteBackup = async () => {
     if (!deletingBackup) return;
@@ -867,14 +871,28 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
     }
   };
 
-  /** 备份文件名 -> 展示标签 */
+  /**
+   * 备份文件名 -> 展示标签
+   *
+   * v1.41.5 命名规则：
+   *   `dockermanagementyanzi_all_YYYYMMDD_HHMMSS.zip`        手动全量
+   *   `dockermanagementyanzi_<堆栈名>_YYYYMMDD_HHMMSS.zip`    堆栈备份
+   *   `dockermanagementyanzi_auto-<档位>_YYYYMMDD_HHMMSS.zip` 自动备份
+   *   `dockermanagementyanzi_config-export_YYYYMMDD_HHMMSS.zip` 配置导出
+   * 历史包（无前缀、`all_`/`auto-x_`/`<栈名>_` + 旧 ISO 时间戳）仍需正常展示，故保留旧分支兜底。
+   */
   const backupLabel = (name: string) => {
     const base = name.replace(/\.(zip|tar\.gz)$/i, "");
-    if (base.startsWith("auto-")) return `自动备份（${base.split("_")[0].slice(5)}）`;
-    if (base.startsWith("all_")) return "手动全量备份";
-    if (base.startsWith("config-export")) return "配置导出";
+    const body = base.startsWith(`${BACKUP_NAME_PREFIX}_`)
+      ? base.slice(BACKUP_NAME_PREFIX.length + 1)
+      : base;
+    // 去掉末尾时间戳：新格式 _YYYYMMDD_HHMMSS，旧格式 _YYYY-MM-DDTHH-MM-SS
+    const stamp = /_(\d{8}_\d{6}|\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2})$/;
+    if (body.startsWith("auto-")) return `自动备份（${body.replace(stamp, "").slice(5)}）`;
+    if (body === "all" || body.startsWith("all_")) return "手动全量备份";
+    if (body.startsWith("config-export")) return "配置导出";
     // 堆栈级备份：<stackName>_<timestamp>
-    return base.replace(/_\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}$/, "");
+    return body.replace(stamp, "");
   };
 
   /** 字节数 -> 人类可读（备份文件粒度用 1 位小数即可） */
@@ -1306,8 +1324,6 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
         setToast({ type: "success", message: `备份完成：${r.backupName}` });
       }
       await loadBackups();
-      // 备份可能已顺带自愈部分文件，刷新体检结果
-      loadPermCheck(true);
     } catch (e: any) {
       setToast({ type: "error", message: e.message || "备份失败" });
     } finally {
@@ -1343,7 +1359,6 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
       const r = await restoreUploadedBackupApi(file);
       setToast({ type: "success", message: `已从上传备份恢复（堆栈 ${r.stacks} 个），刷新页面后生效` });
       await loadBackups();
-      loadPermCheck(true);
     } catch (e: any) {
       setToast({ type: "error", message: e.message || "恢复失败" });
     } finally {
@@ -1539,8 +1554,6 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
   const [appInfoLoading, setAppInfoLoading] = useState(false);
   const [appInfoError, setAppInfoError] = useState<string | null>(null);
-  /** 刚复制成功的目录 key（2 秒后复原为「复制」） */
-  const [copiedDirKey, setCopiedDirKey] = useState<string | null>(null);
 
   const loadAppInfo = useCallback(async () => {
     setAppInfoLoading(true);
@@ -1555,22 +1568,32 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
   }, []);
 
   useEffect(() => {
-    // 「目录镜像」已并入本页 ⇒ 一并加载其运行态
-    if (activeSection === "backup") {
+    // v1.41.5：应用信息已并入「系统更新 → 当前版本」卡片 ⇒ 改在 update 分区加载
+    if (activeSection === "update") {
       void loadAppInfo();
-      void loadMirror();
     }
   }, [activeSection, loadAppInfo]);
 
-  const copyDirPath = async (key: string, p: string) => {
-    const ok = await copyText(p);
-    if (!ok) {
-      setToast({ type: "error", message: "复制失败，请手动选中路径复制" });
+  // v1.41.6：「页面设置 → 网络曲线默认网卡」需要网卡列表（仅本机 socket 引擎有值）
+  useEffect(() => {
+    if (activeSection !== "modal") return;
+    if (!activeEngineId) {
+      setNetIfaces([]);
       return;
     }
-    setCopiedDirKey(key);
-    setTimeout(() => setCopiedDirKey((k) => (k === key ? null : k)), 2000);
-  };
+    let alive = true;
+    void (async () => {
+      try {
+        const list = await fetchNetInterfacesApi(activeEngineId);
+        if (alive) setNetIfaces(list || []);
+      } catch {
+        if (alive) setNetIfaces([]);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [activeSection, activeEngineId]);
 
   // ============ 应用日志（系统设置 → 应用日志） ============
   const [logsData, setLogsData] = useState<LogListResult | null>(null);
@@ -1585,6 +1608,11 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
   const [downloadingLog, setDownloadingLog] = useState<string | null>(null);
   const [deletingLog, setDeletingLog] = useState<string | null>(null);
   const [pruningLogs, setPruningLogs] = useState(false);
+  /** v1.41.6：正在打包 / 正在删除的归档包名 */
+  const [packingLogs, setPackingLogs] = useState(false);
+  const [deletingLogArchive, setDeletingLogArchive] = useState<string | null>(null);
+  /** v1.41.6：「页面设置 → 网络曲线默认网卡」的可选网卡列表（仅本机 socket 引擎有值） */
+  const [netIfaces, setNetIfaces] = useState<NetInterfaceOption[]>([]);
 
   const loadLogs = useCallback(async () => {
     setLogsLoading(true);
@@ -1674,11 +1702,44 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
     }
   };
 
-  // ============ 目录镜像（系统设置 → 目录镜像） ============
-  const [mirrorStates, setMirrorStates] = useState<MirrorRuntimeState[]>([]);
-  const [mirrorLoading, setMirrorLoading] = useState(false);
-  const [mirrorError, setMirrorError] = useState<string | null>(null);
-  const [mirrorSyncing, setMirrorSyncing] = useState(false);
+  /** 立即打包一次（v1.41.6 每周打包；忽略间隔） */
+  const handlePackLogs = async () => {
+    if (packingLogs) return;
+    setPackingLogs(true);
+    try {
+      const r = await packAppLogsApi();
+      if (r.packed) {
+        setToast({
+          type: "success",
+          message: `已打包 ${r.archivedFiles.length} 个日志文件 → ${r.archiveName}（${fmtSize(r.sourceBytes)} → ${fmtSize(r.archiveBytes)}）`,
+        });
+      } else {
+        setToast({ type: "success", message: r.reason || "没有可打包的日志" });
+      }
+      await loadLogs();
+    } catch (e: any) {
+      setToast({ type: "error", message: e?.message || "打包失败" });
+    } finally {
+      setPackingLogs(false);
+    }
+  };
+
+  /** 删除单个归档包（v1.41.6） */
+  const handleDeleteLogArchive = async (name: string) => {
+    if (deletingLogArchive) return;
+    if (!window.confirm(`确定删除日志归档包「${name}」？\n包内日志将无法恢复。`)) return;
+    setDeletingLogArchive(name);
+    try {
+      await deleteAppLogArchiveApi(name);
+      setToast({ type: "success", message: `已删除归档包 ${name}` });
+      await loadLogs();
+    } catch (e: any) {
+      setToast({ type: "error", message: e?.message || "删除归档包失败" });
+    } finally {
+      setDeletingLogArchive(null);
+    }
+  };
+
   // 通知测试（设置 → 通知配置 → 「发送测试通知」）
   const [notifTesting, setNotifTesting] = useState(false);
   const [notifTestResult, setNotifTestResult] = useState<string | null>(null);
@@ -1705,45 +1766,6 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
       alive = false;
     };
   }, [activeSection]);
-
-  const loadMirror = useCallback(async () => {
-    setMirrorLoading(true);
-    setMirrorError(null);
-    try {
-      setMirrorStates(await fetchMirrorStatusApi());
-    } catch (e: any) {
-      setMirrorError(e?.message || "获取镜像状态失败");
-    } finally {
-      setMirrorLoading(false);
-    }
-  }, []);
-
-  // 进入该分区时加载一次，并每 15 秒刷新运行态（同步结果 / 监听是否掉线）
-  useEffect(() => {
-    // 分区已由 "mirror" 并入 "appinfo"（v1.38.0）
-    if (activeSection !== "backup") return () => {};
-    void loadMirror();
-    const t = setInterval(() => void loadMirror(), 15000);
-    return () => clearInterval(t);
-  }, [activeSection, loadMirror]);
-
-  const handleMirrorSyncNow = async () => {
-    setMirrorSyncing(true);
-    try {
-      const r = await syncMirrorNowApi();
-      setMirrorStates(r);
-      const bad = r.filter((s) => s.enabled && !s.valid);
-      if (bad.length > 0) {
-        setToast({ type: "error", message: `同步失败：${bad[0].invalidReason || "目标路径不可用"}` });
-      } else {
-        setToast({ type: "success", message: "已立即同步" });
-      }
-    } catch (e: any) {
-      setToast({ type: "error", message: e?.message || "同步失败" });
-    } finally {
-      setMirrorSyncing(false);
-    }
-  };
 
   /**
    * 发送测试通知。
@@ -1782,19 +1804,29 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
     }
   };
 
+  /**
+   * 侧栏分区顺序（v1.41.6 按用户指定顺序调整）：
+   *   用户 → 列显隐 → 引擎配置 → 标签管理 → 编辑堆栈 → 页面设置
+   *   → 镜像更新 → 备份管理 → 通知 → 日志 → 硬件信息 → 系统更新
+   *
+   * ★ 纯展示顺序调整：**key 与各分区内部的 JSX 条件分支一律不动**，故数据加载
+   *   （loadBackups / loadAppInfo / loadLogs / notify 自检 等）行为完全不变。
+   *   下方 `activeSection === "xxx"` 的 JSX 块顺序与本数组**无关**（各自独立三元），
+   *   调整本数组不会影响渲染逻辑。
+   */
   const sections = [
-    { key: "docker", label: "引擎配置", icon: <Container size={16} /> },
     { key: "user", label: "用户", icon: <User size={16} /> },
+    { key: "colvis", label: "列显隐", icon: <Columns size={16} /> },
+    { key: "docker", label: "引擎配置", icon: <Container size={16} /> },
     { key: "tags", label: "标签管理", icon: <TagsIcon size={16} /> },
-    { key: "compose", label: "Compose 管理", icon: <FileCode2 size={16} /> },
-    { key: "modal", label: "弹窗设置", icon: <Timer size={16} /> },
-    { key: "notifications", label: "通知", icon: <Bell size={16} /> },
-    { key: "backup", label: "备份管理", icon: <Package size={16} /> },
+    { key: "compose", label: "编辑堆栈", icon: <FileCode2 size={16} /> },
+    { key: "modal", label: "页面设置", icon: <Timer size={16} /> },
     { key: "scheduler", label: "镜像更新", icon: <Clock size={16} /> },
+    { key: "backup", label: "备份管理", icon: <Package size={16} /> },
+    { key: "notifications", label: "通知", icon: <Bell size={16} /> },
+    { key: "applogs", label: "日志", icon: <FileText size={16} /> },
     { key: "activity", label: "硬件信息", icon: <Activity size={16} /> },
     { key: "update", label: "系统更新", icon: <Download size={16} /> },
-    { key: "applogs", label: "日志", icon: <FileText size={16} /> },
-    { key: "colvis", label: "列显隐", icon: <Columns size={16} /> },
   ];
 
   // ============ 标签库（设置 → 标签管理，全局 ResourceTag 列表） ============
@@ -2647,188 +2679,6 @@ docker-compose version</code>
               <p className="text-sm text-slate-500">堆栈配置与数据卷的备份与恢复，支持三级备份策略</p>
             </div>
 
-            <div>
-              <h2 className="text-lg font-semibold text-slate-800 mb-1">应用数据</h2>
-              <p className="text-sm text-slate-500">
-                应用运行态、安装位置与目录一览，以及「目录镜像」配置。目录路径可一键复制，便于排障、写脚本或在其它工具里挂载。
-              </p>
-            </div>
-
-            <Card
-              title="应用信息"
-              icon={<Info size={16} />}
-              actions={
-                <IconButton
-                  icon={<RefreshCw size={14} className={appInfoLoading ? "animate-spin" : ""} />}
-                  onClick={() => void loadAppInfo()}
-                  title="刷新"
-                  disabled={appInfoLoading}
-                />
-              }
-            >
-              {appInfoError && <p className="text-xs text-red-500 mb-3">{appInfoError}</p>}
-              {!appInfo ? (
-                <p className="text-sm text-slate-400">{appInfoLoading ? "加载中…" : "暂无数据"}</p>
-              ) : (
-                <div className="space-y-3">
-                  <div className="flex items-center gap-3">
-                    <span className="text-3xl font-bold text-blue-600 font-mono">v{appInfo.version}</span>
-                    <span className="px-2 py-0.5 text-[11px] rounded-full bg-slate-100 text-slate-600 font-mono">
-                      {appInfo.channel}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-x-6 gap-y-2">
-                    <InfoRow label="运行用户" value={appInfo.user} />
-                    <InfoRow label="进程 PID" value={appInfo.pid} />
-                    <InfoRow label="Node" value={appInfo.nodeVersion} />
-                    <InfoRow label="平台" value={`${appInfo.platform} / ${appInfo.arch}`} />
-                    <InfoRow label="启动时间" value={new Date(appInfo.startedAt).toLocaleString()} />
-                    <InfoRow label="已运行" value={fmtUptimeCn(appInfo.uptimeSeconds)} />
-                    <InfoRow label="活跃引擎" value={`${appInfo.engineName}（${appInfo.engineConnection}）`} />
-                    <InfoRow label="引擎数量" value={`${appInfo.engineCount} 个`} />
-                  </div>
-                </div>
-              )}
-            </Card>
-
-            <Card title="安装位置与目录" icon={<FolderOpen size={16} />}>
-              {!appInfo ? (
-                <p className="text-sm text-slate-400">{appInfoLoading ? "加载中…" : "暂无数据"}</p>
-              ) : (
-                <div className="divide-y divide-slate-100">
-                  {appInfo.dirs.map((d) => (
-                    <div key={d.key} className="py-2.5 flex items-start gap-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-sm font-medium text-slate-700">{d.label}</span>
-                          {!d.exists && (
-                            <span className="px-1.5 py-0.5 text-[10px] rounded bg-amber-50 text-amber-600 border border-amber-200">
-                              不存在
-                            </span>
-                          )}
-                          {d.exists && (
-                            <span className="text-[11px] text-slate-400">
-                              {d.files} 个文件 · {d.truncated ? "≥ " : ""}
-                              {fmtSize(d.sizeBytes)}
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-xs text-slate-500 font-mono break-all mt-0.5">{d.path}</p>
-                        <p className="text-[11px] text-slate-400 mt-0.5">{d.note}</p>
-                      </div>
-                      <button
-                        onClick={() => void copyDirPath(d.key, d.path)}
-                        className="flex-shrink-0 flex items-center gap-1 px-2 py-1 text-[11px] text-slate-600 border border-slate-200 rounded hover:bg-slate-50"
-                      >
-                        {copiedDirKey === d.key ? <Check size={12} className="text-green-600" /> : <CopyIcon size={12} />}
-                        {copiedDirKey === d.key ? "已复制" : "复制"}
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </Card>
-          
-
-
-            <div>
-              <h2 className="text-lg font-semibold text-slate-800 mb-1">目录镜像</h2>
-              <p className="text-sm text-slate-500">
-                把「备份目录」或「Compose 目录」在<b>另一个路径</b>再存一份，与原始目录实时同步。
-                变更由文件监听即时触发（1 秒防抖合并），另有每 60 秒全量对账兜底。
-              </p>
-              <p className="text-xs text-amber-600 mt-1">
-                ⚠️ 语义为<b>真镜像</b>：源目录里删除的文件 / 目录会同步从目标删除。因此目标路径不允许是源目录的上级或子目录。
-              </p>
-            </div>
-
-            {mirrorError && <p className="text-xs text-red-500">{mirrorError}</p>}
-
-            {mirrorStates.length === 0 && (
-              <p className="text-sm text-slate-400">{mirrorLoading ? "加载中…" : "暂无镜像状态"}</p>
-            )}
-
-            {mirrorStates.map((s) => (
-              <Card
-                key={s.key}
-                title={s.label}
-                icon={<FolderOpen size={16} />}
-                actions={
-                  <Toggle
-                    active={data.mirror?.[s.key]?.enabled ?? false}
-                    onChange={(v) =>
-                      update("mirror", s.key, { ...(data.mirror?.[s.key] ?? { target: "" }), enabled: v })
-                    }
-                  />
-                }
-              >
-                <div className="space-y-3">
-                  <div className="flex items-start gap-2 text-xs">
-                    <span className="text-slate-400 flex-shrink-0 pt-0.5">源目录</span>
-                    <span className="font-mono text-slate-600 break-all">{s.source}</span>
-                  </div>
-
-                  <FormField
-                    label="目标路径（绝对路径）"
-                    hint="留空 = 关闭该项镜像。示例：/mnt/user/backup-mirror/backups"
-                  >
-                    <Input
-                      value={data.mirror?.[s.key]?.target ?? ""}
-                      onChange={(v) =>
-                        update("mirror", s.key, { ...(data.mirror?.[s.key] ?? { enabled: false }), target: v })
-                      }
-                      placeholder="/mnt/user/backup-mirror"
-                    />
-                  </FormField>
-
-                  {(data.mirror?.[s.key]?.enabled ?? false) && (data.mirror?.[s.key]?.target ?? "").trim() !== "" && (
-                    <div className="rounded-lg bg-slate-50 border border-slate-100 p-3 space-y-1.5">
-                      {!s.valid ? (
-                        <p className="text-xs text-red-600">目标路径不可用：{s.invalidReason}</p>
-                      ) : (
-                        <>
-                          <div className="flex items-center gap-4 text-xs flex-wrap">
-                            <span
-                              className={`inline-flex items-center gap-1 ${
-                                s.watcherActive ? "text-green-600" : "text-amber-600"
-                              }`}
-                            >
-                              <span
-                                className={`w-1.5 h-1.5 rounded-full ${
-                                  s.watcherActive ? "bg-green-500" : "bg-amber-500"
-                                }`}
-                              />
-                              {s.watcherActive ? "文件监听已生效（实时同步）" : "递归监听不可用，仅 60 秒轮询兜底"}
-                            </span>
-                            {s.syncing && <span className="text-blue-600">同步中…</span>}
-                          </div>
-                          <div className="text-xs text-slate-500">
-                            上次同步：{s.lastSyncAt ? new Date(s.lastSyncAt).toLocaleString() : "尚未同步"} · 耗时{" "}
-                            {s.lastDurationMs} ms · 源 {s.sourceFiles} 个文件 / 目标 {s.targetFiles} 个文件 · 上次复制{" "}
-                            {s.copied} 个{s.deleted > 0 ? ` / 删除 ${s.deleted} 个` : ""}
-                          </div>
-                          {s.lastError && <p className="text-xs text-red-600">最近错误：{s.lastError}</p>}
-                        </>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </Card>
-            ))}
-
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handleMirrorSyncNow}
-                disabled={mirrorSyncing}
-                className="flex items-center gap-1.5 px-4 py-2 text-sm text-white bg-blue-500 rounded-lg hover:bg-blue-600 disabled:opacity-50"
-              >
-                <RefreshCw size={14} className={mirrorSyncing ? "animate-spin" : ""} />
-                {mirrorSyncing ? "同步中…" : "立即同步"}
-              </button>
-              <span className="text-xs text-slate-400">开关与路径需点 APPLY 保存后生效</span>
-            </div>
-          
-
             {/* 备份路径与开关 */}
             <Card title="备份设置" icon={<HardDrive size={16} />}>
               <div className="space-y-4">
@@ -2992,12 +2842,19 @@ docker-compose version</code>
                 </button>
               </div>
 
-              {/* 权限提示：优先展示上次备份的跳过项，否则展示只读体检结果 */}
+              {/*
+                备份权限提示（v1.41.5）：**只信上次备份的真实结果** `backupIssues`。
+                原先在此回落到只读「权限体检」(`perm-check`)，但体检判据是
+                「属主 ≠ 服务运行用户 或 模式位不足」——现实中大量文件属主是 root、
+                模式已开放读（0644/0755），备份其实读得到，却被判为异常并弹出
+                「N 个文件权限异常，备份时会被跳过」的假警报。备份本身已有自愈
+                （autoFixReadPerm 默认开）并逐条回报真实跳过项，故移除推测性预检。
+              */}
               {(() => {
-                const details = backupIssues?.details?.length ? backupIssues.details : permCheck?.issues || [];
+                const details = backupIssues?.details || [];
                 const fixed = backupIssues?.fixed || [];
                 if (!details.length && !fixed.length) return null;
-                const fixCmd = backupIssues?.fixCommand || permCheck?.fixCommand || "";
+                const fixCmd = backupIssues?.fixCommand || "";
                 return (
                   <div className="mt-4 border border-amber-200 bg-amber-50 rounded-lg p-3">
                     <div className="flex items-start gap-2">
@@ -3006,7 +2863,7 @@ docker-compose version</code>
                         <p className="text-sm font-medium text-amber-800">
                           {backupIssues?.skipped?.length
                             ? `上次备份跳过 ${backupIssues.skipped.length} 项（权限不足）`
-                            : `检测到 ${permCheck?.issues?.length ?? 0} 个文件权限异常，备份时会被跳过`}
+                            : "备份已自动补正下列文件的属主读权限"}
                         </p>
                         {fixed.length > 0 && (
                           <p className="text-xs mt-1 text-emerald-700">
@@ -3050,16 +2907,6 @@ docker-compose version</code>
                             </p>
                           </div>
                         )}
-
-                        <div className="mt-3">
-                          <button
-                            onClick={() => loadPermCheck(true)}
-                            disabled={permChecking}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 text-xs text-amber-800 border border-amber-300 rounded-md hover:bg-amber-100 disabled:opacity-50"
-                          >
-                            <RefreshCw size={11} className={permChecking ? "animate-spin" : ""} /> 重新检测
-                          </button>
-                        </div>
                       </div>
                     </div>
                   </div>
@@ -3227,15 +3074,50 @@ docker-compose version</code>
               <h2 className="text-lg font-semibold text-slate-800 mb-1">系统更新</h2>
             </div>
 
-            {/* 当前版本 */}
-            <Card title="当前版本" icon={<Download size={16} />}>
+            {/* 当前版本（含原「备份管理 → 应用信息」卡片内容，v1.41.5 合并至此） */}
+            <Card
+              title="当前版本"
+              icon={<Download size={16} />}
+              actions={
+                <IconButton
+                  icon={<RefreshCw size={14} className={appInfoLoading ? "animate-spin" : ""} />}
+                  onClick={() => void loadAppInfo()}
+                  title="刷新"
+                  disabled={appInfoLoading}
+                />
+              }
+            >
+              {appInfoError && <p className="text-xs text-red-500 mb-3">{appInfoError}</p>}
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-slate-600">当前安装版本</p>
                   <p className="text-xs text-slate-400 mt-0.5 break-all">安装目录：{appVersion?.installDir || "—"}</p>
                 </div>
-                <span className="text-2xl font-bold text-blue-600 font-mono">v{appVersion?.version ?? "..."}</span>
+                <div className="flex items-center gap-2">
+                  {appInfo && (
+                    <span className="px-2 py-0.5 text-[11px] rounded-full bg-slate-100 text-slate-600 font-mono">
+                      {appInfo.channel}
+                    </span>
+                  )}
+                  <span className="text-2xl font-bold text-blue-600 font-mono">v{appVersion?.version ?? "..."}</span>
+                </div>
               </div>
+
+              {/* 应用运行态（原「应用信息」卡片） */}
+              {!appInfo ? (
+                <p className="text-sm text-slate-400 mt-3">{appInfoLoading ? "加载中…" : "暂无数据"}</p>
+              ) : (
+                <div className="grid grid-cols-2 gap-x-6 gap-y-2 mt-4 pt-4 border-t border-slate-100">
+                  <InfoRow label="运行用户" value={appInfo.user} />
+                  <InfoRow label="进程 PID" value={appInfo.pid} />
+                  <InfoRow label="Node" value={appInfo.nodeVersion} />
+                  <InfoRow label="平台" value={`${appInfo.platform} / ${appInfo.arch}`} />
+                  <InfoRow label="启动时间" value={new Date(appInfo.startedAt).toLocaleString()} />
+                  <InfoRow label="已运行" value={fmtUptimeCn(appInfo.uptimeSeconds)} />
+                  <InfoRow label="活跃引擎" value={`${appInfo.engineName}（${appInfo.engineConnection}）`} />
+                  <InfoRow label="引擎数量" value={`${appInfo.engineCount} 个`} />
+                </div>
+              )}
             </Card>
 
             {/* 检查更新 */}
@@ -3527,21 +3409,21 @@ docker-compose version</code>
 
                 {(data.logRetention?.enabled ?? true) && (
                   <div className="space-y-5 pl-4 border-l-2 border-slate-100">
-                    {/* 应用日志 ＝ 顶层，同时是另外两类未填时的取值来源 */}
+                    {/* 应用日志 ＝ 顶层（独立管理，不向下游传导） */}
                     <div>
                       <div className="text-xs font-medium text-slate-600 mb-2">
                         {LOG_CHANNEL_LABELS.app} <span className="font-mono text-slate-400">app-*.log</span>
-                        <span className="ml-2 text-[10px] text-slate-400">另外两类未填时跟随这里</span>
+                        <span className="ml-2 text-[10px] text-slate-400">独立管理（默认 365 天 / 1024 MB）</span>
                       </div>
                       <div className="grid grid-cols-2 gap-4">
-                        <FormField label="保留天数" hint="0 = 不限；超期的最先清理">
+                        <FormField label="保留天数" hint="0 = 不限；默认 365 天">
                           <Input
                             type="number"
                             value={String(data.logRetention?.maxDays ?? 365)}
                             onChange={(v) => update("logRetention", "maxDays", Math.max(0, Math.floor(Number(v) || 0)))}
                           />
                         </FormField>
-                        <FormField label="总大小上限（MB）" hint="0 = 不限；超出后从最旧开始删">
+                        <FormField label="总大小上限（MB）" hint="0 = 不限；默认 1024 MB">
                           <Input
                             type="number"
                             value={String(data.logRetention?.maxTotalMB ?? 1024)}
@@ -3563,31 +3445,20 @@ docker-compose version</code>
                         <div key={ch}>
                           <div className="text-xs font-medium text-slate-600 mb-2">
                             {LOG_CHANNEL_LABELS[ch]} <span className="font-mono text-slate-400">{ch}-*.log</span>
-                            <span className="ml-2 text-[10px] text-slate-400">
-                              {ov.maxDays === undefined && ov.maxTotalMB === undefined ? "跟随「应用日志」" : "已单独设置"}
-                            </span>
-                            {(ov.maxDays !== undefined || ov.maxTotalMB !== undefined) && (
-                              <button
-                                type="button"
-                                onClick={() => update("logRetention", ch, {})}
-                                className="ml-2 text-[10px] text-blue-600 hover:underline"
-                              >
-                                恢复跟随
-                              </button>
-                            )}
+                            <span className="ml-2 text-[10px] text-slate-400">独立管理（默认 365 天 / 1024 MB）</span>
                           </div>
                           <div className="grid grid-cols-2 gap-4">
-                            <FormField label="保留天数" hint={`留空 = 跟随（当前 ${data.logRetention?.maxDays ?? 365} 天）`}>
+                            <FormField label="保留天数" hint="0 = 不限；默认 365 天">
                               <Input
                                 type="number"
-                                value={ov.maxDays === undefined ? "" : String(ov.maxDays)}
+                                value={String(ov.maxDays ?? 365)}
                                 onChange={(v) => setOv("maxDays", v)}
                               />
                             </FormField>
-                            <FormField label="总大小上限（MB）" hint={`留空 = 跟随（当前 ${data.logRetention?.maxTotalMB ?? 1024} MB）`}>
+                            <FormField label="总大小上限（MB）" hint="0 = 不限；默认 1024 MB">
                               <Input
                                 type="number"
-                                value={ov.maxTotalMB === undefined ? "" : String(ov.maxTotalMB)}
+                                value={String(ov.maxTotalMB ?? 1024)}
                                 onChange={(v) => setOv("maxTotalMB", v)}
                               />
                             </FormField>
@@ -3598,6 +3469,85 @@ docker-compose version</code>
                   </div>
                 )}
 
+                {/* ========== 每周打包（v1.41.6） ========== */}
+                <div className="space-y-3 pt-1">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-sm text-slate-600">每周打包一次</span>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        把已结束的每日日志归拢成 zip 归档并删除原始文件（当天日志永不打包）；
+                        归档包同样受上方「保留天数 / 总上限」约束
+                      </p>
+                    </div>
+                    <Toggle
+                      active={data.logRetention?.packEnabled ?? true}
+                      onChange={(v) => update("logRetention", "packEnabled", v)}
+                    />
+                  </div>
+
+                  {(data.logRetention?.packEnabled ?? true) && (
+                    <>
+                      <div className="grid grid-cols-2 gap-4 pl-4 border-l-2 border-slate-100">
+                        <FormField label="打包间隔（天）" hint="滚动间隔：距上次打包满 N 天即执行一次">
+                          <Input
+                            type="number"
+                            value={String(data.logRetention?.packIntervalDays ?? 7)}
+                            onChange={(v) =>
+                              update("logRetention", "packIntervalDays", Math.max(1, Math.floor(Number(v) || 7)))
+                            }
+                          />
+                        </FormField>
+                        <FormField label="上次打包" hint="下次到期时间见下方状态">
+                          <Input value={logsData?.pack?.lastPackAt ? new Date(logsData.pack.lastPackAt).toLocaleString() : "从未打包"} disabled />
+                        </FormField>
+                      </div>
+
+                      <div className="flex items-center gap-2 pl-4 flex-wrap">
+                        <button
+                          onClick={handlePackLogs}
+                          disabled={packingLogs}
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50"
+                        >
+                          {packingLogs ? <Loader2 size={13} className="animate-spin" /> : <Package size={13} />}
+                          {packingLogs ? "打包中…" : "立即打包"}
+                        </button>
+                        <span className="text-xs text-slate-400">
+                          {logsData?.pack?.nextPackAt
+                            ? `下次自动打包：${new Date(logsData.pack.nextPackAt).toLocaleString()}`
+                            : "下次自动打包：等待首次打包后开始计时"}
+                        </span>
+                      </div>
+
+                      {logsData && logsData.archives && logsData.archives.length > 0 && (
+                        <div className="pl-4">
+                          <div className="text-xs font-medium text-slate-600 mb-1.5">
+                            已归档压缩包 <span className="text-slate-400 font-normal">（{logsData.archives.length} 个）</span>
+                          </div>
+                          <div className="divide-y divide-slate-100 border border-slate-100 rounded-lg">
+                            {logsData.archives.map((a) => (
+                              <div key={a.name} className="py-2 px-3 flex items-center gap-3">
+                                <span className="font-mono text-xs text-slate-600 flex-1 break-all">{a.name}</span>
+                                <span className="text-[11px] text-slate-400 flex-shrink-0">
+                                  {fmtSize(a.sizeBytes)} · {new Date(a.mtime).toLocaleDateString()}
+                                </span>
+                                <button
+                                  onClick={() => void handleDeleteLogArchive(a.name)}
+                                  disabled={!!deletingLogArchive}
+                                  title="删除归档包"
+                                  className="flex-shrink-0 inline-flex items-center px-2 py-1 text-[11px] text-slate-600 border border-slate-200 rounded hover:bg-slate-50 disabled:opacity-50"
+                                >
+                                  {deletingLogArchive === a.name ? <Loader2 size={11} className="animate-spin" /> : <Trash2 size={11} />}
+                                  删除
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+
                 <div className="flex items-center gap-2 flex-wrap pt-1">
                   <button
                     onClick={handlePruneLogs}
@@ -3605,8 +3555,7 @@ docker-compose version</code>
                     className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50"
                   >
                     <Trash2 size={13} /> {pruningLogs ? "清理中…" : "立即清理"}
-                  </button>
-                  <button
+                  </button>                  <button
                     onClick={handleExportLogs}
                     disabled={exportingLogs || !logsData || logsData.files.length === 0}
                     className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-white bg-blue-500 rounded-lg hover:bg-blue-600 disabled:opacity-50"
@@ -3694,15 +3643,23 @@ docker-compose version</code>
             <div>
               <h2 className="text-lg font-semibold text-slate-800 mb-1">列显隐</h2>
               <p className="text-sm text-slate-500">
-                集中设置各列表的显示列。固定列（图标 / 操作）始终显示、不可隐藏；其余列可自由勾选。
+                集中设置各列表的显示列。固定列始终显示、不可隐藏；其余列可自由勾选。
                 全部取消勾选时仅保留固定列。修改后点击页面底部「保存设置」生效，各页面会在重新进入时回落。
+                镜像 / 数据卷 / 网络三页的操作已改为右键菜单（无操作列）。
+                镜像管理卡片内另有「仓库名隐藏 registry 地址」开关：勾选后 <span className="font-mono">docker.1panel.live/gitea/gitea</span> 显示为 <span className="font-mono">gitea/gitea</span>。
+                「仓库名」为镜像主标识列，常驻显示、不可隐藏；可调的只是列内 registry 地址显不显示。
+                镜像管理页工具栏「列」下拉内也有同名控制项「仓库 registry 地址」（勾选显示完整地址，会话级切换，不写本设置）。
+                镜像管理「SHA-256」列默认不显示（未保存过列设置时），需要时在本卡片或镜像页「列」下拉手动勾选即可。
               </p>
             </div>
 
             {COLVIS_PAGES.map((page) => {
               const stored = (data.columnVisibility as any)?.[page.key] as string[] | undefined;
               const allKeys = [...page.fixed, ...page.cols.map((c) => c[0])];
-              const visibleSet = stored && stored.length > 0 ? new Set(stored) : new Set(allKeys);
+              // 无 stored 时的默认勾选态与镜像页实际默认显示保持一致（v1.42.19）：
+              // images 页「SHA-256」列默认不勾；用户主动「全选」或手动勾选不受限
+              const defaultKeys = page.key === "images" ? allKeys.filter(k => k !== "sha256") : allKeys;
+              const visibleSet = stored && stored.length > 0 ? new Set(stored) : new Set(defaultKeys);
               const setVisible = (keys: string[]) => update("columnVisibility", page.key, keys);
               const toggleCol = (key: string, checked: boolean) => {
                 const next = new Set(visibleSet);
@@ -3724,14 +3681,16 @@ docker-compose version</code>
                   }
                 >
                   <div className="space-y-3">
-                    <p className="text-xs text-slate-400">
-                      固定列（始终显示）：
-                      {page.fixed.map((f) => (
-                        <span key={f} className="ml-1 px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">
-                          {f === "icon" ? "图标" : f === "actions" ? "操作" : f}
-                        </span>
-                      ))}
-                    </p>
+                    {page.fixed.length > 0 && (
+                      <p className="text-xs text-slate-400">
+                        固定列（始终显示）：
+                        {page.fixed.map((f) => (
+                          <span key={f} className="ml-1 px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">
+                            {f === "icon" ? "图标" : f === "actions" ? "操作" : f}
+                          </span>
+                        ))}
+                      </p>
+                    )}
                     <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
                       {page.cols.map(([key, label]) => (
                         <label key={key} className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
@@ -3745,6 +3704,24 @@ docker-compose version</code>
                         </label>
                       ))}
                     </div>
+                    {page.key === "images" && (
+                      <div className="pt-3 border-t border-slate-100">
+                        <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={data.imagesDisplay?.hideRegistryPrefix ?? true}
+                            onChange={(e) => update("imagesDisplay", "hideRegistryPrefix", e.target.checked)}
+                            className="rounded border-slate-300 text-blue-500 focus:ring-blue-500/20"
+                          />
+                          仓库名隐藏 registry 地址
+                        </label>
+                        <p className="mt-1 text-xs text-slate-400">
+                          勾选后 <span className="font-mono">docker.1panel.live/gitea/gitea</span> 显示为 <span className="font-mono">gitea/gitea</span>。
+                          判定规则同 Docker：仓库名 <span className="font-mono">/</span> 前首段含「.」或「:」、或为 <span className="font-mono">localhost</span> 时视为 registry 地址并隐藏；
+                          <span className="font-mono">gitea/gitea</span>、<span className="font-mono">nginx</span> 等无主机名的仓库名原样显示。悬停被缩短的仓库名仍可看到完整地址。
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </Card>
               );
@@ -3755,7 +3732,7 @@ docker-compose version</code>
         {activeSection === "compose" && (
           <div className="max-w-3xl space-y-5">
             <div>
-              <h2 className="text-lg font-semibold text-slate-800 mb-1">Compose 管理</h2>
+              <h2 className="text-lg font-semibold text-slate-800 mb-1">编辑堆栈</h2>
               <p className="text-sm text-slate-500">
                 维护「编辑堆栈 → Compose」页右侧的一键填入模板。每项可填一行或多行 compose 内容（如 restart: unless-stopped），
                 填入时会按目标层级<b>自动缩进</b>（无需手工对齐空格）；值留空的项填入时自动补全（restart→unless-stopped、network_mode→bridge、container_name→服务名 等）。
@@ -3763,6 +3740,19 @@ docker-compose version</code>
                 <b>指针处</b>（编辑器光标所在行的下一行）或 <b>末尾</b>（追加到 compose 文本最后一行）。缩进以标准 2 空格 compose 为基准，会随文档实际缩进自适应。
               </p>
             </div>
+
+            <Card
+              title="WebUI 自动识别"
+              icon={<Globe size={16} />}
+              actions={<Toggle active={data.compose?.autoDetectWebui !== false} onChange={(val) => update("compose", "autoDetectWebui", val)} />}
+            >
+              <div>
+                <p className="text-xs text-slate-500">
+                  LABELS 会解析端口映射，自动填入WebUI端口与URL；
+                  服务未声明 ports 时不识别。关闭则 LABELS 页保持空白，需要手动添加。
+                </p>
+              </div>
+            </Card>
 
             <Card
               title="一键填入模板"
@@ -3852,9 +3842,31 @@ docker-compose version</code>
         {activeSection === "modal" && (
           <div className="max-w-3xl space-y-5">
             <div>
-              <h2 className="text-lg font-semibold text-slate-800 mb-1">弹窗设置</h2>
-              <p className="text-sm text-slate-500">配置操作结果弹窗的自动关闭行为，以及容器详情的展示形式</p>
+              <h2 className="text-lg font-semibold text-slate-800 mb-1">页面设置</h2>
+              <p className="text-sm text-slate-500">配置登录后默认显示的页面，以及操作结果弹窗的自动关闭行为、容器详情的展示形式</p>
             </div>
+
+            <Card title="默认显示页面" icon={<LayoutDashboard size={16} />}>
+              <FormField
+                label="登录后默认显示的页面"
+                hint="每次登录（或刷新网页）后自动进入该页面；选「仪表盘」即沿用原有默认行为。修改后立即生效，下次登录起应用。"
+              >
+                <Select
+                  value={data.modal?.defaultPage ?? "dashboard"}
+                  onChange={(v) => update("modal", "defaultPage", v)}
+                  options={[
+                    { value: "dashboard", label: "仪表盘" },
+                    { value: "containers", label: "容器管理" },
+                    { value: "stacks", label: "堆栈管理" },
+                    { value: "images", label: "镜像管理" },
+                    { value: "volumes", label: "数据卷管理" },
+                    { value: "networks", label: "网络管理" },
+                    { value: "notifications", label: "通知中心" },
+                    { value: "settings", label: "设置中心" },
+                  ]}
+                />
+              </FormField>
+            </Card>
 
             <Card title="容器详情视图" icon={<Columns size={16} />}>
               <FormField
@@ -3900,6 +3912,35 @@ docker-compose version</code>
                   className="max-w-[160px]"
                 />
               </FormField>
+            </Card>
+
+            <Card title="网络曲线默认网卡" icon={<Activity size={16} />}>
+              <FormField
+                label="仪表盘「网络」磁贴默认展示的网卡"
+                hint="默认「自动」＝挑第一个物理网卡（网卡名因机器而异，故不硬编码 eth0）。若在磁贴右上角的下拉里手动选过网卡，则以下设置不生效（手动优先）。"
+              >
+                <Select
+                  value={data.modal?.defaultNetIface ?? ""}
+                  onChange={(v) => update("modal", "defaultNetIface", v)}
+                  options={[
+                    { value: "", label: "自动（第一个物理网卡）" },
+                    ...(() => {
+                      const host = netIfaces.filter((o) => o.kind === "host").map((o) => ({ value: o.name, label: `${o.label}（物理网卡）` }));
+                      const docker = netIfaces
+                        .filter((o) => o.kind === "docker")
+                        .map((o) => ({ value: o.name, label: `${o.label}（虚拟网卡）` }));
+                      return [...host, ...docker];
+                    })(),
+                  ]}
+                />
+              </FormField>
+              {netIfaces.length === 0 && (
+                <p className="text-xs text-slate-400 mt-1.5">
+                  {activeEngineId
+                    ? "当前引擎未返回网卡列表（远程 TCP / SSH 引擎读不到本机 /proc/net/dev），此时只能用「自动」（挑第一个物理网卡；无网卡时磁贴回落容器合计）。"
+                    : "尚未选定引擎，无法列出网卡。"}
+                </p>
+              )}
             </Card>
           </div>
         )}

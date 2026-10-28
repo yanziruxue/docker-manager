@@ -104,9 +104,27 @@ export function migrateLegacyBackups(): void {
   }
 }
 
-/** 时间戳（文件名安全） */
-function tsCompact(): string {
-  return new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+/**
+ * 备份文件名前缀（应用身份）。
+ *
+ * 命名规则（v1.41.5）：
+ *   全量备份  `dockermanagementyanzi_all_YYYYMMDD_HHMMSS.zip`
+ *   堆栈备份  `dockermanagementyanzi_<堆栈名>_YYYYMMDD_HHMMSS.zip`
+ *   自动备份  `dockermanagementyanzi_auto-<档位>_YYYYMMDD_HHMMSS.zip`（仍带档位，供分档保留清理）
+ *
+ * 说明：统一前缀让备份目录里的文件一眼可辨归属；`auto-<档位>` 段保留是为了
+ * `pruneBackups()` 仍能按 `dockermanagementyanzi_auto-<档位>_` 前缀分档滚动清理。
+ */
+export const BACKUP_NAME_PREFIX = "dockermanagementyanzi";
+
+/** 时间戳（文件名安全）：YYYYMMDD_HHMMSS（本地时间） */
+export function tsCompact(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return (
+    `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}` +
+    `_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
+  );
 }
 
 /** 校验文件名并解析为备份目录内的绝对路径（防路径穿越） */
@@ -367,7 +385,7 @@ function stageConfig(staging: string): {
 
 /**
  * 创建全量备份包。
- * @param kind manual=手动（文件名 all_*）/ auto=自动（文件名 auto-<tag>_*）
+ * @param kind manual=手动（`dockermanagementyanzi_all_*`）/ auto=自动（`dockermanagementyanzi_auto-<tag>_*`）
  * @param tag  自动备份的调度类型（weekly / monthly / yearly / simple），用于分组保留
  */
 export function createFullBackup(
@@ -375,7 +393,7 @@ export function createFullBackup(
   tag = ""
 ): { name: string; size: number; skipped: string[]; skippedDetails: PermIssue[]; fixed: PermIssue[] } {
   const dir = resolveBackupDir();
-  const name = `${kind === "manual" ? "all" : "auto"}${tag ? "-" + tag : ""}_${tsCompact()}.zip`;
+  const name = `${BACKUP_NAME_PREFIX}_${kind === "manual" ? "all" : "auto"}${tag ? "-" + tag : ""}_${tsCompact()}.zip`;
   const out = path.join(dir, name);
   const staging = fs.mkdtempSync(path.join(os.tmpdir(), "dsm-backup-"));
   let skipped: string[] = [];
@@ -542,7 +560,7 @@ function stageStacksFrom(srcCompose: string, destRoot: string): { stacks: number
 
 /** 生成“导出全部配置”归档到临时目录（不进备份列表）；调用方下载后应删除 */
 export function exportConfigArchive(): { name: string; path: string } {
-  const name = `config-export_${tsCompact()}.zip`;
+  const name = `${BACKUP_NAME_PREFIX}_config-export_${tsCompact()}.zip`;
   const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "dsm-export-")), name);
   const staging = fs.mkdtempSync(path.join(os.tmpdir(), "dsm-export-stage-"));
   try {
@@ -595,7 +613,7 @@ export function deleteBackupFile(backupName: string): void {
   fs.unlinkSync(target);
 }
 
-/** 保留清理：删除同前缀（如 `auto-weekly_`）中除最新 keep 个外的备份，返回删除数量 */
+/** 保留清理：删除同前缀（如 `dockermanagementyanzi_auto-weekly_`）中除最新 keep 个外的备份，返回删除数量 */
 export function pruneBackups(prefix: string, keep: number): number {
   const dir = resolveBackupDir();
   const files = fs
