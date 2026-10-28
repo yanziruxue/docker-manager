@@ -17,7 +17,7 @@
 ---
 
 
-## v1.44.5 — 2026-10-27（**已构建 · 待双推**）
+## v1.44.5 — 2026-10-27（**已双推 2026-10-28**）
 
 ### 已完成
 - **容器终端优先使用 LABELS 配置的默认 Shell**：编辑堆栈 → LABELS 给服务配的「默认 Shell」此前只存不用于终端连接。现全链贯通——`Containers` 按 `container.stackId → stack.webuiLabels(serviceName === 容器名).defaultShell` 解析 → `ContainerDetailModal` → `XTermTerminal` 新增 `shell` prop → WS URL `&shell=` → 服务端 `attachContainerTerminal(engine, containerId, preferredShell)` 放候选队首。安全：服务端只接受 `/[A-Za-z0-9/._-]+` 绝对路径格式（防注入任意 Cmd）；v1.44.4 的镜像 `Config.Shell` + `exit 0` 探测兜底保留（配置的 shell 不存在时自动回退）。涉及 `src/pages/Containers.tsx`、`src/components/XTermTerminal.tsx`、`server/index.ts`、`server/docker.ts`。**验证**：tsc root+server 双 0；16 组门禁全 0 FAIL；ELF `7f454c46`/e_machine 62；二进制 `shellParam`×2、白名单正则×1；dist `&shell=`×1、版本串 `1.44.5`×1、`1.44.4`×0；**SHA-256 三处逐字节一致** `eebef3ebac7687e72dc0596ef84eef063d6dd70ae7be7e9e37997146fcdfb051`（130,419,904 B，SEA=zip=deb）。
@@ -27,7 +27,7 @@
 无。
 
 ### 下一步
-双推 v1.44.5（连同 v1.43.28~v1.44.4 积压版本，GitHub 侧待 api.github.com 恢复）。
+无。**已发布**（2026-10-28 双推）：Gitea https://192.168.24.10:8024/yanzi/dockermanagementyanzi/releases/tag/v1.44.5（内网入口 http://192.168.24.10:8024，latest 已验 = v1.44.5，源码 commit `3c3b637`）；GitHub https://github.com/yanziruxue/docker-manager/releases/tag/v1.44.5（latest 已验 = v1.44.5，源码 main = `51899d5`，API 同步 commit 内容与本地 `3c3b637` 一致）。
 
 
 ## v1.44.4 — 2026-10-27（**已构建 · 待双推**）
