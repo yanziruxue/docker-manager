@@ -299,8 +299,9 @@ try {
 
 // ---------- 12. 密码框「小眼睛」（显示 / 隐藏明文） ----------
 // 为什么单列一组：`renderToStaticMarkup` 只能验初始态（永远掩码），验不到「点一下变明文」。
-// 本组用 AST 断言状态迁移链路 + **跨文件复用契约**，覆盖 SSR 渲不到的组件与全部 9 个调用点：
-//   登录页 3（登录 / 新密码 / 确认新密码）+ 向导 2（密码 / 确认密码）+ 设置页 4（原 / 新 / 确认 / 当前）。
+// 本组用 AST 断言状态迁移链路 + **跨文件复用契约**，覆盖 SSR 渲不到的组件与全部 16 个调用点：
+//   登录页 4（登录 / 新密码 / 确认新密码 / 找回码）+ 向导 3（密码 / 确认密码 / 找回码）+
+//   设置页 9（改密 3 + 找回码当前密码 + 找回码新码 / 清除验证码 + 绑定登录密码 + 邮箱 / 手机号）（v1.46.2 敏感输入掩码）。
 try {
   // ---- 12a. 共享组件本体 ----
   const pwFn = funcDecl(pwdInput, "PasswordInput");
@@ -330,14 +331,17 @@ try {
   // ---- 12b. ★★ 小眼睛按钮必须是 type="button"（表单是原生 <form onSubmit>，默认 submit 会直接提交）----
   const eyeBtn = pwFn ? find(pwFn, (n) =>
     ts.isJsxOpeningElement(n) && n.tagName.getText() === "button" &&
-    String(attrValueText(attrOf(n, "aria-label")) || "").includes("密码"))[0] : null;
+    (String(attrValueText(attrOf(n, "aria-label")) || "").includes("eyeLabel") ||
+     String(attrValueText(attrOf(n, "aria-label")) || "").includes("密码")))[0] : null;
   check("★ 小眼睛按钮带 aria-label（无障碍 + 悬浮提示）", !!eyeBtn);
   check("★★ 小眼睛按钮 type=\"button\"（★ 本项最关键不变量：漏写会一点就提交表单）",
     !!eyeBtn && attrValueText(attrOf(eyeBtn, "type")) === "button",
     eyeBtn ? String(attrValueText(attrOf(eyeBtn, "type"))) : "(未找到按钮)");
   const ariaExpr = eyeBtn ? String(attrValueText(attrOf(eyeBtn, "aria-label")) || "") : "";
-  check("★ aria-label 随 visible 在「显示密码 / 隐藏密码」间切换",
-    ariaExpr.includes("显示密码") && ariaExpr.includes("隐藏密码"), ariaExpr);
+  // v1.46.2：aria-label 改经 eyeLabel 变量拼接（默认「显示密码/隐藏密码」，敏感非密码字段可自定义如「显示找回码」）
+  check("★ aria-label 随 visible 切换（eyeLabel 拼接；默认含「显示密码 / 隐藏密码」）",
+    !!pwFn && /显示密码/.test(pwFn.getText()) && /隐藏密码/.test(pwFn.getText())
+    && (ariaExpr.includes("eyeLabel") || (ariaExpr.includes("显示密码") && ariaExpr.includes("隐藏密码"))), ariaExpr);
   check("★ 小眼睛按钮 onClick 指向 onToggle", !!eyeBtn && !!attrOf(eyeBtn, "onClick"));
   check("★★ onMouseDown 阻止默认（点按钮不抢焦点，可继续在输入框打字）",
     !!pwFn && /onMouseDown[\s\S]{0,80}preventDefault/.test(pwFn.getText()));
@@ -358,11 +362,12 @@ try {
     && !(opts.excludeWrapper && isInSecretField(n)));
   const importsIt = (src) => /import\s*\{[^}]*\bPasswordInput\b[^}]*\}/.test(src.text);
   const PLAN = [
-    ["登录页 LoginPage", login, 3, ["showPassword", "showNew", "showConfirm"], {}],
-    ["设置向导 SetupWizard", wizard, 2, ["showPassword", "showConfirm"], {}],
-    // 设置页「绑定具体状态」的 4 个：原密码 / 新密码 / 确认新密码 / 当前密码
+    ["登录页 LoginPage", login, 4, ["showPassword", "showNew", "showConfirm", "showCode"], {}],
+    ["设置向导 SetupWizard", wizard, 3, ["showPassword", "showConfirm", "showRecovery"], {}],
+    // 设置页「绑定具体状态」的 9 个：改密 3（原/新/确认）+ 找回码当前密码 + 找回码新码 / 清除验证码 +
+    // 绑定登录密码 + 邮箱 / 手机号（v1.46.2 敏感输入掩码）
     //（SMTP 密码与 Webhook 密钥走 SecretField，见下方专门断言）
-    ["设置页 Settings", settings, 4, ["showOld", "showNew", "showConfirm", "showPassword"], { excludeWrapper: true }],
+    ["设置页 Settings", settings, 9, ["showOld", "showNew", "showConfirm", "showPassword", "showBindPassword", "showRecoveryCode", "showClearCode", "showEmail", "showPhone"], { excludeWrapper: true }],
   ];
   let totalUses = 0;
   for (const [name, src, want, flags, opts] of PLAN) {
@@ -393,7 +398,7 @@ try {
     check(`★ ${name}：显示状态初值均为 false（默认掩码，不默认亮明文）`, decls.every(isFalseState),
       decls.map((d) => (d && d.initializer ? d.initializer.getText() : "(无)")).join(" | "));
   }
-  check("★★ 三个页面合计 9 个「绑定具体状态」的密码框调用点", totalUses === 9, "实得 " + totalUses);
+  check("★★ 三个页面合计 16 个「绑定具体状态」的密码框调用点", totalUses === 16, "实得 " + totalUses);
 
   // ---- 12c-2. SecretField 包装组件（设置页密钥行）----
   const secretFn = funcDecl(settings, "SecretField");
@@ -412,7 +417,7 @@ try {
     secretCalls.length === 2 && new Set(secretVis).size === 2
     && secretVis.includes("showWebhookSecret") && secretVis.includes("showEmailPassword"),
     JSON.stringify(secretVis));
-  // ⚠️ 不能断言「9 个 visible 名字全局唯一」—— 它们是**组件内局部**状态，
+  // ⚠️ 不能断言「16 个 visible 名字全局唯一」—— 它们是**组件内局部**状态，
   //    `showPassword` 在 LoginForm / RecoveryForm / SetupWizard 三处同名完全正常。
   //    真正的风险是「**同一组件内**两个密码框共用一个状态」⇒ 点一个眼睛另一个也跟着变。
   for (const [name, src] of PLAN) {
@@ -443,11 +448,11 @@ try {
   };
   check("★ 负向：LoginPage 内无硬编码 type=\"password\" 的 Input", hardIn(login, ["LoginPage", "LoginForm", "RecoveryForm"]).length === 0);
   check("★ 负向：SetupWizard 内无硬编码 type=\"password\" 的 Input", hardIn(wizard, ["SetupWizard"]).length === 0);
-  check("★ 负向：设置页改密码 / 找回码重设两组件内无硬编码 type=\"password\" 的 Input",
-    hardIn(settings, ["ChangePasswordForm", "RecoveryCodeForm"]).length === 0,
-    "实得 " + hardIn(settings, ["ChangePasswordForm", "RecoveryCodeForm"]).length);
-  check("★ 设置页全部 PasswordInput（4 个具体字段 + SecretField 内 1 个透传）都显式传 lockIcon={false}",
-    usesIn(settings).length === 5 && usesIn(settings).every((el) => attrValueText(attrOf(el, "lockIcon")) === "false"),
+  check("★ 负向：设置页改密码 / 找回码重设 / 联系方式绑定三组件内无硬编码 type=\"password\" 的 Input",
+    hardIn(settings, ["ChangePasswordForm", "RecoveryCodeForm", "ContactBindingForm"]).length === 0,
+    "实得 " + hardIn(settings, ["ChangePasswordForm", "RecoveryCodeForm", "ContactBindingForm"]).length);
+  check("★ 设置页全部 PasswordInput（9 个具体字段 + SecretField 内 1 个透传）都显式传 lockIcon={false}",
+    usesIn(settings).length === 10 && usesIn(settings).every((el) => attrValueText(attrOf(el, "lockIcon")) === "false"),
     `共 ${usesIn(settings).length} 处，其中 lockIcon={false} 的 ` + usesIn(settings).filter((el) => attrValueText(attrOf(el, "lockIcon")) === "false").length + " 处");
 } catch (e) {
   check("密码框小眼睛接线", false, String(e && e.message));

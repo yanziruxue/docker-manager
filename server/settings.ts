@@ -185,9 +185,15 @@ const DEFAULT_SETTINGS = {
      *   磁贴下拉只按「物理网卡 / 虚拟网卡」分组，始终展示某个真实网卡；
      *   仅远程引擎读不到 /proc/net/dev 时才回落容器合计口径。
      * ★ 空串而非写死某个网卡名：网卡名因机器而异（`eth0`/`enp3s0`/`eno1`…），
-     *   硬编码会让「默认」在多数机器上匹配不到 ⇒ 自动挑第一个 host 网卡才可靠。
+     * 硬编码会让「默认」在多数机器上匹配不到 ⇒ 自动挑第一个 host 网卡才可靠。
      */
     defaultNetIface: "",
+    /**
+     * 引擎切换超时时间（秒，v1.46.0）：切换 Docker Engine 后若在该时限内核心数据
+     * （容器列表）未加载成功，前端自动回退到原引擎并提示。默认 30；
+     * 服务端归一化 5~300，非法值回落默认。
+     */
+    engineSwitchTimeout: 30,
   },
   /**
    * Compose 模板（系统设置 → Compose 管理 维护）：
@@ -314,7 +320,15 @@ export function getSettings(): any {
         },
         docker: mergedDocker,
         update: { ...DEFAULT_SETTINGS.update, ...(parsed?.update || {}) },
-        modal: { ...DEFAULT_SETTINGS.modal, ...(parsed?.modal || {}) },
+        modal: {
+          ...DEFAULT_SETTINGS.modal,
+          ...(parsed?.modal || {}),
+          // 引擎切换超时（秒）：钳制 5~300，非法/缺失回落默认 30
+          engineSwitchTimeout: (() => {
+            const n = Number(parsed?.modal?.engineSwitchTimeout);
+            return Number.isFinite(n) && n >= 5 ? Math.min(300, Math.round(n)) : DEFAULT_SETTINGS.modal.engineSwitchTimeout;
+          })(),
+        },
         compose: {
           templates: Array.isArray(parsed?.compose?.templates)
               ? parsed.compose.templates.map((x: any) =>

@@ -25,7 +25,7 @@ import type { DockerImage, PullTask, ImageUpdateStatusView, ImageLock } from "..
 import { Tag } from "../components/Badge";
 import { ConfirmDialog, Modal } from "../components/Modal";
 import { CmdOutputModal, useCmdOutput } from "../components/CmdOutputModal";
-import { EmptyState, IconButton } from "../components/UI";
+import { EmptyState, IconButton, SortableTh } from "../components/UI";
 import { ContextMenu, type MenuItem } from "../components/ContextMenu";
 import { LoadingState, ErrorState } from "../components/DataState";
 
@@ -44,7 +44,7 @@ import {
   ApiError,
 } from "../api";
 import { addOpLog } from "../opLog";
-import { formatBytes } from "../transforms";
+import { formatBytes, parseSizeBytes } from "../transforms";
 
 interface ImagesProps {
   images: DockerImage[];
@@ -1127,6 +1127,14 @@ export function Images({ images, loading, error, engineId, onRefresh, onImagesRe
   // 初始值取服务端设置（缺省隐藏），页内切换为会话级，不写 settings（设置页开关仍是持久化入口）
   const [hideRepoRegistry, setHideRepoRegistry] = useState(hideRepoRegistryInit);
 
+  // 表头点击排序（与容器/堆栈页同模式）：sortKey=null 保持 daemon 原始顺序；同列再点翻转方向
+  const [sortKey, setSortKey] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<1 | -1>(1);
+  const toggleSort = (key: string) => {
+    if (sortKey === key) setSortDir((d) => (d === 1 ? -1 : 1));
+    else { setSortKey(key); setSortDir(1); }
+  };
+
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
       if (columnPickerRef.current && !columnPickerRef.current.contains(e.target as Node)) {
@@ -1146,7 +1154,7 @@ export function Images({ images, loading, error, engineId, onRefresh, onImagesRe
 
   const filtered = useMemo(() => {
     const kw = search.toLowerCase();
-    return images.filter((img) => {
+    const list = images.filter((img) => {
       // 仓库名同时按「完整地址」与「隐藏 registry 后的短名」匹配——
       // 表头显示短名时用户按看到的文案搜也要能命中（v1.42.15）
       const repo = img.repository.toLowerCase();
@@ -1158,7 +1166,33 @@ export function Images({ images, loading, error, engineId, onRefresh, onImagesRe
       else if (filter === "unused") matchFilter = img.associatedContainers.length === 0;
       return matchSearch && matchFilter;
     });
-  }, [images, search, filter, hideRepoRegistry]);
+    if (!sortKey) return list;
+    const dir = sortDir;
+    // 更新状态排序权重：未检查(0) < 最新(1) < 有更新(2)，升序即「有更新」沉底、翻转即置顶
+    const updateRank = (img: DockerImage): number => {
+      const st = imageUpdateStatus?.byRef[`${img.repository}:${img.tag}`];
+      return st === undefined ? 0 : st ? 2 : 1;
+    };
+    const val = (img: DockerImage): string | number => {
+      switch (sortKey) {
+        case "repository": return img.repository.toLowerCase();
+        case "tag": return img.tag.toLowerCase();
+        case "id": return img.id;
+        case "size": return parseSizeBytes(img.size);
+        case "createdAt": return img.createdTs;
+        case "updateStatus": return updateRank(img);
+        case "associatedContainers": return img.associatedContainers.length;
+        case "sha256": return img.sha256;
+        default: return "";
+      }
+    };
+    return [...list].sort((a, b) => {
+      const va = val(a), vb = val(b);
+      if (va < vb) return -dir;
+      if (va > vb) return dir;
+      return 0;
+    });
+  }, [images, search, filter, hideRepoRegistry, sortKey, sortDir, imageUpdateStatus]);
 
   // ⚠️ 勾选按「镜像」粒度计：transformImages 按 RepoTag 拆行 ⇒ 同一镜像 id 多行。
   // 全选/取消判断必须走 id 维度——早期版本用 `selected.size === filtered.length`
@@ -1550,8 +1584,9 @@ export function Images({ images, loading, error, engineId, onRefresh, onImagesRe
       )}
 
       {/* Table */}
+      {/* v1.46.5 响应式紧凑化：cq-root 使表格可用宽 <1280px 时自动切紧凑显示 */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto cq-root">
           <table className="w-full min-w-[800px]">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200">
@@ -1564,14 +1599,14 @@ export function Images({ images, loading, error, engineId, onRefresh, onImagesRe
                     className="rounded border-slate-300 text-blue-500 focus:ring-blue-500"
                   />
                 </th>
-                {visibleColumns.has("repository") && <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-5 py-3 whitespace-nowrap">仓库名</th>}
-                {visibleColumns.has("tag") && <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3 whitespace-nowrap">标签</th>}
-                {visibleColumns.has("id") && <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3 whitespace-nowrap">镜像 ID</th>}
-                {visibleColumns.has("size") && <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3 whitespace-nowrap">大小</th>}
-                {visibleColumns.has("createdAt") && <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3 whitespace-nowrap">创建时间</th>}
-                {visibleColumns.has("updateStatus") && <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3 whitespace-nowrap">更新状态</th>}
-                {visibleColumns.has("associatedContainers") && <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3 whitespace-nowrap">关联容器</th>}
-                {visibleColumns.has("sha256") && <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3 whitespace-nowrap">SHA-256</th>}
+                {visibleColumns.has("repository") && <SortableTh label="仓库名" sortKey={sortKey} dir={sortDir} sortId="repository" onSort={toggleSort} className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-5 py-3 whitespace-nowrap" />}
+                {visibleColumns.has("tag") && <SortableTh label="标签" sortKey={sortKey} dir={sortDir} sortId="tag" onSort={toggleSort} className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3 whitespace-nowrap" />}
+                {visibleColumns.has("id") && <SortableTh label="镜像 ID" sortKey={sortKey} dir={sortDir} sortId="id" onSort={toggleSort} className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3 whitespace-nowrap" />}
+                {visibleColumns.has("size") && <SortableTh label="大小" sortKey={sortKey} dir={sortDir} sortId="size" onSort={toggleSort} className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3 whitespace-nowrap" />}
+                {visibleColumns.has("createdAt") && <SortableTh label="创建时间" sortKey={sortKey} dir={sortDir} sortId="createdAt" onSort={toggleSort} className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3 whitespace-nowrap" />}
+                {visibleColumns.has("updateStatus") && <SortableTh label="更新状态" sortKey={sortKey} dir={sortDir} sortId="updateStatus" onSort={toggleSort} className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3 whitespace-nowrap" />}
+                {visibleColumns.has("associatedContainers") && <SortableTh label="关联容器" sortKey={sortKey} dir={sortDir} sortId="associatedContainers" onSort={toggleSort} className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3 whitespace-nowrap" />}
+                {visibleColumns.has("sha256") && <SortableTh label="SHA-256" sortKey={sortKey} dir={sortDir} sortId="sha256" onSort={toggleSort} className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3 whitespace-nowrap" />}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
@@ -1605,7 +1640,8 @@ export function Images({ images, loading, error, engineId, onRefresh, onImagesRe
                     </td>
                   )}
                   {visibleColumns.has("tag") && <td className="px-3 py-3 whitespace-nowrap"><Tag text={img.tag} color={img.tag === "latest" ? "blue" : "slate"} /></td>}
-                  {visibleColumns.has("id") && <td className="px-3 py-3 whitespace-nowrap"><span className="text-xs font-mono text-slate-400">{img.id}</span></td>}
+                  {/* v1.46.7 响应式紧凑化：宽屏恢复旧版完整 ID，<1024px 只显前 4 位（完整 ID 进 title） */}
+                  {visibleColumns.has("id") && <td className="px-3 py-3 whitespace-nowrap"><span className="text-xs font-mono text-slate-400" title={img.id}><span className="cq-full">{img.id}</span><span className="cq-compact">{img.id.slice(0, 4)}</span></span></td>}
                   {visibleColumns.has("size") && <td className="px-3 py-3 whitespace-nowrap"><span className="text-sm text-slate-600">{img.size}</span></td>}
                   {visibleColumns.has("createdAt") && <td className="px-3 py-3 whitespace-nowrap"><span className="text-sm text-slate-500">{img.createdAt}</span></td>}
                   {visibleColumns.has("updateStatus") && (() => {

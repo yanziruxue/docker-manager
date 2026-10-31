@@ -46,6 +46,14 @@ export function formatBytes(bytes: number): string {
   return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
 }
 
+/** 把 "1.5 GB" 形态的体积串还原为字节数（表头按大小排序用）；无法解析（如数据卷的"—"）返回 -1 沉底 */
+export function parseSizeBytes(s: string): number {
+  const m = (s || "").trim().match(/^([\d.]+)\s*(B|KB|MB|GB|TB)$/i);
+  if (!m) return -1;
+  const mult: Record<string, number> = { B: 1, KB: 1024, MB: 1024 ** 2, GB: 1024 ** 3, TB: 1024 ** 4 };
+  return Math.round(parseFloat(m[1]) * mult[m[2].toUpperCase()]);
+}
+
 /** 解析容器运行时间 */
 function parseUptime(status: string): string {
   const match = status.match(/^Up (.+)$/);
@@ -152,6 +160,7 @@ export function transformImages(raw: any[]): DockerImage[] {
         tag,
         size,
         createdAt,
+        createdTs: (img.Created || 0) * 1000,
         associatedContainers: [],
         associatedCount: img.Containers || 0,
         isDangling,
@@ -179,6 +188,7 @@ export function transformVolumes(raw: any): DockerVolume[] {
       mountpoint: v.Mountpoint || "",
       size: sizeStr,
       createdAt: v.CreatedAt || "",
+      createdTs: Date.parse(v.CreatedAt || "") || 0,
       // 后端 getVolumes 按容器 Mounts 回填的关联容器名（v1.15.3 起有值；此前恒为空数组）
       associatedContainers: Array.isArray(v.UsedBy) ? v.UsedBy : [],
       labels: (v.Labels && Object.keys(v.Labels).length > 0)

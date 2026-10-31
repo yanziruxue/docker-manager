@@ -19,9 +19,9 @@ import { Tag } from "../components/Badge";
 import { ContextMenu, type MenuItem } from "../components/ContextMenu";
 import { Modal, ConfirmDialog } from "../components/Modal";
 import { CmdOutputModal, useCmdOutput } from "../components/CmdOutputModal";
-import { IconButton, EmptyState, FormField, Input, Select } from "../components/UI";
+import { IconButton, EmptyState, FormField, Input, Select, SortableTh } from "../components/UI";
 import { LoadingState, ErrorState } from "../components/DataState";
-import { formatBytes } from "../transforms";
+import { formatBytes, parseSizeBytes } from "../transforms";
 import { removeVolumeApi, pruneVolumesApi, createVolumeApi } from "../api";
 import { addOpLog } from "../opLog";
 
@@ -128,8 +128,16 @@ export function Volumes({ volumes, loading, error, engineId, defaultVisibleColum
     setVisibleColumns(next);
   };
 
+  // 表头点击排序（与容器/堆栈页同模式）：sortKey=null 保持原始顺序；同列再点翻转方向
+  const [sortKey, setSortKey] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<1 | -1>(1);
+  const toggleSort = (key: string) => {
+    if (sortKey === key) setSortDir((d) => (d === 1 ? -1 : 1));
+    else { setSortKey(key); setSortDir(1); }
+  };
+
   const filtered = useMemo(() => {
-    return volumes.filter((v) => {
+    const list = volumes.filter((v) => {
       const matchSearch =
         v.name.toLowerCase().includes(search.toLowerCase()) ||
         v.driver.toLowerCase().includes(search.toLowerCase()) ||
@@ -140,7 +148,26 @@ export function Volumes({ volumes, loading, error, engineId, defaultVisibleColum
         (statusFilter === "unused" && !v.inUse);
       return matchSearch && matchStatus;
     });
-  }, [volumes, search, statusFilter]);
+    if (!sortKey) return list;
+    const dir = sortDir;
+    const val = (v: DockerVolume): string | number => {
+      switch (sortKey) {
+        case "name": return v.name.toLowerCase();
+        case "driver": return v.driver.toLowerCase();
+        case "mountpoint": return v.mountpoint.toLowerCase();
+        case "size": return parseSizeBytes(v.size);
+        case "associatedContainers": return v.associatedContainers.length;
+        case "createdAt": return v.createdTs;
+        default: return "";
+      }
+    };
+    return [...list].sort((a, b) => {
+      const va = val(a), vb = val(b);
+      if (va < vb) return -dir;
+      if (va > vb) return dir;
+      return 0;
+    });
+  }, [volumes, search, statusFilter, sortKey, sortDir]);
 
   // ===== 批量操作（数据卷）=====
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -362,8 +389,9 @@ export function Volumes({ volumes, loading, error, engineId, defaultVisibleColum
       )}
 
       {/* Volume Table */}
+      {/* v1.46.5 响应式紧凑化：cq-root 使表格可用宽 <1280px 时自动切紧凑显示 */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto cq-root">
           <table className="w-full min-w-[700px]">
             <thead>
               <tr className="bg-slate-50/50 border-b border-slate-100">
@@ -376,12 +404,12 @@ export function Volumes({ volumes, loading, error, engineId, defaultVisibleColum
                     className="rounded border-slate-300 text-blue-500 focus:ring-blue-500"
                   />
                 </th>
-                {visibleColumns.has("name") && <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-5 py-3 whitespace-nowrap">卷名称</th>}
-                {visibleColumns.has("driver") && <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-3 whitespace-nowrap">驱动</th>}
-                {visibleColumns.has("mountpoint") && <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-3 whitespace-nowrap">挂载点</th>}
-                {visibleColumns.has("size") && <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-3 whitespace-nowrap">大小</th>}
-                {visibleColumns.has("associatedContainers") && <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-3 whitespace-nowrap">关联容器</th>}
-                {visibleColumns.has("createdAt") && <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-3 whitespace-nowrap">创建时间</th>}
+                {visibleColumns.has("name") && <SortableTh label="卷名称" sortKey={sortKey} dir={sortDir} sortId="name" onSort={toggleSort} className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-5 py-3 whitespace-nowrap" />}
+                {visibleColumns.has("driver") && <SortableTh label="驱动" sortKey={sortKey} dir={sortDir} sortId="driver" onSort={toggleSort} className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-3 whitespace-nowrap" />}
+                {visibleColumns.has("mountpoint") && <SortableTh label="挂载点" sortKey={sortKey} dir={sortDir} sortId="mountpoint" onSort={toggleSort} className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-3 whitespace-nowrap" />}
+                {visibleColumns.has("size") && <SortableTh label="大小" sortKey={sortKey} dir={sortDir} sortId="size" onSort={toggleSort} className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-3 whitespace-nowrap" />}
+                {visibleColumns.has("associatedContainers") && <SortableTh label="关联容器" sortKey={sortKey} dir={sortDir} sortId="associatedContainers" onSort={toggleSort} className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-3 whitespace-nowrap" />}
+                {visibleColumns.has("createdAt") && <SortableTh label="创建时间" sortKey={sortKey} dir={sortDir} sortId="createdAt" onSort={toggleSort} className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-3 whitespace-nowrap" />}
               </tr>
             </thead>
             <tbody>
@@ -405,7 +433,7 @@ export function Volumes({ volumes, loading, error, engineId, defaultVisibleColum
                         <Database size={14} className={`shrink-0 ${volume.inUse ? "text-blue-400" : "text-slate-300"}`} />
                         <span
                           title={volume.name}
-                          className="text-sm font-medium text-slate-700 font-mono truncate max-w-[220px]"
+                          className="text-sm font-medium text-slate-700 font-mono truncate max-w-[160px] whitespace-nowrap cq-w220"
                         >
                           {volume.name}
                         </span>
@@ -422,7 +450,7 @@ export function Volumes({ volumes, loading, error, engineId, defaultVisibleColum
                   )}
                   {visibleColumns.has("mountpoint") && (
                     <td className="px-3 py-3">
-                      <span className="text-xs font-mono text-slate-400 truncate block max-w-[200px]">{volume.mountpoint}</span>
+                      <span className="text-xs font-mono text-slate-400 truncate block max-w-[160px] whitespace-nowrap cq-w200">{volume.mountpoint}</span>
                     </td>
                   )}
                   {visibleColumns.has("size") && (
@@ -446,7 +474,11 @@ export function Volumes({ volumes, loading, error, engineId, defaultVisibleColum
                   )}
                   {visibleColumns.has("createdAt") && (
                     <td className="px-3 py-3 whitespace-nowrap">
-                      <span className="text-xs text-slate-500">{volume.createdAt || "—"}</span>
+                      {/* v1.46.5 响应式紧凑化：宽屏显示完整时间戳，表格可用宽 <1280px 只显年-月-日（原文进 title） */}
+                      <span className="text-xs text-slate-500" title={volume.createdAt}>
+                        <span className="cq-full">{volume.createdAt || "—"}</span>
+                        <span className="cq-compact">{volume.createdAt ? volume.createdAt.slice(0, 10) : "—"}</span>
+                      </span>
                     </td>
                   )}
                   {/* 操作列已移除：所有操作统一走右键菜单 */}

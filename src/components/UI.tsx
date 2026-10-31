@@ -75,6 +75,7 @@ export function ProgressBar({
 
 // Sortable table header (th)：点击切换排序方向，当前列高亮箭头。
 // sortId 为该列标识；sortKey 为当前排序列；dir = 1 升序 / -1 降序；onSort(sortId) 由页面切换。
+// className 语义：为空 = 使用默认 th 样式；非空 = 整段替换 th class（页面表头字号/配色与默认不同时传入完整样式，避免 Tailwind 同类冲突）
 export function SortableTh({
   label,
   sortKey,
@@ -96,7 +97,7 @@ export function SortableTh({
   const Icon = active ? (dir === 1 ? ArrowUp : ArrowDown) : ChevronsUpDown;
   const alignCls = align === "center" ? "text-center" : align === "right" ? "text-right" : "text-left";
   return (
-    <th className={`${alignCls} text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3 ${className}`}>
+    <th className={className || `${alignCls} text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3`}>
       <button
         type="button"
         onClick={() => onSort(sortId)}
@@ -383,6 +384,7 @@ export function Input({
   placeholder,
   type = "text",
   disabled,
+  readOnly,
   className = "",
   onKeyDown,
 }: {
@@ -391,6 +393,8 @@ export function Input({
   placeholder?: string;
   type?: string;
   disabled?: boolean;
+  /** 只读（v1.48.3）：不置灰背景，仅锁输入；配合外层「编辑/完成」按钮实现按行解锁 */
+  readOnly?: boolean;
   className?: string;
   /** 回车提交等键盘交互（v1.15.2 起透传：此前该 prop 被静默丢弃，登录页回车不生效） */
   onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
@@ -402,6 +406,7 @@ export function Input({
       onChange={(e) => onChange?.(e.target.value)}
       placeholder={placeholder}
       disabled={disabled}
+      readOnly={readOnly}
       onKeyDown={onKeyDown}
       className={`w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all disabled:bg-slate-50 disabled:text-slate-400 ${className}`}
     />

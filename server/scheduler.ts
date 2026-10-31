@@ -7,6 +7,7 @@ import { dataPath } from "./paths.js";
 import { createFullBackup, pruneBackups, BACKUP_NAME_PREFIX } from "./backup.js";
 import { broadcastPush } from "./push.js";
 import { notify } from "./notify.js";
+import { recordNotification } from "./notifications.js";
 
 const log = createLogger("Scheduler");
 
@@ -336,8 +337,20 @@ export async function checkEngineImages(engineId: string, onlyRef?: string): Pro
           .map((d) => `${d.image}：${String(d.currentSha).slice(0, 12)} → ${String(d.latestSha).slice(0, 12)}`),
         level: "info",
         dedupKey: `imgupd:${engineId}:${[...names].sort().join(",")}`,
+        engineId,
       });
     }
+    // 镜像检查汇总也写入持久化通知中心（v1.43.18 起在通知中心展示「全部为最新」这类结果）。
+    // 直接落盘、不触发 Webhook/邮件（避免每日检查都外发一封「全部最新」邮件），仅作应用内事件日志。
+    recordNotification({
+      engineId,
+      level: entry.updates > 0 ? "warning" : "success",
+      title: "镜像更新检查完成",
+      summary:
+        entry.updates > 0
+          ? `检查 ${entry.checked} 个，${entry.updates} 个有可用更新，${Math.max(0, entry.checked - entry.updates)} 个为最新`
+          : `全部镜像均为最新（已检查 ${entry.checked} 个）`,
+    });
   } catch (e: any) {
     log.warn(`镜像更新通知触发失败：${e?.message || e}`);
   }

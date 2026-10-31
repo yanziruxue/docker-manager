@@ -10,7 +10,7 @@ import type { DockerEngine } from "./engines.js";
 import { COMPOSE_DIR } from "./paths.js";
 import { getSettings } from "./settings.js";
 import { getImageLocks, isImageLocked, pruneStaleLocks, normalizeId, type ImageLock } from "./image-locks.js";
-import { notify } from "./notify.js";
+import { notify, markManualContainerOp, markManualStackOp } from "./notify.js";
 import { resolveBackupDir, backupFilePath, runTar, copyTree, BACKUP_NAME_PREFIX, tsCompact } from "./backup.js";
 import { zipDirectory, extractZip } from "./zip.js";
 
@@ -713,6 +713,7 @@ function finishPullSuccess(task: PullTaskInternal, engine: DockerEngine, origina
       level: "info",
       // 同一镜像 10 分钟内重复拉取只通知一次
       dedupKey: `pull:${engine.id}:${originalImage}`,
+      engineId: engine.id,
     });
   } catch {
     /* 通知失败不影响拉取结果 */
@@ -1863,9 +1864,11 @@ export async function getStacks(engine: DockerEngine): Promise<any[]> {
         const text = fs.readFileSync(descFile, "utf-8").trim();
         if (text) metaDescription = text;
       }
-      // 图标：目录内 icon.* 文件存在即视为有图标
+      // 图标：目录内 icon.* 文件存在即视为有图标（v1.49.0：仅当 meta 无新式图库 URL 时回退，避免覆盖图库选择）
       const hasIconFile = fs.readdirSync(dirPath).some((f) => /^icon\.(png|jpe?g|gif|svg|webp|ico)$/i.test(f));
-      if (hasIconFile) metaIcon = `/api/stack-icons/${encodeURIComponent(name)}`;
+      if (hasIconFile && (!metaIcon || /^\/api\/stack-icons\/[^/]+$/.test(metaIcon))) {
+        metaIcon = `/api/stack-icons/${encodeURIComponent(name)}`;
+      }
 
       // 既没有 compose 文件、meta 文件，也没有 description 元文件：认为是残留空目录，跳过
       if (!composeFilePath && !hasMeta && !metaDescription) continue;
@@ -2041,9 +2044,13 @@ export async function stackAction(
     // restart = down + up（分两步执行，因为 spawnSync 不支持 &&）
     const downOut = step(["down"], 60000);
     const upOut = step(["up", "-d"], 300000);
+    // v1.48.1：手动堆栈操作打标——巡检不再对属于该 compose 目录的容器发「容器已停止」通知
+    markManualStackOp(engine.id, cwd);
     return `${downOut}\n\n${upOut}`;
   }
-  return step(getComposeArgs(action), 300000);
+  const out = step(getComposeArgs(action), 300000);
+  markManualStackOp(engine.id, cwd);
+  return out;
 }
 
 function getComposeArgs(action: string): string[] {
@@ -2231,6 +2238,8 @@ export async function stackActionStream(
     const pulls = stepArgs.includes("pull") || stepArgs.includes("up") || stepArgs.includes("build");
     await runStep(stepArgs, stepArgs[0] === "down" ? 60000 : 300000, pulls ? pullSink : undefined);
   }
+  // v1.48.1：手动堆栈操作（流式路径）打标——巡检不再对属于该 compose 目录的容器发停止通知
+  markManualStackOp(engine.id, cwd);
   return chunks.join("\n\n");
 }
 
@@ -2271,6 +2280,8 @@ export async function removeStack(
     }
   }
 
+  // v1.48.1：手动删除堆栈打标（down 失败也可能残留容器，同样抑制通知）
+  markManualStackOp(engine.id, cwd);
   return chunks.join("\n");
 }
 
@@ -2575,12 +2586,16 @@ export async function containerAction(engine: DockerEngine, containerId: string,
     case "pause": await withTimeout(container.pause(), 10000); break;
     case "unpause": await withTimeout(container.unpause(), 10000); break;
   }
+  // v1.48.1：手动操作打标——巡检 15 分钟内不再对它发「容器已停止」通知
+  markManualContainerOp(engine.id, containerId);
 }
 
 export async function removeContainer(engine: DockerEngine, containerId: string, force: boolean = false): Promise<void> {
   const docker = getDocker(engine);
   const container = docker.getContainer(containerId);
   await withTimeout(container.remove({ force, v: false }), 15000);
+  // v1.48.1：手动删除打标（删除后容器若短暂残留非运行态，不触发通知）
+  markManualContainerOp(engine.id, containerId);
 }
 
 // ============ 镜像操作 ============
@@ -3973,70 +3988,6 @@ export async function getEngineResourceStats(engine: DockerEngine): Promise<any>
     blockWriteKB: Math.round(blockWriteKB),
     serverVersion: info.ServerVersion || "",
   };
-}
-
-export async function getActivityLogs(engine: DockerEngine): Promise<any[]> {
-  const docker = getDocker(engine);
-  const now = Date.now();
-  const activities: any[] = [];
-  const WINDOW = 30 * 86400000; // 30 天
-
-  try {
-    const containers = await withTimeout(docker.listContainers({ all: true }), 10000);
-    const images = await withTimeout(docker.listImages(), 10000);
-
-    // 容器状态
-    for (const c of containers) {
-      const name = (c.Names?.[0] || "").replace(/^\//, "");
-      const created = (c.Created || 0) * 1000;
-      const ago = now - created;
-
-      if (ago > WINDOW) continue;
-
-      if (c.State === "running") {
-        activities.push({
-          id: `c-run-${c.Id?.slice(0, 12)}`,
-          timestamp: new Date(created).toISOString().replace("T", " ").substring(0, 19),
-          type: "success",
-          message: `容器 ${name} 运行中`,
-        });
-      } else if (c.State === "exited") {
-        activities.push({
-          id: `c-stop-${c.Id?.slice(0, 12)}`,
-          timestamp: new Date(created).toISOString().replace("T", " ").substring(0, 19),
-          type: "warning",
-          message: `容器 ${name} 已停止`,
-        });
-      } else if (c.State === "paused") {
-        activities.push({
-          id: `c-pause-${c.Id?.slice(0, 12)}`,
-          timestamp: new Date(created).toISOString().replace("T", " ").substring(0, 19),
-          type: "info",
-          message: `容器 ${name} 已暂停`,
-        });
-      }
-    }
-
-    // 最近拉取的镜像
-    for (const img of images) {
-      const created = (img.Created || 0) * 1000;
-      const ago = now - created;
-      if (ago > WINDOW) continue;
-      const repoTag = img.RepoTags?.[0] || "<none>";
-      activities.push({
-        id: `img-${img.Id?.replace("sha256:", "").slice(0, 12)}`,
-        timestamp: new Date(created).toISOString().replace("T", " ").substring(0, 19),
-        type: "info",
-        message: `镜像 ${repoTag} 已拉取`,
-      });
-    }
-
-    // 按时间倒序，取最近 100 条
-    activities.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-    return activities.slice(0, 100);
-  } catch {
-    return [];
-  }
 }
 
 /**

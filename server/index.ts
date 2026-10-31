@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import path from "path";
 import os from "os";
-import { existsSync, readdirSync, readFileSync, writeFileSync, unlinkSync, rmSync } from "fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, unlinkSync, rmSync, statSync } from "fs";
 import { fileURLToPath } from "url";
 import {
   getAllEngines,
@@ -26,7 +26,6 @@ import {
   getEngineResourceStats,
   getResourceHistory,
   listNetInterfaces,
-  getActivityLogs,
   containerAction,
   removeContainer,
   removeImage,
@@ -112,10 +111,10 @@ import {
   startMirror,
 } from "./mirror.js";
 import { sendTestNotify, startContainerWatch, EVENTS_WITHOUT_SOURCE, getSecretSources } from "./notify.js";
+import { getNotifications } from "./notifications.js";
 import { WebSocketServer } from "ws";
 import {
   countUsers,
-  getUserByUsername,
   createUser,
   updateUserPassword,
   findUserById,
@@ -133,6 +132,11 @@ import {
   needsReinit,
   requiresAccountReinit,
   reinitUser,
+  findUserByLoginId,
+  bindUserContact,
+  unbindUserContact,
+  validateContact,
+  type ContactType,
 } from "./users.js";
 import { createSession, getSessionUser, renewSession, peekSessionUser, destroySession, requireAuth, invalidateSessionTtlCache, destroySessionsForUser } from "./auth.js";
 import { runFixPermsCli, runPermissionCheckCli, expectedUid } from "./perms-cli.js";
@@ -344,9 +348,10 @@ app.post("/api/auth/init", (req, res) => {
 
 app.post("/api/auth/login", (req, res) => {
   const { username, password } = req.body || {};
-  const user = getUserByUsername(username || "");
+  // v1.45.0：登录 ID 支持 用户名 / 绑定邮箱 / 绑定手机号
+  const user = findUserByLoginId(username || "");
   if (!user || !verifyPassword(password || "", user)) {
-    res.status(401).json({ success: false, error: "用户名或密码错误" });
+    res.status(401).json({ success: false, error: "账号或密码错误" });
     return;
   }
   createSession(res, user.id);
@@ -487,14 +492,122 @@ app.post("/api/auth/recovery", requireAuth, (req, res) => {
   }
 });
 
-/** 清除找回码 */
+/** 清除找回码（v1.46.1：需当前密码 + 当前找回码双重验证，防误触/越权清除导致无法找回） */
 app.delete("/api/auth/recovery", requireAuth, (req, res) => {
   const user = (req as any).user;
+  const { password, code } = req.body || {};
+  const record = findUserById(user.id);
+  if (!record) {
+    res.status(404).json({ success: false, error: "用户不存在" });
+    return;
+  }
+  // 双重验证：任一错误返回同一文案，不泄露具体哪项不对（防枚举）
+  if (!verifyPassword(password || "", record) || !verifyRecoveryCode(code || "", record)) {
+    res.status(400).json({ success: false, error: "当前密码或找回码错误" });
+    return;
+  }
   try {
     clearRecoveryCode(user.id);
     res.json({ success: true });
   } catch (e: any) {
     res.status(400).json({ success: false, error: e?.message || "清除找回码失败" });
+  }
+});
+
+// ============ 绑定邮箱 / 手机号（v1.45.0） ============
+
+/** 掩码回显：邮箱 ab***@domain.com；手机号 138****5678；未绑定返回 null */
+function maskContact(type: ContactType, value?: string): string | null {
+  if (!value) return null;
+  if (type === "email") {
+    const at = value.indexOf("@");
+    if (at <= 0) return "***";
+    const local = value.slice(0, at);
+    const domain = value.slice(at);
+    const head = local.slice(0, Math.min(2, local.length));
+    return `${head}***${domain}`;
+  }
+  return value.length >= 7 ? `${value.slice(0, 3)}****${value.slice(-4)}` : "***";
+}
+
+/** 当前绑定状态（已登录）：仅回显掩码，不回显明文 */
+app.get("/api/auth/contact", requireAuth, (req, res) => {
+  const record = findUserById((req as any).user.id);
+  if (!record) {
+    res.status(404).json({ success: false, error: "用户不存在" });
+    return;
+  }
+  res.json({
+    success: true,
+    data: {
+      email: maskContact("email", record.email),
+      phone: maskContact("phone", record.phone),
+      emailBoundAt: record.emailBoundAt || null,
+      phoneBoundAt: record.phoneBoundAt || null,
+    },
+  });
+});
+
+/**
+ * 绑定邮箱 / 手机号（敏感操作，**必须校验登录密码**）。
+ * body: { type: "email" | "phone", value, password }
+ * 绑定后该值即可作为登录 ID 使用。
+ */
+app.post("/api/auth/contact/bind", requireAuth, (req, res) => {
+  const auth = (req as any).user;
+  const { type, value, password } = req.body || {};
+  if (type !== "email" && type !== "phone") {
+    res.status(400).json({ success: false, error: "绑定类型必须是 email 或 phone" });
+    return;
+  }
+  const fmtErr = validateContact(type as ContactType, String(value || ""));
+  if (fmtErr) {
+    res.status(400).json({ success: false, error: fmtErr });
+    return;
+  }
+  const record = findUserById(auth.id);
+  if (!record) {
+    res.status(404).json({ success: false, error: "用户不存在" });
+    return;
+  }
+  if (!verifyPassword(String(password || ""), record)) {
+    res.status(400).json({ success: false, error: "登录密码错误" });
+    return;
+  }
+  try {
+    bindUserContact(auth.id, type as ContactType, String(value || ""));
+    res.json({ success: true });
+  } catch (e: any) {
+    res.status(400).json({ success: false, error: e?.message || "绑定失败" });
+  }
+});
+
+/** 解绑邮箱 / 手机号（敏感操作，同样必须校验登录密码）。body: { type, password } */
+app.post("/api/auth/contact/unbind", requireAuth, (req, res) => {
+  const auth = (req as any).user;
+  const { type, password } = req.body || {};
+  if (type !== "email" && type !== "phone") {
+    res.status(400).json({ success: false, error: "解绑类型必须是 email 或 phone" });
+    return;
+  }
+  const record = findUserById(auth.id);
+  if (!record) {
+    res.status(404).json({ success: false, error: "用户不存在" });
+    return;
+  }
+  if (!record[type as ContactType]) {
+    res.status(400).json({ success: false, error: type === "email" ? "尚未绑定邮箱" : "尚未绑定手机号" });
+    return;
+  }
+  if (!verifyPassword(String(password || ""), record)) {
+    res.status(400).json({ success: false, error: "登录密码错误" });
+    return;
+  }
+  try {
+    unbindUserContact(auth.id, type as ContactType);
+    res.json({ success: true });
+  } catch (e: any) {
+    res.status(400).json({ success: false, error: e?.message || "解绑失败" });
   }
 });
 
@@ -514,10 +627,10 @@ app.post("/api/auth/reset-by-recovery", (req, res) => {
     res.status(400).json({ success: false, error: "新密码至少 6 位" });
     return;
   }
-  const record = getUserByUsername(username || "");
-  // 统一错误文案：不泄露「用户名是否存在」
+  const record = findUserByLoginId(username || "");
+  // 统一错误文案：不泄露「账号是否存在」
   if (!record || !verifyRecoveryCode(code, record)) {
-    res.status(401).json({ success: false, error: "用户名或找回码错误" });
+    res.status(401).json({ success: false, error: "账号或找回码错误" });
     return;
   }
   const waitMs = recoveryCooldownRemainingMs(record);
@@ -896,57 +1009,172 @@ app.put("/api/engines/:id/stacks/:name/settings", async (req, res) => {
   const engine = getEngine(req.params.id);
   if (!engine) { res.status(404).json({ success: false, error: "引擎不存在" }); return; }
   try {
-    await saveStackSettings(engine, req.params.name, req.body || {});
-    res.json({ success: true, data: "设置已保存" });
+    const body: any = { ...(req.body || {}) };
+    // v1.49.0：URL / data URI 图标转存堆栈图库（icon/ 文件夹）为本地图标；SSH 引擎无本地目录，跳过
+    let iconUrl: string | undefined = body.iconUrl;
+    let webuiLabels: any[] | undefined = body.webuiLabels;
+    const stackDir = path.join(COMPOSE_DIR, req.params.name);
+    if (engine.connectionType !== "ssh" && existsSync(stackDir)) {
+      if (typeof body.iconUrl === "string" && body.iconUrl) {
+        const local = await materializeLocalIcon(stackDir, body.iconUrl);
+        if (local) { body.iconUrl = local; iconUrl = local; }
+      }
+      if (Array.isArray(body.webuiLabels)) {
+        let changed = false;
+        const next = await Promise.all(body.webuiLabels.map(async (l: any) => {
+          if (l && typeof l.iconUrl === "string" && l.iconUrl) {
+            const local = await materializeLocalIcon(stackDir, l.iconUrl);
+            if (local) { changed = true; return { ...l, iconUrl: local }; }
+          }
+          return l;
+        }));
+        if (changed) { body.webuiLabels = next; webuiLabels = next; }
+      }
+    }
+    await saveStackSettings(engine, req.params.name, body);
+    // 返回规范化后的图标引用：前端据此回填表单（URL/data URI 已变成本地 URL）
+    res.json({ success: true, data: { iconUrl, webuiLabels } });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message || "保存失败" });
   }
 });
 
-/** 上传堆栈图标（本地图片） */
+// ============ 堆栈图库（v1.49.0）：堆栈目录 icon/ 文件夹 ============
+
+/** 图标文件扩展名白名单 */
+const ICON_FILE_RE = /\.(png|jpe?g|gif|svg|webp|ico)$/i;
+/** 上传/下载图标的体积上限（2MB） */
+const ICON_MAX_BYTES = 2 * 1024 * 1024;
+/** Content-Type → 扩展名 */
+const ICON_CT_EXT: Record<string, string> = {
+  "image/png": ".png",
+  "image/jpeg": ".jpg",
+  "image/gif": ".gif",
+  "image/svg+xml": ".svg",
+  "image/webp": ".webp",
+  "image/x-icon": ".ico",
+};
+/** 扩展名 → Content-Type（供图用） */
+const ICON_EXT_CT: Record<string, string> = {
+  ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+  ".gif": "image/gif", ".svg": "image/svg+xml", ".webp": "image/webp", ".ico": "image/x-icon",
+};
+
+/** 净化图标文件名：仅保留文件名部分与白名单字符（非法字符替换为 _），无合法扩展名时按来源补 */
+function sanitizeIconFilename(raw: string, fallbackExt = ".png"): string {
+  let name = path.basename(String(raw || "")).replace(/[^A-Za-z0-9._-]/g, "_");
+  name = name.replace(/^\.+/, ""); // 防隐藏文件 / 「..」路径片段
+  if (!ICON_FILE_RE.test(name)) {
+    name = name.replace(/\.[^.]*$/, "") + fallbackExt; // 剥掉非法扩展名后补白名单扩展名
+  }
+  return name.slice(-100); // 防超长文件名
+}
+
+/** 图库内文件重名时追加序号：a.png → a-2.png（图库内多图标共存，绝不覆盖） */
+function dedupeIconFilename(dir: string, name: string): string {
+  if (!existsSync(path.join(dir, name))) return name;
+  const ext = (name.match(ICON_FILE_RE) || [".png"])[0];
+  const stem = name.slice(0, -ext.length);
+  for (let i = 2; i < 1000; i++) {
+    const candidate = `${stem}-${i}${ext}`;
+    if (!existsSync(path.join(dir, candidate))) return candidate;
+  }
+  return `${stem}-${Date.now()}${ext}`;
+}
+
+/** 把远程 URL / data URI 图标转存为堆栈图库本地图标；返回本地 URL，无法转换时返回 null（保留原引用兜底） */
+async function materializeLocalIcon(stackDir: string, url: string): Promise<string | null> {
+  if (!url || url.startsWith("/api/stack-icons/")) return null; // 已是本地图库引用
+  const dir = path.join(stackDir, "icon");
+  const stackName = path.basename(stackDir);
+  const localUrl = (filename: string) =>
+    `/api/stack-icons/${encodeURIComponent(stackName)}/${encodeURIComponent(filename)}`;
+  try {
+    if (url.startsWith("data:image/")) {
+      // SVG 代码粘贴（前端已转 data URI）或其它内联图片：解码落盘
+      const m = /^data:image\/([a-z0-9.+-]+);base64,(.+)$/i.exec(url);
+      if (!m) return null;
+      const buf = Buffer.from(m[2], "base64");
+      if (!buf.length || buf.length > ICON_MAX_BYTES) return null;
+      const ext = ICON_CT_EXT[`image/${m[1].toLowerCase()}`] || `.${m[1].replace(/[^a-z0-9]/g, "")}`;
+      if (!ICON_FILE_RE.test(ext)) return null;
+      const filename = dedupeIconFilename(dir, sanitizeIconFilename(`inline${ext}`, ext));
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(path.join(dir, filename), buf);
+      return localUrl(filename);
+    }
+    if (/^https?:\/\//i.test(url)) {
+      // 外链图片：服务端下载后转本地（8s 超时 + 2MB 上限）
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 8000);
+      const resp = await fetch(url, { signal: ctrl.signal });
+      clearTimeout(timer);
+      if (!resp.ok) return null;
+      const buf = Buffer.from(await resp.arrayBuffer());
+      if (!buf.length || buf.length > ICON_MAX_BYTES) return null;
+      const ct = (resp.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+      let ext = ICON_CT_EXT[ct] || "";
+      if (!ext) {
+        const urlName = path.basename(new URL(url).pathname);
+        ext = ICON_FILE_RE.test(urlName) ? (urlName.match(ICON_FILE_RE) || [".png"])[0] : "";
+      }
+      if (!ext) ext = ".png";
+      const filename = dedupeIconFilename(dir, sanitizeIconFilename(path.basename(new URL(url).pathname), ext));
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(path.join(dir, filename), buf);
+      return localUrl(filename);
+    }
+  } catch { /* 下载失败/超时：保留原 URL 兜底 */ }
+  return null;
+}
+
+/** 上传堆栈图标（本地图片）→ 保存进堆栈图库 icon/ 文件夹，保留原始文件名 */
 app.post("/api/engines/:id/stacks/:name/icon", express.raw({ type: "image/*", limit: "2mb" }), async (req, res) => {
   const engine = getEngine(req.params.id);
   if (!engine) { res.status(404).json({ success: false, error: "引擎不存在" }); return; }
   try {
-    const contentType = req.get("Content-Type") || "image/png";
-    const extMap: Record<string, string> = {
-      "image/png": ".png",
-      "image/jpeg": ".jpg",
-      "image/jpg": ".jpg",
-      "image/gif": ".gif",
-      "image/svg+xml": ".svg",
-      "image/webp": ".webp",
-      "image/x-icon": ".ico",
-    };
-    const ext = extMap[contentType] || ".png";
-
-    // 查找堆栈目录
     const stackDir = path.join(COMPOSE_DIR, req.params.name);
     if (!existsSync(stackDir)) {
-      // SSH 引擎无法本地写，回退到 URL 模式
+      // SSH 引擎无法本地写，保持原有报错
       res.status(400).json({ success: false, error: "堆栈目录不存在，无法保存图标" });
       return;
     }
 
-    // 删除旧图标文件
-    const existingFiles = readdirSync(stackDir);
-    for (const f of existingFiles) {
-      if (f.startsWith("icon.")) {
-        try { unlinkSync(path.join(stackDir, f)); } catch { /* ignore */ }
-      }
+    // v1.49.0：保存进图库文件夹 icon/，保留原始文件名（净化后），重名自动加序号；不再覆盖其它图标
+    const dir = path.join(stackDir, "icon");
+    const rawName = req.get("X-Filename") ? decodeURIComponent(req.get("X-Filename") as string) : "";
+    const contentType = req.get("Content-Type") || "image/png";
+    let filename = rawName ? sanitizeIconFilename(rawName, ICON_CT_EXT[contentType] || ".png") : "";
+    if (!filename || !ICON_FILE_RE.test(filename)) {
+      filename = `icon-${Date.now()}${ICON_CT_EXT[contentType] || ".png"}`;
+    }
+    filename = dedupeIconFilename(dir, filename);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, filename), req.body as Buffer);
+
+    // 更新 meta 中的 icon 字段为图库本地 URL（LABELS 服务图标上传带 ?updateMeta=0，不动堆栈级图标）
+    const iconUrl = `/api/stack-icons/${encodeURIComponent(req.params.name)}/${encodeURIComponent(filename)}`;
+    if (req.query.updateMeta !== "0") {
+      await saveStackSettings(engine, req.params.name, { iconUrl });
     }
 
-    // 保存新图标
-    const iconFilename = `icon${ext}`;
-    const iconPath = path.join(stackDir, iconFilename);
-    writeFileSync(iconPath, req.body as Buffer);
-
-    // 更新 meta 中的 icon 字段
-    await saveStackSettings(engine, req.params.name, { iconUrl: `/api/stack-icons/${encodeURIComponent(req.params.name)}` });
-
-    res.json({ success: true, data: { iconUrl: `/api/stack-icons/${encodeURIComponent(req.params.name)}` } });
+    res.json({ success: true, data: { iconUrl } });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message || "图标上传失败" });
+  }
+});
+
+/** 列出堆栈图库（icon/ 文件夹）内的本地图标文件名 */
+app.get("/api/engines/:id/stacks/:name/icons", (req, res) => {
+  const engine = getEngine(req.params.id);
+  if (!engine) { res.status(404).json({ success: false, error: "引擎不存在" }); return; }
+  try {
+    const dir = path.join(COMPOSE_DIR, req.params.name, "icon");
+    if (!existsSync(dir)) { res.json({ success: true, data: [] }); return; }
+    const files = readdirSync(dir).filter((f) => ICON_FILE_RE.test(f)).sort((a, b) => a.localeCompare(b, "zh"));
+    res.json({ success: true, data: files });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || "读取图库失败" });
   }
 });
 
@@ -972,6 +1200,25 @@ app.get("/api/stack-icons/:name", (req, res) => {
   res.setHeader("Content-Type", ctMap[ext] || "image/png");
   res.setHeader("Cache-Control", "no-cache");
   res.send(readFileSync(path.join(stackDir, iconFile)));
+});
+
+/** 提供堆栈图库（icon/ 文件夹）单个图标文件（v1.49.0） */
+app.get("/api/stack-icons/:name/:file", (req, res) => {
+  // ★ 防路径穿越：只认单段文件名 + 扩展名白名单；decoded 参数含分隔符直接拒绝
+  const raw = req.params.file || "";
+  const file = path.basename(raw);
+  if (file !== raw || file.includes("/") || file.includes("\\") || !ICON_FILE_RE.test(file)) {
+    res.status(404).send("Not found");
+    return;
+  }
+  const p = path.join(COMPOSE_DIR, req.params.name, "icon", file);
+  if (!existsSync(p) || !statSync(p).isFile()) {
+    res.status(404).send("Not found");
+    return;
+  }
+  res.setHeader("Content-Type", ICON_EXT_CT[path.extname(file).toLowerCase()] || "image/png");
+  res.setHeader("Cache-Control", "no-cache");
+  res.send(readFileSync(p));
 });
 
 /** 检查堆栈更新 */
@@ -1606,43 +1853,17 @@ app.get("/api/engines/:id/activity", async (req, res) => {
     return;
   }
   try {
-    const activities = await getActivityLogs(engine);
-    // 镜像更新结果接入通知中心：把「有可用更新」的镜像派生为 warning 活动，
-    // 与既有活动同源（均从引擎实时状态派生），不另存事件流。
-    const updateCache = getImageUpdateCache(engine.id);
-    if (updateCache && updateCache.details?.length) {
-      const ts = updateCache.at
-        ? updateCache.at.replace("T", " ").substring(0, 19)
-        : new Date().toISOString().replace("T", " ").substring(0, 19);
-      for (const d of updateCache.details) {
-        if (!d.hasUpdate) continue;
-        const ref = d.refs?.[0] || d.image;
-        activities.push({
-          id: `img-update-${engine.id}-${ref}`,
-          timestamp: ts,
-          type: "warning",
-          message: `镜像 ${ref} 有可用更新`,
-        });
-      }
-      // v1.43.18：镜像检查汇总进通知中心（取代镜像页内嵌横幅）。
-      // 既保留逐镜像「有可用更新」明细，又补一条「检查了多少 / 多少为最新 / 多少可更新」汇总，
-      // 使「全部为最新」这类结果也能在通知中心看到。
-      const sumChecked = updateCache.checked ?? 0;
-      const sumUpdates = updateCache.updates ?? 0;
-      const sumUpToDate = Math.max(0, sumChecked - sumUpdates);
-      activities.push({
-        id: `img-update-summary-${engine.id}`,
-        timestamp: ts,
-        type: sumUpdates > 0 ? "warning" : "success",
-        message:
-          sumUpdates > 0
-            ? `镜像更新检查：检查 ${sumChecked} 个，${sumUpdates} 个有可用更新，${sumUpToDate} 个为最新`
-            : `全部镜像均为最新（已检查 ${sumChecked} 个）`,
-      });
-    }
-    // 重新按时间倒序，取最近 100 条（含镜像更新通知；用户要求最多显示 100 条，与上游 getActivityLogs 的 100 上限一致）
-    activities.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-    res.json({ success: true, data: activities.slice(0, 100) });
+    // ★ 通知中心改为读**持久化事件日志**（server/notifications.ts）。
+    // 旧实现基于 Docker 实时状态派生快照 + 100 条硬截断，会丢历史（用户反馈「昨天 40 条今天变 17 条」）。
+    // 现在事件由 notify/scheduler/docker 埋点落盘，支持分页，历史不再丢失。
+    const limit = Math.max(1, Math.min(parseInt(String(req.query.limit), 10) || 50, 200));
+    const offset = Math.max(0, parseInt(String(req.query.offset), 10) || 0);
+    const result = getNotifications(engine.id, { limit, offset });
+    // 注意：前端 request() 只取 json.data，故把分页对象整体放进 data 字段
+    res.json({
+      success: true,
+      data: { items: result.data, total: result.total, hasMore: result.hasMore },
+    });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message || "获取活动日志失败" });
   }

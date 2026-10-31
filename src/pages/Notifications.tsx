@@ -5,6 +5,14 @@ import { getOpLogs, type OpLogEntry } from "../opLog";
 
 interface NotificationsProps {
   notifications: ActivityLog[];
+  /** 该引擎通知总数（持久化事件日志，可能远大于已加载条数） */
+  total?: number;
+  /** 是否还有更多可加载 */
+  hasMore?: boolean;
+  /** 正在加载更多 */
+  loadingMore?: boolean;
+  /** 加载更多回调 */
+  onLoadMore?: () => void;
   readIds?: Set<string>;
   onMarkRead?: (id: string) => void;
   onMarkAllRead?: () => void;
@@ -62,7 +70,16 @@ const opStatusColor: Record<OpLogEntry["status"], string> = {
   running: "bg-blue-100 text-blue-700",
 };
 
-export function Notifications({ notifications, readIds = new Set(), onMarkRead, onMarkAllRead }: NotificationsProps) {
+export function Notifications({
+  notifications,
+  total,
+  hasMore,
+  loadingMore,
+  onLoadMore,
+  readIds = new Set(),
+  onMarkRead,
+  onMarkAllRead,
+}: NotificationsProps) {
   const [tab, setTab] = useState<"notifications" | "operations">("notifications");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
@@ -149,6 +166,9 @@ export function Notifications({ notifications, readIds = new Set(), onMarkRead, 
           <div className="flex items-center justify-between mb-5">
             <p className="text-sm text-slate-500">
               共 {visibleNotifs.length} 条通知
+              {total != null && total > visibleNotifs.length && (
+                <span className="ml-1 text-slate-400">（总计 {total} 条，已加载 {visibleNotifs.length}）</span>
+              )}
               {unreadCount > 0 && <span className="ml-1 text-amber-600 font-medium">（{unreadCount} 条未读）</span>}
               {filtered.length !== visibleNotifs.length && `，筛选后 ${filtered.length} 条`}
             </p>
@@ -237,6 +257,19 @@ export function Notifications({ notifications, readIds = new Set(), onMarkRead, 
                   );
                 })}
               </div>
+            </div>
+          )}
+
+          {/* 分页加载更多：持久化事件日志可能远超已加载条数，避免「满 100 看不清历史」 */}
+          {hasMore && tab === "notifications" && (
+            <div className="flex justify-center mt-4">
+              <button
+                onClick={onLoadMore}
+                disabled={loadingMore}
+                className="flex items-center gap-1.5 px-4 py-2 text-sm text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loadingMore ? "加载中..." : "加载更多"}
+              </button>
             </div>
           )}
         </>

@@ -94,6 +94,16 @@ function stackColorIndex(id: string): number {
   return h % STACK_COLORS.length;
 }
 
+/** 运行时长紧凑显示（v1.46.4）：只显示天数；不足 1 天显示「<1天」；已停止等原样保留 */
+function uptimeDays(uptime: string): string {
+  if (!uptime) return "";
+  if (uptime === "已停止") return uptime;
+  const m = uptime.match(/(\d+)\s*(day|month)/i);
+  if (!m) return "<1天";
+  const n = parseInt(m[1], 10) || 0;
+  return m[2].toLowerCase() === "month" ? `${n * 30}天` : `${n}天`;
+}
+
 export function Containers({ containers, onNavigate, onRefresh, loading, error, engineId, defaultVisibleColumns, containerDetailStyle = "drawer", focusContainerName, onFocusContainerConsumed, stacks }: ContainersProps) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -380,7 +390,8 @@ export function Containers({ containers, onNavigate, onRefresh, loading, error, 
       )}
 
       {/* Table */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      {/* v1.46.5 响应式紧凑化：cq-root 使表格可用宽 <1280px 时自动切紧凑显示 */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden cq-root">
         <table className="w-full">
           <thead>
             <tr className="bg-slate-50 border-b border-slate-200">
@@ -442,43 +453,63 @@ export function Containers({ containers, onNavigate, onRefresh, loading, error, 
                       <div className="flex items-center gap-2.5">
                         <div>
                           <div className="flex items-center gap-1.5">
-                            <span className="text-sm font-medium text-slate-700">{container.name}</span>
+                            {/* v1.48.4：名称超 24 字符截断显示省略号，悬停 title 浮现完整名称 */}
+                            <span
+                              className="text-sm font-medium text-slate-700"
+                              title={container.name.length > 24 ? container.name : undefined}
+                            >
+                              {container.name.length > 24 ? `${container.name.slice(0, 24)}…` : container.name}
+                            </span>
                             {container.hasUpdate && (
                               <span className="w-2 h-2 bg-amber-400 rounded-full" title="有可用更新" />
                             )}
                           </div>
+                          {/* v1.46.3：LABELS 页服务描述（有才显示，不占位） */}
+                          {container.description && (
+                            <div
+                              className="text-xs text-slate-400 truncate max-w-[16rem] mt-0.5"
+                              title={container.description}
+                            >
+                              {container.description}
+                            </div>
+                          )}
                         </div>
                       </div>
                     </td>
                   )}
                   {visibleColumns.has("status") && (
                     <td className="px-3 py-3">
-                      {/* 与堆栈管理一致：点击状态列打开详情弹窗 */}
-                      <div className="flex justify-center">
-                        <button
-                          onClick={() => { setDetailContainer(container); setDetailTab("info"); }}
-                          title="点击状态列查看容器详情"
-                          className="inline-flex items-center gap-1.5 text-sm rounded-md ring-1 ring-transparent hover:ring-blue-300 hover:bg-blue-50 px-1.5 py-0.5 transition-colors"
-                        >
-                          <span className={`w-1.5 h-1.5 rounded-full ${
-                            container.status === "running" ? "bg-green-500 animate-pulse" :
-                            container.status === "paused" ? "bg-amber-500" :
-                            container.status === "restarting" ? "bg-blue-500 animate-pulse" :
-                            "bg-slate-400"
-                          }`} />
-                          <span className={
-                            container.status === "running" ? "text-green-600 font-medium" :
-                            container.status === "paused" ? "text-amber-600 font-medium" :
-                            container.status === "restarting" ? "text-blue-600 font-medium" :
-                            "text-slate-500"
-                          }>
-                            {container.status === "running" ? "运行中" :
-                             container.status === "stopped" ? "已停止" :
-                             container.status === "paused" ? "已暂停" :
-                             container.status === "restarting" ? "重启中" : container.status}
-                          </span>
-                        </button>
-                      </div>
+                      {/* v1.46.7 响应式紧凑化：宽屏完全恢复 v1.46.4 之前旧版样式（小色点+状态色文字），<1024px 只显色点；点击均开详情 */}
+                      {(() => {
+                        const statusText =
+                          container.status === "running" ? "运行中" :
+                          container.status === "stopped" ? "已停止" :
+                          container.status === "paused" ? "已暂停" :
+                          container.status === "restarting" ? "重启中" : container.status;
+                        const dotCls =
+                          container.status === "running" ? "bg-green-500 animate-pulse" :
+                          container.status === "paused" ? "bg-amber-500" :
+                          container.status === "restarting" ? "bg-blue-500 animate-pulse" :
+                          "bg-slate-400";
+                        const textCls =
+                          container.status === "running" ? "text-green-600" :
+                          container.status === "paused" ? "text-amber-600" :
+                          container.status === "restarting" ? "text-blue-600" :
+                          "text-slate-500";
+                        return (
+                          <div className="flex justify-center">
+                            <button
+                              onClick={() => { setDetailContainer(container); setDetailTab("info"); }}
+                              title="点击状态列查看容器详情"
+                              className="inline-flex items-center gap-1.5 rounded-md ring-1 ring-transparent hover:ring-blue-300 hover:bg-blue-50 px-1.5 py-0.5 transition-colors"
+                            >
+                              <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dotCls}`} />
+                              <span className={`text-sm font-medium cq-full ${textCls}`}>{statusText}</span>
+                              <span className="cq-compact"><span className={`block w-2.5 h-2.5 rounded-full ${dotCls}`} /></span>
+                            </button>
+                          </div>
+                        );
+                      })()}
                     </td>
                   )}
                   {visibleColumns.has("tags") && (
@@ -498,12 +529,21 @@ export function Containers({ containers, onNavigate, onRefresh, loading, error, 
                         {(() => {
                           const stack = stacks?.find((s) => s.id === container.stackId);
                           if (!stack) return <span className="text-xs text-slate-300">—</span>;
+                          // v1.46.7 响应式紧凑化：宽屏完全恢复旧版徽章样式（badge 边框底色），<1024px 只显色点（名字进 title）
                           const c = STACK_COLORS[stackColorIndex(stack.id)];
                           return (
-                            <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium border ${c.badge}`}>
-                              <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${c.dot}`} />
-                              {stack.name}
-                            </span>
+                            <>
+                              <span
+                                title={stack.name}
+                                className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium border cq-full ${c.badge}`}
+                              >
+                                <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${c.dot}`} />
+                                {stack.name}
+                              </span>
+                              <span className="cq-compact" title={stack.name}>
+                                <span className={`inline-block w-2.5 h-2.5 rounded-full flex-shrink-0 cursor-default ${c.dot}`} />
+                              </span>
+                            </>
                           );
                         })()}
                       </div>
@@ -520,8 +560,10 @@ export function Containers({ containers, onNavigate, onRefresh, loading, error, 
                       </div>
                     </td>
                   )}
-                  {visibleColumns.has("network") && <td className="px-3 py-3"><span className="text-sm text-slate-600">{container.networkMode}</span></td>}
-                  {visibleColumns.has("uptime") && <td className="px-3 py-3"><span className="text-sm text-slate-500">{container.uptime}</span></td>}
+                  {/* v1.46.5 响应式紧凑化：宽屏显示完整网络模式，表格可用宽 <1280px 只显首字母（完整名进 title） */}
+                  {visibleColumns.has("network") && <td className="px-3 py-3"><span className="text-sm text-slate-600" title={container.networkMode}><span className="cq-full">{container.networkMode || "—"}</span><span className="cq-compact">{(container.networkMode || "").charAt(0) || "—"}</span></span></td>}
+                  {/* v1.46.5 响应式紧凑化：宽屏显示完整运行时长，表格可用宽 <1280px 只显天数（原文进 title） */}
+                  {visibleColumns.has("uptime") && <td className="px-3 py-3 whitespace-nowrap"><span className="text-sm text-slate-500" title={container.uptime}><span className="cq-full">{container.uptime}</span><span className="cq-compact">{uptimeDays(container.uptime)}</span></span></td>}
                   {visibleColumns.has("restartPolicy") && (
                     <td className="px-3 py-3 text-center">
                       <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
@@ -903,7 +945,7 @@ function ContainerDetailModal({
   const detailInner = (
     <div className="flex flex-col h-full min-h-0">
         {/* Header */}
-        <div className="flex items-center gap-3 px-6 pt-4 pb-3 border-b border-slate-100">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-6 pt-4 pb-3 border-b border-slate-100">
           <div className="w-10 h-10 rounded-lg bg-slate-100 flex items-center justify-center overflow-hidden">
             {container.icon ? <img src={container.icon} alt="" className="w-9 h-9 rounded" /> : <span className="text-sm font-bold text-slate-400">{container.name.charAt(0)}</span>}
           </div>
@@ -914,7 +956,7 @@ function ContainerDetailModal({
               <span className="text-xs text-slate-400">运行 {container.uptime}</span>
             </div>
           </div>
-          <div className="flex items-center gap-1.5 flex-shrink-0">
+          <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap">
             {actionLoading ? (
               <button
                 disabled
@@ -931,18 +973,21 @@ function ContainerDetailModal({
               <>
                 <button
                   onClick={() => handleOperation("stop")}
+                  title="停止"
                   className="flex items-center gap-1 px-3 py-1.5 text-sm text-white bg-slate-600 rounded-lg hover:bg-slate-700 transition-colors"
                 >
                   <Square size={14} /> 停止
                 </button>
                 <button
                   onClick={() => handleOperation("restart")}
+                  title="重启"
                   className="flex items-center gap-1 px-3 py-1.5 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
                 >
                   <RotateCw size={14} /> 重启
                 </button>
                 <button
                   onClick={() => handleOperation("pause")}
+                  title="暂停"
                   className="flex items-center gap-1 px-3 py-1.5 text-sm text-amber-600 border border-amber-200 rounded-lg hover:bg-amber-50 transition-colors"
                 >
                   <Pause size={14} /> 暂停
@@ -952,12 +997,14 @@ function ContainerDetailModal({
               <>
                 <button
                   onClick={() => handleOperation("unpause")}
+                  title="恢复"
                   className="flex items-center gap-1 px-3 py-1.5 text-sm text-white bg-green-500 rounded-lg hover:bg-green-600 transition-colors"
                 >
                   <Play size={14} /> 恢复
                 </button>
                 <button
                   onClick={() => handleOperation("stop")}
+                  title="停止"
                   className="flex items-center gap-1 px-3 py-1.5 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
                 >
                   <Square size={14} /> 停止
@@ -967,6 +1014,7 @@ function ContainerDetailModal({
               <>
                 <button
                   onClick={() => handleOperation("start")}
+                  title="启动"
                   className="flex items-center gap-1 px-3 py-1.5 text-sm text-white bg-green-500 rounded-lg hover:bg-green-600 transition-colors"
                 >
                   <Play size={14} /> 启动
@@ -995,19 +1043,13 @@ function ContainerDetailModal({
             {container.webuiUrl && (
               <button
                 onClick={() => window.open(container.webuiUrl, "_blank")}
+                title="打开 WebUI"
                 className="flex items-center gap-1 px-3 py-1.5 text-sm text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50 transition-colors"
               >
                 <Globe size={14} /> WebUI
               </button>
             )}
-            {/* 弹窗不再支持点击遮罩关闭，这里补一个显式关闭按钮 */}
-            <button
-              onClick={onClose}
-              title="关闭"
-              className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 transition-colors"
-            >
-              <X size={16} />
-            </button>
+            {/* v1.46.7 移除显式关闭按钮：Drawer 点遮罩 + ESC、Modal 自带头部 × 均可关闭 */}
           </div>
         </div>
 
@@ -1595,6 +1637,8 @@ function ContainerInfoTab({ container }: { container: Container }) {
     { label: "创建时间", value: container.createdAt },
     { label: "运行时长", value: container.uptime },
     { label: "重启策略", value: container.restartPolicy || "no" },
+    // v1.46.3：LABELS 页服务描述（有才显示）
+    ...(container.description ? [{ label: "描述", value: container.description }] : []),
   ];
 
   return (

@@ -88,7 +88,7 @@ ok("单元格仍显示悬空 / 已锁定标签", /\{img\.isDangling && <Tag text
 /* ---------- ③ 搜索匹配 ---------- */
 console.log("\n── ③ 搜索匹配 ──");
 ok("★ 搜索同时匹配完整名与短名（repoShort）", /const repoShort = hideRepoRegistry \? stripRegistryHost\(img\.repository\)\.toLowerCase\(\) : repo;/.test(images) && /matchSearch = repo\.includes\(kw\) \|\| repoShort\.includes\(kw\)/.test(images));
-ok("useMemo 依赖含 hideRepoRegistry", /\}, \[images, search, filter, hideRepoRegistry\]\);/.test(images));
+ok("useMemo 依赖含 hideRepoRegistry", /}, \[images, search, filter, hideRepoRegistry, [^\]]+\]\);/.test(images));
 
 /* ---------- ④ App.tsx 取数 ---------- */
 console.log("\n── ④ App.tsx 取数 ──");
@@ -120,7 +120,7 @@ ok("★ 设置列显隐镜像卡片不含「仓库名」勾选（列常驻）", 
 const allColsBlock = images.match(/const allColumns: \{ key: ColumnKey; label: string \}\[\] = \[[\s\S]*?\];/);
 ok("★ 镜像页「列」下拉不含「仓库名」项", !!allColsBlock && !allColsBlock[0].includes("repository"));
 ok("★ 初始 visibleColumns 强制包含 repository（旧设置藏过的自动恢复）", /defaultSet\.add\("repository"\);/.test(images));
-ok("仓库名列头/单元格渲染条件保留", /visibleColumns\.has\("repository"\) && <th/.test(images) && /visibleColumns\.has\("repository"\) && \(/.test(images));
+ok("仓库名列头/单元格渲染条件保留", /visibleColumns\.has\("repository"\) && <SortableTh/.test(images) && /visibleColumns\.has\("repository"\) && \(/.test(images));
 ok("列显隐分区说明注明仓库名列常驻", /「仓库名」为镜像主标识列，常驻显示/.test(settings));
 
 /* ---------- ⑨ 「仓库 registry 地址」进列下拉（v1.42.18） ---------- */
@@ -137,7 +137,7 @@ console.log("\n── ⑩ SHA-256 列默认不显示（v1.42.19） ──");
 ok("★ 镜像页全量默认分支剔除 sha256（filter c => c.key !== \"sha256\"）", /new Set\(allColumns\.filter\(c => c\.key !== "sha256"\)\.map\(c => c\.key\)\)/.test(images));
 ok("★ stored 分支保留（已保存过列选择的用户尊重其勾选）", /const defaultSet = defaultVisibleColumns && defaultVisibleColumns\.length > 0\s*\n\s*\? new Set\(defaultVisibleColumns as ColumnKey\[\]\)/.test(images));
 ok("★ allColumns 仍含 sha256 项（列可手动勾选，未被移除）", !!allColsBlock && /key: "sha256"/.test(allColsBlock[0]));
-ok("★ SHA-256 列头渲染条件保留", /visibleColumns\.has\("sha256"\) && <th/.test(images));
+ok("★ SHA-256 列头渲染条件保留", /visibleColumns\.has\("sha256"\) && <SortableTh/.test(images));
 ok("★ 设置页列显隐 images 无 stored 时默认不含 sha256", /const defaultKeys = page\.key === "images" \? allKeys\.filter\(k => k !== "sha256"\) : allKeys;/.test(settings) && /const visibleSet = stored && stored\.length > 0 \? new Set\(stored\) : new Set\(defaultKeys\);/.test(settings));
 ok("设置页说明注明 SHA-256 默认不显示", /镜像管理「SHA-256」列默认不显示/.test(settings));
 

@@ -16,6 +16,390 @@
 
 ---
 
+## v1.49.1 — 2026-10-31（**已构建 · 待推 Gitea**）
+
+### 修复（还原）
+
+- **还原「编辑堆栈 → Compose」一键填入模板功能**（v1.48.2 误删，用户本意只移除说明文字）：
+  - 从会话转录（file-rollback 外的第 3 恢复源）逆向回放 17 个移除 Edit + 重建 `src/lib/compose-template.ts`，逐条 `count==1` 校验后落盘
+  - 恢复范围：模板逻辑（insertTemplateBlock/reindentBlock/completeEmptyValue）、Stacks 模板面板、Settings「编辑堆栈」模板维护卡、App→Stacks composeTemplates 链路、types（ComposeTemplate/ComposeInsertPosition）、server/settings 默认与解析
+  - **仅移除** Settings「编辑堆栈」页顶部的长段说明文字（「每项可填一行或多行 compose 内容…自适应」），功能与控件全部保留
+
+### 运维约定
+
+- **源码每次发布推送 Gitea（暂不推 GitHub）**；本版本补交 v1.44.6~v1.49.1 积压源码
+
+---
+
+## v1.49.0 — 2026-10-31（**已构建 · 待推 Gitea**）
+
+### 新功能
+
+- **堆栈图库（icon/ 文件夹）+ 图标全源转本地**：
+  - 堆栈目录下新增 `icon/` 图库文件夹；上传 / URL 链接 / SVG 代码三种来源的图标统一转存为该文件夹内的本地图标，meta 中改写为 `/api/stack-icons/<堆栈名>/<文件名>` 本地引用
+  - URL 图标：保存设置时服务端下载（≤2MB、8s 超时，失败保留原 URL 兜底）；data URI（SVG 代码粘贴）：解码落盘；上传：保留原始文件名（净化 + 重名自动加序号，图库内多图标共存不覆盖）
+  - **图库下拉**：编辑堆栈 SETTINGS（堆栈图标）与 LABELS（每个服务图标）两处，图标控件「编辑代码/SVG」按钮左侧新增「图库」下拉（`FolderOpen` 图标），列出 icon/ 文件夹内图标（缩略图 + 文件名）点选即用
+  - 新端点：`GET /api/engines/:id/stacks/:name/icons`（列图库）、`GET /api/stack-icons/:name/:file`（按文件供图，basename 校验 + 扩展名白名单防路径穿越）；上传端点支持 `X-Filename` 头与 `?updateMeta=0`（LABELS 服务图标上传不覆盖堆栈级 meta.icon）
+  - 兼容：旧版单文件 `icon.<ext>` 回退仅在 meta 无新式图库 URL 时生效；SSH 引擎无本地目录时跳过转存、LABELS 上传回落内联 data URI（保持旧行为）
+  - 保存设置响应返回规范化后的 iconUrl/webuiLabels，前端即时回填表单
+
+### 涉及文件
+
+- `server/index.ts`（图库端点 + materializeLocalIcon + 上传端点改造）、`server/docker.ts`（getStacks 旧图标回退守卫）、`src/api.ts`（X-Filename / updateMeta / listStackIconsApi / 保存返回规范化值）、`src/pages/Stacks.tsx`（图库下拉 ×4 处 + LABELS 上传走图库 + 回填）
+
+---
+
+## v1.48.4 — 2026-10-31（**已构建 · 待双推**）
+
+### 优化
+
+- **容器管理页：容器名称超长截断 + 悬停显示完整名**：名称超过 24 字符时截断显示 `前24字符…`，鼠标悬停浮现完整名称（原生 title）；≤24 字符显示不变。仅作用于容器管理页列表名称列，详情弹窗头部不受影响（`src/pages/Containers.tsx`）。
+
+---
+
+## v1.48.3 — 2026-10-31（**已构建 · 待双推**）
+
+### 优化
+
+- **标签库名称编辑改为「编辑 → 完成」两段式**（设置 → 标签管理）：
+  - 名称输入框默认锁定（readOnly），防止误改；删除按钮左侧新增「编辑」按钮（铅笔图标）
+  - 点击「编辑」解锁该行名称输入，按钮变为绿色「√」（悬浮提示「完成编辑」）；点「√」完成并重新锁定
+  - 同一时间仅允许编辑一行；新建标签自动进入编辑态；删除正在编辑的行自动退出编辑态
+  - `Input` 组件新增 `readOnly` 属性透传（additive，不影响既有用法）
+
+---
+
+## v1.48.2 — 2026-10-31（**已构建 · 待双推**）
+
+### 移除
+
+- **「编辑堆栈 → Compose」一键填入模板功能整体下线**（用户要求移除）：
+  - 堆栈编辑器 Compose 页右侧模板面板（单填/全部填入/光标定位）删除
+  - 设置中心「编辑堆栈」分区的「一键填入模板」维护卡片删除（分区保留，仅剩 WebUI 自动识别开关）
+  - `src/lib/compose-template.ts` 整文件删除；`ComposeTemplate`/`ComposeInsertPosition` 类型删除；`ComposeConfig.templates` 字段删除
+  - 服务端 `DEFAULT_SETTINGS.compose.templates` 默认模板与解析映射、`normalizeComposeInsert` 删除；旧 settings.json 中残留的 `compose.templates` 字段读取时直接忽略（不影响加载）
+
+---
+
+## v1.48.1 — 2026-10-31（**已构建 · 待双推**）
+
+### 手动启停的容器不再进通知（Patch）
+
+- **根因**：通知中心的「容器已停止」来自 60 秒状态巡检（`diffContainerStates`），只看「运行中 → 非运行中」转变，不知道是用户在 App 里自己点的——手动 stop / restart / 暂停堆栈容器都会误报
+- **抑制机制**（notify.ts）：新增手动操作抑制表，打标后 **15 分钟内**的对应容器/堆栈停止事件跳过通知，**命中即消费**（一次性，避免永久漏报）
+  - 容器级 `markManualContainerOp(engineId, cidOrName)`：按 id / 名称匹配
+  - 堆栈级 `markManualStackOp(engineId, workDir)`：按容器 `com.docker.compose.project.working_dir` 标签匹配，与 compose project 命名解耦
+- **打标点**（docker.ts，均已成功后打标）：`containerAction`（start/stop/restart/pause/unpause）、`removeContainer`、`stackAction`（up/down/pull/build/restart）、`stackActionStream`（流式路径）、`removeStack`
+- **效果**：自己操作的启停不进通知；**异常停止（崩溃 / OOM / 外部 docker stop）仍照常通知**
+- 硬核验：tsc 双 0；16 组门禁 0 FAIL；SHA-256 三处一致 `e7c25d0366b42771396eaac9f1b0e44a2853abfc63c3c6f8d0624b3630a3ffcd`（130,419,904 B）；ELF `7f454c46`；版本串 1.48.1×2 / 1.48.0×0；SEA blob 明文段抑制表/打标调用锚点全在
+- 交付包：`build-upload/dockermanagementyanzi-linux-x64-v1.48.1.zip` + `dockermanagementyanzi_1.48.1_amd64.deb`
+
+---
+
+## v1.48.0 — 2026-10-31（**已构建 · 待双推**）
+
+### 登录页品牌化改版（Minor：仿品牌落地页分栏布局）
+
+- **分栏骨架** `AuthLayout`：左侧蓝色渐变品牌区（`hidden lg:flex`，小屏自动只显表单）+ 右侧白色表单区，LoginForm / RecoveryForm 共用
+- **左栏内容**（仿参考截图）：Logo「Docker 管理」+ 主标语「每一台容器，都该有『在哪、什么状态』的答案」+ 平台简介 + 6 条功能亮点（容器/堆栈管理、资源监控、WebUI 识别、镜像/卷/网络、LABELS、找回码安全，含角标）+ 底部「自托管 · 数据不出内网 · 一个 Docker 容器即可运行」；装饰圆 3 个
+- **右栏表单**：大标题「登录」+ 用户名/邮箱/手机号 + 密码（掩码不变）+ 右对齐「忘记密码？重置密码」链接 + 蓝 600 登录按钮 + 底部灰色说明条（本地部署/登录 ID 说明）；找回码重置视图同布局
+- **门禁锚点零破坏**：notice 绿条条件渲染、「重置密码」文案、PasswordInput ×4（showPassword/showCode/showNew/showConfirm）、pr-9、「找回码区分大小写…」「位找回码重置登录密码」全部保留；16 组门禁 0 FAIL
+- 硬核验：SHA-256 三处一致 `c3df19dfcc173ccc27697d9eb96f8b58230f9908ea4b51f440ad5d3ebb4cbea1`（130,419,904 B）；ELF `7f454c46`；版本串 1.48.0×2 / 1.47.1×0；解码段新锚点（每一台容器/忘记密码？重置密码/自托管…）×1 + 门禁文案全在
+- 交付包：`build-upload/dockermanagementyanzi-linux-x64-v1.48.0.zip` + `dockermanagementyanzi_1.48.0_amd64.deb`
+
+---
+
+## v1.47.1 — 2026-10-31（**已构建 · 待双推**）
+
+### 顶栏微调（UI Patch）
+
+- **左上角双行版本**：Logo + 引擎状态点右侧新增两行——上行「Docker v{ServerVersion}」（本地 Docker 版本）、下行「v{程序版本}」；悬浮 title 同步补充（引擎名/连接状态/Docker 版本/程序版本）
+- **移除顶栏右侧通知铃铛与搜索框**：通知下拉弹层（含「查看更多通知」「暂无通知」）一并删除；未读数仍走顶部导航「通知中心」红色角标
+- **清理**：TopBar 的 `notifications`/`onMarkAllRead` props 与 `useState`/`showNotifications` 状态删除（App.tsx 调用处同步）
+- 验证：tsc 双 0；16 组门禁 0 FAIL；dist 正向「程序版本」「本地 Docker 版本」、负向「查看更多通知」「暂无通知」「showNotifications」×0
+- 硬核验：SHA-256 三处一致 `94ac12e0306e2f8aa8599d8d055338e5b9d7b40bb194e184bca4d6982d65b8bc`（130,419,904 B）；ELF `7f454c46`；版本串 1.47.1×2 / 1.47.0×0
+- 交付包：`build-upload/dockermanagementyanzi-linux-x64-v1.47.1.zip` + `dockermanagementyanzi_1.47.1_amd64.deb`
+
+---
+
+## v1.47.0 — 2026-10-31（**已构建 · 待双推**）
+
+### 顶部导航改版：左侧边栏移除，导航整体迁至顶栏（Minor：布局新功能）
+
+- **布局重构**：左侧 `Sidebar.tsx` 整文件删除；`App.tsx` 根布局 `flex h-screen` → `flex flex-col h-screen`，顶栏在上、内容区在下，左侧空间全部让给内容区
+- **TopBar 重写**（单行顶栏，用户 AskUserQuestion 确认「单行」方案）：
+  - 左上角：Logo 图标 + 引擎状态点（原侧边栏左下角信息精简迁入；引擎名/Docker 版本/状态/应用版本全进悬浮 title，`≥2xl` 露出版本号）
+  - 导航 8 项（仪表盘/容器管理/堆栈管理/镜像管理/数据卷管理/网络管理/通知中心/设置中心）：宽屏图标+文字（`xl:inline`），视口 `<1280px` 自动只显图标 + title；角标改为**绝对定位**不占行宽（容器运行数/总数、堆栈/镜像/卷总数、通知未读红标、设置中心更新红标）
+  - 面包屑/页标题删除（与导航重复）；右侧工具区（页面操作/刷新/搜索/铃铛/用户）保留，搜索框 `<xl` 隐藏、用户名 `<lg` 隐藏省宽
+  - `nav` 区 `overflow-x-auto` 兜底极窄窗口
+- **清理**：`sidebarCollapsed` state 与折叠按钮移除（localStorage 遗留 key 无害）；`pageTitles` 面包屑映射删除
+- 验证：tsc 双 0；16 组门禁 0 FAIL；dist 负向 `sidebarCollapsed`/面包屑「首页」×0、正向 `activePage`×2
+- 硬核验：SHA-256 三处一致 `1b052be953ff55c358a4cb692d6004f8d5155f69122b6c828fe4c49bff8d06a8`（130,419,904 B）；ELF `7f454c46`；版本串 1.47.0×2 / 1.46.9×0
+- 交付包：`build-upload/dockermanagementyanzi-linux-x64-v1.47.0.zip` + `dockermanagementyanzi_1.47.0_amd64.deb`
+
+---
+
+## v1.46.9 — 2026-10-31（**已构建 · 待双推**）
+
+### 修复：详情弹窗操作按钮窄页保持图标+文字完整显示 🐛
+
+v1.46.8 把用户「窄页时只显示图标不显示文字」的反馈误读为**期望行为**（做成窄页主动藏文字），实际用户诉求是**修复文字丢失**——窄页按钮也要完整显示图标+文字。
+
+修正（`Containers.tsx` 详情弹窗 Header）：
+- 8 个操作按钮文字还原（去掉 `cq-full` 包裹），任何宽度都图标+文字完整显示
+- Header 改 `flex-wrap` + `gap-y-2`：窄页按钮组自动换到第二行，不再盖住标题（修复最初截图的挤压重叠）
+- 按钮组自身加 `flex-wrap` 兜底；v1.46.8 补的 `title` 提示保留；× 关闭按钮保持已删除状态
+
+**验证**：tsc 0；16 组门禁 0 FAIL；SHA-256 三处一致 `c0967b84…f490`（130,419,904 B）；ELF `7f454c46`；版本串 `1.46.9`×2 / `1.46.8`×0；base64 解码锚点 `flex-wrap`×38、`gap-y-2`×8、按钮文字「停止」×28 /「删除」×101、`打开 WebUI`×4。⚠️ 核验口径沉淀：`b'\uXXXX'` 在 Python 字节串中不转义（会假红），中文锚点一律用 UTF-8 编码 `.encode()` 查 base64 解码段（前端 dist 整段 base64 嵌 bundle.js，明文段查不到是正常的）。
+
+**未完成 / 已知限制**：无。
+**下一步**：随待双推队列（v1.44.7~v1.46.9）发布。
+
+---
+
+## v1.46.8 — 2026-10-31（**已构建 · 待双推**）
+
+### 优化：容器详情弹窗头部操作按钮响应式 + 移除显式关闭按钮 🎨
+
+用户截图反馈：详情弹窗较窄时右上角「停止/重启/暂停/删除/WebUI」被挤压——删除文字消失、停止按钮盖住标题。
+
+**响应式**（复用 v1.46.5 容器查询体系）：详情弹窗 Header 加 `cq-root`，8 个操作按钮（停止×2/重启×2/暂停/恢复/启动/删除/WebUI）文字包 `cq-full`——弹窗可用宽 ≥1024px 图标+文字，<1024px 只显图标，全部补齐 `title` 悬浮提示。loading 态「XX中...」保留文字不参与切换。
+
+**移除显式关闭 ×**：WebUI 右侧的 × 删除。关闭途径确认充足——Drawer 模式点遮罩 + ESC；Modal 模式自带头部 × + 遮罩 + ESC（旧注释「弹窗不再支持点击遮罩关闭」已过时，现 `dismissable` 均开启）。
+
+**验证**：tsc 0；16 组门禁 0 FAIL；SHA-256 三处一致 `ec6616f4…d14c7`（130,419,904 B）；ELF `7f454c46`；版本串 `1.46.8`×2 / `1.46.7`×0；二进制内嵌 cq 锚点 ×21。
+
+**未完成 / 已知限制**：堆栈管理等其他详情弹窗如有同款头部按钮，可按同模式推广（用户未提，暂不扩散）。
+**下一步**：随待双推队列（v1.44.7~v1.46.8）发布。
+
+---
+
+## v1.46.7 — 2026-10-31（**已构建 · 待双推**）
+
+### 修复：宽屏样式完全对齐 v1.46.4 之前旧版 🐛
+
+用户反馈 v1.46.6 与 v1.46.4（不含）之前版本显示不一样。比对 git 基线 `3c3b637`（v1.44.5）逐列找出差异——v1.46.5 宽屏恢复的是「新造」样式而非旧版原样式：
+
+| 列 | 旧版（≤v1.46.3） | v1.46.6 宽屏（错） | v1.46.7 修正 |
+|---|---|---|---|
+| 状态 | 小点(1.5) + 状态色文字（绿/黄/蓝 text-sm font-medium） | 大点 + 灰字 | ✅ 恢复旧版 |
+| 堆栈 | 彩色徽章 badge（边框+底色+px-2 py-0.5） | 点 + 灰字 | ✅ 恢复旧版 |
+| 镜像 ID | 完整 ID | 12 位 | ✅ 恢复旧版 |
+| 卷名称/挂载点 | 220px / 200px 截断 | 不限宽 | ✅ 恢复旧版 |
+
+实现调整（`src/index.css`）：`.cq-full` 不再预设 `display:inline`（保留元素自身 inline/inline-flex，宽屏样式由 JSX 完全控制）；`.cq-fullwidth` 拆为 `.cq-w220`/`.cq-w200`。⚠️ 层叠顺序坑：`.cq-compact{display:none}` 必须置于 `@container (max-width)` 块**之前**（同特异性按源顺序取胜，放后面窄屏 inline 会被覆盖致紧凑内容消失）——已加 dist CSS 顺序断言。
+
+窄屏（<1024px）保留 v1.46.4 用户确认过的紧凑版（色点 2.5 / ID 前 4 位 / 160px 截断 / 年-月-日）。
+
+**验证**：tsc 0；16 组门禁 0 FAIL；dist CSS 层叠顺序硬断言（compact 默认规则先于查询块）；SHA-256 三处一致 `e54aed4c…eb121`（130,419,904 B）；ELF `7f454c46`；版本串 `1.46.7`×2 / `1.46.6`×0；二进制内嵌 cq 锚点 ×4。
+
+**未完成 / 已知限制**：无。
+**下一步**：随待双推队列（v1.44.7~v1.46.7）发布。
+
+---
+
+## v1.46.6 — 2026-10-31（**已构建 · 待双推**）
+
+### 修复：紧凑化阈值降档 1280 → 1024px 🐛
+
+用户反馈全屏仍只显示色点。排查：dist CSS 规则顺序与内容均正确（排除实现缺陷），根因为 **1366/1440 屏全屏扣除侧边栏 ~240px + 内边距后表格可用宽 <1280px**，v1.46.5 的 1280 阈值被正确命中——阈值定高了。
+
+修正（`src/index.css`）：`@container (max-width: 1279.9px)` → `(max-width: 1023.9px)`、`(min-width: 1280px)` → `(min-width: 1024px)`，注释同步。
+
+**验证**：dist CSS 新阈值两条规则；SHA-256 三处一致 `8085b1fea7d28445dcb935040546bd9256661d5655d88eb88d7f55fa4abd628b`（130,419,904 B）；ELF `7f454c46`；版本串 `1.46.6`×2 / `1.46.5`×0；二进制 base64 解码新阈值 `@container`×2。
+
+**未完成 / 已知限制**：若升级后全屏仍紧凑，请 F12 检查 class 含 `cq-root` 的 div 实际宽度是否 ≥1024px（另行定位）。
+**下一步**：随待双推队列（v1.44.7~v1.46.6）发布。
+
+---
+
+## v1.46.5 — 2026-10-31（**已构建 · 待双推**）
+
+### 优化：列表紧凑化改为响应式（容器查询自适应）🎨
+
+v1.46.4 的紧凑化是**无条件生效**的（全屏也只显示紧凑信息）。本次改为**自适应页面大小**：表格可用宽 ≥1280px 显示完整信息，<1280px 自动切紧凑——信息零丢失，全屏回归完整显示。
+
+**实现**（原生 CSS 容器查询，零依赖；`src/index.css` 新增基础类）：
+- `.cq-root`：`container-type: inline-size`，标记表格滚动容器为查询容器
+- `.cq-full` / `.cq-compact`：宽屏显示完整 / 紧凑内容，`@container (max-width: 1279.9px)` 下互换显隐
+- `.cq-fullwidth`：`@container (min-width: 1280px)` 下解除 `max-width` 限制
+- 老浏览器（不支持 `@container`）优雅降级：始终显示完整版，无白屏风险
+- ⚠️ 沉淀：Tailwind 3.4 **原生不支持**容器查询（官方 `@tailwindcss/container-queries` 插件才有，v4 才内置）；插件断点尺度与屏幕断点不同（xl=576px），故手写原生 CSS 更可控
+
+**切换点**（7 处，`title` 悬浮均保留完整值）：
+- 容器页（`Containers.tsx`）：状态（色点↔色点+文字）、堆栈（色点↔色点+名）、网络模式（首字母↔全名）、运行时长（天数↔原文）
+- 镜像页（`Images.tsx`）：ID（前 4 位↔12 位）
+- 卷页（`Volumes.tsx`）：名称/挂载点（160px 截断↔自适应省略）、创建时间（年-月-日↔完整时间戳）
+
+**验证**：tsc 双 0；16 组门禁 0 FAIL；dist CSS 含 `container-type:inline-size` + 两条 `@container` 规则；二进制 base64 解码锚点 `.cq-root`×1 + `@container`×2；SHA-256 三处一致（postject 产物 = zip 内层 = deb 内层 = `1b8c23fe2cdfe6907b611ec2527ca032f54a15a29b016d9efbf411ee7624b33a`，130,419,904 B）；ELF `7f454c46`；版本串 `1.46.5`×2 / `1.46.4`×0。
+
+**未完成 / 已知限制**：无。
+**下一步**：随待双推队列（v1.44.7~v1.46.5）发布。
+
+---
+
+## v1.46.4 — 2026-10-30（**已构建 · 待双推**）
+
+### 优化：列表紧凑化（窄页不换行）🎨
+
+**容器列表**（`Containers.tsx`）：
+- 状态列：只显示彩色圆点（绿=运行中/黄=已暂停/蓝=重启中/灰=已停止），状态文字放 title 悬浮，点击仍开详情
+- 堆栈列：只显示堆栈色点（沿用稳定哈希配色），堆栈名放 title 悬浮
+- 运行时长：解析 `Up N days/months` → 「N天」（月按 30 天折算），不足 1 天显示「<1天」，原文放 title
+- 网络模式：只显示首字母，完整模式名放 title
+
+**镜像列表**（`Images.tsx`）：
+- 镜像 ID：12 位 → 前 4 位，完整 12 位放 title
+
+**卷列表**（`Volumes.tsx`）：
+- 卷名称/挂载点：截断宽度收窄（220→160 / 200→160）+ `whitespace-nowrap`，前部分显示后省略
+- 创建时间：只显示年-月-日（`2026-10-30 10:00:00 +0800 CST` → `2026-10-30`），完整时间戳放 title
+
+### 修复：设置中心引擎卡片窄页错位 🐛
+
+引擎卡片地址行加 `truncate`、状态块改 `flex-shrink min-w-0 max-w-[45%]`、状态/版本号加 `whitespace-nowrap`——长 TCP 地址 / 错误信息不再挤压错位。
+
+### 调整：「引擎切换超时」移到引擎配置区 🔧
+
+v1.46.0 的「引擎切换超时」卡片从「页面设置」移至「引擎配置」（Docker Engine 连接卡片之后），归位引擎相关设置。
+
+### 构建核验
+
+- tsc 0 错误；16 组门禁全 0 FAIL
+- 二进制 `1.46.4`×2、`1.46.3`×0；ELF `7f454c46`
+- SHA-256 三处逐字节一致：`306d7bc41e4de2c8bf98fc8e484acaa823b6e446a2aedc2d51cffd54ea9728d1`（130,419,904 B）
+
+---
+
+## v1.46.3 — 2026-10-29（**已构建 · 待双推**）
+
+### 修复：编辑堆栈 LABELS 页服务描述在容器管理页不可见 🐛
+
+**根因（三处断链）**：v1.44.1 引入 LABELS「描述」时只做了编辑与落盘（`StackWebUILabel.description`），展示链路完全没接：
+1. `App.tsx` enrichment 循环的 continue 条件不含 `description`——**只填了描述的标签被整个跳过**；
+2. 即使进入循环也从不把 `label.description` 拷贝到容器；
+3. `Container` 类型无 `description` 字段，容器管理页无任何渲染。
+
+**修复**：
+- `src/types.ts`：`Container` 加 `description?: string`。
+- `src/App.tsx`：enrichment continue 条件纳入 description；匹配容器后 `c.description = label.description`（沿用 服务名 / `<project>-<service>` / `<project>-<service>-<index>` 匹配规则）。
+- `src/pages/Containers.tsx`：容器列表「名称」列名称下方灰色小字显示描述（超长截断 + title 悬浮，无描述不占位）；容器详情「基本信息」加「描述」行（有描述才显示）。
+
+### 验证
+
+- tsc 0 错误；16 组门禁全 0 FAIL。
+- 二进制 `1.46.3`×2、`1.46.2`×0；ELF `7f454c46`。
+- **SHA-256 三处逐字节一致**：`36f3e031926bfedd678610c37ddd2c828ed9aebb586005ab8cbb13d3adcedf86`（130,419,904 B，SEA=zip=deb）。
+- 包：`build-upload/dockermanagementyanzi-linux-x64-v1.46.3.zip`（+ latest 别名）、`dockermanagementyanzi_1.46.3_amd64.deb`。
+
+---
+
+## v1.46.2 — 2026-10-29（**已构建 · 待双推**）
+
+### 敏感输入框掩码显示（找回码 / 邮箱 / 手机号）🙈
+
+- **共享组件**（`src/components/PasswordInput.tsx`）：向后兼容扩展 `leftIcon`（自定义左图标，找回码框用 KeyRound，与 `lockIcon` 互斥）、`rightExtra`（右侧附加节点，如字数统计）、`ariaLabel`（眼睛按钮无障碍文案，默认仍为「显示/隐藏密码」）。
+- **6 个明文敏感框改走 PasswordInput**（默认掩码 + 小眼睛核对）：
+  - 登录页「找回密码」：找回码（`LoginPage.tsx`）
+  - 初始设置 / 账号重设向导：密码找回码（`SetupWizard.tsx`）
+  - 设置页「密码找回码」：新找回码 + 清除验证区「当前找回码」（`Settings.tsx` RecoveryCodeForm）
+  - 设置页「绑定邮箱 / 手机号」：新邮箱 + 新手机号（`Settings.tsx` ContactBindingForm）
+- 密码框本就掩码，不变。
+
+### 门禁同步（断言跟上设计变更）
+
+- `check-auth-wiring.mjs`：调用点 10→16（登录 3→4、向导 2→3、设置 5→9，新增 `showCode`/`showRecovery`/`showRecoveryCode`/`showClearCode`/`showEmail`/`showPhone`）；aria-label 断言适配 `eyeLabel` 变量拼接。
+- `check-auth-render.mjs`：向导掩码框 2→3；EYE 正则放宽为 `aria-label="显示[^"]*"`（覆盖「显示找回码」等）；全站小眼睛 5→7；title 断言放宽为 `(显示|隐藏)[^"]*`。
+
+### 验证
+
+- server + root `tsc` 双 0 错误；16 组门禁全 0 FAIL（auth PASS=75）。
+- 二进制 `1.46.2`×2、`1.46.1`×0；dist 解码锚点：`ariaLabel`×7、`leftIcon`×5、`输入当前设置的找回码`×1 等。
+- **SHA-256 三处逐字节一致**：`018a1770a8638a0ab7023ce809e584ef168f2310458cfe8718b4bfc43a45fb30`（130,419,904 B，SEA=zip=deb）。
+- 包：`build-upload/dockermanagementyanzi-linux-x64-v1.46.2.zip`（+ latest 别名）、`dockermanagementyanzi_1.46.2_amd64.deb`。
+
+---
+
+## v1.46.1 — 2026-10-29（**已构建 · 待双推**）
+
+### 清除找回码：当前密码 + 找回码双重验证 🔒
+
+- **服务端**（`server/index.ts`）：`DELETE /api/auth/recovery` 从「仅登录态即可清除」升级为**双重验证**——body 必须带 `password`（当前密码）+ `code`（当前找回码），`verifyPassword` + `verifyRecoveryCode` 任一失败返回 400「当前密码或找回码错误」（统一文案，不泄露具体哪项错，防枚举）。
+- **前端**（`src/pages/Settings.tsx`）：「清除」按钮点击后展开**行内验证区**——输入当前找回码 + 复用表单「当前密码」框，替换原纯确认弹窗（`ConfirmDialog`）；清除成功后同时清空两输入框。
+- **API**（`src/api.ts`）：`clearRecoveryCode(password, code)` 改签名，DELETE 携带 body。
+
+**安全动机**：清除找回码后只能重新设置，属不可逆敏感操作；此前仅登录态即可清除（连密码都不验），存在误触/会话被劫持后被恶意清除的风险。
+
+### 验证
+
+- server + root `tsc` 双 0 错误；16 组门禁全 0 FAIL。
+- 二进制 `1.46.1`×2；服务端新文案（`\u` 转义口径）×1；dist 解码锚点：`当前找回码`×3、`确认清除`×1、`双重验证`×1、`请输入当前找回码`×1。
+- **SHA-256 三处逐字节一致**：`6b39bbc30113abcbbafbae89a1d68c2261238ddfad93ce849c64ed7f59b4d279`（130,419,904 B，SEA=zip=deb）。
+- 包：`build-upload/dockermanagementyanzi-linux-x64-v1.46.1.zip`（+ latest 别名）、`dockermanagementyanzi_1.46.1_amd64.deb`。
+
+---
+
+## v1.46.0 — 2026-10-29（**已构建 · 待双推**）
+
+### 已完成
+- **引擎切换超时回退（默认 30 秒，可设置）**：切换 Docker Engine 后与「引擎切换超时时间（秒）」竞速——时限内核心数据（容器列表）未加载成功或明确失败 ⇒ **自动回退到原引擎**（state + 服务端 `PUT /api/engines/active` 回写）并提示「切换引擎超时（N 秒），已回退到原引擎『X』」/「引擎『X』连接失败，已回退到原引擎…」。涉及：`src/types.ts` + `server/settings.ts`（`ModalConfig.engineSwitchTimeout` 默认 30，服务端归一化钳制 5~300、非法回落 30；modal 段二级合并旧配置自动兜底）、`src/App.tsx`（`loadEngineData` 返回布尔——以容器列表请求成功为「切换成功」判据；`handleActiveEngineChange` `Promise.race` 竞速回退；`loadSeqRef` 序号守卫丢弃被更新加载取代的过期结果；`engineSwitchLoadRef` 守卫避免主动加载与 useEffect 双拉，且竞速期间用户又选其他引擎时跳过回退不覆盖新选择）、`src/pages/Settings.tsx`（页面设置新增「引擎切换超时」卡片 + 输入框）。`scripts/check-net-iface.mjs` 断言放宽（`defaultNetIface` 不再锚定 modal 段结尾——新增字段使其失去「最后一项」地位，属断言未跟上设计变更）。**验证**：server+root tsc 双 0；16 组门禁全 0 FAIL；ELF `7f454c46`；二进制 `-a` 口径 `1.46.0`×3、`1.45.0`×0；dist 解码锚点 `引擎切换超时时间（秒）`×1、`已回退到原引擎`×2、`连接失败，已回退到原引擎`×1；**SHA-256 三处逐字节一致**（见下）。
+- 版本号 1.45.0 → 1.46.0（新功能走 Minor）。
+- **构建硬核验**：`npm run test:gates` 16 组全 0 FAIL；ELF `7f454c46`/e_machine 62；**SHA-256 三处逐字节一致** `15a5bfaf97e1bbbb97cc245bfad6b70c086ee615bdcd90a55ad3d36d7738642c`（130,419,904 B，SEA=zip=deb）。
+
+### 未完成 / 已知限制
+- 「切换成功」判据为容器列表请求成功；容器列表为空但请求成功的引擎（如新装的 Docker）视为切换成功——符合预期。
+- 超时回退提示复用页面数据区错误条（`dataError`），非独立 toast——与既有错误展示位一致。
+
+### 下一步
+双推 v1.44.7 + v1.45.0 + v1.46.0（Gitea + GitHub）。
+
+---
+
+## v1.45.0 — 2026-10-29（**已构建 · 待双推**）
+
+### 已完成
+- **用户管理：绑定邮箱 / 手机号（绑定后可作为登录 ID）**。后端：`server/users.ts` `UserRecord` 新增 `email`/`phone`/`emailBoundAt`/`phoneBoundAt` 字段（归一化存储：邮箱去空白+转小写、手机号去空格/横线/`+86` 前缀取纯数字）；新增 `validateEmail`/`validatePhone`（邮箱标准格式、手机号中国大陆 11 位 `1[3-9]`）、`bindUserContact`/`unbindUserContact`（**全局唯一性校验**——同一邮箱/手机号不可绑定到多个账号；重复绑定同值幂等）与 `findUserByLoginId`（登录 ID 依次匹配 用户名→邮箱→手机号）。`server/index.ts`：`POST /api/auth/login` 与 `POST /api/auth/reset-by-recovery`（找回码重置）改走 `findUserByLoginId`（错误文案「账号或密码/找回码错误」）；新增 3 个接口——`GET /api/auth/contact`（掩码回显 `y***@x.com` / `138****5678`，不下发明文）、`POST /api/auth/contact/bind`、`POST /api/auth/contact/unbind`（**绑定/解绑/换绑一律服务端强校验登录密码**，与「设置找回码需验密码」同模式；不在 REINIT 白名单 ⇒ 账号待重初始化期间不可绑定）。前端：`src/api.ts` 新增 `getContactStatus`/`bindContact`/`unbindContact` + `ContactStatus`/`ContactType`；`src/pages/Settings.tsx`「用户」区新增「绑定邮箱 / 手机号」卡片（状态芯片掩码回显、换绑、解绑二次确认 + 密码校验，新表单密码框状态名 `showBindPassword` 保持页内唯一）；`src/components/auth/LoginPage.tsx` 登录与找回码重置表单文案改「用户名 / 邮箱 / 手机号」。`scripts/check-auth-wiring.mjs` 断言同步升级（设置页密码框 4→5、合计 9→10、lockIcon 5→6、负向检查纳入 `ContactBindingForm`）。**验证**：server+root tsc 双 0 错误；16 组门禁全 0 FAIL（auth-wiring PASS=75）；ELF `7f454c46`；二进制 `-a` 口径 `1.45.0`×2、`1.44.7`×0；dist 解码锚点 `绑定邮箱 / 手机号`×1、`用户名 / 邮箱 / 手机号`×2、`contact/bind`/`contact/unbind`×1、`解绑邮箱`/`解绑手机号`×3；**SHA-256 三处逐字节一致**（见下）。
+- 版本号 1.44.7 → 1.45.0（新功能走 Minor）。
+- **构建硬核验**：`npm run test:gates` 16 组全 0 FAIL；ELF `7f454c46`/e_machine 62；**SHA-256 三处逐字节一致** `0b3b7356b351f73277692f05a339094d503bb77b656601372155876a580800c5`（130,419,904 B，SEA=zip=deb）。
+
+### 未完成 / 已知限制
+- 邮箱/手机号为**明文落盘**（`users.json` 已 0600；与用户名同敏感级别，非哈希对象）。
+- 不含邮箱/手机号验证码校验（本地自托管场景无邮件/短信服务，绑定正确性由登录密码校验保障）。
+
+### 下一步
+双推 v1.44.7 + v1.45.0（Gitea + GitHub）。
+
+---
+
+## v1.44.7 — 2026-10-29（**已构建 · 待双推**）
+
+### 已完成
+- **通知中心改为持久化事件日志（根治「丢历史 + 100 条截断」）**：旧实现 `docker.ts:getActivityLogs` 基于 Docker 实时状态派生快照（容器重建/删除、事件超 30 天、累计超 100 条立即消失），正是用户反馈「昨天 40 条今天变 17 条」「满 100 后看不清以前通知」的共同根因。现新增 `server/notifications.ts`：JSONL 追加写（`data/notifications.jsonl`）+ 内存缓存（每引擎按时间倒序）+ 每引擎上限 2000 条裁剪 + 分页读；`notify`/`scheduler`/`docker` 三处埋点（`containerDown`/`updateAvailable`/`updateComplete`/镜像检查汇总）调 `recordNotification()` 落盘，**写入串行化防并发竞态、永不抛错**。前端 `activity` 端点改为读 `getNotifications(engineId,{limit,offset})` 返回 `{items,total,hasMore}`；前端 `Notifications.tsx` 改为分页 + 「加载更多」按钮，标题区展示「总计 N 条，已加载 M 条」。涉及 `server/notifications.ts`（新）、`server/notify.ts`（`NotifyPayload` 加 `engineId`、去重后落盘）、`server/scheduler.ts`（`updateAvailable` 传 `engineId` + 汇总落盘）、`server/docker.ts`（`updateComplete` 传 `engineId` + 删除死代码 `getActivityLogs`）、`server/index.ts`（端点改分页、移除 `getActivityLogs` 导入）、`src/api.ts`（`fetchActivitiesPage` + `ActivityPage`）、`src/App.tsx`（分页 state + `loadMoreActivities`）、`src/pages/Notifications.tsx`（分页 props + 加载更多）。**验证**：server+root tsc 双 0 错误；`npm run test:gates` 全 0 FAIL（含 `test:notifclear` 计数文案仍锚定 `visibleNotifs.length`）；ELF `7f454c46`/e_machine 62；dist 字面量锚点；**SHA-256 三处逐字节一致**（见构建核验）。
+- 版本号 1.44.6 → 1.44.7（通知中心架构修复走 Patch）。
+- **构建硬核验**：server+root tsc 双 0 错误；`npm run test:gates` 全 0 FAIL；ELF `7f454c46`/e_machine 62；二进制 `1.44.7`×6、`1.44.6`×0；dist 字面量锚点 `加载更多`×1、`总计`×1、`hasMore`×6、`onLoadMore`×2；**SHA-256 三处逐字节一致** `b6390c53b2191865f60e4a65738e8240452f37fc1d5834f1a3a9d5c365980533`（130,419,904 B，SEA=zip=deb）。
+
+### 未完成 / 已知限制
+- 镜像检查「汇总」条目为每日一次落盘（不经去重窗口压缩），长期会占持久化日志一条/天；属预期事件日志行为，非缺陷。
+- `Notifications` 页「清空」仅清本地视图（按 id 忽略），不动持久化文件——历史仍可在服务端 `data/notifications.jsonl` 找回（与既有设计一致）。
+
+### 下一步
+双推 v1.44.7（Gitea + GitHub）。
+
+---
+
+## v1.44.6 — 2026-10-29（**已构建 · 待双推**）
+
+### 已完成
+- **镜像管理页 + 数据卷管理页表头点击排序**：复用既有 `SortableTh` 组件（与容器/堆栈页同模式）——`sortKey=null` 保持原始顺序，点列头升序 → 再点降序；当前列蓝色箭头高亮。镜像页 8 列全可排（仓库名/标签/镜像 ID/大小/创建时间/更新状态/关联容器/SHA-256，更新状态按 未检查<最新<有更新 权重、大小按字节解析、关联容器按数量）；数据卷页 6 列全可排（卷名称/驱动/挂载点/大小/关联容器/创建时间）。涉及 `src/pages/Images.tsx`、`src/pages/Volumes.tsx`、`src/components/UI.tsx`（`SortableTh.className` 语义改为「非空 = 整段替换 th class」，避免 Volumes 页 `text-[11px] text-slate-400` 与基类 Tailwind 同类冲突）、`src/types.ts` + `src/transforms.ts`（`DockerImage`/`DockerVolume` 新增 `createdTs` 毫秒时间戳——`createdAt` 显示串是「3 天前」相对时间不可排；新增 `parseSizeBytes()` 把 "1.5 GB" 还原为字节，无法解析如 "—" 返回 -1 沉底）。**验证**：tsc 0 错误；16 组门禁全 0 FAIL（`check-images-repo-display.mjs` 3 项锚点同步升级：`<th>` → `<SortableTh`、useMemo 依赖放宽）；ELF `7f454c46`/e_machine 62；dist 字面量锚点 `sortId:"updateStatus"`/`"mountpoint"`/`"sha256"` 各×1、`sortId:"associatedContainers"`×2（两页共用）、`createdTs`×4、「点击排序」×1（⚠️ 局部函数名 `toggleSort`/`parseSizeBytes` 被 esbuild 改名，dist 正向断言必须用字符串字面量/属性名锚点）；**SHA-256 三处逐字节一致** `da5c265702585154f19db9e2e2898e49993c8e37a01508da73c86bcb29e4985c`（130,419,904 B，SEA=zip=deb）。
+- 版本号 1.44.5 → 1.44.6（UI 交互小改走 Patch）。
+
+### 未完成 / 已知限制
+无。
+
+### 下一步
+双推 v1.44.6。
+
+---
 
 ## v1.44.5 — 2026-10-27（**已双推 2026-10-28**）
 

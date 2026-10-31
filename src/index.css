@@ -176,3 +176,32 @@ body {
 .drawer-content {
   animation: slideInRight 0.22s ease-out;
 }
+
+/* v1.46.5 列表响应式紧凑化：以表格滚动容器（cq-root）为查询容器，
+   可用宽 <1024px 时自动切紧凑显示；>=1024px 恢复完整信息（v1.46.6 由 1280 降档：1366/1440 屏全屏扣侧边栏后 <1280 误命中）
+   v1.46.7：cq-full 不再预设 display（保留元素自身 inline/inline-flex），宽屏样式完全对齐 v1.46.4 之前旧版 */
+.cq-root {
+  container-type: inline-size;
+}
+/* cq-compact：默认隐藏，窄屏以 inline 显示（默认规则必须在 @container 块之前，同特异性按源顺序取胜） */
+.cq-compact {
+  display: none;
+}
+/* cq-full：宽屏显示（用元素自身 display），窄屏隐藏 */
+@container (max-width: 1023.9px) {
+  .cq-full {
+    display: none;
+  }
+  .cq-compact {
+    display: inline;
+  }
+}
+/* 宽屏恢复旧版截断宽度（卷名称 220 / 挂载点 200，同 v1.46.4 之前） */
+@container (min-width: 1024px) {
+  .cq-w220 {
+    max-width: 220px;
+  }
+  .cq-w200 {
+    max-width: 200px;
+  }
+}

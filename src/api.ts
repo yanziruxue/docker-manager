@@ -1,4 +1,4 @@
-import type { DockerEngine, EngineResourceStats, ResourceSample, SystemSettings, SchedulerStatus, SchedulerLastResult, ImageUpdateSummaryView, DockerNetwork, NetworkCreateOptions, NetInterfaceOption, ContainerFileEntry, AppInfo, LogListResult, LogTailResult, LogPruneResult, LogPackResult, LogPackConfig, LogArchiveInfo, MirrorRuntimeState, NotifyRuntimeStatus, NotifyTestResult } from "./types";
+import type { DockerEngine, EngineResourceStats, ResourceSample, SystemSettings, SchedulerStatus, SchedulerLastResult, ImageUpdateSummaryView, DockerNetwork, NetworkCreateOptions, NetInterfaceOption, ContainerFileEntry, AppInfo, LogListResult, LogTailResult, LogPruneResult, LogPackResult, LogPackConfig, LogArchiveInfo, MirrorRuntimeState, NotifyRuntimeStatus, NotifyTestResult, ActivityLog } from "./types";
 
 const BASE = "/api";
 
@@ -318,8 +318,12 @@ export function setRecoveryCode(code: string, password: string): Promise<void> {
 }
 
 /** 清除找回码 */
-export function clearRecoveryCode(): Promise<void> {
-  return request<void>("/auth/recovery", { method: "DELETE" });
+/** 清除找回码（v1.46.1：需当前密码 + 当前找回码双重验证） */
+export function clearRecoveryCode(password: string, code: string): Promise<void> {
+  return request<void>("/auth/recovery", {
+    method: "DELETE",
+    body: JSON.stringify({ password, code }),
+  });
 }
 
 /** 通过找回码重置密码（无需登录；两次使用间隔 10 分钟） */
@@ -331,6 +335,41 @@ export function resetPasswordByRecovery(
   return request<void>("/auth/reset-by-recovery", {
     method: "POST",
     body: JSON.stringify({ username, code, newPassword }),
+  });
+}
+
+// ============ 绑定邮箱 / 手机号（v1.45.0） ============
+
+export type ContactType = "email" | "phone";
+
+/** 绑定状态（服务端仅回显掩码，不回显明文） */
+export interface ContactStatus {
+  /** 掩码邮箱，如 y***@example.com；未绑定为 null */
+  email: string | null;
+  /** 掩码手机号，如 138****5678；未绑定为 null */
+  phone: string | null;
+  emailBoundAt: string | null;
+  phoneBoundAt: string | null;
+}
+
+/** 当前绑定状态 */
+export function getContactStatus(): Promise<ContactStatus> {
+  return request<ContactStatus>("/auth/contact");
+}
+
+/** 绑定邮箱 / 手机号（需登录密码；绑定后可作为登录 ID） */
+export function bindContact(type: ContactType, value: string, password: string): Promise<void> {
+  return request<void>("/auth/contact/bind", {
+    method: "POST",
+    body: JSON.stringify({ type, value, password }),
+  });
+}
+
+/** 解绑邮箱 / 手机号（需登录密码） */
+export function unbindContact(type: ContactType, password: string): Promise<void> {
+  return request<void>("/auth/contact/unbind", {
+    method: "POST",
+    body: JSON.stringify({ type, password }),
   });
 }
 
@@ -902,19 +941,30 @@ export function saveStackEnvApi(engineId: string, stackName: string, envContent:
   });
 }
 
-/** 保存堆栈设置 */
-export function saveStackSettingsApi(engineId: string, stackName: string, settings: any): Promise<void> {
-  return request<void>(`/engines/${engineId}/stacks/${encodeURIComponent(stackName)}/settings`, {
+/** 保存堆栈设置；v1.49.0 起返回规范化后的图标引用（URL/data URI 已转存堆栈图库为本地图标） */
+export function saveStackSettingsApi(
+  engineId: string,
+  stackName: string,
+  settings: any
+): Promise<{ iconUrl?: string; webuiLabels?: any[] } | null> {
+  return request(`/engines/${engineId}/stacks/${encodeURIComponent(stackName)}/settings`, {
     method: "PUT",
     body: JSON.stringify(settings),
   });
 }
 
-/** 上传堆栈图标（本地图片） */
-export async function uploadStackIconApi(engineId: string, stackName: string, file: File): Promise<string> {
-  const res = await fetch(`${BASE}/engines/${engineId}/stacks/${encodeURIComponent(stackName)}/icon`, {
+/** 上传堆栈图标（本地图片）→ 存入堆栈图库 icon/ 文件夹；X-Filename 传原始文件名供服务端保留；
+ *  updateMeta=false 用于 LABELS 服务图标上传（不更新堆栈级 meta.icon） */
+export async function uploadStackIconApi(
+  engineId: string,
+  stackName: string,
+  file: File,
+  updateMeta = true
+): Promise<string> {
+  const qs = updateMeta ? "" : "?updateMeta=0";
+  const res = await fetch(`${BASE}/engines/${engineId}/stacks/${encodeURIComponent(stackName)}/icon${qs}`, {
     method: "POST",
-    headers: { "Content-Type": file.type || "image/png" },
+    headers: { "Content-Type": file.type || "image/png", "X-Filename": encodeURIComponent(file.name) },
     body: file,
   });
   const json = await res.json();
@@ -922,6 +972,11 @@ export async function uploadStackIconApi(engineId: string, stackName: string, fi
     throw new Error(json.error || "图标上传失败");
   }
   return json.data.iconUrl as string;
+}
+
+/** 列出堆栈图库（icon/ 文件夹）内的本地图标文件名（v1.49.0） */
+export function listStackIconsApi(engineId: string, stackName: string): Promise<string[]> {
+  return request(`/engines/${engineId}/stacks/${encodeURIComponent(stackName)}/icons`);
 }
 
 /** 检查堆栈更新 */
@@ -1136,9 +1191,21 @@ export function batchStackActionApi(engineId: string, action: "up" | "down" | "r
   });
 }
 
-/** 获取活动日志 */
-export function fetchEngineActivity(engineId: string): Promise<any[]> {
-  return request<any[]>(`/engines/${engineId}/activity`);
+/** 活动日志分页返回结构（通知中心已改为持久化事件日志，支持分页） */
+export interface ActivityPage {
+  items: ActivityLog[];
+  total: number;
+  hasMore: boolean;
+}
+
+/** 分页获取活动日志（通知中心持久化事件日志） */
+export function fetchActivitiesPage(engineId: string, limit = 50, offset = 0): Promise<ActivityPage> {
+  return request<ActivityPage>(`/engines/${engineId}/activity?limit=${limit}&offset=${offset}`);
+}
+
+/** 取活动日志第一页（兼容旧用法，仅返回 items） */
+export function fetchEngineActivity(engineId: string): Promise<ActivityLog[]> {
+  return fetchActivitiesPage(engineId, 50, 0).then((r) => r.items);
 }
 
 // ============ 系统设置 API ============

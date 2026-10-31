@@ -51,6 +51,7 @@ import {
   Undo2,
   FileText,
   Eye,
+  Smartphone,
 } from "lucide-react";
 import type { SystemSettings, DockerEngine, UpdateInfo, UpdateState, ResourceTag, ComposeTemplate, AppInfo, LogListResult, LogTailResult, NetInterfaceOption, NotifyRuntimeStatus } from "../types";
 // 值导入（不是 type）：密钥「清除」哨兵值
@@ -65,8 +66,13 @@ import {
   getRecoveryStatus,
   setRecoveryCode,
   clearRecoveryCode,
+  getContactStatus,
+  bindContact,
+  unbindContact,
   type AuthUser,
   type RecoveryStatus,
+  type ContactStatus,
+  type ContactType,
 } from "../api";
 import {
   sanitizeRecoveryInput,
@@ -263,6 +269,8 @@ function getDefaultSettings(): SystemSettings {
       containerDetailStyle: "drawer",
       // 网络曲线默认网卡："" = 自动选第一个物理网卡（网卡名因机器而异，不可硬编码）
       defaultNetIface: "",
+      // 引擎切换超时（秒，v1.46.0）：超时未加载成功核心数据则回退原引擎
+      engineSwitchTimeout: 30,
     },
     compose: {
       templates: [
@@ -478,6 +486,11 @@ function RecoveryCodeForm() {
   const [success, setSuccess] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
+  /** 行内清除验证区（v1.46.1）：清除需当前密码 + 当前找回码双重验证 */
+  const [clearCode, setClearCode] = useState("");
+  /** v1.46.2：找回码输入默认掩码，小眼睛可核对 */
+  const [showRecoveryCode, setShowRecoveryCode] = useState(false);
+  const [showClearCode, setShowClearCode] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -520,11 +533,21 @@ function RecoveryCodeForm() {
   const doClear = async () => {
     setError(null);
     setSuccess(null);
+    if (!password) {
+      setError("请输入当前密码");
+      return;
+    }
+    if (!clearCode) {
+      setError("请输入当前找回码");
+      return;
+    }
     setBusy(true);
     try {
-      await clearRecoveryCode();
+      await clearRecoveryCode(password, clearCode);
       setSuccess("已清除找回码");
       setConfirmClear(false);
+      setClearCode("");
+      setPassword("");
       await load();
     } catch (e: any) {
       setError(e?.message || "清除失败");
@@ -557,17 +580,22 @@ function RecoveryCodeForm() {
           required
           hint="仅字母和数字，区分大小写"
         >
-          <div className="relative">
-            <Input
-              value={code}
-              onChange={(v) => setCode(sanitizeRecoveryInput(v))}
-              placeholder={`${RECOVERY_MIN_LENGTH}~${RECOVERY_MAX_LENGTH} 位字母或数字`}
-              className="pr-12 font-mono tracking-wider"
-            />
-            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-slate-400 tabular-nums pointer-events-none">
-              {code.length}/{RECOVERY_MAX_LENGTH}
-            </span>
-          </div>
+          <PasswordInput
+            value={code}
+            onChange={(v) => setCode(sanitizeRecoveryInput(v))}
+            placeholder={`${RECOVERY_MIN_LENGTH}~${RECOVERY_MAX_LENGTH} 位字母或数字`}
+            visible={showRecoveryCode}
+            onToggle={() => setShowRecoveryCode((v) => !v)}
+            leftIcon={<KeyRound size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />}
+            lockIcon={false}
+            ariaLabel="找回码"
+            className="font-mono tracking-wider"
+            rightExtra={
+              <span className="text-[11px] text-slate-400 tabular-nums">
+                {code.length}/{RECOVERY_MAX_LENGTH}
+              </span>
+            }
+          />
         </FormField>
         <FormField label="当前密码" required hint="敏感操作，需二次验证">
           <PasswordInput
@@ -614,13 +642,257 @@ function RecoveryCodeForm() {
         </span>
       </div>
 
+      {confirmClear && (
+        <div className="border border-red-200 bg-red-50 rounded-lg px-4 py-3 space-y-3">
+          <div className="text-xs text-red-700 font-medium">清除后将无法通过找回码重置密码；需输入当前找回码 + 当前密码双重验证（密码用上方「当前密码」输入框）</div>
+          <div className="max-w-xs">
+            <FormField label="当前找回码" required>
+              <PasswordInput
+                value={clearCode}
+                onChange={(v) => setClearCode(sanitizeRecoveryInput(v))}
+                placeholder="输入当前设置的找回码"
+                visible={showClearCode}
+                onToggle={() => setShowClearCode((v) => !v)}
+                leftIcon={<KeyRound size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />}
+                lockIcon={false}
+                ariaLabel="找回码"
+                className="font-mono tracking-wider"
+              />
+            </FormField>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={doClear}
+              disabled={busy}
+              className="flex items-center gap-1.5 px-4 py-2 text-sm text-white bg-red-500 rounded-lg hover:bg-red-600 transition-colors disabled:opacity-60"
+            >
+              {busy && <Loader2 size={14} className="animate-spin" />} 确认清除
+            </button>
+            <button
+              onClick={() => {
+                setConfirmClear(false);
+                setClearCode("");
+              }}
+              disabled={busy}
+              className="px-3 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors disabled:opacity-60"
+            >
+              取消
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 「用户」区块：绑定邮箱 / 手机号（v1.45.0）——绑定 / 解绑均需验证登录密码；绑定后可作为登录 ID */
+function ContactBindingForm() {
+  const [status, setStatus] = useState<ContactStatus | null>(null);
+  const [emailValue, setEmailValue] = useState("");
+  const [phoneValue, setPhoneValue] = useState("");
+  const [password, setPassword] = useState("");
+  const [showBindPassword, setShowBindPassword] = useState(false);
+  /** v1.46.2：邮箱 / 手机号输入默认掩码，小眼睛可核对 */
+  const [showEmail, setShowEmail] = useState(false);
+  const [showPhone, setShowPhone] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  /** 待解绑类型（非空时弹确认框） */
+  const [unbindType, setUnbindType] = useState<ContactType | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setStatus(await getContactStatus());
+    } catch {
+      setStatus(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const doBind = async (type: ContactType) => {
+    setError(null);
+    setSuccess(null);
+    const value = (type === "email" ? emailValue : phoneValue).trim();
+    if (!value) {
+      setError(type === "email" ? "请输入邮箱" : "请输入手机号");
+      return;
+    }
+    if (!password) {
+      setError("请输入登录密码");
+      return;
+    }
+    setBusy(true);
+    try {
+      await bindContact(type, value, password);
+      setSuccess(type === "email" ? "邮箱绑定成功，此后可用该邮箱登录" : "手机号绑定成功，此后可用该手机号登录");
+      if (type === "email") setEmailValue("");
+      else setPhoneValue("");
+      setPassword("");
+      await load();
+    } catch (e: any) {
+      setError(e?.message || "绑定失败");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const doUnbind = async () => {
+    if (!unbindType) return;
+    setError(null);
+    setSuccess(null);
+    if (!password) {
+      setError("请先在下方输入登录密码，再确认解绑");
+      setUnbindType(null);
+      return;
+    }
+    setBusy(true);
+    try {
+      await unbindContact(unbindType, password);
+      setSuccess(unbindType === "email" ? "已解绑邮箱" : "已解绑手机号");
+      setPassword("");
+      setUnbindType(null);
+      await load();
+    } catch (e: any) {
+      setError(e?.message || "解绑失败");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleString("zh-CN") : "—");
+  const emailBound = !!status?.email;
+  const phoneBound = !!status?.phone;
+
+  return (
+    <div className="space-y-4">
+      {/* 绑定状态行：掩码回显（服务端不下发明文） */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+        {emailBound ? (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-green-50 text-green-700 rounded-full border border-green-100">
+            <Mail size={11} /> 邮箱 {status?.email}
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-50 text-slate-500 rounded-full border border-slate-200">
+            <Mail size={11} /> 邮箱未绑定
+          </span>
+        )}
+        {phoneBound ? (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-green-50 text-green-700 rounded-full border border-green-100">
+            <Smartphone size={11} /> 手机号 {status?.phone}
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-50 text-slate-500 rounded-full border border-slate-200">
+            <Smartphone size={11} /> 手机号未绑定
+          </span>
+        )}
+        {(emailBound || phoneBound) && (
+          <span className="text-slate-400">绑定后即可用邮箱 / 手机号登录</span>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <FormField
+          label="新邮箱"
+          hint={emailBound ? `当前：${status?.email}（绑定于 ${fmt(status?.emailBoundAt ?? null)}）` : "输入后点「绑定邮箱」"}
+        >
+          <PasswordInput
+            value={emailValue}
+            onChange={setEmailValue}
+            placeholder={emailBound ? "输入新邮箱可换绑" : "例如 name@example.com"}
+            visible={showEmail}
+            onToggle={() => setShowEmail((v) => !v)}
+            lockIcon={false}
+            ariaLabel="邮箱"
+          />
+        </FormField>
+        <FormField
+          label="新手机号"
+          hint={phoneBound ? `当前：${status?.phone}（绑定于 ${fmt(status?.phoneBoundAt ?? null)}）` : "中国大陆 11 位手机号"}
+        >
+          <PasswordInput
+            value={phoneValue}
+            onChange={setPhoneValue}
+            placeholder={phoneBound ? "输入新手机号可换绑" : "例如 13800001234"}
+            visible={showPhone}
+            onToggle={() => setShowPhone((v) => !v)}
+            lockIcon={false}
+            ariaLabel="手机号"
+          />
+        </FormField>
+      </div>
+
+      <FormField label="登录密码" required hint="绑定 / 解绑 / 换绑均需验证">
+        <PasswordInput
+          value={password}
+          onChange={setPassword}
+          placeholder="••••••••"
+          visible={showBindPassword}
+          onToggle={() => setShowBindPassword((v) => !v)}
+          lockIcon={false}
+        />
+      </FormField>
+
+      {error && (
+        <div className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+          {error}
+        </div>
+      )}
+      {success && (
+        <div className="text-xs text-green-700 bg-green-50 border border-green-100 rounded-lg px-3 py-2">
+          {success}
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          onClick={() => doBind("email")}
+          disabled={busy}
+          className="flex items-center gap-1.5 px-4 py-2 text-sm text-white bg-blue-500 rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-60"
+        >
+          {busy && <Loader2 size={14} className="animate-spin" />} 绑定邮箱
+        </button>
+        <button
+          onClick={() => doBind("phone")}
+          disabled={busy}
+          className="flex items-center gap-1.5 px-4 py-2 text-sm text-white bg-blue-500 rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-60"
+        >
+          {busy && <Loader2 size={14} className="animate-spin" />} 绑定手机号
+        </button>
+        {emailBound && (
+          <button
+            onClick={() => setUnbindType("email")}
+            disabled={busy}
+            className="px-3 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors disabled:opacity-60"
+          >
+            解绑邮箱
+          </button>
+        )}
+        {phoneBound && (
+          <button
+            onClick={() => setUnbindType("phone")}
+            disabled={busy}
+            className="px-3 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors disabled:opacity-60"
+          >
+            解绑手机号
+          </button>
+        )}
+      </div>
+
       <ConfirmDialog
-        open={confirmClear}
-        onClose={() => setConfirmClear(false)}
-        onConfirm={doClear}
-        title="清除找回码"
-        message="清除后将无法通过找回码重置密码，只能重新设置。确认清除？"
-        confirmText="清除"
+        open={unbindType !== null}
+        onClose={() => setUnbindType(null)}
+        onConfirm={doUnbind}
+        title={unbindType === "email" ? "解绑邮箱" : "解绑手机号"}
+        message={
+          unbindType === "email"
+            ? "解绑后将无法再用该邮箱登录（需在下方已输入登录密码）。确认解绑？"
+            : "解绑后将无法再用该手机号登录（需在下方已输入登录密码）。确认解绑？"
+        }
+        confirmText="解绑"
         danger
         loading={busy}
       />
@@ -1832,10 +2104,14 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
   // ============ 标签库（设置 → 标签管理，全局 ResourceTag 列表） ============
   const tags = Array.isArray(data.tags) ? data.tags : [];
   const setTags = (next: ResourceTag[]) => setData({ ...data, tags: next });
-  /** 新建空标签：默认随机色，名称聚焦由渲染端 input 完成 */
+  /** 当前处于名称编辑态的标签 id（v1.48.3）：点「编辑」解锁，点「√」完成；同一时间只允许编辑一行 */
+  const [editingTagId, setEditingTagId] = useState<string | null>(null);
+  /** 新建空标签：默认随机色，名称聚焦由渲染端 input 完成；新标签自动进入编辑态 */
   const addTag = () => {
     const color = randomTagColor();
-    setTags([...tags, { id: `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, name: "", color }]);
+    const id = `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    setTags([...tags, { id, name: "", color }]);
+    setEditingTagId(id);
   };
   const patchTag = (id: string, patch: Partial<ResourceTag>) =>
     setTags(tags.map((t) => (t.id === id ? { ...t, ...patch } : t)));
@@ -2017,27 +2293,27 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
                               <p className="text-sm font-medium text-slate-700">{engine.name}</p>
                               {isActive && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500 text-white font-medium">当前</span>}
                             </div>
-                            <p className="text-xs text-slate-400 mt-0.5">
+                            <p className="text-xs text-slate-400 mt-0.5 truncate">
                               {engine.connectionType === "socket" ? engine.socketPath : engine.connectionType === "ssh" ? `${engine.sshUsername}@${engine.sshHost}:${engine.sshPort}` : engine.tcpAddress}
                             </p>
                           </div>
                         )}
                       </div>
 
-                      {/* 状态 */}
-                      <div className="flex flex-col items-end gap-0.5 flex-shrink-0">
-                        <div className="flex items-center gap-1.5">
+                      {/* 状态（v1.46.4 防错位：允许收缩 + 完整信息放 title） */}
+                      <div className="flex flex-col items-end gap-0.5 flex-shrink min-w-0 max-w-[45%]">
+                        <div className="flex items-center gap-1.5 min-w-0">
                           {statusIcon}
-                          <span className={`text-xs font-medium ${
+                          <span className={`text-xs font-medium whitespace-nowrap ${
                             engine.status === "connected" ? "text-green-600" :
                             engine.status === "error" ? "text-red-500" : "text-slate-400"
-                          }`}>{statusText}</span>
+                          }`} title={statusText}>{statusText}</span>
                           {engine.dockerVersion && (
-                            <span className="text-[10px] text-slate-400 ml-1">{engine.dockerVersion}</span>
+                            <span className="text-[10px] text-slate-400 ml-1 whitespace-nowrap">{engine.dockerVersion}</span>
                           )}
                         </div>
                         {engine.status === "error" && engine.errorMessage && (
-                          <span className="text-[10px] text-red-400 max-w-[200px] truncate" title={engine.errorMessage}>
+                          <span className="text-[10px] text-red-400 max-w-full truncate" title={engine.errorMessage}>
                             {engine.errorMessage}
                           </span>
                         )}
@@ -2209,6 +2485,19 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
                   </button>
                 )}
               </div>
+            </Card>
+
+            <Card title="引擎切换超时" icon={<Timer size={16} />}>
+              <FormField
+                label="引擎切换超时时间（秒）"
+                hint="切换 Docker Engine 后，若在该时限内核心数据（容器列表）未加载成功，自动回退到原引擎并提示。范围 5~300，默认 30。保存后下次切换生效。"
+              >
+                <Input
+                  value={String(data.modal?.engineSwitchTimeout ?? 30)}
+                  onChange={(val) => update("modal", "engineSwitchTimeout", parseInt(val, 10) || 0)}
+                  type="number"
+                />
+              </FormField>
             </Card>
 
             <Card title="Compose 命令" icon={<Terminal size={16} />}>
@@ -2539,6 +2828,10 @@ docker-compose version</code>
 
             <Card title="密码找回码" icon={<ShieldCheck size={16} />}>
               <RecoveryCodeForm />
+            </Card>
+
+            <Card title="绑定邮箱 / 手机号" icon={<Mail size={16} />}>
+              <ContactBindingForm />
             </Card>
           </div>
         )}
@@ -3733,12 +4026,6 @@ docker-compose version</code>
           <div className="max-w-3xl space-y-5">
             <div>
               <h2 className="text-lg font-semibold text-slate-800 mb-1">编辑堆栈</h2>
-              <p className="text-sm text-slate-500">
-                维护「编辑堆栈 → Compose」页右侧的一键填入模板。每项可填一行或多行 compose 内容（如 restart: unless-stopped），
-                填入时会按目标层级<b>自动缩进</b>（无需手工对齐空格）；值留空的项填入时自动补全（restart→unless-stopped、network_mode→bridge、container_name→服务名 等）。
-                每项可单独选择填入位置：<b>services 下</b>（第一个服务内部，缩进 4 空格）、<b>environment 下</b> / <b>volumes 下</b>（第一个服务对应键的子项，缩进 6 空格）、
-                <b>指针处</b>（编辑器光标所在行的下一行）或 <b>末尾</b>（追加到 compose 文本最后一行）。缩进以标准 2 空格 compose 为基准，会随文档实际缩进自适应。
-              </p>
             </div>
 
             <Card
@@ -4027,21 +4314,31 @@ docker-compose version</code>
                             </label>
                           ))}
                         </div>
-                        {/* 名称编辑 */}
+                        {/* 名称编辑：默认锁定，点「编辑」解锁（v1.48.3） */}
                         <Input
                           value={tag.name}
-                          onChange={(val) => patchTag(tag.id, { name: val })}
+                          onChange={(val) => { if (editingTagId === tag.id) patchTag(tag.id, { name: val }); }}
+                          readOnly={editingTagId !== tag.id}
                           placeholder="标签名称，如：媒体、下载、开发"
-                          className="flex-1 min-w-[140px]"
+                          className={`flex-1 min-w-[140px] ${editingTagId !== tag.id ? "text-slate-500 cursor-default" : ""}`}
                         />
                         {/* 实时预览 */}
                         <div className="w-28 flex-shrink-0 flex justify-center">
                           <TagChip tag={{ ...tag, name: tag.name || "预览" }} />
                         </div>
+                        {/* 编辑/完成：锁定时点铅笔进入编辑态，编辑时点 √ 完成（v1.48.3） */}
+                        <IconButton
+                          icon={editingTagId === tag.id ? <Check size={14} className="text-green-600" /> : <Pencil size={14} />}
+                          title={editingTagId === tag.id ? "完成编辑" : "编辑名称"}
+                          onClick={() => setEditingTagId(editingTagId === tag.id ? null : tag.id)}
+                        />
                         <IconButton
                           icon={<Trash2 size={14} />}
                           title="删除标签"
-                          onClick={() => removeTag(tag.id)}
+                          onClick={() => {
+                            if (editingTagId === tag.id) setEditingTagId(null);
+                            removeTag(tag.id);
+                          }}
                         />
                       </div>
                     );

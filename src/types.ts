@@ -213,6 +213,8 @@ export interface Container {
   stats?: ContainerStats;
   hasUpdate?: boolean;
   webuiUrl?: string;
+  /** 服务描述（v1.46.3，来自所属堆栈 LABELS 页，按服务名匹配透传） */
+  description?: string;
   /** 来自所属堆栈 LABELS 页的彩色标签（完整对象，直接带颜色渲染） */
   tags?: ResourceTag[];
 }
@@ -336,6 +338,8 @@ export interface DockerImage {
   tag: string;
   size: string;
   createdAt: string;
+  /** 创建时间原始毫秒时间戳（表头排序用；createdAt 为相对时间展示串不可排） */
+  createdTs: number;
   associatedContainers: string[]; // 关联容器名称列表
   associatedCount: number;        // 关联容器数量
   isDangling: boolean;
@@ -388,6 +392,8 @@ export interface DockerVolume {
   mountpoint: string;
   size: string;
   createdAt: string;
+  /** 创建时间毫秒时间戳（表头排序用；解析失败为 0） */
+  createdTs: number;
   associatedContainers: string[];
   labels?: { key: string; value: string }[];
   options?: { key: string; value: string }[];
@@ -675,6 +681,11 @@ export interface ModalConfig {
    * - `modal`  = 居中弹窗（原有样式）
    */
   containerDetailStyle: "drawer" | "modal";
+  /**
+   * 引擎切换超时时间（秒，v1.46.0）：切换 Docker Engine 后若在该时限内
+   * 核心数据（容器列表）未加载成功，自动回退到原引擎并提示。默认 30。
+   */
+  engineSwitchTimeout: number;
   /**
    * 网络曲线**默认网卡**（v1.41.6）：仪表盘「网络」磁贴进页面时展示哪个网卡。
    * - `""`（默认）= **自动选第一个物理网卡**（`kind === "host"`，跳过 lo / veth）；

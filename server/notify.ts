@@ -24,6 +24,7 @@ import { createLogger } from "./logger.js";
 import { getSettings } from "./settings.js";
 import { CURRENT_VERSION } from "./updater.js";
 import os from "node:os";
+import { recordNotification } from "./notifications.js";
 
 /** 通知日志：写入 `logs/notify-YYYY-MM-DD.log`（与「应用日志」「操作记录」分文件，可独立设保留策略） */
 const log = createLogger("Notify", "notify");
@@ -52,6 +53,8 @@ export interface NotifyPayload {
   level: "info" | "warning" | "error";
   /** 去重键：同一键在 TTL 内只发一次。不传则不去重 */
   dedupKey?: string;
+  /** 关联引擎 ID：用于把事件归到具体引擎的通知中心（不传则只在外部通道推送、不入持久化日志） */
+  engineId?: string;
 }
 
 const WEBHOOK_TIMEOUT_MS = 8_000;
@@ -242,6 +245,21 @@ export async function doNotify(p: NotifyPayload, opts?: { force?: boolean }): Pr
     return res;
   }
 
+  // ★ 持久化到通知中心（事件日志）：与 Webhook/邮件开关无关，仅首个去重窗口内的事件入日志，
+  //   避免重复刷屏；无 engineId 时 recordNotification 内部跳过（测试通知等不污染日志）。
+  //  这是「昨天 40 条今天变 17 条」「满 100 看不清历史」的根因修复点。
+  try {
+    recordNotification({
+      engineId: p.engineId || "",
+      level: p.level,
+      title: p.title,
+      summary: p.summary,
+      lines: p.lines,
+    });
+  } catch {
+    /* 存储失败绝不影响主流程 */
+  }
+
   const tasks: Promise<void>[] = [];
 
   if (cfg.webhook.enabled && cfg.webhook.url) {
@@ -302,6 +320,42 @@ export function getSecretSources(): { smtpPassword: SecretSource; webhookSecret:
 
 // ============ 容器状态巡检（containerDown 的唯一触发源） ============
 
+// ============ 手动操作抑制（v1.48.1） ============
+// 用户在 App 内手动启停/重启/暂停/删除容器、或对堆栈执行 compose 操作后，
+// 短时间内的「运行中 → 非运行中」转变不再发通知（自己操作的结果自己知道）。
+// 异常停止（崩溃 / OOM / 外部操作）不受影响。命中即消费，避免永久抑制。
+const MANUAL_OP_WINDOW_MS = 15 * 60_000;
+/** engineId -> (容器 id 或名称 -> 打标时间) */
+const manualContainerOps = new Map<string, Map<string, number>>();
+/** engineId -> (compose working_dir -> 打标时间)：堆栈容器按 working_dir 标签匹配，与 project 命名解耦 */
+const manualStackWorkdirs = new Map<string, Map<string, number>>();
+
+/** 查询并消费一条抑制记录（过期视为未命中） */
+function consumeManual(map: Map<string, Map<string, number>>, engineId: string, key: string): boolean {
+  const m = map.get(engineId);
+  if (!m) return false;
+  const ts = m.get(key);
+  if (ts === undefined) return false;
+  m.delete(key);
+  return Date.now() - ts <= MANUAL_OP_WINDOW_MS;
+}
+
+/** 手动容器操作打标（start/stop/restart/pause/unpause/remove 成功后调用） */
+export function markManualContainerOp(engineId: string, cidOrName: string): void {
+  if (!engineId || !cidOrName) return;
+  const m = manualContainerOps.get(engineId) || new Map<string, number>();
+  m.set(cidOrName, Date.now());
+  manualContainerOps.set(engineId, m);
+}
+
+/** 手动堆栈操作打标（compose up/down/restart/pull/build/删除成功后调用，传 compose working_dir） */
+export function markManualStackOp(engineId: string, workDir: string): void {
+  if (!engineId || !workDir) return;
+  const m = manualStackWorkdirs.get(engineId) || new Map<string, number>();
+  m.set(workDir, Date.now());
+  manualStackWorkdirs.set(engineId, m);
+}
+
 /** 引擎容器快照：engineId -> Map<containerId, running> */
 let lastStates = new Map<string, Map<string, boolean>>();
 let watchTimer: NodeJS.Timeout | null = null;
@@ -328,6 +382,23 @@ export function diffContainerStates(
       if (wasRunning === true && running === false) {
         const c = list.find((x) => String(x.Id) === id);
         const name = (c?.Names?.[0] || id.slice(0, 12)).replace(/^\//, "");
+        // v1.48.1 手动操作抑制：App 内手动启停/重启/暂停/删除的容器不发「容器已停止」通知
+        let manual = false;
+        const byId = manualContainerOps.get(engineId);
+        if (byId) {
+          for (const key of byId.keys()) {
+            if (key === name || id === key || id.startsWith(key)) {
+              byId.delete(key);
+              manual = true;
+              break;
+            }
+          }
+        }
+        if (!manual) {
+          const wd = (c as any)?.Labels?.["com.docker.compose.project.working_dir"];
+          if (wd && consumeManual(manualStackWorkdirs, engineId, String(wd))) manual = true;
+        }
+        if (manual) continue; // 只跳过本容器的通知；基线在循环后照常更新
         notify({
           event: "containerDown",
           title: `容器已停止：${name}`,
@@ -335,6 +406,7 @@ export function diffContainerStates(
           lines: [`容器 ID：${id.slice(0, 12)}`, `状态：${c?.Status || c?.State || "未知"}`],
           level: "warning",
           dedupKey: `down:${engineId}:${id}`,
+          engineId,
         });
       }
     }
@@ -351,7 +423,7 @@ export function resetContainerWatch(): void {
 export interface WatchTarget {
   engineId: string;
   engineName: string;
-  list: { Id?: string; Names?: string[]; State?: string; Status?: string }[];
+  list: { Id?: string; Names?: string[]; State?: string; Status?: string; Labels?: Record<string, string> }[];
 }
 
 /**

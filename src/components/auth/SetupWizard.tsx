@@ -40,6 +40,7 @@ export function SetupWizard({ onDone, mode = "create", initialUsername, lockedUs
   const [confirm, setConfirm] = useState("");
   const [showConfirm, setShowConfirm] = useState(false);
   const [recovery, setRecovery] = useState("");
+  const [showRecovery, setShowRecovery] = useState(false); // v1.46.2：找回码默认掩码，小眼睛可核对
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -162,18 +163,21 @@ export function SetupWizard({ onDone, mode = "create", initialUsername, lockedUs
                 : `可选，${RECOVERY_MIN_LENGTH}~${RECOVERY_MAX_LENGTH} 位字母或数字，区分大小写；忘记密码时可用它重置。留空可稍后在「系统设置 → 用户」补设`
             }
           >
-            <div className="relative">
-              <KeyRound size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <Input
-                value={recovery}
-                onChange={(v) => setRecovery(sanitizeRecoveryInput(v))}
-                placeholder={`${RECOVERY_MIN_LENGTH}~${RECOVERY_MAX_LENGTH} 位字母或数字`}
-                className="pl-9 font-mono tracking-wider"
-              />
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-slate-400 tabular-nums">
-                {recovery.length}/{RECOVERY_MAX_LENGTH}
-              </span>
-            </div>
+            <PasswordInput
+              value={recovery}
+              onChange={(v) => setRecovery(sanitizeRecoveryInput(v))}
+              placeholder={`${RECOVERY_MIN_LENGTH}~${RECOVERY_MAX_LENGTH} 位字母或数字`}
+              visible={showRecovery}
+              onToggle={() => setShowRecovery((v) => !v)}
+              leftIcon={<KeyRound size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />}
+              ariaLabel="找回码"
+              className="font-mono tracking-wider"
+              rightExtra={
+                <span className="text-[11px] text-slate-400 tabular-nums">
+                  {recovery.length}/{RECOVERY_MAX_LENGTH}
+                </span>
+              }
+            />
           </FormField>
 
           {error && (

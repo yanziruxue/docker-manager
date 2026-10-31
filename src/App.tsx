@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Sidebar } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
 import { Dashboard } from "./pages/Dashboard";
 import { Containers } from "./pages/Containers";
@@ -18,6 +17,7 @@ import {
   fetchEngineVolumes,
   fetchEngineStacks,
   fetchEngineActivity,
+  fetchActivitiesPage,
   fetchSettings,
   saveSettingsApi,
   checkUpdateApi,
@@ -68,6 +68,10 @@ export default function App() {
   const [volumes, setVolumes] = useState<DockerVolume[]>([]);
   const [stacks, setStacks] = useState<Stack[]>([]);
   const [activities, setActivities] = useState<ActivityLog[]>([]);
+  // 通知中心分页状态（持久化事件日志，支持滚动加载历史）
+  const [activitiesTotal, setActivitiesTotal] = useState(0);
+  const [activitiesHasMore, setActivitiesHasMore] = useState(false);
+  const [activitiesLoadingMore, setActivitiesLoadingMore] = useState(false);
   const [resourceStats, setResourceStats] = useState<EngineResourceStats | null>(null);
   const [settings, setSettings] = useState<SystemSettings | null>(null);
   const [dataLoading, setDataLoading] = useState(false);
@@ -222,23 +226,7 @@ export default function App() {
     setAuthState("login");
   };
 
-  // 侧边栏折叠状态（localStorage 持久化）
-  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem("sidebarCollapsed") === "1";
-    } catch {
-      return false;
-    }
-  });
-  const toggleSidebar = () => {
-    setSidebarCollapsed((prev) => {
-      const next = !prev;
-      try {
-        localStorage.setItem("sidebarCollapsed", next ? "1" : "0");
-      } catch { /* ignore */ }
-      return next;
-    });
-  };
+  // v1.47.0：侧边栏折叠状态随侧边栏一并移除（导航已迁顶部，localStorage 遗留 key 无害）
 
   // 通知已读状态（localStorage 持久化，按通知 ID 记录）
   const [readNotificationIds, setReadNotificationIds] = useState<Set<string>>(() => {
@@ -248,17 +236,6 @@ export default function App() {
     } catch { return new Set(); }
   });
   const unreadCount = activities.filter((a) => !readNotificationIds.has(a.id)).length;
-
-  const pageTitles: Record<PageKey, { title: string; breadcrumb: string[] }> = {
-    dashboard: { title: "仪表盘", breadcrumb: ["首页", "仪表盘"] },
-    containers: { title: "容器管理", breadcrumb: ["首页", "容器管理"] },
-    stacks: { title: "堆栈管理", breadcrumb: ["首页", "堆栈管理"] },
-    images: { title: "镜像管理", breadcrumb: ["首页", "镜像管理"] },
-    volumes: { title: "数据卷管理", breadcrumb: ["首页", "数据卷管理"] },
-    networks: { title: "网络管理", breadcrumb: ["首页", "网络管理"] },
-    notifications: { title: "通知中心", breadcrumb: ["首页", "通知中心"] },
-    settings: { title: "设置中心", breadcrumb: ["首页", "设置中心"] },
-  };
 
   // 自动更新：检测到新版后自动下载应用，并监听后端重启后刷新前端（避免停留在旧前端 bundle）
   // ⚠️ 此处 `applyUpdateApi()` 刚被调用，二进制可能仍在下载（旧进程会正常响应很久），
@@ -348,18 +325,28 @@ export default function App() {
   }, [authState]);
 
   // 活跃引擎变化时拉取数据
-  const loadEngineData = useCallback(async (engineId: string) => {
-    if (!engineId) return;
+  // ★ v1.46.0：返回「切换成功」布尔值（以容器列表请求是否成功为判据），
+  //   供引擎切换超时回退（handleActiveEngineChange）竞速判定；
+  //   loadSeqRef 序号守卫丢弃被更新的加载取代的过期结果（快速连切/回退时防止旧结果覆盖新数据）。
+  const loadSeqRef = useRef(0);
+  const loadEngineData = useCallback(async (engineId: string): Promise<boolean> => {
+    if (!engineId) return false;
+    const seq = ++loadSeqRef.current;
     setDataLoading(true);
     setDataError(null);
     try {
+      let coreOk = false; // 容器列表请求成功 = 引擎可达 = 切换成功
       const [rawContainers, rawImages, rawVolumes, rawStacks, rawActivities] = await Promise.all([
-        fetchEngineContainers(engineId).catch(() => []),
+        fetchEngineContainers(engineId)
+          .then((r) => { coreOk = true; return r; })
+          .catch(() => []),
         fetchEngineImages(engineId).catch(() => []),
         fetchEngineVolumes(engineId).catch(() => ({ Volumes: [] })),
         fetchEngineStacks(engineId).catch(() => []),
-        fetchEngineActivity(engineId).catch(() => []),
+        fetchActivitiesPage(engineId, 50, 0).catch(() => ({ items: [], total: 0, hasMore: false })),
       ]);
+      // 已被更新的加载取代（如超时回退后重拉原引擎）⇒ 丢弃本批结果
+      if (seq !== loadSeqRef.current) return false;
       const xfContainers = transformContainers(rawContainers);
 
       // 交叉引用：堆栈 WebUI Labels 的图标/WebUI 地址/标签 传导到对应容器
@@ -379,7 +366,9 @@ export default function App() {
               .map(resolveTag)
               .filter((t: any): t is { id: string; name: string; color: string } => !!t);
           }
-          if (!label.iconUrl && !label.webuiUrl && (!label.tags || label.tags.length === 0)) continue;
+          // v1.46.3：仅有描述的标签也参与透传（此前 continue 条件漏了 description，
+          // 导致「LABELS 页只填了描述」的服务在容器管理页看不到描述）
+          if (!label.iconUrl && !label.webuiUrl && !label.description && (!label.tags || label.tags.length === 0)) continue;
           const matched = xfContainers.filter((c) =>
             c.name === label.serviceName ||
             c.name === `${st.name}-${label.serviceName}` ||
@@ -388,6 +377,7 @@ export default function App() {
           for (const c of matched) {
             if (label.iconUrl) c.icon = label.iconUrl;
             if (label.webuiUrl) c.webuiUrl = label.webuiUrl;
+            if (label.description) c.description = label.description;
             // 标签合并去重（同 id 只保留一个）
             if (label.tags && label.tags.length > 0) {
               const exist = new Set((c.tags || []).map((t) => t.id));
@@ -471,16 +461,21 @@ export default function App() {
       }
       setVolumes(xfVolumes);
       setStacks(xfStacks);
-      setActivities(transformActivityLogs(rawActivities));
+      setActivities(transformActivityLogs(rawActivities.items));
+      setActivitiesTotal(rawActivities.total);
+      setActivitiesHasMore(rawActivities.hasMore);
+      return coreOk;
     } catch (err: any) {
+      if (seq !== loadSeqRef.current) return false;
       setDataError(err.message || "数据加载失败");
       setContainers([]);
       setImages([]);
       setVolumes([]);
       setStacks([]);
       setActivities([]);
+      return false;
     } finally {
-      setDataLoading(false);
+      if (seq === loadSeqRef.current) setDataLoading(false);
     }
   }, []);
 
@@ -492,7 +487,8 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (activeEngineId) {
+    // engineSwitchLoadRef 守卫：主动切换流程已在加载目标引擎时跳过，避免双拉
+    if (activeEngineId && engineSwitchLoadRef.current !== activeEngineId) {
       loadEngineData(activeEngineId);
     }
   }, [activeEngineId, loadEngineData]);
@@ -518,16 +514,53 @@ export default function App() {
   }, [activeEngineId, page]);
 
   // 切换活跃引擎（供 Settings 调用）
+  // ★ v1.46.0 引擎切换超时回退：切换后与「引擎切换超时时间（秒，默认 30）」竞速——
+  //   时限内核心数据（容器列表）未加载成功，或明确失败 ⇒ 自动回退原引擎并提示。
+  //   engineSwitchLoadRef 置为目标引擎时，useEffect 不重复拉取（由本处的主动加载负责）。
+  const engineSwitchLoadRef = useRef<string | null>(null);
   const handleActiveEngineChange = useCallback(
     async (engineId: string) => {
+      if (!engineId || engineId === activeEngineId) return;
+      const prevId = activeEngineId;
+      const engineName = (id: string) => engines.find((e) => e.id === id)?.name || id;
       setActiveEngineIdState(engineId);
+      engineSwitchLoadRef.current = engineId;
       try {
         await setActiveEngineIdApi(engineId);
       } catch (err) {
         console.error("保存活跃引擎失败:", err);
       }
+      const timeoutSec = Math.max(5, Math.min(300, Number(settings?.modal?.engineSwitchTimeout) || 30));
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const result = await Promise.race([
+          loadEngineData(engineId).then((ok) => ({ ok, timedOut: false })),
+          new Promise<{ ok: false; timedOut: boolean }>((resolve) => {
+            timer = setTimeout(() => resolve({ ok: false, timedOut: true }), timeoutSec * 1000);
+          }),
+        ]);
+        if (!result.ok) {
+          // 仅当期间没有更新的切换时才回退（竞速中用户又选了其他引擎 ⇒ 守卫已被覆盖，跳过回退）
+          if (engineSwitchLoadRef.current === engineId) {
+            // 回退原引擎：先清守卫再切回，useEffect 会自动重新拉取原引擎数据；
+            // 过期的新引擎加载结果由 loadSeqRef 序号守卫丢弃。
+            engineSwitchLoadRef.current = null;
+            setActiveEngineIdState(prevId);
+            setActiveEngineIdApi(prevId).catch(() => {});
+            setDataError(
+              result.timedOut
+                ? `切换引擎超时（${timeoutSec} 秒），已回退到原引擎「${engineName(prevId)}」`
+                : `引擎「${engineName(engineId)}」连接失败，已回退到原引擎「${engineName(prevId)}」`
+            );
+          }
+          return;
+        }
+      } finally {
+        if (timer) clearTimeout(timer);
+        if (engineSwitchLoadRef.current === engineId) engineSwitchLoadRef.current = null;
+      }
     },
-    []
+    [activeEngineId, engines, loadEngineData, settings]
   );
 
   // Settings 中引擎列表变化时同步
@@ -571,12 +604,33 @@ export default function App() {
   /** 重新拉取活动日志（镜像「检查更新」后用于让通知中心即时出现更新可用通知） */
   const refreshActivities = useCallback(async (engineId: string) => {
     try {
-      const raw = await fetchEngineActivity(engineId);
-      setActivities(transformActivityLogs(raw));
+      const resp = await fetchActivitiesPage(engineId, 50, 0);
+      setActivities(transformActivityLogs(resp.items));
+      setActivitiesTotal(resp.total);
+      setActivitiesHasMore(resp.hasMore);
     } catch {
       // 活动刷新失败不打扰用户，通知中心下次进入页面时再同步
     }
   }, []);
+
+  /** 通知中心加载更多历史（分页） */
+  const loadMoreActivities = useCallback(
+    async (engineId: string) => {
+      if (activitiesLoadingMore || !activitiesHasMore) return;
+      setActivitiesLoadingMore(true);
+      try {
+        const resp = await fetchActivitiesPage(engineId, 50, activities.length);
+        setActivities((prev) => [...prev, ...transformActivityLogs(resp.items)]);
+        setActivitiesTotal(resp.total);
+        setActivitiesHasMore(resp.hasMore);
+      } catch {
+        // 加载失败不打扰用户
+      } finally {
+        setActivitiesLoadingMore(false);
+      }
+    },
+    [activitiesLoadingMore, activitiesHasMore, activities.length],
+  );
 
   /** 检查全部镜像更新：真正调用后端 digest 比对（此前只重拉列表，导致「没反应」） */
   const handleCheckAllUpdates = useCallback(async () => {
@@ -716,39 +770,25 @@ export default function App() {
     return <LoginPage onDone={handleAuthDone} notice={loginNotice} />;
   }
 
-  // relative：为内部 absolute 元素建立包含块，防止其逃逸到初始包含块撑高文档
+  // v1.47.0：左侧边栏移除，导航迁至顶部 TopBar——布局改为纵向（顶栏在上、内容区在下），左侧空间全部让给内容
   return (
-    <div className="relative flex h-screen bg-slate-50 overflow-hidden">
-      <Sidebar
-        active={page}
+    <div className="relative flex flex-col h-screen bg-slate-50 overflow-hidden">
+      <TopBar
+        activePage={page}
         onNavigate={handleNavigate}
         stats={stats}
         engineName={activeEngine?.name}
         engineStatus={activeEngine?.status}
         dockerVersion={activeEngine?.dockerVersion}
-        notificationsCount={unreadCount}
         updateAvailable={appUpdateAvailable}
-        collapsed={sidebarCollapsed}
-        onToggleCollapsed={toggleSidebar}
-        runtimeVersion={runtimeVersion}
+        appVersion={runtimeVersion}
+        onRefresh={() => activeEngineId && loadEngineData(activeEngineId)}
+        refreshing={dataLoading}
+        unreadCount={unreadCount}
+        user={me}
+        onLogout={handleLogout}
       />
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
-        <TopBar
-          title={pageTitles[page].title}
-          breadcrumb={pageTitles[page].breadcrumb}
-          onRefresh={() => activeEngineId && loadEngineData(activeEngineId)}
-          refreshing={dataLoading}
-          onNavigate={handleNavigate}
-          notifications={activities}
-          unreadCount={unreadCount}
-          user={me}
-          onLogout={handleLogout}
-          onMarkAllRead={() => {
-            const allIds = new Set(activities.map((a) => a.id));
-            setReadNotificationIds(allIds);
-            localStorage.setItem("readNotificationIds", JSON.stringify([...allIds]));
-          }}
-        />
         <main className="flex-1 min-h-0 overflow-y-auto">
           {page === "dashboard" && (
             <Dashboard
@@ -832,6 +872,10 @@ export default function App() {
           {page === "notifications" && (
             <Notifications
               notifications={activities}
+              total={activitiesTotal}
+              hasMore={activitiesHasMore}
+              loadingMore={activitiesLoadingMore}
+              onLoadMore={() => activeEngineId && loadMoreActivities(activeEngineId)}
               readIds={readNotificationIds}
               onMarkRead={(id) => {
                 const next = new Set(readNotificationIds);

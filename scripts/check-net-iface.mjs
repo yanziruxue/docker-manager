@@ -111,7 +111,7 @@ ok("下拉展示的是解析后的 active（不是原始 iface）", /<IfaceSelec
 /* ---------- ③ 配置项三处贯通 ---------- */
 console.log("\n── ③ modal.defaultNetIface 贯通 ──");
 // ⚠️ 字段前有较长注释，窗口要放宽（否则 400 字符不够，会假红）
-ok("server/settings.ts 默认值存在且为空串（=自动）", /modal:\s*\{[\s\S]{0,900}?defaultNetIface:\s*"",\s*\n\s*\}/.test(settingsSrv));
+ok("server/settings.ts 默认值存在且为空串（=自动）", /modal:\s*\{[\s\S]{0,900}?defaultNetIface:\s*""/.test(settingsSrv));
 ok("src/types.ts ModalConfig 含该字段", /defaultNetIface:\s*string;/.test(types));
 ok("Settings.tsx 本地默认值含该字段", /defaultNetIface:\s*"",/.test(settingsTsx));
 ok("★ 默认空串而非硬编码某网卡名", !/defaultNetIface:\s*"[a-z]/.test(settingsSrv));

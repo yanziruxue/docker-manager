@@ -31,6 +31,14 @@ export interface UserRecord {
   credentialVersion?: number;
   /** 最后一次「重新设置账号」的时间 */
   credentialUpdatedAt?: string;
+  /** 绑定的邮箱（归一化：去首尾空白 + 转小写；明文落盘，文件本身 0600） */
+  email?: string;
+  /** 绑定的手机号（归一化：纯数字 11 位） */
+  phone?: string;
+  /** 邮箱绑定时间 */
+  emailBoundAt?: string;
+  /** 手机号绑定时间 */
+  phoneBoundAt?: string;
 }
 
 /**
@@ -84,6 +92,29 @@ export function findUserById(id: string): UserRecord | undefined {
   return loadUsers().find((u) => u.id === id);
 }
 
+/**
+ * 按「登录 ID」查找用户：用户名 → 绑定邮箱 → 绑定手机号，依次匹配。
+ * 邮箱不区分大小写、手机号按归一化比对；未命中返回 undefined。
+ */
+export function findUserByLoginId(login: string): UserRecord | undefined {
+  const raw = (login || "").trim();
+  if (!raw) return undefined;
+  const users = loadUsers();
+  const lower = raw.toLowerCase();
+  // 1) 用户名（不区分大小写）
+  const byName = users.find((u) => u.username.trim().toLowerCase() === lower);
+  if (byName) return byName;
+  // 2) 邮箱（归一化后比对）
+  const email = normalizeEmail(raw);
+  const byEmail = users.find((u) => u.email && u.email === email);
+  if (byEmail) return byEmail;
+  // 3) 手机号（归一化后比对）
+  const phone = normalizePhone(raw);
+  const byPhone = users.find((u) => u.phone && u.phone === phone);
+  if (byPhone) return byPhone;
+  return undefined;
+}
+
 /** scrypt 哈希：返回 hex 编码的 hash 与 salt */
 export function hashPassword(password: string): { hash: string; salt: string } {
   const salt = crypto.randomBytes(16);
@@ -101,6 +132,98 @@ export function verifyPassword(password: string, record: UserRecord): boolean {
   } catch {
     return false;
   }
+}
+
+// ============ 绑定邮箱 / 手机号 ============
+// 绑定值明文落盘（users.json 本身 0600）；绑定/解绑由调用方（index.ts）先校验登录密码。
+// 绑定后邮箱/手机号可作为登录 ID（见 findUserByLoginId）。
+
+const EMAIL_RE = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+const PHONE_RE = /^1[3-9]\d{9}$/;
+export type ContactType = "email" | "phone";
+
+/** 归一化邮箱：去首尾空白 + 转小写 */
+export function normalizeEmail(raw: string): string {
+  return (raw || "").trim().toLowerCase();
+}
+
+/** 归一化手机号：去空格 / 横线 / +86 前缀，仅保留数字 */
+export function normalizePhone(raw: string): string {
+  let p = (raw || "").replace(/[\s-]/g, "");
+  if (p.startsWith("+86")) p = p.slice(3);
+  else if (p.startsWith("86") && p.length === 13) p = p.slice(2);
+  return p;
+}
+
+/** 校验邮箱格式，合法返回 null，否则返回错误说明 */
+export function validateEmail(raw: string): string | null {
+  const v = normalizeEmail(raw);
+  if (!v) return "请输入邮箱";
+  if (!EMAIL_RE.test(v)) return "邮箱格式不正确";
+  return null;
+}
+
+/** 校验手机号格式（中国大陆 11 位），合法返回 null，否则返回错误说明 */
+export function validatePhone(raw: string): string | null {
+  const v = normalizePhone(raw);
+  if (!v) return "请输入手机号";
+  if (!PHONE_RE.test(v)) return "手机号格式不正确（需中国大陆 11 位手机号）";
+  return null;
+}
+
+/** 绑定值的归一化（按类型分派） */
+export function normalizeContact(type: ContactType, raw: string): string {
+  return type === "email" ? normalizeEmail(raw) : normalizePhone(raw);
+}
+
+/** 校验绑定值格式（按类型分派） */
+export function validateContact(type: ContactType, raw: string): string | null {
+  return type === "email" ? validateEmail(raw) : validatePhone(raw);
+}
+
+/**
+ * 绑定邮箱 / 手机号（**调用方必须先校验登录密码**）。
+ * - 全局唯一性校验：同一邮箱/手机号不可绑定到多个账号；
+ * - 若该值已绑定在本账号上，幂等成功（不重复写时间戳）。
+ */
+export function bindUserContact(id: string, type: ContactType, value: string): void {
+  const err = validateContact(type, value);
+  if (err) throw new Error(err);
+  const normalized = normalizeContact(type, value);
+  const users = loadUsers();
+  const idx = users.findIndex((u) => u.id === id);
+  if (idx < 0) throw new Error("用户不存在");
+  // 唯一性：其他账号已绑定同一值则拒绝
+  const conflict = users.some((u, i) => i !== idx && u[type] === normalized);
+  if (conflict) {
+    throw new Error(type === "email" ? "该邮箱已被其他账号绑定" : "该手机号已被其他账号绑定");
+  }
+  // 幂等：值未变化则不重复写
+  if (users[idx][type] === normalized) return;
+  const boundAt = new Date().toISOString();
+  users[idx] =
+    type === "email"
+      ? { ...users[idx], email: normalized, emailBoundAt: boundAt }
+      : { ...users[idx], phone: normalized, phoneBoundAt: boundAt };
+  saveUsers(users);
+}
+
+/** 解绑邮箱 / 手机号（**调用方必须先校验登录密码**） */
+export function unbindUserContact(id: string, type: ContactType): void {
+  const users = loadUsers();
+  const idx = users.findIndex((u) => u.id === id);
+  if (idx < 0) throw new Error("用户不存在");
+  if (!users[idx][type]) return; // 未绑定，幂等成功
+  const next: UserRecord = { ...users[idx] };
+  if (type === "email") {
+    delete next.email;
+    delete next.emailBoundAt;
+  } else {
+    delete next.phone;
+    delete next.phoneBoundAt;
+  }
+  users[idx] = next;
+  saveUsers(users);
 }
 
 // ============ 密码找回码 ============

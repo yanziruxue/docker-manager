@@ -180,7 +180,8 @@ try {
   // 初始态恒为掩码 ⇒ 只需断言初始渲染；「切态」由 check-auth-wiring.mjs 的源码级断言兜底。
   // 覆盖三处：登录页（1 个）+ 首次设置/账号重设向导（reinit / create 各 2 个）。
   {
-    const EYE = /<button[^>]*aria-label="显示密码"[^>]*>/g;
+    // v1.46.2：敏感输入掩码统一走 PasswordInput ⇒ 小眼睛 aria-label 可为「显示密码 / 显示找回码 / 显示邮箱…」
+    const EYE = /<button[^>]*aria-label="显示[^"]*"[^>]*>/g;
     const eyeTags = (html) => html.match(EYE) || [];
     // 只匹配 **开标签**，按钮文案「重置密码 / 修改密码」在标签内部，不会被误认成小眼睛
     const pwdTags = (html) => (html.match(/<input[^>]*type="password"[^>]*>/g) || []);
@@ -193,21 +194,21 @@ try {
     check("★ 负向：登录页初始渲染【不含】「隐藏密码」（默认确为掩码，没被写死成明文）",
       !r.loginPlain.includes('aria-label="隐藏密码"'));
 
-    // —— 向导：reinit 与 create 各 2 个密码框（密码 / 确认密码）——
+    // —— 向导：reinit 与 create 各 3 个掩码框（密码 / 确认密码 / 找回码；v1.46.2 找回码掩码化）——
     for (const [name, html] of [["mode=reinit", r.reinit], ["mode 缺省（create）", r.create]]) {
-      check(`★ ${name} 掩码密码框 2 个（密码 / 确认密码）`, pwdTags(html).length === 2, "实得 " + pwdTags(html).length);
-      check(`★ ${name} 小眼睛按钮 2 个`, eyeTags(html).length === 2, "实得 " + eyeTags(html).length);
+      check(`★ ${name} 掩码密码框 3 个（密码 / 确认密码 / 找回码）`, pwdTags(html).length === 3, "实得 " + pwdTags(html).length);
+      check(`★ ${name} 小眼睛按钮 3 个`, eyeTags(html).length === 3, "实得 " + eyeTags(html).length);
     }
 
-    // —— ★★ 全站共 5 个小眼睛按钮，每一个都必须是 type="button" ——
+    // —— ★★ 全站共 7 个小眼睛按钮，每一个都必须是 type="button" ——
     // 表单是原生 <form onSubmit>，按钮默认 type 就是 submit；漏写则「点小眼睛 = 立刻提交表单」。
     const allEye = [...eyeTags(r.loginPlain), ...eyeTags(r.reinit), ...eyeTags(r.create)];
     const badType = allEye.filter((b) => !/type="button"/.test(b));
-    check("★★ 全部 5 个小眼睛按钮 type=\"button\"（漏成 submit 会直接提交表单）",
-      allEye.length === 5 && badType.length === 0,
+    check("★★ 全部 7 个小眼睛按钮 type=\"button\"（漏成 submit 会直接提交表单）",
+      allEye.length === 7 && badType.length === 0,
       "共 " + allEye.length + " 个，异常 " + badType.length + " 个" + (badType[0] ? "：" + badType[0] : ""));
-    check("★ 全部小眼睛按钮都带 title 悬浮提示",
-      allEye.every((b) => /title="(显示|隐藏)密码"/.test(b)));
+    check("★ 全部小眼睛按钮都带 title 悬浮提示（v1.46.2 起敏感字段可为「显示/隐藏找回码」等）",
+      allEye.every((b) => /title="(显示|隐藏)[^"]*"/.test(b)));
     check("★ 负向：向导初始渲染同样【不含】「隐藏密码」",
       !r.reinit.includes('aria-label="隐藏密码"') && !r.create.includes('aria-label="隐藏密码"'));
   }

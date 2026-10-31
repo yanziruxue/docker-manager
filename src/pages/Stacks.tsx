@@ -34,6 +34,8 @@ import {
   Code,
   ArrowLeftRight,
   Columns,
+  FolderOpen,
+  ChevronDown,
 } from "lucide-react";
 import type {
   Stack,
@@ -56,6 +58,7 @@ import {
   saveStackEnvApi,
   saveStackSettingsApi,
   uploadStackIconApi,
+  listStackIconsApi,
   backupStackApi,
   batchStackActionApi,
   containerActionApi,
@@ -1253,6 +1256,81 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
   const labelIconInputRef = useRef<HTMLInputElement>(null);
   const pendingLabelIconIndexRef = useRef<number>(-1);
 
+  // v1.49.0 堆栈图库（icon/ 文件夹）下拉：图标字段「编辑代码/SVG」左侧可选已有本地图标
+  const [galleryTarget, setGalleryTarget] = useState<IconTarget | null>(null);
+  const [galleryFiles, setGalleryFiles] = useState<string[]>([]);
+  const [galleryLoading, setGalleryLoading] = useState(false);
+  /** 打开图库下拉：拉取 icon/ 文件夹文件列表 */
+  const openIconGallery = async (t: IconTarget) => {
+    if (galleryTarget) {
+      const same =
+        (galleryTarget.kind === "settings" && t.kind === "settings") ||
+        (galleryTarget.kind === "label" && t.kind === "label" && galleryTarget.index === t.index);
+      if (same) { setGalleryTarget(null); return; } // 再点同一个收起
+    }
+    setGalleryTarget(t);
+    setGalleryFiles([]);
+    if (!engineId) return;
+    setGalleryLoading(true);
+    try {
+      const files = await listStackIconsApi(engineId, stack.name);
+      setGalleryFiles(files);
+    } catch { /* 拉取失败显示空态 */ }
+    finally { setGalleryLoading(false); }
+  };
+  /** 从图库选择图标：写入目标字段的本地 URL */
+  const pickGalleryIcon = (t: IconTarget, file: string) => {
+    setIconUrl(t, `/api/stack-icons/${encodeURIComponent(stack.name)}/${encodeURIComponent(file)}`);
+    setGalleryTarget(null);
+  };
+  /** 图库下拉面板（按钮左侧弹出）：缩略图 + 文件名列表 */
+  const galleryPanel = (t: IconTarget) => {
+    if (!galleryTarget || galleryTarget.kind !== t.kind) return null;
+    if (t.kind === "label" && galleryTarget.kind === "label" && galleryTarget.index !== t.index) return null;
+    return (
+      <div className="absolute z-30 mt-1 w-64 max-h-60 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg py-1">
+        {galleryLoading ? (
+          <div className="px-3 py-2 text-xs text-slate-400 flex items-center gap-2">
+            <Loader2 size={12} className="animate-spin" /> 读取图库...
+          </div>
+        ) : galleryFiles.length === 0 ? (
+          <div className="px-3 py-2 text-xs text-slate-400">图库为空：上传或保存图标后自动存入堆栈 icon/ 文件夹</div>
+        ) : (
+          galleryFiles.map((f) => (
+            <button
+              key={f}
+              type="button"
+              onClick={() => pickGalleryIcon(t, f)}
+              className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-50"
+              title={f}
+            >
+              <img
+                src={`/api/stack-icons/${encodeURIComponent(stack.name)}/${encodeURIComponent(f)}`}
+                alt=""
+                className="w-5 h-5 rounded flex-shrink-0"
+              />
+              <span className="truncate">{f}</span>
+            </button>
+          ))
+        )}
+      </div>
+    );
+  };
+  /** 图库下拉按钮（置于 SVG/编辑代码按钮左侧） */
+  const galleryButton = (t: IconTarget) => (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => openIconGallery(t)}
+        title="从堆栈图库（icon 文件夹）选择图标"
+        className="flex items-center gap-1 px-3 py-1.5 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 whitespace-nowrap"
+      >
+        <FolderOpen size={14} /> 图库 <ChevronDown size={12} />
+      </button>
+      {galleryPanel(t)}
+    </div>
+  );
+
   const tabs = [
     { key: "compose", label: "COMPOSE", icon: <FileCode size={14} /> },
     { key: "env", label: ".ENV", icon: <Wrench size={14} /> },
@@ -1318,9 +1396,12 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
       } else if (activeTab === "env") {
         await saveStackEnvApi(engineId, stack.name, envContent);
       } else if (activeTab === "webui") {
-        await saveStackSettingsApi(engineId, stack.name, { webuiLabels });
+        const normalized = await saveStackSettingsApi(engineId, stack.name, { webuiLabels });
+        // v1.49.0：URL/data URI 已被服务端转存为图库本地 URL，回填表单保持一致
+        if (normalized?.webuiLabels) setWebuiLabels(normalized.webuiLabels);
       } else if (activeTab === "settings") {
-        await saveStackSettingsApi(engineId, stack.name, settings);
+        const normalized = await saveStackSettingsApi(engineId, stack.name, settings);
+        if (normalized?.iconUrl !== undefined) setSettings((s) => ({ ...s, iconUrl: normalized.iconUrl as string }));
         // 名称变更后目录已被重命名，关闭弹窗避免后续操作使用旧名称
         if (settings.name && settings.name !== stack.name) {
           setSaveSuccess(true);
@@ -1353,8 +1434,16 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
     }
   };
 
-  /** 读取本地文件为 data URI 并写入指定 LABELS 服务的图标（LABELS 图标不托管服务器，直接内联） */
-  const handleLabelIconFile = (index: number, file: File) => {
+  /** LABELS 服务图标上传（v1.49.0）：优先存入堆栈图库 icon/ 文件夹转本地图标；
+   *  SSH 引擎等无法落盘时回落为内联 data URI（保持旧行为兜底） */
+  const handleLabelIconFile = async (index: number, file: File) => {
+    if (!engineId) return;
+    try {
+      const url = await uploadStackIconApi(engineId, stack.name, file, false);
+      setIconUrl({ kind: "label", index }, url);
+      onRefresh?.();
+      return;
+    } catch { /* 图库不可用（如 SSH 引擎）：回落内联 */ }
     const reader = new FileReader();
     reader.onload = () => {
       const url = typeof reader.result === "string" ? reader.result : "";
@@ -1646,6 +1735,8 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
                             <span className="flex-1 text-sm text-slate-600 truncate">
                               内嵌 SVG 图标（{svgSizeLabel(label.iconUrl)}）
                             </span>
+                            {/* v1.49.0：图库下拉（编辑代码按钮左侧） */}
+                            {galleryButton({ kind: "label", index: i })}
                             <button
                               type="button"
                               onClick={() => openSvgEditor({ kind: "label", index: i })}
@@ -1691,6 +1782,8 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
                             >
                               <Upload size={14} /> 上传
                             </button>
+                            {/* v1.49.0：图库下拉（SVG 按钮左侧） */}
+                            {galleryButton({ kind: "label", index: i })}
                             <button
                               type="button"
                               onClick={() => openSvgEditor({ kind: "label", index: i })}
@@ -1786,6 +1879,8 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
                       <span className="flex-1 text-sm text-slate-600 truncate">
                         内嵌 SVG 图标（{svgSizeLabel(settings.iconUrl)}）
                       </span>
+                      {/* v1.49.0：图库下拉（编辑代码按钮左侧） */}
+                      {galleryButton({ kind: "settings" })}
                       <button
                         type="button"
                         onClick={() => openSvgEditor({ kind: "settings" })}
@@ -1829,6 +1924,8 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
                         {iconUploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
                         上传
                       </button>
+                      {/* v1.49.0：图库下拉（SVG 按钮左侧） */}
+                      {galleryButton({ kind: "settings" })}
                       <button
                         type="button"
                         onClick={() => openSvgEditor({ kind: "settings" })}
