@@ -130,20 +130,39 @@ export function TagGroup({ tags, max = 3 }: { tags?: ResourceTag[]; max?: number
   );
 }
 
-/** 多选标签选择器：展示已选 chips，点开弹出标签库复选框面板 */
+/** 多选标签选择器（v1.49.2 升级为可搜索 combobox）：面板顶部搜索框实时过滤标签库；
+ * 输入无匹配时显示「+ 新建」项，点选经 onCreateTag 落盘标签库并自动选中新标签 */
 export function TagSelect({
   library,
   value,
   onChange,
+  onCreateTag,
   placeholder = "添加标签",
 }: {
   library: ResourceTag[];
   value: ResourceTag[];
   onChange: (next: ResourceTag[]) => void;
+  /** 输入内容无匹配时的新建回调：落盘标签库并返回新标签（返回 null 表示失败）；未提供则不显示新建入口 */
+  onCreateTag?: (name: string) => Promise<ResourceTag | null>;
   placeholder?: string;
 }) {
   const [open, setOpen] = useState(false);
+  /** 搜索框输入：过滤标签库；非空且无命中时显示「+ 新建」 */
+  const [query, setQuery] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+
+  // 打开面板时聚焦搜索框并清空上次输入
+  useEffect(() => {
+    if (open) {
+      setQuery("");
+      setCreateError("");
+      // 等面板渲染完成后再聚焦
+      requestAnimationFrame(() => inputRef.current?.focus());
+    }
+  }, [open]);
 
   // 点击外部关闭
   useEffect(() => {
@@ -165,6 +184,32 @@ export function TagSelect({
     onChange(has ? value.filter((t) => t.id !== tag.id) : [...value, tag]);
   };
 
+  // 输入过滤（大小写不敏感子串匹配）
+  const q = query.trim().toLowerCase();
+  const filtered = q ? library.filter((t) => (t.name || "").toLowerCase().includes(q)) : library;
+  // 「新建」条件：提供了回调 + 输入非空 + 标签库无同名标签（大小写不敏感）
+  const canCreate = !!onCreateTag && q.length > 0 && !library.some((t) => (t.name || "").toLowerCase() === q);
+
+  const handleCreate = async () => {
+    if (!onCreateTag || !q || creating) return;
+    setCreating(true);
+    setCreateError("");
+    try {
+      const tag = await onCreateTag(query.trim());
+      if (tag && tag.id) {
+        onChange([...value, tag]);
+        setQuery("");
+      } else {
+        setCreateError("新建失败，请重试");
+      }
+    } catch {
+      setCreateError("新建失败，请重试");
+    } finally {
+      setCreating(false);
+      inputRef.current?.focus();
+    }
+  };
+
   return (
     <div className="relative" ref={rootRef}>
       <div
@@ -184,14 +229,54 @@ export function TagSelect({
 
       {open && (
         <div className="absolute left-0 right-0 top-full mt-1 bg-white rounded-lg border border-slate-200 shadow-lg z-50 overflow-hidden">
-          {library.length === 0 ? (
+          {/* 搜索框：输入实时过滤标签库（v1.49.2） */}
+          <div className="p-2 border-b border-slate-100">
+            <input
+              ref={inputRef}
+              type="text"
+              value={query}
+              onChange={(e) => { setQuery(e.target.value); setCreateError(""); }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (canCreate) handleCreate();
+                }
+              }}
+              placeholder="输入筛选标签，无匹配可新建"
+              className="w-full px-2.5 py-1.5 text-sm border border-slate-200 rounded-md focus:outline-none focus:border-blue-400"
+            />
+          </div>
+
+          {/* 新建入口：输入非空且标签库无同名标签时显示 */}
+          {canCreate && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleCreate();
+              }}
+              disabled={creating}
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50 transition-colors disabled:opacity-60 border-b border-slate-100"
+            >
+              <Plus size={14} className="flex-shrink-0" />
+              <span className="truncate">新建「{query.trim()}」</span>
+            </button>
+          )}
+          {createError && (
+            <div className="px-3 py-1.5 text-xs text-red-500 border-b border-slate-100">{createError}</div>
+          )}
+
+          {library.length === 0 && !canCreate ? (
             <div className="px-3 py-4 text-xs text-slate-400 text-center">
               <TagsIcon size={14} className="mx-auto mb-1.5" />
-              暂无标签，请先到「系统设置 → 标签管理」创建
+              {onCreateTag ? "输入名称新建标签" : "暂无标签，请先到「系统设置 → 标签管理」创建"}
             </div>
+          ) : filtered.length === 0 && !canCreate ? (
+            <div className="px-3 py-4 text-xs text-slate-400 text-center">无匹配标签</div>
           ) : (
             <div className="max-h-52 overflow-y-auto py-1">
-              {library.map((tag) => {
+              {filtered.map((tag) => {
                 const checked = value.some((t) => t.id === tag.id);
                 return (
                   <button

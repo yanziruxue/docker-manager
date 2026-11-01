@@ -42,7 +42,8 @@ import {
   transformStacks,
   transformActivityLogs,
 } from "./transforms";
-import type { PageKey, Container, DockerImage, DockerVolume, DockerEngine, Stack, SystemSettings, ActivityLog, EngineResourceStats, UpdateInfo, ImageUpdateDetail, ImageUpdateSummaryView, ImageUpdateStatusView } from "./types";
+import type { PageKey, Container, DockerImage, DockerVolume, DockerEngine, Stack, SystemSettings, ActivityLog, EngineResourceStats, UpdateInfo, ImageUpdateDetail, ImageUpdateSummaryView, ImageUpdateStatusView, ResourceTag } from "./types";
+import { randomTagColor } from "./components/TagPicker";
 
 /** 把后端检查明细摊平成 { repo:tag -> 是否有更新 }；多 tag 镜像的每个标签都写入，保证表格逐行能匹配 */
 function toRefMap(details: ImageUpdateDetail[]): Record<string, boolean> {
@@ -578,6 +579,26 @@ export default function App() {
     }
   }, []);
 
+  // 标签库新建标签（v1.49.2）：堆栈 LABELS 标签选择器输入无匹配时「+ 新建」直达，
+  // 随机色 + id 与系统设置「标签管理」同规则，落盘后同步本地 settings 状态
+  const handleCreateTag = useCallback(async (name: string): Promise<ResourceTag | null> => {
+    const cur = settingsRef.current;
+    if (!cur) return null;
+    const tag: ResourceTag = {
+      id: `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+      name,
+      color: randomTagColor(),
+    };
+    try {
+      const saved = await saveSettingsApi({ ...cur, tags: [...(cur.tags || []), tag] });
+      setSettings(saved);
+      return tag;
+    } catch (err) {
+      console.error("新建标签失败:", err);
+      return null;
+    }
+  }, []);
+
   /**
    * 应用检查结果。
    * 后端 `checkEngineImages` 返回的**始终是该引擎的全量视图**（单镜像检查也会与缓存合并），
@@ -826,6 +847,7 @@ export default function App() {
               onRefresh={() => activeEngineId && loadEngineData(activeEngineId)}
               menuLanguage={settings?.docker?.menuLanguage || "zh"}
               tagLibrary={settings?.tags || []}
+              onCreateTag={handleCreateTag}
               autoCloseDelay={settings?.modal?.autoCloseDelay ?? 5}
               composeTemplates={settings?.compose?.templates ?? []}
               autoDetectWebui={settings?.compose?.autoDetectWebui ?? true}
