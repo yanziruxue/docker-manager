@@ -819,6 +819,12 @@ export interface SystemSettings {
 export interface TelemetryConfig {
   /** 是否上传安装数量统计（默认 true；关闭后不再向远端发送任何数据） */
   enabled: boolean;
+  /**
+   * X-App-Key 应用密钥（v1.50.6，服务端管理台签发的 `lh_`+48hex 明文，详见 docs/客户端实施说明.md）。
+   * 非空时上报请求携带 `X-App-Key` 头（新鉴权）；空串 = 不携带，回落旧 `X-Telemetry-Key` 过渡头。
+   * 配置化存储（settings.json，不入库、不进日志），绝不硬编码进源码。
+   */
+  appKey?: string;
 }
 
 /**

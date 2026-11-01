@@ -282,7 +282,7 @@ function getDefaultSettings(): SystemSettings {
       autoDetectWebui: true,
     },
     // 默认开启上传安装数量统计（系统设置 → 硬件信息 可关闭）
-    telemetry: { enabled: true },
+    telemetry: { enabled: true, appKey: "" },
     // 镜像管理页显示选项：仓库名默认隐藏 registry 地址前缀（列显隐 → 镜像管理 可关）
     imagesDisplay: { hideRegistryPrefix: true, hideLibraryPrefix: true },
     // 目录镜像：默认关闭，目标路径留空（用户按需开启）
@@ -3357,6 +3357,8 @@ docker-compose version</code>
             <ActivityPanel
               telemetryEnabled={data.telemetry?.enabled ?? true}
               onTelemetryEnabledChange={(val) => update("telemetry", "enabled", val)}
+              appKey={data.telemetry?.appKey ?? ""}
+              onAppKeyChange={(val) => update("telemetry", "appKey", val)}
             />
           </div>
         )}

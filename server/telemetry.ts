@@ -628,6 +628,8 @@ interface TelemetryConfigLike {
   enabled?: boolean;
   endpoint?: string;
   collectHwFingerprint?: boolean;
+  /** X-App-Key 应用密钥（v1.50.6）；空串/未配置 = 不携带新鉴权头 */
+  appKey?: string;
 }
 
 /** 上报端点（可用环境变量 TELEMETRY_ENDPOINT 覆盖，便于自建/调试） */
@@ -641,13 +643,16 @@ const TELEMETRY_PATH = "/api/yanzi-docker/event";
  */
 function readConfig(): Required<TelemetryConfigLike> {
   let enabled = true;
+  let appKey = process.env.TELEMETRY_APP_KEY || "";
   try {
     const s = getSettings();
     if (s?.telemetry && typeof s.telemetry.enabled === "boolean") enabled = s.telemetry.enabled;
+    // 密钥来源优先级：环境变量 > 设置页（配置化存储，绝不硬编码）
+    if (!appKey && s?.telemetry && typeof s.telemetry.appKey === "string") appKey = s.telemetry.appKey;
   } catch {
     /* 读取失败按默认开启 */
   }
-  return { enabled, endpoint: TELEMETRY_ENDPOINT, collectHwFingerprint: true };
+  return { enabled, endpoint: TELEMETRY_ENDPOINT, collectHwFingerprint: true, appKey: appKey.trim() };
 }
 
 /**
@@ -719,7 +724,9 @@ async function sendReport(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        // 鉴权：设备标识（硬件指纹）同时作为 X-Telemetry-Key
+        // 鉴权（新，v1.50.6）：管理台签发的应用密钥原样直传，不拼接/不哈希/base64（见 docs/客户端实施说明.md §2）
+        ...(cfg.appKey ? { "X-App-Key": cfg.appKey } : {}),
+        // 鉴权（旧，过渡兼容）：设备标识（硬件指纹）作为 X-Telemetry-Key；服务端双头并存时优先认 X-App-Key
         "X-Telemetry-Key": info.deviceId,
       },
       body: JSON.stringify(buildPayload(info, cfg.collectHwFingerprint, uploadEnabled, upapi)),

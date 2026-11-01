@@ -16,7 +16,27 @@
 
 ---
 
-## v1.50.5 — 2026-11-01（**已构建 · 待发布**）
+## v1.50.6 — 2026-11-01（**已构建 · 待发布**）
+
+---
+
+### 已完成
+- **上报请求接入 `X-App-Key` 应用密钥（对接《客户端实施说明》新鉴权体系）**：
+  - `server/telemetry.ts`：`readConfig()` 读取密钥（来源优先级：环境变量 `TELEMETRY_APP_KEY` > 设置页 `settings.telemetry.appKey`）；`sendReport()` 密钥非空时请求头携带 `X-App-Key`（明文原样直传，不拼接/不哈希），**旧 `X-Telemetry-Key` 过渡头保留**（服务端双头并存优先认 X-App-Key）
+  - `src/types.ts` + `server/settings.ts`：`TelemetryConfig.appKey?: string`（默认空串 = 不携带新头，走旧鉴权过渡）
+  - `src/components/ActivityPanel.tsx`：活跃度面板「上传安装数量统计」卡内新增「X-App-Key（应用密钥，选填）」输入框（PasswordInput 掩码 + 小眼睛，配置化存储不硬编码、不进日志）
+  - `src/pages/Settings.tsx`：activity 分区接线 + 默认值
+  - 兼容性：不填密钥行为与 v1.50.5 完全一致（仅 X-Telemetry-Key）；填入后立即对上报生效（每次上报时实时读取配置）
+
+### 未完成 / 已知限制
+- 无
+
+### 下一步
+- 无
+
+---
+
+## v1.50.5 — 2026-11-01（**已构建 · 已推 Gitea**）
 
 ---
 
