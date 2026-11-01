@@ -44,7 +44,7 @@ import {
   ApiError,
 } from "../api";
 import { addOpLog } from "../opLog";
-import { formatBytes, parseSizeBytes, stripRegistryHost } from "../transforms";
+import { formatBytes, parseSizeBytes, stripLibraryPrefix, stripRegistryHost } from "../transforms";
 
 interface ImagesProps {
   images: DockerImage[];
@@ -67,6 +67,12 @@ interface ImagesProps {
    * 不回写服务端；设置页开关仍是持久化入口。
    */
   hideRepoRegistryInit?: boolean;
+  /**
+   * 「library/ 命名空间前缀」显隐的初始值（系统设置 → 列显隐 → 镜像管理，v1.50.3）。
+   * true = 剥掉官方命名空间前缀（library/nginx ⇒ nginx，默认）；false = 原样显示。
+   * 页内工具栏「列」下拉的「library/ 前缀」项以此为初值、会话级切换，不回写服务端。
+   */
+  hideRepoLibraryInit?: boolean;
   /** 检查全部镜像更新（后端 digest 比对） */
   onCheckAllUpdates?: () => void;
   /** 检查单个镜像更新（右键菜单，传 repo:tag） */
@@ -494,7 +500,7 @@ function ImageImportPanel({
   );
 }
 
-export function Images({ images, loading, error, engineId, onRefresh, onImagesRemoved, defaultVisibleColumns, hideRepoRegistryInit = true, onCheckAllUpdates, onCheckImageUpdate, checkingUpdates, imageUpdateStatus, imageUpdateError }: ImagesProps) {
+export function Images({ images, loading, error, engineId, onRefresh, onImagesRemoved, defaultVisibleColumns, hideRepoRegistryInit = true, hideRepoLibraryInit = true, onCheckAllUpdates, onCheckImageUpdate, checkingUpdates, imageUpdateStatus, imageUpdateError }: ImagesProps) {
   const [search, setSearch] = useState("");
   // 搜索框 ref：非受控模式，原生事件直读 DOM 值（见下方 useEffect 注释）
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -1122,6 +1128,17 @@ export function Images({ images, loading, error, engineId, onRefresh, onImagesRe
   // 初始值取服务端设置（缺省隐藏），页内切换为会话级，不写 settings（设置页开关仍是持久化入口）
   const [hideRepoRegistry, setHideRepoRegistry] = useState(hideRepoRegistryInit);
 
+  // 「library/ 命名空间前缀」显隐（v1.50.3）：工具栏「列」下拉新增项「library/ 前缀」——
+  // 勾选 = 显示官方命名空间前缀（library/nginx）；不勾选 = 剥掉前缀（nginx）。
+  // 初始值取服务端设置（缺省剥掉），页内切换为会话级，不写 settings（设置页开关仍是持久化入口）
+  const [hideRepoLibrary, setHideRepoLibrary] = useState(hideRepoLibraryInit);
+
+  /** 仓库名展示值：先按开关剥 registry 主机名，再按开关剥 library/ 前缀；悬停 title 恒显完整原始名 */
+  const repoShown = (repo: string) => {
+    const after = hideRepoRegistry ? stripRegistryHost(repo) : repo;
+    return hideRepoLibrary ? stripLibraryPrefix(after) : after;
+  };
+
   // 表头点击排序（与容器/堆栈页同模式）：sortKey=null 保持 daemon 原始顺序；同列再点翻转方向
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<1 | -1>(1);
@@ -1154,7 +1171,9 @@ export function Images({ images, loading, error, engineId, onRefresh, onImagesRe
       // 表头显示短名时用户按看到的文案搜也要能命中（v1.42.15）
       const repo = img.repository.toLowerCase();
       const repoShort = hideRepoRegistry ? stripRegistryHost(img.repository).toLowerCase() : repo;
-      const matchSearch = repo.includes(kw) || repoShort.includes(kw) || img.tag.toLowerCase().includes(kw);
+      // 剥 library/ 后的形态也要能按所见文案命中（v1.50.3，与短名匹配同理由）
+      const repoShorter = hideRepoLibrary ? stripLibraryPrefix(repoShort) : repoShort;
+      const matchSearch = repo.includes(kw) || repoShort.includes(kw) || repoShorter.includes(kw) || img.tag.toLowerCase().includes(kw);
       let matchFilter = true;
       if (filter === "used") matchFilter = img.associatedContainers.length > 0;
       // 「未使用」= 无任何容器引用；悬空镜像已归入此分类（不再单列）
@@ -1187,7 +1206,7 @@ export function Images({ images, loading, error, engineId, onRefresh, onImagesRe
       if (va > vb) return dir;
       return 0;
     });
-  }, [images, search, filter, hideRepoRegistry, sortKey, sortDir, imageUpdateStatus]);
+  }, [images, search, filter, hideRepoRegistry, hideRepoLibrary, sortKey, sortDir, imageUpdateStatus]);
 
   // ⚠️ 勾选按「镜像」粒度计：transformImages 按 RepoTag 拆行 ⇒ 同一镜像 id 多行。
   // 全选/取消判断必须走 id 维度——早期版本用 `selected.size === filtered.length`
@@ -1460,6 +1479,20 @@ export function Images({ images, loading, error, engineId, onRefresh, onImagesRe
                     />
                     仓库 registry 地址
                   </label>
+                  {/* 「library/ 前缀」项（v1.50.3）：勾选 = 显示官方命名空间前缀；不勾选 = 剥掉。
+                      与「仓库 registry 地址」并列会话级切换；持久化入口在 设置 → 列显隐 → 镜像管理。 */}
+                  <label
+                    className="flex items-center gap-2 px-2 py-1.5 text-sm text-slate-600 hover:bg-slate-50 rounded cursor-pointer"
+                    title="勾选显示官方命名空间前缀（如 library/nginx）；不勾选剥掉前缀（如 nginx）"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={!hideRepoLibrary}
+                      onChange={() => setHideRepoLibrary((v) => !v)}
+                      className="rounded border-slate-300 text-blue-500 focus:ring-blue-500"
+                    />
+                    library/ 前缀
+                  </label>
                 </div>
               </div>
             )}
@@ -1627,9 +1660,9 @@ export function Images({ images, loading, error, engineId, onRefresh, onImagesRe
                       <div className="flex items-center gap-2">
                         <span
                           className="text-sm font-mono text-slate-700"
-                          title={hideRepoRegistry && stripRegistryHost(img.repository) !== img.repository ? img.repository : undefined}
+                          title={repoShown(img.repository) !== img.repository ? img.repository : undefined}
                         >
-                          {hideRepoRegistry ? stripRegistryHost(img.repository) : img.repository}
+                          {repoShown(img.repository)}
                         </span>
                         {img.isDangling && <Tag text="悬空" color="amber" />}
                         {isLocked(img) && <Tag text="不被清理" color="purple" />}

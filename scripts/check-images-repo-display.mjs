@@ -15,6 +15,8 @@
  *      初始值取 hideRepoRegistryInit prop（settings 缺省 true），会话级切换不写服务端。
  *   ⑩ 「SHA-256」列默认不显示（v1.42.19）：镜像页全量默认分支剔除 sha256；设置页列显隐卡片
  *      无 stored 时 images 默认不含 sha256；列本身仍可手动勾选（allColumns 保留、渲染条件保留）。
+ *   ⑪ 「library/ 前缀」显隐（v1.50.3）：stripLibraryPrefix 纯函数（真实执行用例）+ 列下拉新项 +
+ *      repoShown 统一展示链 + 搜索匹配剥后形态 + 设置页/服务端/types/App 全链路接线。
  *
  * 运行：node scripts/check-images-repo-display.mjs （已接入 npm run test:gates）
  */
@@ -86,8 +88,8 @@ console.log("\n── ② Images.tsx 接线 ──");
 ok("★ ImagesProps 含 hideRepoRegistryInit?: boolean", /hideRepoRegistryInit\?: boolean;/.test(images));
 ok("★ 解构默认值 hideRepoRegistryInit = true", /hideRepoRegistryInit = true/.test(images));
 ok("★ 会话级状态 useState(hideRepoRegistryInit)", /useState\(hideRepoRegistryInit\)/.test(images));
-ok("★ 仓库名单元格条件缩短", /hideRepoRegistry \? stripRegistryHost\(img\.repository\) : img\.repository/.test(images));
-ok("★ 被缩短时悬停 title 显示完整地址", /title=\{hideRepoRegistry && stripRegistryHost\(img\.repository\) !== img\.repository \? img\.repository : undefined\}/.test(images));
+ok("★ 仓库名单元格条件缩短（v1.50.3 起统一走 repoShown：先 registry 后 library）", /hideRepoRegistry \? stripRegistryHost\(repo\) : repo/.test(images) && /hideRepoLibrary \? stripLibraryPrefix\(after\) : after/.test(images));
+ok("★ 被缩短时悬停 title 显示完整地址", /title=\{repoShown\(img\.repository\) !== img\.repository \? img\.repository : undefined\}/.test(images));
 ok("单元格仍显示悬空 / 已锁定标签", /\{img\.isDangling && <Tag text="悬空" color="amber" \/>\}/.test(images));
 
 /* ---------- ③ 搜索匹配 ---------- */
@@ -110,7 +112,7 @@ ok("列显隐分区总说明提及该开关", /镜像管理卡片内另有「仓
 
 /* ---------- ⑥ 服务端默认值 + 合并 ---------- */
 console.log("\n── ⑥ 服务端设置 ──");
-ok("★ DEFAULT_SETTINGS.imagesDisplay.hideRegistryPrefix = true", /imagesDisplay: \{\s*\n\s*hideRegistryPrefix: true,?\s*\n\s*\},/.test(server));
+ok("★ DEFAULT_SETTINGS.imagesDisplay.hideRegistryPrefix = true（v1.50.3 起同段含 hideLibraryPrefix）", /imagesDisplay: \{[\s\S]*?hideRegistryPrefix: true,[\s\S]*?hideLibraryPrefix: true,[\s\S]*?\},/.test(server));
 ok("★ getSettings 二级合并（旧配置无该段时继承默认）", /imagesDisplay: \{ \.\.\.DEFAULT_SETTINGS\.imagesDisplay, \.\.\.\(parsed\?\.imagesDisplay \|\| \{\}\) \},/.test(server));
 
 /* ---------- ⑦ 类型定义 ---------- */
@@ -145,6 +147,50 @@ ok("★ allColumns 仍含 sha256 项（列可手动勾选，未被移除）", !!
 ok("★ SHA-256 列头渲染条件保留", /visibleColumns\.has\("sha256"\) && <SortableTh/.test(images));
 ok("★ 设置页列显隐 images 无 stored 时默认不含 sha256", /const defaultKeys = page\.key === "images" \? allKeys\.filter\(k => k !== "sha256"\) : allKeys;/.test(settings) && /const visibleSet = stored && stored\.length > 0 \? new Set\(stored\) : new Set\(defaultKeys\);/.test(settings));
 ok("设置页说明注明 SHA-256 默认不显示", /镜像管理「SHA-256」列默认不显示/.test(settings));
+
+/* ---------- ⑪ 「library/ 前缀」显隐（v1.50.3） ---------- */
+console.log("\n── ⑪ 「library/ 前缀」显隐（v1.50.3） ──");
+ok("★ stripLibraryPrefix 函数存在（transforms.ts 导出）", /export function stripLibraryPrefix\(repo: string\): string \{/.test(transforms));
+ok("★ Images.tsx 已导入 stripLibraryPrefix", /import \{[^}]*stripLibraryPrefix[^}]*\} from "\.\.\/transforms"/.test(images));
+// 真实执行用例
+const flm = transforms.match(/export function stripLibraryPrefix\(repo: string\): string \{[\s\S]*?\n\}/);
+ok("stripLibraryPrefix 函数体可定位", !!flm);
+if (flm) {
+  const body = flm[0]
+    .replace(/\(repo: string\): string/, "(repo)")
+    .replace(/^export function stripLibraryPrefix/, "return function stripLibraryPrefix")
+    .replace(/\}\s*$/, "}");
+  let stripLib;
+  try {
+    stripLib = new Function(`${body}`)();
+  } catch (e) {
+    console.log("  ❌ 函数体编译失败:", e.message);
+    fail++;
+  }
+  if (stripLib) {
+    ok("★ library/nginx ⇒ nginx（用户指定场景）", stripLib("library/nginx") === "nginx");
+    ok("nginx ⇒ 原样（无前缀）", stripLib("nginx") === "nginx");
+    ok("gitea/library ⇒ 原样（首段不是 library）", stripLib("gitea/library") === "gitea/library");
+    ok("library/foo/bar ⇒ foo/bar（剥首段后保留剩余路径）", stripLib("library/foo/bar") === "foo/bar");
+    ok("裸 library ⇒ 原样（剥完为空不剥，绝不显示空仓库名）", stripLib("library") === "library");
+    ok("<none> ⇒ 原样", stripLib("<none>") === "<none>");
+  }
+}
+ok("★ 新 prop hideRepoLibraryInit（默认 true）", /hideRepoLibraryInit = true/.test(images));
+ok("★ 会话级状态 setHideRepoLibrary", /const \[hideRepoLibrary, setHideRepoLibrary\] = useState\(hideRepoLibraryInit\)/.test(images));
+ok("★ 展示值统一走 repoShown（先 registry 后 library）", /const repoShown = \(repo: string\) => \{/.test(images) && /hideRepoLibrary \? stripLibraryPrefix\(after\) : after/.test(images));
+ok("★ 单元格渲染用 repoShown 且悬停显示完整原始名", /title=\{repoShown\(img\.repository\) !== img\.repository \? img\.repository : undefined\}/.test(images));
+ok("★ 「列」下拉内有「library/ 前缀」label", /library\/ 前缀\s*<\/label>/.test(images));
+ok("★ 该项勾选态 = 显示前缀（checked={!hideRepoLibrary}）", /checked=\{!hideRepoLibrary\}/.test(images));
+ok("★ onChange 切换会话级状态", /onChange=\{\(\) => setHideRepoLibrary\(\(v\) => !v\)\}/.test(images));
+ok("★ 搜索同时匹配剥 library 后的形态", /repoShorter = hideRepoLibrary \? stripLibraryPrefix\(repoShort\) : repoShort/.test(images) && /repoShorter\.includes\(kw\)/.test(images));
+ok("★ useMemo 依赖含 hideRepoLibrary", /\[images, search, filter, hideRepoRegistry, hideRepoLibrary, sortKey, sortDir, imageUpdateStatus\]/.test(images));
+ok("★ App.tsx 从 settings.imagesDisplay.hideLibraryPrefix 取数（缺省 true）", /hideRepoLibraryInit=\{settings\?\.imagesDisplay\?\.hideLibraryPrefix \?\? true\}/.test(app));
+ok("★ 设置页持久化开关接线（读写 hideLibraryPrefix）", /checked=\{data\.imagesDisplay\?\.hideLibraryPrefix \?\? true\}/.test(settings) && /update\("imagesDisplay", "hideLibraryPrefix", e\.target\.checked\)/.test(settings));
+ok("★ 设置页默认值含 hideLibraryPrefix: true", /imagesDisplay: \{ hideRegistryPrefix: true, hideLibraryPrefix: true \}/.test(settings));
+ok("★ 服务端 DEFAULT_SETTINGS.hideLibraryPrefix = true", /hideLibraryPrefix: true,/.test(server));
+ok("★ 服务端二级合并已覆盖该字段（…DEFAULT_SETTINGS.imagesDisplay 展开）", /imagesDisplay: \{ \.\.\.DEFAULT_SETTINGS\.imagesDisplay, \.\.\.\(parsed\?\.imagesDisplay \|\| \{\}\) \},/.test(server));
+ok("★ types.ts ImagesDisplayConfig 含 hideLibraryPrefix", /hideLibraryPrefix: boolean;/.test(types));
 
 console.log(`\n结果: PASS=${pass} FAIL=${fail}`);
 process.exit(fail === 0 ? 0 : 1);

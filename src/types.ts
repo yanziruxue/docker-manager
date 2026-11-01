@@ -834,6 +834,12 @@ export interface ImagesDisplayConfig {
    * 悬空镜像 `<none>` 与空串不受影响；鼠标悬停被缩短的仓库名仍可看到完整地址。
    */
   hideRegistryPrefix: boolean;
+  /**
+   * 仓库名剥掉 Docker Hub 官方命名空间前缀 library/（**默认 true**，v1.50.3）：
+   * `library/nginx` ⇒ 显示 `nginx`；`docker.io/library/nginx` 先剥 registry 再剥 library ⇒ `nginx`。
+   * 仅首段恰为 `library` 时剥（`gitea/library`、裸 `library` 原样）；悬停仍可见完整原始名。
+   */
+  hideLibraryPrefix: boolean;
 }
 
 // ============ 应用详情 / 应用日志 / 目录镜像 ============

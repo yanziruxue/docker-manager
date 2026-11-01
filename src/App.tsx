@@ -868,6 +868,7 @@ export default function App() {
               }}
               defaultVisibleColumns={settings?.columnVisibility?.images}
               hideRepoRegistryInit={settings?.imagesDisplay?.hideRegistryPrefix ?? true}
+              hideRepoLibraryInit={settings?.imagesDisplay?.hideLibraryPrefix ?? true}
               onCheckAllUpdates={handleCheckAllUpdates}
               onCheckImageUpdate={handleCheckImageUpdate}
               checkingUpdates={checkingUpdates}

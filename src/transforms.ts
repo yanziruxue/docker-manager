@@ -149,6 +149,19 @@ export function stripRegistryHost(repo: string): string {
   return rest ? rest : raw;
 }
 
+/**
+ * 仓库名剥掉 Docker Hub 官方命名空间前缀 library/（v1.50.3，系统设置 → 列显隐 → 镜像管理 控制）。
+ * 仅当首段恰为 `library` 且其后还有内容时剥掉，绝不显示空仓库名：
+ *   library/nginx ⇒ nginx；docker.io/library/nginx ⇒ docker.io/nginx（先剥 registry 再剥 library）；
+ *   gitea/library、library ⇒ 原样（首段不是 library / 裸命名空间无剩余）；<none> 原样。
+ */
+export function stripLibraryPrefix(repo: string): string {
+  const raw = repo?.trim() || "";
+  if (!raw.startsWith("library/")) return raw;
+  const rest = raw.slice("library/".length);
+  return rest ? rest : raw;
+}
+
 export function transformImages(raw: any[]): DockerImage[] {
   const out: DockerImage[] = [];
   // 去重：daemon 的 /images/json 在多源拉取/镜像加速器场景可能返回重复条目或 RepoTags 内重复串，

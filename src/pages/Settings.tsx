@@ -284,7 +284,7 @@ function getDefaultSettings(): SystemSettings {
     // 默认开启上传安装数量统计（系统设置 → 硬件信息 可关闭）
     telemetry: { enabled: true },
     // 镜像管理页显示选项：仓库名默认隐藏 registry 地址前缀（列显隐 → 镜像管理 可关）
-    imagesDisplay: { hideRegistryPrefix: true },
+    imagesDisplay: { hideRegistryPrefix: true, hideLibraryPrefix: true },
     // 目录镜像：默认关闭，目标路径留空（用户按需开启）
     mirror: {
       backups: { enabled: false, target: "" },
@@ -4012,6 +4012,22 @@ docker-compose version</code>
                           勾选后 <span className="font-mono">docker.1panel.live/gitea/gitea</span> 显示为 <span className="font-mono">gitea/gitea</span>。
                           判定规则同 Docker：仓库名 <span className="font-mono">/</span> 前首段含「.」或「:」、或为 <span className="font-mono">localhost</span> 时视为 registry 地址并隐藏；
                           <span className="font-mono">gitea/gitea</span>、<span className="font-mono">nginx</span> 等无主机名的仓库名原样显示。悬停被缩短的仓库名仍可看到完整地址。
+                        </p>
+                        {/* 「剥 library/ 前缀」开关（v1.50.3）：官方镜像命名空间 library/ 的显隐 */}
+                        <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer mt-2">
+                          <input
+                            type="checkbox"
+                            checked={data.imagesDisplay?.hideLibraryPrefix ?? true}
+                            onChange={(e) => update("imagesDisplay", "hideLibraryPrefix", e.target.checked)}
+                            className="rounded border-slate-300 text-blue-500 focus:ring-blue-500/20"
+                          />
+                          仓库名剥掉 library/ 前缀
+                        </label>
+                        <p className="mt-1 text-xs text-slate-400">
+                          勾选后 Docker Hub 官方镜像 <span className="font-mono">library/nginx</span> 显示为 <span className="font-mono">nginx</span>
+                          （<span className="font-mono">docker.io/library/nginx</span> 先剥 registry 再剥 library，同样显示 <span className="font-mono">nginx</span>）。
+                          仅首段恰为 <span className="font-mono">library</span> 时剥，<span className="font-mono">gitea/library</span> 等第三方仓库名不受影响。
+                          镜像管理页工具栏「列」下拉内也有同名控制项「library/ 前缀」。
                         </p>
                       </div>
                     )}

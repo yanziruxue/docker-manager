@@ -228,6 +228,8 @@ const DEFAULT_SETTINGS = {
    */
   imagesDisplay: {
     hideRegistryPrefix: true,
+    // 仓库名剥掉官方命名空间前缀 library/ 默认开启（v1.50.3）：library/nginx ⇒ nginx
+    hideLibraryPrefix: true,
   },
 };
 

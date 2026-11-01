@@ -16,6 +16,26 @@
 
 ---
 
+## v1.50.3 — 2026-11-01（**已构建 · 待发布**）
+
+---
+
+### 已完成
+- **镜像管理新增「library/ 前缀」显隐选项**（剥掉 Docker Hub 官方命名空间前缀）：
+  - 新纯函数 `stripLibraryPrefix()`（`src/transforms.ts`）：仅首段恰为 `library` 且其后有内容时剥——`library/nginx` ⇒ `nginx`；`docker.io/library/nginx` 先剥 registry 再剥 library ⇒ `nginx`；`gitea/library`、裸 `library`、`<none>` 原样，绝不显示空仓库名
+  - `src/types.ts` `ImagesDisplayConfig` 新增 `hideLibraryPrefix: boolean`（**默认 true**）；`server/settings.ts` 默认值 + 二级合并覆盖旧配置
+  - `src/pages/Images.tsx`：工具栏「列」下拉新增「library/ 前缀」项（会话级，勾选 = 显示前缀）；展示统一走 `repoShown()`（先 registry 后 library）；搜索同时匹配剥 library 后形态；悬停 title 恒显完整原始名
+  - `src/pages/Settings.tsx`：设置 → 列显隐 → 镜像管理 新增持久化开关「仓库名剥掉 library/ 前缀」；`src/App.tsx` 传 `hideRepoLibraryInit`
+  - 门禁 `scripts/check-images-repo-display.mjs` 新增 ⑪ 断言段（真实执行用例 + 全链路接线，52→76 项）；同步更新 3 条因设计升级失效的旧锚点（单元格渲染统一 repoShown / 默认值含新字段）；负向自检通过（注入回归→红→还原→绿）
+
+### 未完成 / 已知限制
+- 无
+
+### 下一步
+- 无
+
+---
+
 ## v1.50.2 — 2026-11-01（**已构建 · 待发布**）
 
 ---
