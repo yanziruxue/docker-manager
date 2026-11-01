@@ -127,10 +127,34 @@ export function transformContainers(raw: any[]): Container[] {
 }
 
 /** 转换镜像列表：与 docker images 口径一致，每个标签一行（同 ID 多标签会重复出现） */
+/**
+ * 仓库名隐藏 registry 地址前缀（v1.42.15，系统设置 → 列显隐 → 镜像管理 控制）。
+ * 判定沿用 Docker 自身规则：`/` 前首段含「.」或「:」、或为 `localhost` ⇒ 视为 registry 主机名并剥掉。
+ *   docker.1panel.live/gitea/gitea ⇒ gitea/gitea
+ *   registry:5000/foo/bar         ⇒ foo/bar
+ *   localhost/foo                 ⇒ foo
+ *   gitea/gitea / nginx / library/nginx ⇒ 原样（无主机名）
+ * 悬空镜像 `<none>`、空串、剥完为空（如裸 `localhost/`）时原样返回，绝不显示空仓库名。
+ * （v1.49.4 自 Images.tsx 迁入：transformImages 去重也需要同一套剥前缀逻辑，单一来源）
+ */
+export function stripRegistryHost(repo: string): string {
+  const raw = repo?.trim() || "";
+  if (!raw || raw === "<none>") return raw;
+  const slash = raw.indexOf("/");
+  if (slash <= 0) return raw; // 无斜杠或斜杠开头 ⇒ 无主机名可剥
+  const head = raw.slice(0, slash);
+  const isHost = head === "localhost" || head.includes(".") || head.includes(":");
+  if (!isHost) return raw;
+  const rest = raw.slice(slash + 1);
+  return rest ? rest : raw;
+}
+
 export function transformImages(raw: any[]): DockerImage[] {
   const out: DockerImage[] = [];
   // 去重：daemon 的 /images/json 在多源拉取/镜像加速器场景可能返回重复条目或 RepoTags 内重复串，
-  // 按 sha256+repository+tag 去重（key 含 sha256 ⇒ 同 tag 不同镜像 ID 的合法场景仍保留）
+  // 按 sha256+repository+tag 去重（key 含 sha256 ⇒ 同 tag 不同镜像 ID 的合法场景仍保留）。
+  // v1.49.4：repository 用剥掉 registry 前缀后的显示名参与去重 —— 同一镜像 Id 在多个 registry
+  // 有同名 tag 时（如内网 Gitea + ghcr.io 双源 retag），显示名完全相同却成多行 ⇒ 按显示名收敛为一行。
   const seen = new Set<string>();
   for (const img of raw) {
     const fullSha = (img.Id || "").replace("sha256:", "");
@@ -150,7 +174,7 @@ export function transformImages(raw: any[]): DockerImage[] {
       if (repository !== "<none>" && !repository.includes("/") && repository !== "scratch") {
         repository = `library/${repository}`;
       }
-      const dedupeKey = `${fullSha}|${repository}|${tag}`;
+      const dedupeKey = `${fullSha}|${stripRegistryHost(repository)}|${tag}`;
       if (seen.has(dedupeKey)) continue;
       seen.add(dedupeKey);
       const isDangling = repository === "<none>" && tag === "<none>";

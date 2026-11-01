@@ -29,6 +29,7 @@ const app = read("src/App.tsx");
 const settings = read("src/pages/Settings.tsx");
 const server = read("server/settings.ts");
 const types = read("src/types.ts");
+const transforms = read("src/transforms.ts"); // v1.49.4：stripRegistryHost 迁入此处（去重共用）
 
 let pass = 0;
 let fail = 0;
@@ -42,17 +43,21 @@ function ok(name, cond) {
   }
 }
 
-/* ---------- ① stripRegistryHost 纯函数 ---------- */
+/* ---------- ① stripRegistryHost 纯函数（v1.49.4 起定义在 transforms.ts，Images.tsx 导入） ---------- */
 console.log("\n── ① stripRegistryHost 纯函数 ──");
-ok("函数存在（stripRegistryHost(repo: string): string）", /function stripRegistryHost\(repo: string\): string \{/.test(images));
+ok("函数存在（transforms.ts export stripRegistryHost(repo: string): string）", /export function stripRegistryHost\(repo: string\): string \{/.test(transforms));
+ok("Images.tsx 已改为从 transforms 导入", /import \{[^}]*stripRegistryHost[^}]*\} from "\.\.\/transforms"/.test(images));
+ok("Images.tsx 本地定义已移除（单一来源）", !/function stripRegistryHost\(repo: string\): string \{/.test(images));
+// v1.49.4：transformImages 去重 key 用剥前缀后的显示名（同 Id 同显示名同 tag 收敛为一行）
+ok("★ transformImages 去重 key 使用 stripRegistryHost(repository)", /const dedupeKey = `\$\{fullSha\}\|\$\{stripRegistryHost\(repository\)\}\|\$\{tag\}`/.test(transforms));
 
-const fm = images.match(/function stripRegistryHost\(repo: string\): string \{[\s\S]*?\n\}/);
+const fm = transforms.match(/export function stripRegistryHost\(repo: string\): string \{[\s\S]*?\n\}/);
 ok("函数体可定位", !!fm);
 if (fm) {
   // 剥 TS 类型标注后用 new Function 执行真实实现
   const body = fm[0]
     .replace(/\(repo: string\): string/, "(repo)")
-    .replace(/^function stripRegistryHost/, "return function stripRegistryHost")
+    .replace(/^export function stripRegistryHost/, "return function stripRegistryHost")
     .replace(/\}\s*$/, "}");
   let strip;
   try {

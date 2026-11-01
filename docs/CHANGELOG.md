@@ -16,6 +16,19 @@
 
 ---
 
+## v1.49.4 — 2026-11-01（**已构建 · 已推 Gitea**）
+
+### 镜像列表重复行修复（同 Id 同显示名跨 registry 收敛）
+
+- **现象**：镜像管理页同名镜像出现成对的「完全相同」行（截图 5 行，仅 2 个真实 tag）——同一镜像 Id 被多个 registry 别名引用（如内网 Gitea `192.168.24.10:8024/...` + `ghcr.io/...` 双源 retag），去重 key 含完整 repository 而显示层剥掉 registry 前缀 ⇒ 显示名相同却各占一行
+- **修复**：`transformImages` 去重 key 的 repository 改用 `stripRegistryHost` 剥前缀后的**显示名**——同 Id + 同显示名 + 同 tag = 同一镜像内容，收敛为一行；多架构（同 tag 不同 Id）因 key 含 sha256 仍各自保留
+- `stripRegistryHost` 从 Images.tsx 迁至 transforms.ts 单一来源（去重与显示共用同一套剥前缀规则）；Images.tsx 改导入
+- 镜像列表行 React `key` 由 `img.id` 改为 `id|repository|tag`（多 tag 拆行时 id 重复导致 key 冲突）
+- **复现验证**（真实 transformImages 切片执行）：5 行双 registry 数据 → 收敛为 2 行（每 tag 一行）；多架构同 tag 不同 Id 保留 2 行；library/ 前缀去重不受影响
+- 门禁：`check-images-repo-display.mjs` 锚点随迁移更新（49→52 项），并新增「去重 key 使用剥前缀显示名」守卫；负向自检通过（注入回退 → 红 → 还原 → 绿）
+- 硬核验：tsc 双 0 · 16 组门禁全绿 · SHA 三处一致 `bfb9da1e…fa11`（130,419,904 B）· ELF `7f454c46` · 版本串 1.49.4×2 / 1.49.3×0
+- 已知限制：关闭「隐藏 registry 地址」时，被收敛的 registry 别名行不再单独出现（同 Id 同内容，信息等价）
+
 ## v1.49.3 — 2026-11-01（**已构建 · 已推 Gitea**）
 
 ### 标签选择器交互修正：输入并入原输入框（去掉面板内独立搜索框）
