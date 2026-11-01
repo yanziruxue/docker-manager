@@ -945,6 +945,9 @@ export function Images({ images, loading, error, engineId, onRefresh, onImagesRe
   //  2) 手动检查（检查全部 / 单镜像）完成后，下方 showCheckResult 弹窗提示明细。
   const [showCheckResult, setShowCheckResult] = useState(false);
   const manualCheckPending = useRef(false);
+  // v1.50.1：右键单镜像「检查更新」时记录该镜像 ref——结果弹窗切换单镜像语境
+  // （显示该镜像明细 + 「更新镜像」按钮直达拉取）；null = 全量检查，弹窗维持原汇总渲染
+  const [singleCheckRef, setSingleCheckRef] = useState<string | null>(null);
   // 手动检查完成（checkingUpdates 由 true 落回 false）即弹出结果明细弹窗
   useEffect(() => {
     if (manualCheckPending.current && !checkingUpdates) {
@@ -961,6 +964,16 @@ export function Images({ images, loading, error, engineId, onRefresh, onImagesRe
         at: imageUpdateStatus.at,
       }
     : null;
+  // v1.50.1：单镜像检查结果（byRef 的 key 即 repo:tag，含多 tag 镜像摊平）；null = 该镜像不在结果里（检查失败等）
+  const singleHasUpdate = singleCheckRef && imageUpdateStatus ? (imageUpdateStatus.byRef[singleCheckRef] ?? null) : null;
+  /** 单镜像检查发现更新 →「更新镜像」：关闭结果弹窗并复用拉取弹窗（进度/通知全走既有链路） */
+  const handleSingleCheckUpdate = () => {
+    if (!singleCheckRef) return;
+    const ref = singleCheckRef;
+    setShowCheckResult(false);
+    setSingleCheckRef(null);
+    openPullModal(ref);
+  };
   const [batchBusy, setBatchBusy] = useState(false);
   const [batchDownloading, setBatchDownloading] = useState<{ current: number; total: number; ref: string } | null>(null);
   const [confirmBatchDelete, setConfirmBatchDelete] = useState(false);
@@ -1263,6 +1276,7 @@ export function Images({ images, loading, error, engineId, onRefresh, onImagesRe
       icon: <RefreshCw size={14} />,
       disabled: !onCheckImageUpdate,
       onClick: () => {
+        setSingleCheckRef(`${img.repository}:${img.tag}`);
         manualCheckPending.current = true;
         onCheckImageUpdate?.(`${img.repository}:${img.tag}`);
       },
@@ -1464,6 +1478,7 @@ export function Images({ images, loading, error, engineId, onRefresh, onImagesRe
           {onCheckAllUpdates && (
             <button
               onClick={() => {
+                setSingleCheckRef(null); // 全量检查：弹窗回落汇总语境
                 manualCheckPending.current = true;
                 onCheckAllUpdates();
               }}
@@ -1885,7 +1900,7 @@ export function Images({ images, loading, error, engineId, onRefresh, onImagesRe
       {/* v1.43.18：手动检查更新（检查全部 / 单镜像）完成后弹出的结果明细 */}
       <Modal
         open={showCheckResult}
-        onClose={() => setShowCheckResult(false)}
+        onClose={() => { setShowCheckResult(false); setSingleCheckRef(null); }}
         title="镜像更新检查结果"
         size="sm"
       >
@@ -1894,6 +1909,26 @@ export function Images({ images, loading, error, engineId, onRefresh, onImagesRe
             <div className="flex items-center gap-2 text-sm text-red-600">
               <AlertTriangle size={16} className="flex-shrink-0" />
               <span>检查更新失败：{imageUpdateError}</span>
+            </div>
+          ) : singleCheckRef && checkResult ? (
+            /* v1.50.1 单镜像语境：右键「检查更新」只针对该镜像，有更新直接给「更新镜像」入口 */
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 text-sm text-slate-600">
+                {singleHasUpdate ? (
+                  <AlertTriangle size={16} className="text-amber-500 flex-shrink-0" />
+                ) : (
+                  <CheckCircle2 size={16} className="text-green-500 flex-shrink-0" />
+                )}
+                <span className="font-medium">{singleCheckRef}</span>
+              </div>
+              {singleHasUpdate ? (
+                <p className="text-sm text-amber-600">发现新版本，是否更新该镜像？</p>
+              ) : (
+                <p className="text-sm text-slate-500">该镜像已是最新版本。</p>
+              )}
+              <p className="text-xs text-slate-400">
+                检查时间：{new Date(checkResult.at).toLocaleString("zh-CN")}
+              </p>
             </div>
           ) : checkResult ? (
             <div className="space-y-3">
@@ -1938,13 +1973,30 @@ export function Images({ images, loading, error, engineId, onRefresh, onImagesRe
               </p>
             </div>
           ) : null}
-          <div className="flex justify-end pt-2">
-            <button
-              onClick={() => setShowCheckResult(false)}
-              className="px-4 py-2 text-sm text-white bg-blue-500 rounded-lg hover:bg-blue-600"
-            >
-              知道了
-            </button>
+          <div className="flex justify-end gap-2 pt-2">
+            {singleCheckRef && singleHasUpdate ? (
+              <>
+                <button
+                  onClick={() => { setShowCheckResult(false); setSingleCheckRef(null); }}
+                  className="px-4 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50"
+                >
+                  暂不更新
+                </button>
+                <button
+                  onClick={handleSingleCheckUpdate}
+                  className="px-4 py-2 text-sm text-white bg-blue-500 rounded-lg hover:bg-blue-600"
+                >
+                  更新镜像
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={() => { setShowCheckResult(false); setSingleCheckRef(null); }}
+                className="px-4 py-2 text-sm text-white bg-blue-500 rounded-lg hover:bg-blue-600"
+              >
+                知道了
+              </button>
+            )}
           </div>
         </div>
       </Modal>
