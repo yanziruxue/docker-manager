@@ -4133,11 +4133,6 @@ docker-compose version</code>
                   ))}
                 </div>
               )}
-              <p className="text-xs text-slate-400 mt-3">
-                示例：network_mode: （留空自动补 bridge）、restart: unless-stopped、container_name: （留空自动补服务名）、- TZ=Asia/Shanghai（environment 下）、- /etc/localtime:/etc/localtime:ro（volumes 下）。
-                「services 下」填到第一个服务内并缩进 4 空格，「environment 下」「volumes 下」填到对应键的子项并缩进 6 空格（键不存在时自动创建），
-                「指针处」填到编辑器光标所在行的下一行（需先在编辑器中点击定位），「末尾」追加到文件最后一行。保存后立即生效。
-              </p>
             </Card>
           </div>
         )}
