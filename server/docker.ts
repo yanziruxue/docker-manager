@@ -3196,7 +3196,8 @@ export async function getContainerStats(engine: DockerEngine, containerId: strin
 
   return {
     cpuPercent: Math.round(cpuPercent * 100) / 100,
-    memoryUsage: Math.round(memoryUsage / 1024 / 1024), // MB
+    // 内存保留 1 位小数（v1.50.4）：单位最小颗粒 MB，轻量容器（<0.5MB）不再被取整显示成 0 MB
+    memoryUsage: Math.round((memoryUsage / 1024 / 1024) * 10) / 10, // MB（1 位小数）
     memoryLimit: Math.round(memoryLimit / 1024 / 1024), // MB
     netInput: Math.round(netInput / 1024), // KB
     netOutput: Math.round(netOutput / 1024), // KB

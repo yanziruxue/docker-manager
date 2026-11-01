@@ -721,7 +721,8 @@ function fmtKbRate(kbps: number): string {
 /** MB → 可读文本（与仪表盘同一口径） */
 function fmtMB(mb: number): string {
   if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`;
-  return `${Math.round(mb)} MB`;
+  // <10MB 保留 1 位小数（v1.50.4，内存最小颗粒 MB，轻量容器不再显示 0 MB）
+  return `${mb < 10 ? Math.round(mb * 10) / 10 : Math.round(mb)} MB`;
 }
 
 /** 卡片里的小曲线通用参数：高度 + 半透明网格 */

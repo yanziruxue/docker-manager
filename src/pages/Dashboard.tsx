@@ -77,10 +77,10 @@ interface DashboardProps {
 
 const NO_STATS = "正在获取引擎资源数据…";
 
-/** MB → 可读文本 */
+/** MB → 可读文本（<10MB 保留 1 位小数，内存最小颗粒 MB，轻量容器不再显示 0 MB） */
 function fmtMB(mb: number): string {
   if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`;
-  return `${Math.round(mb)} MB`;
+  return `${mb < 10 ? Math.round(mb * 10) / 10 : Math.round(mb)} MB`;
 }
 
 /** KB/s → 可读速率 */
