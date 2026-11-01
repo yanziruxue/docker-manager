@@ -3205,6 +3205,37 @@ export async function getContainerStats(engine: DockerEngine, containerId: strin
   };
 }
 /**
+ * 全部运行容器的资源监控明细（仪表盘「容器资源监控」对比卡片）。
+ * 与 getEngineResourceStats 同款并发采样（Promise.allSettled，单个失败丢弃不影响整体），
+ * 但不做合计而是逐容器回传快照；网络/磁盘仍为累计值，速率由前端差分计算。
+ */
+export async function getAllContainerStats(engine: DockerEngine): Promise<any[]> {
+  const docker = getDocker(engine);
+  const running = await withTimeout(docker.listContainers({ all: false }), 10000).catch(() => [] as any[]);
+  if (!running.length) return [];
+
+  const results = await Promise.allSettled(
+    (running as any[]).map(async (c) => {
+      const s = await getContainerStats(engine, c.Id);
+      return {
+        id: c.Id as string,
+        name: Array.isArray(c.Names) && c.Names[0] ? String(c.Names[0]).replace(/^\//, "") : String(c.Id).slice(0, 12),
+        cpuPercent: s.cpuPercent || 0,
+        memoryUsage: s.memoryUsage || 0,
+        memoryLimit: s.memoryLimit || 0,
+        netInput: s.netInput || 0,
+        netOutput: s.netOutput || 0,
+        blockInput: s.blockInput || 0,
+        blockOutput: s.blockOutput || 0,
+      };
+    })
+  );
+  return results
+    .filter((r): r is PromiseFulfilledResult<any> => r.status === "fulfilled")
+    .map((r) => r.value);
+}
+
+/**
  * 引擎级资源汇总（仪表盘资源监控）
  * - info：NCPU / MemTotal（宿主机规格，作为 CPU/内存上限）
  * - df：镜像 + 数据卷 + 容器的磁盘占用

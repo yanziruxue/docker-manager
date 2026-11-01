@@ -23,6 +23,7 @@ import {
   getStacks,
   getContainerLogs,
   getContainerStats,
+  getAllContainerStats,
   getEngineResourceStats,
   getResourceHistory,
   listNetInterfaces,
@@ -1561,6 +1562,21 @@ app.get("/api/engines/:id/containers/:cid/stats", async (req, res) => {
     res.json({ success: true, data: stats });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message || "获取资源监控失败" });
+  }
+});
+
+/** 全部运行容器资源监控明细（仪表盘「容器资源监控」对比卡片；网络/磁盘为累计值，前端差分算速率） */
+app.get("/api/engines/:id/containers-stats", async (req, res) => {
+  const engine = getEngine(req.params.id);
+  if (!engine) {
+    res.status(404).json({ success: false, error: "引擎不存在" });
+    return;
+  }
+  try {
+    const data = await getAllContainerStats(engine);
+    res.json({ success: true, data });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || "获取容器资源监控失败" });
   }
 });
 

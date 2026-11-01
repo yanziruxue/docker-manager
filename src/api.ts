@@ -484,6 +484,24 @@ export function fetchEngineResourceStats(engineId: string): Promise<EngineResour
   return request<EngineResourceStats>(`/engines/${engineId}/resource-stats`);
 }
 
+/** 逐容器资源监控明细行（仪表盘「容器资源监控」对比卡片；网络/磁盘为累计 KB，前端差分算速率） */
+export interface ContainerStatRow {
+  id: string;
+  name: string;
+  cpuPercent: number;
+  memoryUsage: number;
+  memoryLimit: number;
+  netInput: number;
+  netOutput: number;
+  blockInput: number;
+  blockOutput: number;
+}
+
+/** 获取全部运行容器资源监控明细（仪表盘「容器资源监控」对比卡片） */
+export function fetchAllContainerStats(engineId: string): Promise<ContainerStatRow[]> {
+  return request<ContainerStatRow[]>(`/engines/${engineId}/containers-stats`);
+}
+
 /** 获取资源时间序列（仪表盘内存 / 网络折线图；range: 10s|30s|1m|2m|5m） */
 export function fetchResourceHistoryApi(engineId: string, range = "5m"): Promise<ResourceSample[]> {
   return request<ResourceSample[]>(`/engines/${engineId}/resource-history?range=${range}`);

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Monitor,
   Cpu,
@@ -49,7 +49,7 @@ import { NodeCard } from "../components/NodeCard";
 import { NodeCardGrid, FilterChips } from "../components/NodeCardGrid";
 import { StackContainersModal } from "../components/StackContainersModal";
 import { Toast } from "../components/UI";
-import { fetchResourceHistoryApi, fetchNetInterfacesApi, fetchSettings } from "../api";
+import { fetchResourceHistoryApi, fetchNetInterfacesApi, fetchSettings, fetchAllContainerStats, type ContainerStatRow } from "../api";
 import { tempTextColor, fmtTemp } from "../lib/thermal";
 import type {
   Container,
@@ -264,6 +264,7 @@ export function Dashboard({
           /* 第 2 列 · 应用（2 列档并入网络） */
           <>
             <ContainersTile containers={containers} onNavigate={onNavigate} />
+            <ContainerStatsTile engineId={engineId} />
             <StacksTile stacks={stacks} defaultSubColumns={defaultSubColumns} onNavigate={onNavigate} />
             <ImagesTile
               total={images.length}
@@ -1036,6 +1037,268 @@ function ImagesTile({
  * v1.42.10 起**移除「全部（容器合计）」选项**，始终展示某个真实网卡；
  * 仅当引擎没有任何可选网卡（远程 TCP / SSH 读不到 /proc/net/dev）时，才回落到容器合计口径。
  */
+/* ────────────── 容器资源监控（对比卡片，v1.50.0） ────────────── */
+
+/** 刷新间隔选项（秒）；默认 5s，最低 1s */
+const CONTAINER_STATS_INTERVALS = ["1", "3", "5", "10"];
+
+/** 同类型对比的指标页签 */
+const CONTAINER_METRIC_TABS: { key: "cpu" | "mem" | "net" | "blk"; label: string }[] = [
+  { key: "cpu", label: "CPU" },
+  { key: "mem", label: "内存" },
+  { key: "net", label: "网络" },
+  { key: "blk", label: "磁盘" },
+];
+
+/** 每容器的差分速率（KB/s；首轮无基线为 0） */
+interface ContainerRateRow {
+  netRx: number;
+  netTx: number;
+  blkR: number;
+  blkW: number;
+}
+
+/**
+ * 容器资源监控对比卡片：
+ * - 「同类型对比」：CPU/内存/网络/磁盘 4 页签，所有运行容器横向条形按值降序；
+ *   CPU/内存按占比分档配色，网络/磁盘显示差分速率（↓读/↑写），条形按当前最大值归一化。
+ * - 「按容器对比」：每容器一行 4 迷你指标（复用容器列表展开行样式）。
+ * 数据来自 GET /containers-stats（服务端并发采样全部运行容器）；网络/磁盘为累计值，前端差分算速率。
+ */
+function ContainerStatsTile({ engineId }: { engineId?: string }) {
+  const [rows, setRows] = useState<ContainerStatRow[]>([]);
+  const [rates, setRates] = useState<Record<string, ContainerRateRow>>({});
+  const [error, setError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  // 视图 / 指标页签 / 刷新间隔全部按磁贴持久化
+  const [view, setView] = useStoredString("dm.tile.containerStats.view", "type");
+  const [metric, setMetric] = useStoredString("dm.tile.containerStats.metric", "cpu");
+  const [intervalSec, setIntervalSec] = useStoredString("dm.tile.containerStats.interval", "5");
+  const intervalMs = (CONTAINER_STATS_INTERVALS.includes(intervalSec) ? parseInt(intervalSec, 10) : 5) * 1000;
+
+  // 差分基线：容器 id → 上一帧累计值（切引擎 / 间隔变更时 cleanup 清空重建，避免用旧基线差出畸形速率）
+  const prevRef = useRef<Map<string, { ts: number; netIn: number; netOut: number; blkIn: number; blkOut: number }>>(new Map());
+
+  useEffect(() => {
+    if (!engineId) return;
+    let cancelled = false;
+    /** 防重入：N 容器并发采样可能超过间隔时长（尤其 1s 档 + 远程引擎） */
+    let inFlight = false;
+    const pull = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const data = await fetchAllContainerStats(engineId);
+        if (cancelled) return;
+        const now = Date.now();
+        const nextRates: Record<string, ContainerRateRow> = {};
+        const snapshot = new Map<string, { ts: number; netIn: number; netOut: number; blkIn: number; blkOut: number }>();
+        for (const r of data) {
+          const p = prevRef.current.get(r.id);
+          const dt = p ? (now - p.ts) / 1000 : 0;
+          // Math.max(0,…) 防容器重启后累计计数器回绕差出负速率
+          nextRates[r.id] = {
+            netRx: p && dt > 0 ? Math.max(0, (r.netInput - p.netIn) / dt) : 0,
+            netTx: p && dt > 0 ? Math.max(0, (r.netOutput - p.netOut) / dt) : 0,
+            blkR: p && dt > 0 ? Math.max(0, (r.blockInput - p.blkIn) / dt) : 0,
+            blkW: p && dt > 0 ? Math.max(0, (r.blockOutput - p.blkOut) / dt) : 0,
+          };
+          snapshot.set(r.id, { ts: now, netIn: r.netInput, netOut: r.netOutput, blkIn: r.blockInput, blkOut: r.blockOutput });
+        }
+        prevRef.current = snapshot;
+        setError(null);
+        setRows(data);
+        setRates(nextRates);
+        setLoaded(true);
+      } catch (err: any) {
+        if (!cancelled) setError(err.message || "获取容器资源监控失败");
+      } finally {
+        inFlight = false;
+      }
+    };
+    pull();
+    const timer = window.setInterval(pull, intervalMs);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      prevRef.current = new Map();
+    };
+  }, [engineId, intervalMs]);
+
+  /** 同类型对比的条形数据（当前指标，降序） */
+  const bars = useMemo(() => {
+    const list = rows.map((r) => {
+      const rate = rates[r.id];
+      if (metric === "cpu") {
+        const pct = clamp(r.cpuPercent, 0, 100);
+        return { id: r.id, name: r.name, value: r.cpuPercent, pct, color: loadColor(pct), label: `${round1(r.cpuPercent)}%` };
+      }
+      if (metric === "mem") {
+        const p = r.memoryLimit > 0 ? (r.memoryUsage / r.memoryLimit) * 100 : 0;
+        return {
+          id: r.id,
+          name: r.name,
+          value: r.memoryUsage,
+          pct: clamp(p, 0, 100),
+          color: loadColor(p),
+          label: `${r.memoryUsage} / ${r.memoryLimit} MB`,
+        };
+      }
+      if (metric === "net") {
+        const rx = rate?.netRx || 0;
+        const tx = rate?.netTx || 0;
+        return { id: r.id, name: r.name, value: rx + tx, pct: 0, color: "#3b82f6", label: `↓${fmtRate(rx)} / ↑${fmtRate(tx)}` };
+      }
+      const rd = rate?.blkR || 0;
+      const wr = rate?.blkW || 0;
+      return { id: r.id, name: r.name, value: rd + wr, pct: 0, color: "#3b82f6", label: `↓${fmtRate(rd)} / ↑${fmtRate(wr)}` };
+    });
+    // 网络/磁盘无固定上限：按当前列表最大合计速率归一化条形
+    if (metric === "net" || metric === "blk") {
+      const max = Math.max(...list.map((b) => b.value), 0);
+      for (const b of list) b.pct = max > 0 ? clamp((b.value / max) * 100, 0, 100) : 0;
+    }
+    return list.sort((a, b) => b.value - a.value);
+  }, [rows, rates, metric]);
+
+  /** 同类型对比当前页签的副标题单位 */
+  const metricLabel = CONTAINER_METRIC_TABS.find((t) => t.key === metric)?.label ?? "";
+
+  const viewToggle = (
+    <div className="flex items-center rounded-lg border border-slate-200 overflow-hidden text-xs">
+      <button
+        type="button"
+        onClick={() => setView("type")}
+        className={`px-2 py-1 transition-colors ${view === "type" ? "bg-blue-500 text-white" : "bg-white text-slate-500 hover:bg-slate-50"}`}
+      >
+        同类型
+      </button>
+      <button
+        type="button"
+        onClick={() => setView("container")}
+        className={`px-2 py-1 border-l border-slate-200 transition-colors ${view === "container" ? "bg-blue-500 text-white" : "bg-white text-slate-500 hover:bg-slate-50"}`}
+      >
+        按容器
+      </button>
+    </div>
+  );
+
+  const intervalSelect = (
+    <select
+      value={intervalSec}
+      onChange={(e) => setIntervalSec(e.target.value)}
+      title="刷新间隔（默认 5s，最低 1s）"
+      className="text-xs border border-slate-200 rounded-lg px-1.5 py-1 bg-white text-slate-600 focus:outline-none focus:border-blue-400"
+    >
+      {CONTAINER_STATS_INTERVALS.map((s) => (
+        <option key={s} value={s}>
+          {s}s
+        </option>
+      ))}
+    </select>
+  );
+
+  return (
+    <Tile
+      id="containerStats"
+      title="容器资源监控"
+      subtitle={`运行容器 ${rows.length} 个 · 每 ${intervalMs / 1000}s 刷新`}
+      actions={
+        <div className="flex items-center gap-2">
+          {viewToggle}
+          {intervalSelect}
+        </div>
+      }
+    >
+      {error && !loaded ? (
+        <p className="text-sm text-red-500 py-4">{error}</p>
+      ) : !loaded ? (
+        <p className="text-sm text-slate-400 py-4">正在加载容器资源监控…</p>
+      ) : rows.length === 0 ? (
+        <p className="text-sm text-slate-400 py-4">暂无运行中的容器</p>
+      ) : view === "type" ? (
+        <div>
+          {/* 指标页签：CPU / 内存 / 网络 / 磁盘 */}
+          <div className="flex items-center gap-1 mb-3">
+            {CONTAINER_METRIC_TABS.map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                onClick={() => setMetric(t.key)}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+                  metric === t.key ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+            {(metric === "net" || metric === "blk") && (
+              <span className="ml-auto text-[11px] text-slate-400">条形按当前最大速率归一</span>
+            )}
+          </div>
+          <div className="max-h-72 overflow-y-auto pr-1 space-y-2">
+            {bars.map((b) => (
+              <div key={b.id} className="flex items-center gap-3" title={b.name}>
+                <span className="w-28 flex-shrink-0 truncate text-xs text-slate-600">{b.name}</span>
+                <Bar percent={b.pct} color={b.color} className="flex-1" />
+                <span className="w-40 flex-shrink-0 text-right text-xs font-mono text-slate-600 truncate">{b.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="max-h-80 overflow-y-auto pr-1 divide-y divide-slate-50">
+          {rows.map((r) => {
+            const rate = rates[r.id];
+            const memPct = r.memoryLimit > 0 ? clamp((r.memoryUsage / r.memoryLimit) * 100, 0, 100) : 0;
+            return (
+              <div key={r.id} className="py-2.5 first:pt-0" title={r.name}>
+                <p className="text-xs font-medium text-slate-700 truncate mb-1.5">{r.name}</p>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <Cpu size={13} className="text-blue-500 flex-shrink-0" />
+                    <span className="text-[11px] text-slate-500 w-8">CPU</span>
+                    <span className="text-[11px] font-mono text-slate-600">{round1(r.cpuPercent)}%</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <MemoryStick size={13} className="text-purple-500 flex-shrink-0" />
+                    <span className="text-[11px] text-slate-500 w-8">内存</span>
+                    <span className="text-[11px] font-mono text-slate-600 truncate">
+                      {r.memoryUsage}/{r.memoryLimit}MB
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <ArrowDown size={13} className="text-green-500 flex-shrink-0" />
+                    <span className="text-[11px] text-slate-500 w-8">网络</span>
+                    <span className="text-[11px] font-mono text-slate-600 truncate">
+                      ↓{fmtRate(rate?.netRx || 0)} ↑{fmtRate(rate?.netTx || 0)}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <ArrowUp size={13} className="text-orange-500 flex-shrink-0" />
+                    <span className="text-[11px] text-slate-500 w-8">磁盘</span>
+                    <span className="text-[11px] font-mono text-slate-600 truncate">
+                      ↓{fmtRate(rate?.blkR || 0)} ↑{fmtRate(rate?.blkW || 0)}
+                    </span>
+                  </div>
+                </div>
+                {/* 内存占比条：只有内存有天然上限，其余三项无上限不画条 */}
+                <Bar percent={memPct} color={loadColor(memPct)} className="mt-1.5" />
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {/* 页脚辅助说明：仅同类型视图提示当前指标 */}
+      {view === "type" && rows.length > 0 && (
+        <p className="mt-2 text-[11px] text-slate-400">
+          当前对比：{metricLabel}（{metric === "cpu" ? "%" : metric === "mem" ? "MB" : "KB/s"}），按值降序
+        </p>
+      )}
+    </Tile>
+  );
+}
+
 function NetTile({
   stats,
   history,

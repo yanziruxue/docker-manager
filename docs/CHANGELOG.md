@@ -16,6 +16,26 @@
 
 ---
 
+## v1.50.0 — 2026-11-01（**已构建 · 已推 Gitea + GitHub**）
+
+---
+
+### 已完成
+- **仪表盘新增「容器资源监控」对比卡片**（第 2 列「应用」区，容器卡片之后）：
+  - **同类型对比**：CPU / 内存 / 网络 / 磁盘 4 页签，全部运行容器横向条形按值降序；CPU/内存按占比分档配色（沿用全仪表盘 loadColor 语义），网络/磁盘显示差分速率（↓读 / ↑写）并按当前最大速率归一化条形
+  - **按容器对比**：每容器一行 4 迷你指标（CPU% / 内存用量与上限 / 网络 ↓↑ / 磁盘 ↓↑）+ 内存占比条
+  - **刷新间隔可设**：1s / 3s / 5s / 10s 下拉（默认 5s，最低 1s），与视图/页签选择一起按磁贴持久化；防重入（N 容器并发采样可能超时长）+ 差分基线在切引擎/间隔变更时重建
+- **新端点 `GET /api/engines/:id/containers-stats`**：`server/docker.ts#getAllContainerStats` 与 `getEngineResourceStats` 同款 `Promise.allSettled` 并发采样全部运行容器（单个失败丢弃不影响整体），逐容器回传 `{ name, cpuPercent, memoryUsage/Limit(MB), netInput/Output, blockInput/Output(累计 KB) }`；速率由前端差分计算（`Math.max(0,…)` 防计数器回绕负值）
+- 涉及 `server/docker.ts`、`server/index.ts`、`src/api.ts`（`fetchAllContainerStats`/`ContainerStatRow`）、`src/pages/Dashboard.tsx`（`ContainerStatsTile`）
+
+### 影响
+- 无。卡片仅仪表盘页面轮询，离开页面即停止；网络/磁盘速率首轮无基线显示 0，第二帧起正常
+
+### 下一步
+无。
+
+---
+
 ## v1.49.4 — 2026-11-01（**已构建 · 已推 Gitea**）
 
 ### 镜像列表重复行修复（同 Id 同显示名跨 registry 收敛）
