@@ -966,13 +966,14 @@ export function Images({ images, loading, error, engineId, onRefresh, onImagesRe
     : null;
   // v1.50.1：单镜像检查结果（byRef 的 key 即 repo:tag，含多 tag 镜像摊平）；null = 该镜像不在结果里（检查失败等）
   const singleHasUpdate = singleCheckRef && imageUpdateStatus ? (imageUpdateStatus.byRef[singleCheckRef] ?? null) : null;
-  /** 单镜像检查发现更新 →「更新镜像」：关闭结果弹窗并复用拉取弹窗（进度/通知全走既有链路） */
+  /** 单镜像检查发现更新 →「更新镜像」：关闭结果弹窗并立即发起拉取（免二次确认；进度/通知全走既有链路） */
   const handleSingleCheckUpdate = () => {
     if (!singleCheckRef) return;
     const ref = singleCheckRef;
     setShowCheckResult(false);
     setSingleCheckRef(null);
-    openPullModal(ref);
+    setPullPrefill(ref);
+    void startPull(ref);
   };
   const [batchBusy, setBatchBusy] = useState(false);
   const [batchDownloading, setBatchDownloading] = useState<{ current: number; total: number; ref: string } | null>(null);

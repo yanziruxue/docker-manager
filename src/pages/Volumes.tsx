@@ -83,10 +83,14 @@ export function Volumes({ volumes, loading, error, engineId, defaultVisibleColum
     if (!engineId) return;
     try {
       const result = await pruneVolumesApi(engineId);
+      const deleted = Array.isArray(result?.VolumesDeleted) ? result.VolumesDeleted : [];
       addOpLog({ action: "清理未关联数据卷", target: "全部未关联卷", status: "success", engineId });
-      showOutput({ title: "清理未关联数据卷", name: "全部未关联卷", output: formatVolumePrune(result) });
       setConfirmCleanUnused(false);
       onRefresh?.();
+      // 没有未关联卷（0 个被删）时不弹结果窗，弹窗自动关闭；有删除才展示清理明细
+      if (deleted.length > 0) {
+        showOutput({ title: "清理未关联数据卷", name: "全部未关联卷", output: formatVolumePrune(result) });
+      }
     } catch (e: any) {
       addOpLog({ action: "清理未关联数据卷", target: "全部未关联卷", status: "failed", detail: e.message || "清理失败", engineId });
       showOutput({ title: "清理未关联数据卷", name: "全部未关联卷", output: e.message || "清理失败", failed: true });
