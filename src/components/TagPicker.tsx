@@ -130,8 +130,8 @@ export function TagGroup({ tags, max = 3 }: { tags?: ResourceTag[]; max?: number
   );
 }
 
-/** 多选标签选择器（v1.49.2 升级为可搜索 combobox）：面板顶部搜索框实时过滤标签库；
- * 输入无匹配时显示「+ 新建」项，点选经 onCreateTag 落盘标签库并自动选中新标签 */
+/** 多选标签选择器（v1.49.2 combobox）：输入框即触发框——已选 chips 与 inline 输入同行，
+ * 输入实时过滤标签库下拉；无匹配时显示「+ 新建」项，点选经 onCreateTag 落盘标签库并自动选中新标签 */
 export function TagSelect({
   library,
   value,
@@ -147,24 +147,22 @@ export function TagSelect({
   placeholder?: string;
 }) {
   const [open, setOpen] = useState(false);
-  /** 搜索框输入：过滤标签库；非空且无命中时显示「+ 新建」 */
+  /** inline 输入：过滤标签库；非空且无同名命中时显示「+ 新建」 */
   const [query, setQuery] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
-  // 打开面板时聚焦搜索框并清空上次输入
+  // 收起时清空过滤输入与错误提示
   useEffect(() => {
-    if (open) {
+    if (!open) {
       setQuery("");
       setCreateError("");
-      // 等面板渲染完成后再聚焦
-      requestAnimationFrame(() => inputRef.current?.focus());
     }
   }, [open]);
 
-  // 点击外部关闭
+  // 点击外部 / Escape 关闭
   useEffect(() => {
     if (!open) return;
     const handle = (e: MouseEvent) => {
@@ -212,46 +210,44 @@ export function TagSelect({
 
   return (
     <div className="relative" ref={rootRef}>
+      {/* 触发框 = 输入框：chips 与 inline 输入同行，点击任意处聚焦输入 */}
       <div
-        className="flex items-center flex-wrap gap-1.5 min-h-[36px] px-2 py-1.5 border border-slate-200 rounded-lg bg-white cursor-pointer hover:border-blue-300 transition-colors"
-        onClick={() => setOpen((o) => !o)}
-        title="点击选择标签"
+        className="flex items-center flex-wrap gap-1.5 min-h-[36px] px-2 py-1.5 border border-slate-200 rounded-lg bg-white cursor-text hover:border-blue-300 focus-within:border-blue-400 transition-colors"
+        onClick={() => inputRef.current?.focus()}
+        title="输入筛选标签，无匹配可新建"
       >
-        {value.length === 0 && (
-          <span className="inline-flex items-center gap-1 text-slate-400 text-sm px-1">
-            <Plus size={13} /> {placeholder}
-          </span>
-        )}
         {value.map((t) => (
           <TagChip key={t.id} tag={t} onRemove={() => onChange(value.filter((x) => x.id !== t.id))} />
         ))}
+        <input
+          ref={inputRef}
+          type="text"
+          value={query}
+          onChange={(e) => { setQuery(e.target.value); setOpen(true); setCreateError(""); }}
+          onFocus={() => setOpen(true)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              e.stopPropagation();
+              if (canCreate) handleCreate();
+            } else if (e.key === "Escape") {
+              e.stopPropagation();
+              setOpen(false);
+              inputRef.current?.blur();
+            }
+          }}
+          placeholder={value.length === 0 ? placeholder : ""}
+          className="flex-1 min-w-[90px] bg-transparent outline-none border-none text-sm text-slate-700 placeholder:text-slate-400 px-0.5 py-0"
+        />
       </div>
 
       {open && (
         <div className="absolute left-0 right-0 top-full mt-1 bg-white rounded-lg border border-slate-200 shadow-lg z-50 overflow-hidden">
-          {/* 搜索框：输入实时过滤标签库（v1.49.2） */}
-          <div className="p-2 border-b border-slate-100">
-            <input
-              ref={inputRef}
-              type="text"
-              value={query}
-              onChange={(e) => { setQuery(e.target.value); setCreateError(""); }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  if (canCreate) handleCreate();
-                }
-              }}
-              placeholder="输入筛选标签，无匹配可新建"
-              className="w-full px-2.5 py-1.5 text-sm border border-slate-200 rounded-md focus:outline-none focus:border-blue-400"
-            />
-          </div>
-
           {/* 新建入口：输入非空且标签库无同名标签时显示 */}
           {canCreate && (
             <button
               type="button"
+              onMouseDown={(e) => e.preventDefault()}
               onClick={(e) => {
                 e.stopPropagation();
                 handleCreate();
@@ -282,6 +278,7 @@ export function TagSelect({
                   <button
                     key={tag.id}
                     type="button"
+                    onMouseDown={(e) => e.preventDefault()}
                     onClick={(e) => {
                       e.stopPropagation();
                       toggle(tag);
