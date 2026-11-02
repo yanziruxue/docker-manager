@@ -10,11 +10,13 @@ import {
   UploadCloud,
   Thermometer,
   HardDrive,
+  Send,
 } from "lucide-react";
 import {
   fetchTelemetryStatus,
   fetchServiceUnitStatus,
   fetchThermalStatus,
+  reportTelemetryNow,
   type TelemetryStatus,
   type DeviceHardware,
   type DeviceDetails,
@@ -205,6 +207,30 @@ export function ActivityPanel({
 
   /** SATA/HDD 缺温度且 drivetemp 未加载 ⇒ 给加载提示（NVMe 无需该模块） */
   const needDrivetemp = !!thermal && !thermal.drivetempLoaded && thermal.sataWithoutTemp.length > 0;
+
+  // 立即上报（临时按钮，后续版本移除）：手动触发一次上报逻辑并回填状态
+  const [reporting, setReporting] = useState(false);
+  const [reportMsg, setReportMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const handleReportNow = async () => {
+    if (reporting) return;
+    setReporting(true);
+    setReportMsg(null);
+    try {
+      const r = await reportTelemetryNow();
+      if (r.sent.length > 0) {
+        setReportMsg({ ok: true, text: `已发出 ${r.upapi === "install" ? "install（安装上报）" : "heartbeat（心跳）"}` });
+      } else {
+        setReportMsg({ ok: false, text: r.error || "未发出（见上方错误信息）" });
+      }
+      // 回填最新状态（上次上报时间等）
+      const s = await fetchTelemetryStatus().catch(() => null);
+      if (s) setStatus(s);
+    } catch (err: any) {
+      setReportMsg({ ok: false, text: String(err?.message || err || "上报失败") });
+    } finally {
+      setReporting(false);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -458,6 +484,23 @@ export function ActivityPanel({
                 value={fmtDisk(details?.disk)}
                 title={fmtDisk(details?.disk)}
               />
+            </div>
+
+            {/* 立即上报（临时按钮，后续版本移除） */}
+            <div className="border-t border-slate-100 pt-3 flex items-center gap-3">
+              <button
+                onClick={handleReportNow}
+                disabled={reporting}
+                className="flex items-center gap-1.5 px-3 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed flex-shrink-0"
+              >
+                {reporting ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                {reporting ? "上报中..." : "立即发送"}
+              </button>
+              {reportMsg && (
+                <span className={`text-xs ${reportMsg.ok ? "text-green-600" : "text-red-500"}`}>
+                  {reportMsg.text}
+                </span>
+              )}
             </div>
           </div>
         ) : (
