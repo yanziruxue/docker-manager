@@ -638,7 +638,7 @@ const TELEMETRY_ENDPOINTS = process.env.TELEMETRY_ENDPOINT
   ? [process.env.TELEMETRY_ENDPOINT]
   : ["http://192.168.24.10:30507", "https://yanzi-api.ziruxue.top"];
 /** 上报路径（seg=`yanzi-docker`，服务端管理台签发的应用段名） */
-const TELEMETRY_PATH = "/api/yanzi-docker/event";
+const TELEMETRY_PATH = "/api/docker-management";
 /**
  * event 接口**应用级共享 token**（v1.50.10，对所有安装者相同，随客户端分发——文档 §2 设计如此）：
  * 请求头 `token: <值>`，服务端比对 sha256 摘要（常量时间），不匹配 401 TOKEN_INVALID。
