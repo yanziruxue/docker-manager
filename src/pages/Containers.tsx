@@ -600,7 +600,7 @@ export function Containers({ containers, onNavigate, onRefresh, loading, error, 
                     <td colSpan={visibleCount + 1} className="px-12 py-4">
                       <div className="grid grid-cols-4 gap-4">
                         <ResourceMini icon={<Cpu size={14} />} label="CPU" value={`${container.stats.cpuPercent}%`} percent={container.stats.cpuPercent} color="blue" />
-                        <ResourceMini icon={<MemoryStick size={14} />} label="内存" value={`${container.stats.memoryUsage} / ${container.stats.memoryLimit} MB`} percent={(container.stats.memoryUsage / container.stats.memoryLimit) * 100} color="purple" />
+                        <ResourceMini icon={<MemoryStick size={14} />} label="内存" value={`${fmtMB(container.stats.memoryUsage)} / ${fmtMB(container.stats.memoryLimit)}`} percent={(container.stats.memoryUsage / container.stats.memoryLimit) * 100} color="purple" />
                         <ResourceMini icon={<Network size={14} />} label="网络 I/O" value={`${container.stats.netInput} ↓ / ${container.stats.netOutput} ↑ KB`} icon2={<ArrowDownRight size={12} className="text-green-500" />} icon3={<ArrowUpRight size={12} className="text-orange-500" />} />
                         <ResourceMini icon={<TrendingUp size={14} />} label="磁盘 I/O" value={`${container.stats.blockInput} ↓ / ${container.stats.blockOutput} ↑ KB`} />
                       </div>
@@ -1189,7 +1189,7 @@ function ContainerDetailModal({
                   <div className="bg-white rounded-lg border border-slate-200 p-4">
                     <div className="flex items-center justify-between mb-3">
                       <span className="flex items-center gap-2 text-sm text-slate-600"><MemoryStick size={16} className="text-purple-500" /> 内存使用</span>
-                      <span className="text-xl font-bold text-slate-800">{stats.memoryUsage}<span className="text-sm font-normal text-slate-400"> / {stats.memoryLimit} MB</span></span>
+                      <span className="text-xl font-bold text-slate-800">{fmtMB(stats.memoryUsage)}<span className="text-sm font-normal text-slate-400"> / {fmtMB(stats.memoryLimit)}</span></span>
                     </div>
                     <ProgressBar value={stats.memoryUsage} max={stats.memoryLimit} color="purple" showLabel />
                     <div className="mt-3 pt-3 border-t border-slate-100">

@@ -1141,7 +1141,7 @@ function ContainerStatsTile({ engineId }: { engineId?: string }) {
           value: r.memoryUsage,
           pct: clamp(p, 0, 100),
           color: loadColor(p),
-          label: `${r.memoryUsage} / ${r.memoryLimit} MB`,
+          label: `${fmtMB(r.memoryUsage)} / ${fmtMB(r.memoryLimit)}`,
         };
       }
       if (metric === "net") {
