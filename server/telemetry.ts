@@ -630,10 +630,23 @@ interface TelemetryConfigLike {
   collectHwFingerprint?: boolean;
 }
 
-/** 上报端点（可用环境变量 TELEMETRY_ENDPOINT 覆盖，便于自建/调试） */
-const TELEMETRY_ENDPOINT = process.env.TELEMETRY_ENDPOINT || "https://yanzi-api.ziruxue.top";
-/** 上报路径 */
+/**
+ * 上报端点（v1.50.10 对齐《客户端实施说明》）：**双通道 fallback**——优先内网直连，
+ * 网络失败 / 5xx / 429 自动回落公网域名；环境变量 TELEMETRY_ENDPOINT 设置后只走单通道（自建/调试）。
+ */
+const TELEMETRY_ENDPOINTS = process.env.TELEMETRY_ENDPOINT
+  ? [process.env.TELEMETRY_ENDPOINT]
+  : ["http://192.168.24.10:30507", "https://yanzi-api.ziruxue.top"];
+/** 上报路径（seg=`yanzi-docker`，服务端管理台签发的应用段名） */
 const TELEMETRY_PATH = "/api/yanzi-docker/event";
+/**
+ * event 接口**应用级共享 token**（v1.50.10，对所有安装者相同，随客户端分发——文档 §2 设计如此）：
+ * 请求头 `token: <值>`，服务端比对 sha256 摘要（常量时间），不匹配 401 TOKEN_INVALID。
+ * 环境变量 TELEMETRY_TOKEN 可覆盖（默认值即管理台签发的共享 token）。
+ */
+const TELEMETRY_TOKEN =
+  process.env.TELEMETRY_TOKEN ||
+  "854b1b2c61c3d95cfe43fd90f161d71c7f62ed64a0eccc330a0c34f7e4a00cfc";
 
 /**
  * 读取上报配置。`enabled` 取自「系统设置 → 硬件信息」的上传开关
@@ -647,7 +660,7 @@ function readConfig(): Required<TelemetryConfigLike> {
   } catch {
     /* 读取失败按默认开启 */
   }
-  return { enabled, endpoint: TELEMETRY_ENDPOINT, collectHwFingerprint: true };
+  return { enabled, endpoint: TELEMETRY_ENDPOINTS[0], collectHwFingerprint: true };
 }
 
 /**
@@ -677,8 +690,7 @@ function buildPayload(info: DeviceInfo, collectHw: boolean, uploadEnabled: boole
     arch: process.arch,
     channel: "sea-linux-x64",
     virtualized: info.virtualized,
-    /** 标识文件路径（本机 `config/device.info`，对应卡片「标识文件」） */
-    deviceFile: DEVICE_FILE,
+    // deviceFile 不再上报（v1.50.10）：文档 §3.3 字段表未列该字段，规避未知字段整包 400 风险
     // 6 维设备标识（安装时快照，与 deviceId 同源，服务端可复算校验）—— 对应卡片「主板」等
     hardware: collectHw ? info.hardware : null,
     /**
@@ -706,33 +718,46 @@ export interface ReportResult {
   fatal?: boolean;
 }
 
-/** 发送一条上报（唯一出口）；`fatal=true` 表示鉴权失败（401/403），不做密集重试 */
+/** 发送一条上报（唯一出口）；`fatal=true` 表示鉴权失败（401/403），不做密集重试。
+ *  v1.50.10：双端点 fallback——网络错误 / 5xx / 429 回落下一端点；
+ *  其余 4xx（400 载荷不合法 / 401 token 错 / 404 seg 不存在）换端点无济于事，直接失败。 */
 async function sendReport(
   info: DeviceInfo,
   cfg: Required<TelemetryConfigLike>,
   uploadEnabled: boolean,
   upapi: TelemetryEvent
 ): Promise<{ ok: true } | { ok: false; error: string; fatal: boolean }> {
-  const url = `${cfg.endpoint}${TELEMETRY_PATH}`;
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        // 鉴权：设备标识（硬件指纹）同时作为 X-Telemetry-Key
-        "X-Telemetry-Key": info.deviceId,
-      },
-      body: JSON.stringify(buildPayload(info, cfg.collectHwFingerprint, uploadEnabled, upapi)),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
-    if (!res.ok) {
+  const body = JSON.stringify(buildPayload(info, cfg.collectHwFingerprint, uploadEnabled, upapi));
+  let lastErr = "";
+  for (let i = 0; i < TELEMETRY_ENDPOINTS.length; i++) {
+    const url = `${TELEMETRY_ENDPOINTS[i]}${TELEMETRY_PATH}`;
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          // event 接口鉴权（文档 §2）：应用级共享 token，服务端比对 sha256 摘要
+          token: TELEMETRY_TOKEN,
+          // 过渡头保留：设备标识（硬件指纹），旧服务端兼容；新服务端忽略
+          "X-Telemetry-Key": info.deviceId,
+        },
+        body,
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+      if (res.ok) return { ok: true };
+      lastErr = `HTTP ${res.status}`;
       const fatal = res.status === 401 || res.status === 403;
-      return { ok: false, error: `HTTP ${res.status}`, fatal };
+      // 429 / 5xx：若还有备用端点则回落重试；否则按原语义返回（429 非 fatal，走 10 分钟重试 ≥ Retry-After 常规量级）
+      if ((res.status === 429 || res.status >= 500) && i < TELEMETRY_ENDPOINTS.length - 1) continue;
+      return { ok: false, error: lastErr, fatal };
+    } catch (e) {
+      // 网络错误（超时/拒连/DNS）：回落下一端点
+      lastErr = (e as Error).message || "网络错误";
+      if (i < TELEMETRY_ENDPOINTS.length - 1) continue;
+      return { ok: false, error: lastErr, fatal: false };
     }
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: (e as Error).message || "网络错误", fatal: false };
   }
+  return { ok: false, error: lastErr || "上报失败", fatal: false };
 }
 
 /** 下一次计划上报时间（含失败重试），页面展示用 */
