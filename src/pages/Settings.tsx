@@ -1618,6 +1618,9 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
     startUpdatePolling();
     try {
       await applyLocalUpdateApi();
+      // 后端已消费待应用包并取消销毁定时器：立即隐藏「已上传本地更新包（待应用）」卡片，
+      // 进度展示交给 updateState 轮询（v1.50.8）
+      setPendingUpload(null);
     } catch (err: any) {
       if (statusTimerRef.current) clearInterval(statusTimerRef.current);
       statusTimerRef.current = null;
