@@ -282,7 +282,7 @@ function getDefaultSettings(): SystemSettings {
       autoDetectWebui: true,
     },
     // 默认开启上传安装数量统计（系统设置 → 硬件信息 可关闭）
-    telemetry: { enabled: true, appKey: "" },
+    telemetry: { enabled: true },
     // 镜像管理页显示选项：仓库名默认隐藏 registry 地址前缀（列显隐 → 镜像管理 可关）
     imagesDisplay: { hideRegistryPrefix: true, hideLibraryPrefix: true },
     // 目录镜像：默认关闭，目标路径留空（用户按需开启）
@@ -951,6 +951,67 @@ const COLVIS_PAGES: ColVisPageDef[] = [
     ],
   },
 ];
+
+// ============ 「改动内容」— releaseNotes 受限 markdown 渲染（v1.50.6） ============
+
+/** 行内 markdown 片段：**加粗** 与 `代码` → React 节点（构建元素树，不走 innerHTML，零 XSS 面） */
+function renderInlineMd(text: string, keyPrefix: string): React.ReactNode[] {
+  return text
+    .split(/(\*\*[^*]+\*\*|`[^`]+`)/g)
+    .filter(Boolean)
+    .map((p, i) => {
+      const key = `${keyPrefix}-${i}`;
+      if (p.startsWith("**") && p.endsWith("**")) {
+        return <strong key={key} className="font-semibold text-slate-700">{p.slice(2, -2)}</strong>;
+      }
+      if (p.startsWith("`") && p.endsWith("`")) {
+        return <code key={key} className="px-1 py-0.5 rounded bg-slate-100 text-[11px] font-mono text-slate-700">{p.slice(1, -1)}</code>;
+      }
+      return <span key={key}>{p}</span>;
+    });
+}
+
+/**
+ * 「改动内容」视图：把 release body（CHANGELOG 段落原文）按受限 markdown 渲染。
+ * 支持：`### 小节标题`、`- 一级列表`、缩进 `- 二级列表`、行内 **加粗** / `代码`；其余行作普通段落。
+ * 列表项按前导空格数分级（<3 空格 = 一级，≥3 空格 = 二级并挂到最近一级项下）。
+ */
+function ReleaseNotesView({ notes }: { notes: string }) {
+  const topItems: { text: string; children: string[] }[] = [];
+  const paragraphs: string[] = [];
+  for (const raw of notes.split("\n")) {
+    const line = raw.trimEnd();
+    if (!line.trim()) continue;
+    if (/^#{1,4}\s/.test(line.trim())) continue; // 「### 已完成」等小节标题不重复展示（卡片标题即「改动内容」）
+    const indent = raw.length - raw.trimStart().length;
+    const li = line.trim().match(/^[-*]\s+(.*)$/);
+    if (li) {
+      if (indent >= 3 && topItems.length > 0) topItems[topItems.length - 1].children.push(li[1]);
+      else topItems.push({ text: li[1], children: [] });
+    } else {
+      paragraphs.push(line.trim());
+    }
+  }
+  return (
+    <div className="text-xs text-slate-600 leading-relaxed space-y-1.5">
+      {topItems.length > 0 && (
+        <ul className="list-disc pl-4 space-y-1">
+          {topItems.map((it, i) => (
+            <li key={`t-${i}`}>
+              {renderInlineMd(it.text, `t${i}`)}
+              {it.children.length > 0 && (
+                <ul className="list-[circle] pl-4 mt-0.5 space-y-0.5 text-slate-500">
+                  {it.children.map((c, j) => <li key={`c-${i}-${j}`}>{renderInlineMd(c, `c${i}${j}`)}</li>)}
+                </ul>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {paragraphs.map((p, i) => <p key={`p-${i}`}>{renderInlineMd(p, `p${i}`)}</p>)}
+    </div>
+  );
+}
 
 export function Settings({ settings, activeEngineId, engines, onActiveEngineChange, onEnginesChange, onSaveSettings, updateInfo, onUpdateInfoChange, currentUser }: SettingsProps) {
   const [activeSection, setActiveSection] = useState("docker");
@@ -3357,8 +3418,6 @@ docker-compose version</code>
             <ActivityPanel
               telemetryEnabled={data.telemetry?.enabled ?? true}
               onTelemetryEnabledChange={(val) => update("telemetry", "enabled", val)}
-              appKey={data.telemetry?.appKey ?? ""}
-              onAppKeyChange={(val) => update("telemetry", "appKey", val)}
             />
           </div>
         )}
@@ -3571,10 +3630,11 @@ docker-compose version</code>
                     </div>
                     {updateInfo.releaseNotes && (
                       <div>
-                        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Release 说明</p>
-                        <pre className="text-xs text-slate-600 whitespace-pre-wrap bg-white border border-slate-200 rounded-lg p-3 max-h-48 overflow-y-auto font-sans">
-                          {updateInfo.releaseNotes}
-                        </pre>
+                        {/* v1.50.6：标题改「改动内容」，原文由 <pre> 纯文本改为受限 markdown 渲染（### 小节 / 列表 / 加粗 / 代码） */}
+                        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">改动内容</p>
+                        <div className="bg-white border border-slate-200 rounded-lg p-3 max-h-56 overflow-y-auto">
+                          <ReleaseNotesView notes={updateInfo.releaseNotes} />
+                        </div>
                       </div>
                     )}
                     <div className="flex items-center justify-between text-xs text-slate-400">

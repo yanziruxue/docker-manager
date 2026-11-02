@@ -24,7 +24,6 @@ import {
 import { copyText } from "../lib/clipboard";
 import { tempTextColor, fmtTemp } from "../lib/thermal";
 import { Card, Toggle } from "./UI";
-import { PasswordInput } from "./PasswordInput";
 
 /** 单条「标签：值」展示行 */
 function Row({
@@ -123,24 +122,17 @@ const DRIVETEMP_CMD = "echo drivetemp | sudo tee /etc/modules-load.d/drivetemp.c
 export function ActivityPanel({
   telemetryEnabled,
   onTelemetryEnabledChange,
-  appKey,
-  onAppKeyChange,
 }: {
   /** 上传开关当前值（来自系统设置；未传入时回退用后端返回值展示） */
   telemetryEnabled?: boolean;
   /** 切换上传开关（改动后需点「APPLY」保存） */
   onTelemetryEnabledChange?: (val: boolean) => void;
-  /** X-App-Key 应用密钥当前值（v1.50.6，来自系统设置；空 = 未配置走旧鉴权头） */
-  appKey?: string;
-  /** 修改 X-App-Key（改动后需点「APPLY」保存） */
-  onAppKeyChange?: (val: string) => void;
 } = {}) {
   const [status, setStatus] = useState<TelemetryStatus | null>(null);
   const [unit, setUnit] = useState<ServiceUnitStatus | null>(null);
   const [thermal, setThermal] = useState<ThermalStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [showUuid, setShowUuid] = useState(false);
-  const [showAppKey, setShowAppKey] = useState(false);
   const [copied, setCopied] = useState(false);
   const [fixCopied, setFixCopied] = useState(false);
   const [modCopied, setModCopied] = useState(false);
@@ -424,23 +416,6 @@ export function ActivityPanel({
                     : "当前为关闭状态（已保存）。"}
                 </div>
               )}
-              {/* X-App-Key 应用密钥（v1.50.6）：非必填，空 = 走旧 X-Telemetry-Key 过渡头；
-                  配置化存储（settings.json），不进日志、不硬编码（对接 docs/客户端实施说明.md §2） */}
-              <div className="mt-2 border-t border-slate-200 pt-2">
-                <div className="text-xs font-medium text-slate-600 mb-1.5">X-App-Key（应用密钥，选填）</div>
-                <PasswordInput
-                  value={appKey ?? ""}
-                  onChange={(val) => onAppKeyChange?.(val)}
-                  placeholder="lh_…（服务端管理台签发，留空走旧鉴权）"
-                  visible={showAppKey}
-                  onToggle={() => setShowAppKey((v) => !v)}
-                  ariaLabel="应用密钥"
-                />
-                <div className="mt-1 text-[11px] leading-relaxed text-slate-400">
-                  上报时以请求头 <span className="font-mono">X-App-Key</span> 原样直传（不拼接/不哈希）；密钥配置化存储、不出现在日志与 URL。
-                  留空时仅携带旧 <span className="font-mono">X-Telemetry-Key</span> 过渡头。
-                </div>
-              </div>
             </div>
 
             {/* 上报状态 */}

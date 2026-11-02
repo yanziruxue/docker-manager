@@ -221,8 +221,6 @@ const DEFAULT_SETTINGS = {
    */
   telemetry: {
     enabled: true,
-    // X-App-Key 应用密钥（v1.50.6）：空 = 不携带新鉴权头，回落旧 X-Telemetry-Key；由管理台签发后填入
-    appKey: "",
   },
   /**
    * 镜像管理页显示选项（系统设置 → 列显隐 → 镜像管理，v1.42.15 新增）。

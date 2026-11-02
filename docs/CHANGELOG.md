@@ -16,17 +16,17 @@
 
 ---
 
-## v1.50.6 — 2026-11-01（**已构建 · 待发布**）
+## v1.50.6 — 2026-11-02（**已构建 · 待发布**）
 
 ---
 
 ### 已完成
-- **上报请求接入 `X-App-Key` 应用密钥（对接《客户端实施说明》新鉴权体系）**：
-  - `server/telemetry.ts`：`readConfig()` 读取密钥（来源优先级：环境变量 `TELEMETRY_APP_KEY` > 设置页 `settings.telemetry.appKey`）；`sendReport()` 密钥非空时请求头携带 `X-App-Key`（明文原样直传，不拼接/不哈希），**旧 `X-Telemetry-Key` 过渡头保留**（服务端双头并存优先认 X-App-Key）
-  - `src/types.ts` + `server/settings.ts`：`TelemetryConfig.appKey?: string`（默认空串 = 不携带新头，走旧鉴权过渡）
-  - `src/components/ActivityPanel.tsx`：活跃度面板「上传安装数量统计」卡内新增「X-App-Key（应用密钥，选填）」输入框（PasswordInput 掩码 + 小眼睛，配置化存储不硬编码、不进日志）
-  - `src/pages/Settings.tsx`：activity 分区接线 + 默认值
-  - 兼容性：不填密钥行为与 v1.50.5 完全一致（仅 X-Telemetry-Key）；填入后立即对上报生效（每次上报时实时读取配置）
+- **检查更新卡片：「Release 说明」升级为「改动内容」结构化展示**（`src/pages/Settings.tsx`）：
+  - 原状态：卡片已渲染 release body（`updateInfo.releaseNotes`，Gitea/GitHub 发布时自动取自 CHANGELOG 对应段落），但是 markdown 原文塞 `<pre>` 纯文本——`###`、`**`、列表符号全裸露
+  - 新增 `ReleaseNotesView` 受限 markdown 渲染组件：`### 小节`（不重复展示）、`-` 一级/二级列表（按缩进 3 空格分级）、行内 `**加粗**` 与 `` `代码` ``、其余行普通段落
+  - 安全：行内解析构建 React 元素树（`renderInlineMd`），不走 `dangerouslySetInnerHTML`，零 XSS 面
+  - 展示上限不变（服务端截断 2000 字符），卡片内 `max-h-56` 滚动
+  - 数据链路不变：`checkForUpdate()` Gitea 优先 → GitHub 保底，release body 随 `releaseNotes` 回传
 
 ### 未完成 / 已知限制
 - 无
