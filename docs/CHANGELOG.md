@@ -16,6 +16,17 @@
 
 ---
 
+## v1.50.12 — 2026-11-02（**已构建 · 已推 Gitea**）
+
+**已完成**
+- 上报远端 API 路径 `TELEMETRY_PATH` 由 `/api/yanzi-docker/event` 改为 `/api/docker-management/event`（`server/telemetry.ts`），对齐接收端新路由；文档 `docs/上报接口速览.md` §1 端点路径同步更新。
+- 升版本号 1.50.11 → 1.50.12（`package.json`）。
+
+**未完成 / 已知限制**
+- 远端 `192.168.24.10:30507/api/docker-management/event`（及公网 fallback `yanzi-api.ziruxue.top`）需接收端实际部署该路由后上报方能成功；「立即发送」按钮报 HTTP 404 即因旧路径在远端不存在，路径改后待接收端就绪即恢复。
+
+**下一步**：接收端部署新路由后，「立即发送」恢复绿字成功；无代码侧后续。
+
 ## v1.50.11 — 2026-11-02（**已构建 · 待发布**）
 
 **已完成**
