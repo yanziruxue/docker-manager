@@ -55,8 +55,25 @@ function toRefMap(details: ImageUpdateDetail[]): Record<string, boolean> {
   return out;
 }
 
+/** 合法页面键（v1.50.7 提升到模块级：sessionStorage 恢复与登录默认页共用） */
+const VALID_PAGES: PageKey[] = [
+  "dashboard", "containers", "stacks", "images",
+  "volumes", "networks", "notifications", "settings",
+];
+
+/** 会话级页面记忆（v1.50.7）：刷新后保持刷新前页面；新开标签/新会话不携带，仍走默认页 */
+const PAGE_STORAGE_KEY = "dmgr.page";
+function readStoredPage(): PageKey | null {
+  try {
+    const v = sessionStorage.getItem(PAGE_STORAGE_KEY);
+    return v && VALID_PAGES.includes(v as PageKey) ? (v as PageKey) : null;
+  } catch {
+    return null;
+  }
+}
+
 export default function App() {
-  const [page, setPage] = useState<PageKey>("dashboard");
+  const [page, setPage] = useState<PageKey>(() => readStoredPage() ?? "dashboard");
 
   // 引擎状态
   const [engines, setEngines] = useState<DockerEngine[]>([]);
@@ -276,14 +293,14 @@ export default function App() {
         setEngines(list);
         if (settingsData) setSettings(settingsData);
         if (versionInfo?.version) setRuntimeVersion(versionInfo.version);
-        // 登录后默认显示页面（v1.42.9）：仅在登录态就绪、settings 已加载时跳转一次，
-        // 不覆盖用户当次会话内的手动导航（authState 变化才会重跑本 effect）。
-        const VALID_PAGES: PageKey[] = [
-          "dashboard", "containers", "stacks", "images",
-          "volumes", "networks", "notifications", "settings",
-        ];
+        // 登录后默认显示页面（v1.42.9）：仅在登录态就绪、settings 已加载时跳转一次。
+        // v1.50.7：sessionStorage 已有会话页面记录（刷新/会话内重登）时优先恢复刷新前页面，
+        // 仅全新会话（新开标签、无记录）才落到设置里的默认页面。
+        const stored = readStoredPage();
         const dp = settingsData?.modal?.defaultPage;
-        if (dp && VALID_PAGES.includes(dp as PageKey)) {
+        if (stored) {
+          setPage(stored);
+        } else if (dp && VALID_PAGES.includes(dp as PageKey)) {
           setPage(dp as PageKey);
         }
         // 自动检查更新：覆盖「网页刷新 / 后端启动 / 每 6 小时」三触发条件
@@ -486,6 +503,15 @@ export default function App() {
     setFocusContainerName(opts?.focusContainerName ?? "");
     setPage(target as PageKey);
   };
+
+  // 会话级页面持久化（v1.50.7）：页面变化即写入 sessionStorage，刷新后恢复
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(PAGE_STORAGE_KEY, page);
+    } catch {
+      /* 隐私模式等存储不可用时静默降级（回落默认页） */
+    }
+  }, [page]);
 
   useEffect(() => {
     // engineSwitchLoadRef 守卫：主动切换流程已在加载目标引擎时跳过，避免双拉
