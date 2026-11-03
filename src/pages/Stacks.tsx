@@ -633,6 +633,14 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
     const isRunning = stack.status === "running" || stack.status === "partial";
     const isOperating = operatingStacks.has(stack.name);
 
+    // 打开 WebUI 置顶（仅当存在可识别的 WebUI 时显示）
+    if (stack.webuiLabels.length > 0) {
+      const webuiLabel = stack.webuiLabels[0];
+      const webuiUrl = webuiLabel.webuiUrl || (webuiLabel.webuiPort ? `http://localhost:${webuiLabel.webuiPort}` : "");
+      items.push({ label: L("Open WebUI", "打开 WebUI"), icon: <Globe size={14} />, onClick: () => webuiUrl && window.open(webuiUrl, "_blank") });
+      items.push({ separator: true });
+    }
+
     // 按用户截图 10 项菜单排列
     items.push({ label: L("Compose Up", "启动"), icon: <Play size={14} />, onClick: () => handleStackAction(stack.name, "up"), disabled: isOperating });
     items.push({ label: L("Stop", "停止"), icon: <Square size={14} />, onClick: () => handleStackAction(stack.name, "down"), disabled: isOperating || !isRunning });
@@ -660,13 +668,6 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
     items.push({ label: L("Terminal", "终端"), icon: <Terminal size={14} />, onClick: () => { setContextMenu(null); setTerminalStack(stack); } });
     items.push({ label: L("Backup", "备份"), icon: <Package size={14} />, onClick: () => { setContextMenu(null); handleBackup(stack.name); }, disabled: isOperating });
     items.push({ label: L("Duplicate", "复制"), icon: <Copy size={14} />, onClick: () => { setContextMenu(null); setTimeout(() => { setCreateMode(true); }, 100); } });
-
-    if (stack.webuiLabels.length > 0) {
-      const webuiLabel = stack.webuiLabels[0];
-      const webuiUrl = webuiLabel.webuiUrl || (webuiLabel.webuiPort ? `http://localhost:${webuiLabel.webuiPort}` : "");
-      items.push({ separator: true });
-      items.push({ label: L("Open WebUI", "打开 WebUI"), icon: <Globe size={14} />, onClick: () => webuiUrl && window.open(webuiUrl, "_blank") });
-    }
 
     return items;
   };

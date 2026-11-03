@@ -16,6 +16,11 @@
 
 ---
 
+## v1.50.14 — 2026-11-03（**已构建 · 已推 Gitea**）
+
+- **右键堆栈菜单「打开 WebUI」置顶（UI 调整）**：`src/pages/Stacks.tsx` 的 `getStackMenuItems` 原把「打开 WebUI」放在菜单**末尾**（条件性、带分隔符）。现改为：当 `stack.webuiLabels.length > 0` 时，把「打开 WebUI」作为菜单**第一项**，其后加分隔符再接启动/停止等原序列；无 WebUI 时布局与原先一致（直接以「启动」开头）。删除末尾旧 webui 块。涉及文件：`src/pages/Stacks.tsx`。`tsc` 双 0、16 组门禁 0 FAIL、SEA 四步 + 三处二进制 SHA（`931ec113…`）逐字节一致。
+- 已知限制：无。下一步：真机右键含 WebUI 的堆栈验证「打开 WebUI」是否出现在菜单顶部。
+
 ## v1.50.13 — 2026-11-03（**已构建 · 已推 Gitea**）
 
 - **右键菜单不跟随鼠标指针（修复）**：`src/components/ContextMenu.tsx` 原用 `position:fixed` + `e.clientX/clientY`，但竖直/水平夹紧用 `items.length*36` **估算**菜单尺寸，会过早把菜单顶离光标（尤其底部/右侧点击时菜单跳到上方/贴边，视觉上像"停在屏幕中间不跟手"）。改为：① 通过 `createPortal` 挂载到 `document.body`（消除任何祖先包含块歧义）；② `useLayoutEffect` 实测渲染后的真实 `offsetWidth/offsetHeight`，仅在**真实尺寸**会溢出视口时才回退到贴边（不再是估算式夹紧）。`tsc` 双 0、16 组门禁 0 FAIL、SEA 四步 + 三处二进制 SHA（`43e4fd67…`）逐字节一致。
