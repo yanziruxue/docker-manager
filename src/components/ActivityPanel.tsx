@@ -462,7 +462,7 @@ export function ActivityPanel({
                 mono
                 title={status.deviceFile}
               />
-              <Row label="主板" value={hw?.boardSerial ?? ""} mono title={hw?.boardSerial} />
+              <Row label="主板序列号" value={hw?.boardSerial ?? ""} mono title={hw?.boardSerial} />
               <Row label="主板型号" value={details?.dmi?.boardName ?? ""} title={details?.dmi?.boardName} />
               <Row
                 label="产品序列号"

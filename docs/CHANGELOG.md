@@ -16,6 +16,11 @@
 
 ---
 
+## v1.50.16 — 2026-11-03（**已构建 · 已推 Gitea**）
+
+- **UI 文案：硬件信息卡「主板」标签改为「主板序列号」**：避免与同卡「主板型号」混淆。`src/components/ActivityPanel.tsx:465` 行标签 `label="主板"` → `label="主板序列号"`，字段仍取 `hw.boardSerial`（SMBIOS Type 2 Baseboard Serial，主板自身序列号，参与 6 维设备指纹）。`tsc` 双 0、16 组门禁 0 FAIL（PASS=46）、SEA 四步 + 三处二进制 SHA（`462624f2…`）逐字节一致、前端解码段锚点 `主板序列号`=1、`主板` 旧标签 0 残留。
+- 已知限制：无。下一步：无。
+
 ## v1.50.15 — 2026-11-03（**已构建 · 已推 Gitea**）
 
 - **修复：列显隐设置刷新后丢失（全部列显示）**：根因——`settings` 为异步加载，刷新后首挂时 `settings?.columnVisibility.*` 仍为 `undefined`，4 个带列显隐的页面（`Containers`/`Images`/`Volumes`/`Stacks`）的 `useState(defaultSet)` 仅在首次挂载取值，初始落到「全部列」，且 settings 加载完成后 `useState` 不更新，导致刷新后列显隐配置（系统设置 → 列显隐）被忽略。切页面时组件卸载重挂、settings 已在内存中就绪，故不受影响。修复：各页面新增 effect，当 `defaultVisibleColumns` 从 `undefined`/空首次变为有效数组（settings 就绪）时同步一次默认列；用 ref 仅同步首次就绪，不覆盖会话内手动调整；切页重挂时 settings 已就绪、幂等无副作用。涉及文件：`src/pages/Containers.tsx`、`src/pages/Images.tsx`、`src/pages/Volumes.tsx`、`src/pages/Stacks.tsx`。`tsc` 双 0、16 组门禁 0 FAIL、SEA 四步 + 三处二进制 SHA（`a6acf942…`）逐字节一致。
