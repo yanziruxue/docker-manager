@@ -1,5 +1,5 @@
-import React, { useEffect, useRef } from "react";
-import { ChevronRight } from "lucide-react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 export interface MenuItem {
   label?: string;
@@ -19,6 +19,26 @@ interface ContextMenuProps {
 
 export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
+  // 先用光标位置占位，实测后修正，避免首帧溢出；useLayoutEffect 在绘制前完成，无闪烁
+  const [pos, setPos] = useState({ left: x, top: y });
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    const pad = 4;
+    let left = x;
+    let top = y;
+    // 仅当真实尺寸会溢出视口时才回退到贴边（不再用 items.length*36 估算，避免过早顶起）
+    if (left + w + pad > window.innerWidth) {
+      left = Math.max(pad, window.innerWidth - w - pad);
+    }
+    if (top + h + pad > window.innerHeight) {
+      top = Math.max(pad, window.innerHeight - h - pad);
+    }
+    setPos({ left, top });
+  }, [x, y, items.length]);
 
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
@@ -37,15 +57,11 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
     };
   }, [onClose]);
 
-  // Adjust position to prevent overflow
-  const adjustedX = Math.min(x, window.innerWidth - 220);
-  const adjustedY = Math.min(y, window.innerHeight - items.length * 36 - 16);
-
-  return (
+  return createPortal(
     <div
       ref={ref}
       className="context-menu fixed z-[9999] min-w-[200px] bg-slate-800 rounded-lg shadow-2xl border border-slate-700 py-1.5"
-      style={{ left: adjustedX, top: adjustedY }}
+      style={{ left: pos.left, top: pos.top }}
     >
       {items.map((item, index) => {
         if (item.separator) {
@@ -74,6 +90,7 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
           </button>
         );
       })}
-    </div>
+    </div>,
+    document.body
   );
 }
