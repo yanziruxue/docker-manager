@@ -16,6 +16,11 @@
 
 ---
 
+## v1.50.13 — 2026-11-03（**已构建 · 已推 Gitea**）
+
+- **右键菜单不跟随鼠标指针（修复）**：`src/components/ContextMenu.tsx` 原用 `position:fixed` + `e.clientX/clientY`，但竖直/水平夹紧用 `items.length*36` **估算**菜单尺寸，会过早把菜单顶离光标（尤其底部/右侧点击时菜单跳到上方/贴边，视觉上像"停在屏幕中间不跟手"）。改为：① 通过 `createPortal` 挂载到 `document.body`（消除任何祖先包含块歧义）；② `useLayoutEffect` 实测渲染后的真实 `offsetWidth/offsetHeight`，仅在**真实尺寸**会溢出视口时才回退到贴边（不再是估算式夹紧）。`tsc` 双 0、16 组门禁 0 FAIL、SEA 四步 + 三处二进制 SHA（`43e4fd67…`）逐字节一致。
+- 已知限制：无。下一步：让用户在真机右键验证跟手效果。
+
 ## v1.50.12 — 2026-11-02（**已构建 · 已推 Gitea**）
 
 **已完成**
