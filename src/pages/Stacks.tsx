@@ -369,6 +369,16 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
       ? new Set(defaultVisibleColumns as StackColumnKey[])
       : new Set(allStackColumns.map((c) => c.key))
   );
+  // settings 异步加载：刷新后首挂时 defaultVisibleColumns 可能仍为 undefined（settings 未就绪），
+  // 初始 state 落到「全部列」；settings 就绪后同步一次默认列，避免刷新后列显隐丢失。
+  const appliedStacksDefaultRef = useRef(false);
+  useEffect(() => {
+    if (appliedStacksDefaultRef.current) return;
+    if (defaultVisibleColumns && defaultVisibleColumns.length > 0) {
+      setVisibleStackColumns(new Set(defaultVisibleColumns as StackColumnKey[]));
+      appliedStacksDefaultRef.current = true;
+    }
+  }, [defaultVisibleColumns]);
   const [showColumnPicker, setShowColumnPicker] = useState(false);
   const columnPickerRef = useRef<HTMLDivElement>(null);
   const toggleStackColumn = (key: StackColumnKey) => {

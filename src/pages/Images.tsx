@@ -1123,6 +1123,20 @@ export function Images({ images, loading, error, engineId, onRefresh, onImagesRe
 
   const [visibleColumns, setVisibleColumns] = useState<Set<ColumnKey>>(defaultSet);
 
+  // settings 异步加载：刷新后首挂时 defaultVisibleColumns 可能仍为 undefined（settings 未就绪），
+  // 初始 state 落到「全部列」（或 defaultSet 的回退集合）；settings 就绪后同步一次默认列。
+  // 「仓库名」为主标识列：与 defaultSet 一致，同步时也强制包含 repository。
+  const appliedImagesDefaultRef = useRef(false);
+  useEffect(() => {
+    if (appliedImagesDefaultRef.current) return;
+    if (defaultVisibleColumns && defaultVisibleColumns.length > 0) {
+      const s = new Set(defaultVisibleColumns as ColumnKey[]);
+      s.add("repository");
+      setVisibleColumns(s);
+      appliedImagesDefaultRef.current = true;
+    }
+  }, [defaultVisibleColumns]);
+
   // 「仓库 registry 地址」显隐（v1.42.18）：工具栏「列」下拉新增项「仓库 registry 地址」——
   // 勾选 = 显示完整仓库地址（含 registry 前缀）；不勾选 = 隐藏前缀只显示短名（gitea/gitea）。
   // 初始值取服务端设置（缺省隐藏），页内切换为会话级，不写 settings（设置页开关仍是持久化入口）

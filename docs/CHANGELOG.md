@@ -16,6 +16,11 @@
 
 ---
 
+## v1.50.15 — 2026-11-03（**已构建 · 已推 Gitea**）
+
+- **修复：列显隐设置刷新后丢失（全部列显示）**：根因——`settings` 为异步加载，刷新后首挂时 `settings?.columnVisibility.*` 仍为 `undefined`，4 个带列显隐的页面（`Containers`/`Images`/`Volumes`/`Stacks`）的 `useState(defaultSet)` 仅在首次挂载取值，初始落到「全部列」，且 settings 加载完成后 `useState` 不更新，导致刷新后列显隐配置（系统设置 → 列显隐）被忽略。切页面时组件卸载重挂、settings 已在内存中就绪，故不受影响。修复：各页面新增 effect，当 `defaultVisibleColumns` 从 `undefined`/空首次变为有效数组（settings 就绪）时同步一次默认列；用 ref 仅同步首次就绪，不覆盖会话内手动调整；切页重挂时 settings 已就绪、幂等无副作用。涉及文件：`src/pages/Containers.tsx`、`src/pages/Images.tsx`、`src/pages/Volumes.tsx`、`src/pages/Stacks.tsx`。`tsc` 双 0、16 组门禁 0 FAIL、SEA 四步 + 三处二进制 SHA（`a6acf942…`）逐字节一致。
+- 已知限制：无。下一步：真机刷新含自定义列显隐的页面，确认刷新后正确应用设置里的默认列。
+
 ## v1.50.14 — 2026-11-03（**已构建 · 已推 Gitea**）
 
 - **右键堆栈菜单「打开 WebUI」置顶（UI 调整）**：`src/pages/Stacks.tsx` 的 `getStackMenuItems` 原把「打开 WebUI」放在菜单**末尾**（条件性、带分隔符）。现改为：当 `stack.webuiLabels.length > 0` 时，把「打开 WebUI」作为菜单**第一项**，其后加分隔符再接启动/停止等原序列；无 WebUI 时布局与原先一致（直接以「启动」开头）。删除末尾旧 webui 块。涉及文件：`src/pages/Stacks.tsx`。`tsc` 双 0、16 组门禁 0 FAIL、SEA 四步 + 三处二进制 SHA（`931ec113…`）逐字节一致。

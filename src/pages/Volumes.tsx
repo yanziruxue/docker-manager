@@ -115,6 +115,17 @@ export function Volumes({ volumes, loading, error, engineId, defaultVisibleColum
 
   const [visibleColumns, setVisibleColumns] = useState<Set<ColumnKey>>(defaultSet);
 
+  // settings 异步加载：刷新后首挂时 defaultVisibleColumns 可能仍为 undefined（settings 未就绪），
+  // 初始 state 落到「全部列」；settings 就绪后同步一次默认列，避免刷新后列显隐丢失。
+  const appliedVolumesDefaultRef = useRef(false);
+  useEffect(() => {
+    if (appliedVolumesDefaultRef.current) return;
+    if (defaultVisibleColumns && defaultVisibleColumns.length > 0) {
+      setVisibleColumns(new Set(defaultVisibleColumns as ColumnKey[]));
+      appliedVolumesDefaultRef.current = true;
+    }
+  }, [defaultVisibleColumns]);
+
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
       if (columnPickerRef.current && !columnPickerRef.current.contains(e.target as Node)) {

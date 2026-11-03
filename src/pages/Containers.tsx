@@ -204,6 +204,19 @@ export function Containers({ containers, onNavigate, onRefresh, loading, error, 
     : new Set(allColumns.map((c) => c.key));
   const [visibleColumns, setVisibleColumns] = useState<Set<ColumnKey>>(containerDefaults);
 
+  // settings 异步加载：刷新后首挂时 defaultVisibleColumns 仍可能为 undefined（settings 未就绪），
+  // 初始 state 落到「全部列」；settings 就绪后同步一次默认列，避免刷新后列显隐丢失。
+  // 切换页面时组件重挂、settings 已在内存中就绪，此处幂等无副作用；
+  // 仅首次就绪同步一次（ref 拦截），不覆盖用户在会话内的手动调整。
+  const appliedContainersDefaultRef = useRef(false);
+  useEffect(() => {
+    if (appliedContainersDefaultRef.current) return;
+    if (defaultVisibleColumns && defaultVisibleColumns.length > 0) {
+      setVisibleColumns(new Set<ColumnKey>([...(defaultVisibleColumns as ColumnKey[]), "stack"]));
+      appliedContainersDefaultRef.current = true;
+    }
+  }, [defaultVisibleColumns]);
+
   // 关闭列选择器
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
