@@ -18,7 +18,9 @@
 
 ## v1.50.16 — 2026-11-03（**已构建 · 已推 Gitea**）
 
-- **UI 文案：硬件信息卡「主板」标签改为「主板序列号」**：避免与同卡「主板型号」混淆。`src/components/ActivityPanel.tsx:465` 行标签 `label="主板"` → `label="主板序列号"`，字段仍取 `hw.boardSerial`（SMBIOS Type 2 Baseboard Serial，主板自身序列号，参与 6 维设备指纹）。`tsc` 双 0、16 组门禁 0 FAIL（PASS=46）、SEA 四步 + 三处二进制 SHA（`462624f2…`）逐字节一致、前端解码段锚点 `主板序列号`=1、`主板` 旧标签 0 残留。
+- **UI 文案：硬件信息卡「主板」标签改为「主板序列号」**：避免与同卡「主板型号」混淆。`src/components/ActivityPanel.tsx:465` 行标签 `label="主板"` → `label="主板序列号"`，字段仍取 `hw.boardSerial`（SMBIOS Type 2 Baseboard Serial，主板自身序列号，参与 6 维设备指纹）。
+- **服务端修复（随本版一并纳入）：上报 `boardSerial` 改用现采值覆盖安装快照**。`server/telemetry.ts:695` `buildPayload` 中 `hardware.boardSerial` 由安装时快照改为上报瞬间 `collectBoardId()` 现采，避免「安装时 DMI 副本尚未生成 → 快照为空 → webyanzi/远端显示 —」；仅覆盖上报展示值，不改写 `device.info`、不重算 `deviceId`（指纹仍以安装快照为准）。
+- 核验：`tsc` 双 0（src + server）、16 组门禁 0 FAIL（PASS=46）、SEA 四步 + 三处二进制 SHA（`22ccd25f…`）逐字节一致、前端解码段锚点 `主板序列号`=1、服务端段新逻辑 `boardSerial: collectBoardId()` 命中 2 / 旧快照逻辑 0。
 - 已知限制：无。下一步：无。
 
 ## v1.50.15 — 2026-11-03（**已构建 · 已推 Gitea**）

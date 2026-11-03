@@ -692,7 +692,11 @@ function buildPayload(info: DeviceInfo, collectHw: boolean, uploadEnabled: boole
     virtualized: info.virtualized,
     // deviceFile 不再上报（v1.50.10）：文档 §3.3 字段表未列该字段，规避未知字段整包 400 风险
     // 6 维设备标识（安装时快照，与 deviceId 同源，服务端可复算校验）—— 对应卡片「主板」等
-    hardware: collectHw ? info.hardware : null,
+    // boardSerial 用现采值覆盖安装快照：避免「安装时 DMI 副本尚未生成 → 快照为空 → webyanzi 显示 —」
+    // 仅覆盖上报展示值，不改写 device.info、不重算 deviceId（指纹仍以安装快照为准）
+    hardware: collectHw
+      ? { ...info.hardware, boardSerial: collectBoardId() }
+      : null,
     /**
      * 富硬件明细（与「硬件信息」卡片逐项对应）：
      * cpu{model,cores,threads,freqGHz} / gpu{model,memory} / memory{model,sizeGB} /
