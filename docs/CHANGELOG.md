@@ -22,7 +22,7 @@
 - **行为说明（重要）**：`device.info` 完好时沿用旧 ID（btime==mtime 只读），因此**已撞 ID 的两台 VM 必须手动删一次 `device.info` 再重启服务**，才会按新算法重算指纹并分流成两台设备；新安装的 VM 直接就是新指纹。新算法下同一 VM 改主机名会触发一次"重装"统计（罕见，可接受）。极端情形（主机名+机器ID+MAC+UUID 全一致的完全冷克隆）仍可能撞——极少见。
 - **核验**：`tsc` 双 0；16 组门禁 0 FAIL（全绿）；SEA 四步 + 三处二进制 SHA（`f46662a6…`）逐字节一致；二进制解码锚点 `1.50.19`=2 / `1.50.18`=0 / `collectProductUuid`=2 / `readMachineId`=2 / `readPrimaryMac`=2 / `dmi-product_uuid`=3 / `/etc/machine-id`=1。
 - 已知限制：见上「极端情形」；`product_uuid`/`board_serial` 仍依赖安装期 root 镜像副本（非 root 服务读不到 sysfs 0400），副本缺失时回退 sysfs/dmidecode。下一步：用户真机删 `device.info` 重启验证两台 VM 分流；观察克隆 VM 去重效果。
-- 快照：commit（待记） + tag v1.50.19 推 Gitea main+tag 双 ref 一致；GitHub 按约定未推。
+- 快照：commit 8cb4d70 + tag v1.50.19 推 Gitea main+tag 双 ref 一致；GitHub 按约定未推。
 
 ## v1.50.18 — 2026-11-04（**已构建 · 已推 Gitea**）
 
