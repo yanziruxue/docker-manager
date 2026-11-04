@@ -88,6 +88,8 @@ export interface EngineResourceStats {
   disks: DiskStat[];
   /** 逐网口实时速率（仅本机 socket 引擎可读 /proc/net/dev；远程引擎为空数组） */
   netIfaces: NetIfaceStat[];
+  /** 显卡实时监测（仅本机 socket 引擎可采集；远程引擎为空数组）。null 字段 = 读不到（无权限/无驱动） */
+  gpus: GpuStat[];
   /** 宿主机正常运行时间（秒）：读 /proc/uptime，读不到（远程引擎 / 非 Linux）为 0 → 前端显示「—」 */
   hostUptimeSec: number;
   // ───────── 宿主机库存（系统设置 → 硬件信息页 + 处理器/内存图标 tooltip） ─────────
@@ -134,10 +136,16 @@ export interface ResourceSample {
   netIfaces?: Record<string, { rx: number; tx: number }>;
   /**
    * 逐磁盘速率与利用率：键 = 设备名（`sda` / `nvme0n1` …）。
-   * `read` / `write` 单位 **MB/s**，`busy` 单位 **%**。
+   * `read` / `write` 单位 **MB/s**，`busy` 单位 **%`。
    * 仅本机 socket 引擎有值；远程引擎缺省（磁盘磁贴显示「无曲线」）。
    */
   disks?: Record<string, { read: number; write: number; busy: number }>;
+  /**
+   * 显卡实时监测：型号 / 核显独显 / 利用率% / 显存 / 温度。
+   * 仅本机 socket 引擎有值；远程引擎缺省（显卡磁贴显示「无 GPU」）。
+   * 单卡字段为 null 表示读不到（无权限 / 无驱动），前端显示「—」。
+   */
+  gpus?: GpuStat[];
 }
 
 /** 宿主机磁盘统计（/proc/diskstats 差分） */
@@ -158,6 +166,28 @@ export interface NetIfaceStat {
   name: string;
   rxKBps: number;
   txKBps: number;
+}
+
+/** 显卡实时监测（仪表盘「显卡」磁贴） */
+export interface GpuStat {
+  /** 展示顺序（0 起） */
+  index: number;
+  /** 型号（经 pci.ids 解析，或 nvidia-smi 回退） */
+  model: string;
+  /** 厂商名（Intel / NVIDIA / AMD / …） */
+  vendor: string;
+  /** 厂商 PCI ID（0x8086 → "8086"） */
+  vendorId: string;
+  /** 核显 / 独显 / 未知（非 root 服务按厂商粗分，仅作展示提示） */
+  type: "integrated" | "discrete" | "unknown";
+  /** GPU 利用率（%，0–100）；读不到为 null */
+  usagePercent: number | null;
+  /** 显存已用（MB）；共享显存或读不到为 null */
+  memoryUsedMB: number | null;
+  /** 显存总量（MB）；同上 */
+  memoryTotalMB: number | null;
+  /** 核心温度（℃）；读不到为 null */
+  tempC: number | null;
 }
 
 /** 网络曲线的可选接口（本机网口 + Docker 网桥虚拟网卡） */

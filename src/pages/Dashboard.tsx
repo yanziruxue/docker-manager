@@ -12,6 +12,7 @@ import {
   ArrowUp,
   ArrowUpRight,
   ChevronUp,
+  Zap,
 } from "lucide-react";
 import { Tile, useStoredFlag } from "../components/Tile";
 import { TileGrid, useMinWidth } from "../components/TileGrid";
@@ -42,6 +43,7 @@ function statsToSample(st: EngineStats): ResourceSample {
     hostCpuPercent: st.hostCpuPercent ?? undefined,
     ...(Object.keys(netIfaces).length ? { netIfaces } : {}),
     ...(Object.keys(disks).length ? { disks } : {}),
+    ...(st.gpus && st.gpus.length ? { gpus: st.gpus } : {}),
   };
 }
 import { LoadingState, ErrorState } from "../components/DataState";
@@ -59,6 +61,7 @@ import type {
   DiskStat,
   ResourceSample,
   NetInterfaceOption,
+  GpuStat,
 } from "../types";
 
 interface DashboardProps {
@@ -259,6 +262,7 @@ export function Dashboard({
             <SystemTile stats={resourceStats} engineId={engineId} />
             <CpuTile stats={resourceStats} history={series} />
             <MemTile stats={resourceStats} history={series} />
+            <GpuTile stats={resourceStats} history={series} />
             {mergeIo && <DiskTile stats={resourceStats} history={series} />}
           </>,
           /* 第 2 列 · 应用（2 列档并入网络） */
@@ -787,6 +791,140 @@ function MemTile({ stats, history }: { stats: EngineResourceStats | null; histor
         </>
       ) : (
         <Placeholder />
+      )}
+    </Tile>
+  );
+}
+
+/** 显卡磁贴配色板（逐卡曲线，按卡索引取色） */
+const GPU_LINE_COLORS = [
+  "#8b5cf6", "#3b82f6", "#10b981", "#f59e0b", "#ef4444",
+  "#06b6d4", "#ec4899", "#84cc16", "#14b8a6", "#f97316",
+];
+const gpuColor = (i: number) => GPU_LINE_COLORS[i % GPU_LINE_COLORS.length];
+
+/** 核显/独显/未知 → 徽标（文案 + 配色） */
+function gpuTypeBadge(t: GpuStat["type"]): { text: string; cls: string } {
+  if (t === "integrated") return { text: "核显", cls: "bg-blue-50 text-blue-600" };
+  if (t === "discrete") return { text: "独显", cls: "bg-purple-50 text-purple-600" };
+  return { text: "显卡", cls: "bg-slate-100 text-slate-500" };
+}
+
+/**
+ * 显卡：逐卡用量条（利用率%）+ 显存 + 温度 + 核显/独显徽标，外加可折叠的逐卡用量曲线。
+ * 数据来自 resourceStats.gpus（本机 socket 引擎采集；远程引擎为空数组 → 显示「无 GPU」）。
+ * 单卡字段为 null（非 root 无权限 / 无驱动）⇒ 该字段显示「—」（与磁盘温度同口径）。
+ */
+function GpuTile({ stats, history }: { stats: EngineResourceStats | null; history: ResourceSample[] }) {
+  const { range, setRange, points } = useChartRange("gpu");
+  const [showChart, setShowChart] = useStoredFlag("dm.tile.gpu.chart", false);
+  const gpus: GpuStat[] = stats?.gpus || [];
+  const pts = history.slice(-points);
+
+  // 逐卡用量曲线：每卡一条（按 index 取历史样本里对应卡；null/NaN ⇒ 曲线沿用上一个有效值）
+  const gpuSeries: LineSeries[] = gpus.map((g, i) => ({
+    name: g.model.length > 16 ? g.model.slice(0, 16) + "…" : g.model,
+    color: gpuColor(g.index ?? i),
+    values: pts.map((s) => {
+      const v = s.gpus?.[g.index]?.usagePercent;
+      return v === null || v === undefined || !Number.isFinite(v) ? NaN : v;
+    }),
+  }));
+
+  const canChart = gpus.length > 0;
+
+  const persistent = canChart
+    ? {
+        bottom: (
+          <div className="pt-3 border-t border-slate-100">
+            <button
+              type="button"
+              onClick={() => setShowChart(!showChart)}
+              aria-expanded={showChart}
+              className="flex w-full items-center justify-between text-xs text-slate-500 hover:text-slate-700 transition-colors"
+            >
+              <span>显卡用量曲线</span>
+              <ChevronUp size={14} className={`transition-transform ${showChart ? "" : "rotate-180"}`} />
+            </button>
+            {showChart && (
+              <>
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] mt-1.5 mb-1">
+                  {gpus.map((g, i) => (
+                    <Legend key={g.index} color={gpuColor(g.index ?? i)}>
+                      {g.model.length > 14 ? g.model.slice(0, 14) + "…" : g.model}{" "}
+                      <b className="font-semibold">
+                        {g.usagePercent === null || g.usagePercent === undefined ? "—" : `${round1(g.usagePercent)}%`}
+                      </b>
+                    </Legend>
+                  ))}
+                </div>
+                <LineChart
+                  series={gpuSeries}
+                  yMax={100}
+                  formatMax={(v) => `${Math.round(v)}%`}
+                  formatMin={() => "0"}
+                  emptyText="正在采样显卡…"
+                  labels={clockLabels(pts)}
+                  formatValue={(v) => `${round1(v)}%`}
+                />
+              </>
+            )}
+          </div>
+        ),
+      }
+    : undefined;
+
+  return (
+    <Tile
+      id="gpu"
+      title="显卡"
+      icon={<Zap size={32} />}
+      subtitle={gpus.length > 0 ? `${gpus.length} 张显卡` : "无 GPU"}
+      actions={canChart ? <RangeSelect value={range} onChange={setRange} /> : undefined}
+      persistent={persistent}
+    >
+      {!stats ? (
+        <Placeholder />
+      ) : gpus.length === 0 ? (
+        <p className="text-xs text-slate-400 py-2">本机无显卡 / 远程引擎不支持读取宿主硬件</p>
+      ) : (
+        <div className="pt-3 border-t border-slate-100 space-y-3">
+          {gpus.map((g) => {
+            const badge = gpuTypeBadge(g.type);
+            const usage = g.usagePercent;
+            return (
+              <div key={g.index}>
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="text-sm font-medium text-slate-700 truncate flex-1" title={g.model}>
+                    {g.model}
+                  </span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${badge.cls}`}>{badge.text}</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="w-12 flex-shrink-0 text-xs text-slate-500">利用率</span>
+                  <Bar
+                    percent={usage === null || usage === undefined ? 0 : usage}
+                    color={usage === null || usage === undefined ? "#cbd5e1" : loadColor(usage)}
+                    className="flex-1"
+                  />
+                  <span className="w-12 flex-shrink-0 text-right text-xs font-mono text-slate-600">
+                    {usage === null || usage === undefined ? "—" : `${Math.round(usage)}%`}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-[11px] text-slate-500 mt-1.5">
+                  <span>
+                    显存{" "}
+                    {g.memoryUsedMB !== null && g.memoryTotalMB !== null
+                      ? `${fmtMB(g.memoryUsedMB)} / ${fmtMB(g.memoryTotalMB)}`
+                      : "—"}
+                  </span>
+                  <span>温度 {g.tempC !== null && g.tempC !== undefined ? `${g.tempC}℃` : "—"}</span>
+                  {g.vendor && g.vendor !== g.model && <span className="text-slate-400">{g.vendor}</span>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       )}
     </Tile>
   );

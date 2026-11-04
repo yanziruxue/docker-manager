@@ -472,6 +472,236 @@ function collectGpu(): string {
   return "";
 }
 
+// ---------- 显卡运行时监测（仪表盘「显卡」磁贴） ----------
+
+/** 单张显卡的运行时监测数据 */
+export interface GpuStat {
+  /** 展示顺序（0 起） */
+  index: number;
+  /** 型号（经 pci.ids 解析，或 nvidia-smi 回退） */
+  model: string;
+  /** 厂商名（Intel / NVIDIA / AMD / …） */
+  vendor: string;
+  /** 厂商 PCI ID（0x8086 → "8086"） */
+  vendorId: string;
+  /** 核显 / 独显 / 未知（非 root 服务按厂商粗分，仅作展示提示） */
+  type: "integrated" | "discrete" | "unknown";
+  /** GPU 利用率（%，0–100）；读不到（远程引擎 / 无权限 / 无驱动）为 null */
+  usagePercent: number | null;
+  /** 显存已用（MB）；共享显存（Intel iGPU）或读不到为 null */
+  memoryUsedMB: number | null;
+  /** 显存总量（MB）；同上 */
+  memoryTotalMB: number | null;
+  /** 核心温度（℃，hwmon / nvidia-smi）；读不到为 null */
+  tempC: number | null;
+}
+
+/** PCI 厂商 ID → 厂商名（仅常见显卡厂商） */
+function gpuVendorName(vendorId: string): string {
+  switch (vendorId.toLowerCase()) {
+    case "8086": return "Intel";
+    case "10de": return "NVIDIA";
+    case "1002": return "AMD";
+    case "1a03": return "ASPEED";
+    case "102b": return "Matrox";
+    case "15ad": return "VMware";
+    case "1234": return "QEMU";
+    default: return `Vendor ${vendorId}`;
+  }
+}
+
+/**
+ * 按厂商粗分核显 / 独显（仅展示提示，非精确）：
+ * - Intel 且型号不含独立显卡标识（Arc / Xe / Battlemage / Alchemist）→ 核显；
+ * - NVIDIA → 独显；
+ * - 其余（AMD / 其他）→ 独显（Unraid/NAS 场景加装独显为主；AMD APU 核显会标成「独显」属已知近似）。
+ */
+function classifyGpu(vendorId: string, model: string): GpuStat["type"] {
+  const v = vendorId.toLowerCase();
+  if (v === "8086") {
+    return /arc|battlemage|alchemist|xe\b|xeon.*graphics/i.test(model) ? "discrete" : "integrated";
+  }
+  if (v === "10de") return "discrete";
+  return "discrete";
+}
+
+/** 扫描 PCI 显示控制器（class 0x03xx），返回每张卡的地址 / 厂商 / 型号 */
+function scanPciGpus(): { addr: string; vendorId: string; deviceId: string; model: string; type: GpuStat["type"] }[] {
+  try {
+    const devDir = "/sys/bus/pci/devices";
+    if (!fs.existsSync(devDir)) return [];
+    const list: { addr: string; vendorId: string; deviceId: string; model: string; type: GpuStat["type"] }[] = [];
+    for (const e of fs.readdirSync(devDir)) {
+      const cls = readTextFile(path.join(devDir, e, "class"));
+      if (!/^0x03/i.test(cls.trim())) continue; // 仅显示控制器（VGA / 3D / Display）
+      const vendorId = readTextFile(path.join(devDir, e, "vendor")).replace(/^0x/i, "").toLowerCase() || "0000";
+      const deviceId = readTextFile(path.join(devDir, e, "device")).replace(/^0x/i, "").toLowerCase();
+      const model = resolvePciName(`0x${vendorId}`, `0x${deviceId}`) || `Vendor ${vendorId} Device ${deviceId}`;
+      list.push({ addr: e, vendorId, deviceId, model, type: classifyGpu(vendorId, model) });
+    }
+    return list;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 把 PCI 地址（0000:00:02.0）匹配到 /sys/class/drm/cardN：DRM 设备软链接 `cardN/device`
+ * 指向 `/sys/devices/pci0000:00/0000:00:02.0`，与目标 PCI 设备真实路径同后缀。
+ * 用于把 PCI 扫描到的显卡关联到其 DRM 节点，进而读取 sysfs 运行状态。
+ */
+function findDrmCardForPci(addr: string): string | null {
+  try {
+    const drmDir = "/sys/class/drm";
+    if (!fs.existsSync(drmDir)) return null;
+    for (const c of fs.readdirSync(drmDir)) {
+      if (!/^card\d+$/.test(c)) continue;
+      let target = "";
+      try {
+        target = fs.realpathSync(path.join(drmDir, c, "device"));
+      } catch {
+        continue;
+      }
+      if (target.endsWith(addr) || target.includes(addr)) return c;
+    }
+  } catch {
+    /* 忽略 */
+  }
+  return null;
+}
+
+/** 读 DRM 设备下的 hwmon 温度（temp1_input，毫摄氏度） */
+function readDrmHwmonTemp(deviceDir: string): number | null {
+  try {
+    const hwmonBase = path.join(deviceDir, "hwmon");
+    if (!fs.existsSync(hwmonBase)) return null;
+    for (const h of fs.readdirSync(hwmonBase)) {
+      const p = path.join(hwmonBase, h, "temp1_input");
+      const raw = readTextFile(p);
+      if (raw) {
+        const mC = parseInt(raw, 10);
+        if (Number.isFinite(mC)) return Math.round(mC / 1000);
+      }
+    }
+  } catch {
+    /* 忽略 */
+  }
+  return null;
+}
+
+/** 解析 nvidia-smi csv（index,name,utilization.gpu,memory.used,memory.total,temperature.gpu） */
+function parseNvidiaSmi(text: string): { index: number; usage: number; memUsed: number; memTotal: number; temp: number }[] {
+  const out: { index: number; usage: number; memUsed: number; memTotal: number; temp: number }[] = [];
+  for (const line of text.split("\n")) {
+    const parts = line.split(",").map((s) => s.trim());
+    if (parts.length < 6) continue;
+    const index = parseInt(parts[0], 10);
+    const usage = parseFloat(parts[2]);
+    const memUsed = parseFloat(parts[3]);
+    const memTotal = parseFloat(parts[4]);
+    const temp = parseFloat(parts[5]);
+    if (!Number.isFinite(index)) continue;
+    out.push({
+      index,
+      usage: Number.isFinite(usage) ? clampGpu(usage) : 0,
+      memUsed: Number.isFinite(memUsed) ? Math.round(memUsed) : 0,
+      memTotal: Number.isFinite(memTotal) ? Math.round(memTotal) : 0,
+      temp: Number.isFinite(temp) ? Math.round(temp) : 0,
+    });
+  }
+  return out;
+}
+
+function clampGpu(n: number): number {
+  return Math.max(0, Math.min(100, n));
+}
+
+/** 读非 N 卡（Intel/AMD）的 sysfs 运行状态，尽力填充 usage/显存/温度；读不到的字段保持 null */
+function fillSysfsGpu(p: { addr: string; vendorId: string; model: string; type: GpuStat["type"] }, out: GpuStat): void {
+  if (p.vendorId.toLowerCase() === "10de") return; // N 卡走 nvidia-smi
+  const card = findDrmCardForPci(p.addr);
+  if (!card) return;
+  const devDir = `/sys/class/drm/${card}/device`;
+  // AMD amdgpu：gpu_busy_percent（部分内核世界可读）；Intel iGPU 通常无此文件 ⇒ usage 保持 null
+  const busy = readTextFile(path.join(devDir, "gpu_busy_percent"));
+  if (busy) {
+    const v = parseFloat(busy);
+    if (Number.isFinite(v)) out.usagePercent = clampGpu(v);
+  }
+  // AMD radeon 显存（字节）：mem_info_vram_total / mem_info_vram_used
+  const vramTotal = readTextFile(path.join(devDir, "mem_info_vram_total"));
+  const vramUsed = readTextFile(path.join(devDir, "mem_info_vram_used"));
+  if (vramTotal) {
+    const v = parseInt(vramTotal, 10);
+    if (Number.isFinite(v)) out.memoryTotalMB = Math.round(v / 1024 / 1024);
+  }
+  if (vramUsed) {
+    const v = parseInt(vramUsed, 10);
+    if (Number.isFinite(v)) out.memoryUsedMB = Math.round(v / 1024 / 1024);
+  }
+  const t = readDrmHwmonTemp(devDir);
+  if (t !== null) out.tempC = t;
+}
+
+let gpuStatsCache: { ts: number; data: GpuStat[] } | null = null;
+const GPU_STATS_TTL = 2000; // nvidia-smi 起进程较重，2s 缓存防止每秒采样打满 CPU
+
+/**
+ * 采集全部显卡的实时监测数据（型号 / 核显独显 / 利用率 / 显存 / 温度）。
+ * - 型号与核显/独显分类：PCI sysfs 直读（非 root 可读）；
+ * - N 卡利用率/显存/温度：nvidia-smi（通常非 root 可跑）；
+ * - Intel/AMD：sysfs gpu_busy_percent + hwmon 温度 + radeon 显存，尽力探测；
+ *   读不到（远程引擎 / 无驱动 / 非 root 无权限）的字段置 null，前端显示「—」。
+ * 远程引擎（非本机 socket）无宿主硬件访问能力，调用方应传空数组。
+ */
+function collectGpuStatsUncached(): GpuStat[] {
+  const pcis = scanPciGpus();
+  if (pcis.length === 0) return [];
+
+  // N 卡数据：按顺序与 PCI 扫描到的 NVIDIA 设备一一对应
+  const nvidiaText = tryExec("nvidia-smi", [
+    "--query-gpu=index,name,utilization.gpu,memory.used,memory.total,temperature.gpu",
+    "--format=csv,noheader,nounits",
+  ]);
+  const nvidia = nvidiaText ? parseNvidiaSmi(nvidiaText) : [];
+  let nvCursor = 0;
+
+  return pcis.map((p, i) => {
+    const stat: GpuStat = {
+      index: i,
+      model: p.model,
+      vendor: gpuVendorName(p.vendorId),
+      vendorId: p.vendorId,
+      type: p.type,
+      usagePercent: null,
+      memoryUsedMB: null,
+      memoryTotalMB: null,
+      tempC: null,
+    };
+    if (p.vendorId.toLowerCase() === "10de") {
+      const nv = nvidia[nvCursor++];
+      if (nv) {
+        stat.usagePercent = nv.usage;
+        stat.memoryUsedMB = nv.memUsed;
+        stat.memoryTotalMB = nv.memTotal;
+        stat.tempC = nv.temp;
+      }
+    } else {
+      fillSysfsGpu(p, stat);
+    }
+    return stat;
+  });
+}
+
+/** 带 2s 缓存的显卡采集入口 */
+export function collectGpuStats(): GpuStat[] {
+  const now = Date.now();
+  if (gpuStatsCache && now - gpuStatsCache.ts < GPU_STATS_TTL) return gpuStatsCache.data;
+  const data = collectGpuStatsUncached();
+  gpuStatsCache = { ts: now, data };
+  return data;
+}
+
 /** 采集内存标识：总容量（GB）为主，dmidecode 内存序列号兜底（全 0 归零） */
 function collectMemory(): string {
   try {

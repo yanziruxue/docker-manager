@@ -13,6 +13,7 @@ import { getImageLocks, isImageLocked, pruneStaleLocks, normalizeId, type ImageL
 import { notify, markManualContainerOp, markManualStackOp } from "./notify.js";
 import { resolveBackupDir, backupFilePath, runTar, copyTree, BACKUP_NAME_PREFIX, tsCompact } from "./backup.js";
 import { zipDirectory, extractZip } from "./zip.js";
+import { collectGpuStats, type GpuStat } from "./telemetry.js";
 
 /**
  * 拼接路径：SSH 引擎用 POSIX 路径（远程 Linux），本地引擎用系统路径
@@ -3385,7 +3386,7 @@ export interface ResourceSample {
   netIfaces?: Record<string, { rx: number; tx: number }>;
   /**
    * 逐磁盘速率与利用率：键 = 设备名（`sda` / `nvme0n1` …）。
-   * `read` / `write` 单位 **MB/s**，`busy` 单位 **%**。
+   * `read` / `write` 单位 **MB/s**，`busy` 单位 **%`。
    * 仅本机 socket 引擎可读 /proc/diskstats；远程引擎为 undefined（前端退化为「无曲线」）。
    *
    * ⚠️ 这份数据**必须复用** `getEngineResourceStats` 同一帧里已经算好的 `disks`，
@@ -3393,6 +3394,13 @@ export interface ResourceSample {
    * 导致下一帧速率虚高（与 `listNetInterfaces` 不复用 `sampleHostNetIfaces` 是同一个坑）。
    */
   disks?: Record<string, { read: number; write: number; busy: number }>;
+  /**
+   * 显卡实时监测：型号 / 核显独显 / 利用率% / 显存 / 温度。
+   * 仅本机 socket 引擎可采集（非 root 服务按厂商粗分核显独显、N 卡走 nvidia-smi、
+   * A/I 卡走 sysfs 尽力探测）；远程引擎为 undefined（前端显示「无 GPU」）。
+   * 字段为 null 表示读不到（无权限 / 无驱动），前端显示「—」。
+   */
+  gpus?: GpuStat[];
 }
 
 const RESOURCE_HISTORY_MAX = 300; // 5 分钟 @1s
@@ -3921,6 +3929,8 @@ export async function getEngineResourceStats(engine: DockerEngine): Promise<any>
     }
   }
   const memMaxSupportedMB = isLocal ? readMaxSupportedMemMB() : 0;
+  // 显卡实时监测：仅本机 socket 引擎可读宿主硬件（远程引擎为 []）
+  const gpus = isLocal ? collectGpuStats() : [];
   // 宿主机正常运行时间：仅本机引擎可读 /proc/uptime
   const hostUptimeSec = isLocal ? readHostUptimeSec() : 0;
 
@@ -3979,6 +3989,8 @@ export async function getEngineResourceStats(engine: DockerEngine): Promise<any>
     netIfaces: netIfaces.length > 0 ? netIfacesMap : undefined,
     // 逐磁盘速率同理：远程引擎保持 undefined（前端显示「无曲线」）
     disks: disks.length > 0 ? disksMap : undefined,
+    // 显卡监测：仅本机引擎有值（远程引擎保持 undefined）
+    gpus: gpus.length > 0 ? gpus : undefined,
   });
 
   return {
@@ -3994,6 +4006,8 @@ export async function getEngineResourceStats(engine: DockerEngine): Promise<any>
     /** 宿主机整机 CPU 使用率（%，/proc/stat 聚合行 `cpu ` 差分）：仅本机 socket 引擎有值；远程引擎 / 首采无基线为 null */
     hostCpuPercent,
     disks,
+    /** 显卡实时监测：仅本机 socket 引擎可采集；远程引擎为空数组 */
+    gpus,
     cpuPercent: Math.round(cpuPercent * 100) / 100,
     cpuMaxPercent: ncpu * 100,
     memoryUsageMB,

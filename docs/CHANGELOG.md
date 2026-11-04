@@ -16,6 +16,16 @@
 
 ---
 
+## v1.50.17 — 2026-11-04（**已构建 · 已推 Gitea**）
+
+- **新增：仪表盘「显卡」磁贴（核显 + 独显 用量 / 显存 / 温度）**：用户需求——在仪表盘页面增加显卡的调用和使用率，包括核显与独显。
+  - **后端采集（`server/telemetry.ts`）**：新增 `GpuStat` 接口 + `collectGpuStats()`（带 2s 缓存，防 nvidia-smi 每秒起进程打满 CPU）。采集链路：① 扫描 `/sys/bus/pci/devices` 的 PCI class `0x03xx`（显示控制器）识别所有显卡，经 `pci.ids` 解析型号；② 按厂商粗分**核显/独显**（Intel 且型号不含 Arc/Xe → 核显，NVIDIA → 独显，其余 → 独显，AMD APU 核显会被近似标为独显，属已知限制）；③ N 卡走 `nvidia-smi --query-gpu=index,name,utilization.gpu,memory.used,memory.total,temperature.gpu`，按 PCI 扫描顺序与 NVIDIA 设备一一对应；④ Intel/AMD 走 sysfs 尽力探测（`/sys/class/drm/cardN/device/gpu_busy_percent` 利用率、`mem_info_vram_*` 显存、`hwmon/temp1_input` 温度）。
+  - **接线（`server/docker.ts` + `src/types.ts`）**：`EngineResourceStats` / `ResourceSample`（前后端）新增 `gpus: GpuStat[]`；`getEngineResourceStats` 仅**本机 socket 引擎**调用 `collectGpuStats()`（远程引擎为 `[]`），写入返回对象与 `recordResourceSample` 历史样本（SSE 推送 + 历史接口自动覆盖）。读不到的字段（非 root 无权限 / 无驱动）置 `null`，前端显示「—」（与磁盘温度同口径，诚实反映非 root 限制）。
+  - **前端磁贴（`src/pages/Dashboard.tsx`）**：新增 `GpuTile`，逐卡展示型号 + 核显/独显徽标 + 利用率条 + 显存 + 温度，并带**可折叠的逐卡用量曲线**（每卡一条线，按卡索引取色，量程 0–100%）。磁贴挂入栅格第 1 列（始终可见，不破坏 2 列档列数约束），`statsToSample` 同步透传 `gpus`。无显卡 / 远程引擎显示「无 GPU」。
+  - 核验：`tsc` 双 0（src + server）、16 组门禁 0 FAIL（PASS=46）、SEA 四步 + 三处二进制 SHA（`a6b415e9…`）逐字节一致、前端解码段锚点 `显卡`/`核显`/`独显`/`显卡用量曲线` 全命中、服务端段 `collectGpuStats`/`scanPciGpus`/`gpu_busy_percent`/`nvidia-smi` 查询串均入包。
+- 已知限制：① 核显/独显分类按厂商粗分（AMD APU 核显会标为独显）；② 非 root 服务下 Intel iGPU 通常无 `gpu_busy_percent`（i915 不暴露简单利用率文件），其利用率会显示「—」，仅温度/型号可读；N 卡因 nvidia-smi 通常 setuid 可读，可正常显示利用率/显存/温度；③ 未新增专用门禁（采集器为纯增量、已 tsc + 构建 + 锚点核验覆盖）。
+- 下一步：真机（含 N 卡 / Intel 核显）验证磁贴显示与曲线；视情况为采集器补负向自检门禁。
+
 ## v1.50.16 — 2026-11-03（**已构建 · 已推 Gitea**）
 
 - **UI 文案：硬件信息卡「主板」标签改为「主板序列号」**：避免与同卡「主板型号」混淆。`src/components/ActivityPanel.tsx:465` 行标签 `label="主板"` → `label="主板序列号"`，字段仍取 `hw.boardSerial`（SMBIOS Type 2 Baseboard Serial，主板自身序列号，参与 6 维设备指纹）。
