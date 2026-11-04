@@ -909,12 +909,12 @@ interface TelemetryConfigLike {
 }
 
 /**
- * 上报端点（v1.50.10 对齐《客户端实施说明》）：**双通道 fallback**——优先内网直连，
- * 网络失败 / 5xx / 429 自动回落公网域名；环境变量 TELEMETRY_ENDPOINT 设置后只走单通道（自建/调试）。
+ * 上报端点（v1.50.21 起移除内网直连，仅走公网域名）：单通道上报。
+ * 环境变量 TELEMETRY_ENDPOINT 可覆盖（自建/调试用）。
  */
 const TELEMETRY_ENDPOINTS = process.env.TELEMETRY_ENDPOINT
   ? [process.env.TELEMETRY_ENDPOINT]
-  : ["http://192.168.24.10:30507", "https://yanzi-api.ziruxue.top"];
+  : ["https://yanzi-api.ziruxue.top"];
 /** 上报路径（seg=`docker-management`，服务端管理台签发的应用段名） */
 const TELEMETRY_PATH = "/api/docker-management/event";
 /**
@@ -1001,8 +1001,8 @@ export interface ReportResult {
 }
 
 /** 发送一条上报（唯一出口）；`fatal=true` 表示鉴权失败（401/403），不做密集重试。
- *  v1.50.10：双端点 fallback——网络错误 / 5xx / 429 回落下一端点；
- *  其余 4xx（400 载荷不合法 / 401 token 错 / 404 seg 不存在）换端点无济于事，直接失败。 */
+ *  v1.50.21 起仅单通道（公网域名）；网络错误 / 5xx 触发 10 分钟重试，不换端点。
+ *  其余 4xx（400 载荷不合法 / 401 token 错 / 404 seg 不存在）直接失败，重试无济于事。 */
 async function sendReport(
   info: DeviceInfo,
   cfg: Required<TelemetryConfigLike>,

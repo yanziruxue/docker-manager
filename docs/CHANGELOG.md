@@ -16,6 +16,13 @@
 
 ---
 
+## v1.50.21 — 2026-11-04（**已构建 · 已推 Gitea**）
+
+- **上报端点精简：移除内网直连 `192.168.24.10:30507`，仅走公网域名**：用户要求只用域名上报。改 `server/telemetry.ts` 的 `TELEMETRY_ENDPOINTS` 兜底数组由 `["http://192.168.24.10:30507", "https://yanzi-api.ziruxue.top"]`（双通道 fallback）改为单元素 `["https://yanzi-api.ziruxue.top"]`，fallback 循环天然退化为单通道；同步更新 `sendReport` 注释（不再"换备用端点"）与 `docs/上报接口速览.md`（端点表改为单条、失败策略去掉"先换备用端点"）。`TELEMETRY_ENDPOINT` 环境变量覆盖能力不变（自建/调试仍可用）。
+- 核验：tsc server 0；16 组门禁 0 FAIL（全绿）；SEA 四步 + 三处二进制 SHA（`f7754ae1…`）逐字节一致；二进制解码锚点 `1.50.21`=2 / `1.50.20`=0 / 内网 IP `192.168.24.10:30507`=0（已从二进制移除）/ 域名 `yanzi-api.ziruxue.top` 仍存在。
+- 已知限制：无。下一步：无。
+- 快照：commit（待记） + tag v1.50.21 推 Gitea main+tag 双 ref 一致；GitHub 按约定未推。
+
 ## v1.50.20 — 2026-11-04（**已构建 · 已推 Gitea**）
 
 - **修复：两台 VM 删 `device.info` 重启后设备指纹仍相同（统计主键仍撞）**：用户反馈按指引删 `device.info` 重启后 ID 仍一致。两个根因：① **路径不对**——真实安装目录是 v1.50.18 引入的 `/data/dockermanagementyanzi`（或更早自定义路径），而示例写的是 `/opt/...`，`rm` 删的是不存在的文件、`device.info` 根本没动；② 即便路径正确，若两台是「完全克隆」（主机名 / 机器 ID / 系统 UUID / 主网卡 MAC 全一致），纯硬件维度在 v1.50.19 仍会撞。修复（`server/telemetry.ts`）：`deviceId` 由「纯硬件指纹哈希」改为 `sha256(硬件指纹 | 安装实例随机 nonce)`——nonce 在标识文件**重建**时由 `crypto.randomUUID()` 生成并持久化进 `device.info`（重启不变），于是任何两个安装实例（含同硬件 / 克隆 VM）删一次文件重启后必分流为两个设备（telemetry 业界标准的 install-instance id 做法，硬件指纹退为辅助）。`DeviceInfo` 接口新增 `nonce?` 字段；`toDeviceInfo` 透传。`getDeviceInfo` 的「完好文件只读返回」逻辑不变——旧 intact 的 `device.info`（无 nonce）仍按原 `deviceId` 返回，仅在重建（删文件）时换成 nonce 版，向后兼容。
