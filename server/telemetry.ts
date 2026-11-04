@@ -2,7 +2,7 @@
  * 安装量与活跃度上报（仅上报端）
  *
  * 设计依据《Linux应用安装量与活跃用户统计方案（设备唯一标识+风控校验体系）》：
- *  - 主标识（统计主键）：本机硬件指纹 = 主板 + CPU + 内存 + 硬盘 + 显卡 + 安装的系统（6 维哈希）
+ *  - 主标识（统计主键）：本机硬件指纹 = 主板+CPU+内存+硬盘+显卡+系统（硬件 6 维）+ 系统UUID+主机名+机器ID+主网卡MAC（实例级 4 维）
  *  - 触发：首次安装 / 重装 / 标识文件重建（计为「安装事件」）+ 进程启动、重启、每 12 小时（心跳）
  *  ★ v1.35.9 起载荷收敛为**单字段** `upapi`（取值 `"install"` / `"heartbeat"`）：
  *      `"install"`   ＝ 安装 / 重装 → 服务端覆盖设备快照、刷新安装时间；
@@ -382,21 +382,61 @@ function collectDiskId(): string {
   return "";
 }
 
+/** 采集系统 UUID（SMBIOS product_uuid）：root 镜像副本优先，sysfs 次之，dmidecode 兜底 */
+function collectProductUuid(): string {
+  return (
+    readTextFile("/run/dockermanagementyanzi/dmi-product_uuid") ||
+    readTextFile("/sys/class/dmi/id/product_uuid") ||
+    tryExec("dmidecode", ["-s", "system-uuid"])
+  );
+}
+
+/** 采集机器 ID（systemd /etc/machine-id；克隆未再生时可能与他机相同） */
+function readMachineId(): string {
+  return readTextFile("/etc/machine-id") || readTextFile("/var/lib/dbus/machine-id");
+}
+
+/** 采集主网卡 MAC：默认路由出口网卡优先，兜底首个 up 非 lo 网卡 */
+function readPrimaryMac(): string {
+  try {
+    const netDir = "/sys/class/net";
+    if (!fs.existsSync(netDir)) return "";
+    const parts = tryExec("ip", ["route", "show", "default"]).split(/\s+/);
+    const idx = parts.indexOf("dev");
+    const candidates: string[] = [];
+    if (idx >= 0 && parts[idx + 1]) candidates.push(parts[idx + 1]);
+    for (const e of fs.readdirSync(netDir)) {
+      if (e === "lo") continue;
+      if (!candidates.includes(e)) candidates.push(e);
+    }
+    for (const c of candidates) {
+      const mac = readTextFile(path.join(netDir, c, "address"));
+      if (/^([0-9a-f]{2}:){5}[0-9a-f]{2}$/i.test(mac)) return mac.toLowerCase();
+    }
+  } catch { /* 忽略 */ }
+  return "";
+}
+
 /**
  * 采集硬件指纹（= 统计主键）。
- * 维度：系统 + CPU + 内存 + 硬盘 + 显卡 + 主板（6 维）。
- * 规则：虚拟环境六项统一归零后再哈希（避免虚拟机硬件同质化导致指纹碰撞）；
- *      采集失败字段保留空占位，避免字段缺失引发碰撞。
+ * 维度：系统 + CPU + 内存 + 硬盘 + 显卡 + 主板（硬件 6 维）
+ *       + 系统 UUID + 主机名 + 机器 ID + 主网卡 MAC（实例级 4 维）。
+ * 不再对虚拟环境归零：虚拟机的系统 UUID / 主机名 / 机器 ID / MAC 通常已能区分，
+ * 归零反而会让所有 VM 撞成同一个常量哈希。采集失败字段保留空占位。
  */
 export function collectHardwareFingerprint(): { fingerprint: string; virtualized: boolean } {
   const virtualized = detectVirtualization();
-  const system = virtualized ? "0" : collectOsVersion();
-  const cpu = virtualized ? "0" : collectCpuId();
-  const gpu = virtualized ? "0" : collectGpu();
-  const memory = virtualized ? "0" : collectMemory();
-  const disk = virtualized ? "0" : collectDiskId();
-  const board = virtualized ? "0" : collectBoardId();
-  const raw = [system, cpu, gpu, memory, disk, board].join("|");
+  const system = collectOsVersion();
+  const cpu = collectCpuId();
+  const gpu = collectGpu();
+  const memory = collectMemory();
+  const disk = collectDiskId();
+  const board = collectBoardId();
+  const productUuid = collectProductUuid();
+  const host = os.hostname();
+  const machineId = readMachineId();
+  const mac = readPrimaryMac();
+  const raw = [system, cpu, gpu, memory, disk, board, productUuid, host, machineId, mac].join("|");
   const fingerprint = crypto.createHash("sha256").update(raw).digest("hex");
   return { fingerprint, virtualized };
 }

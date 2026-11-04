@@ -16,6 +16,14 @@
 
 ---
 
+## v1.50.19 — 2026-11-04（**已构建 · 已推 Gitea**）
+
+- **修复：虚拟机设备指纹撞车（统计主键全 VM 同一台）**：用户反馈——两台虚拟机装的本服务，设备标识（硬件指纹/统计主键）一模一样，导致远端统计把多台 VM 合并成一台。根因在 `server/telemetry.ts` 的 `collectHardwareFingerprint()`：原逻辑对**虚拟化环境**把 6 个硬件维度（`system|cpu|gpu|memory|disk|board`）**全部强制置 `"0"`**，注释写"避免虚拟机硬件同质化导致碰撞"，实际效果相反——所有 VM 指纹都等于 `sha256("0|0|0|0|0|0")` 这一个常量哈希。修复：**移除虚拟化归零**，虚拟化环境也如实采集 6 维（采集失败本就返回空串，已有兜底）；指纹原始串升级为 `system|cpu|gpu|memory|disk|board|productUuid|host|machineId|mac`——新增 **系统 UUID（`/sys/class/dmi/id/product_uuid`，root 镜像副本 `/run/dockermanagementyanzi/dmi-product_uuid` 优先）+ 主机名（`os.hostname()`）+ 机器 ID（`/etc/machine-id`）+ 主网卡 MAC（默认路由出口网卡 `/sys/class/net/<dev>/address`，兜底首个 up 非 lo）** 四个实例级维度，打散模板/克隆 VM 的碰撞。新增 `collectProductUuid()` / `readMachineId()` / `readPrimaryMac()` 三个采集函数。
+- **行为说明（重要）**：`device.info` 完好时沿用旧 ID（btime==mtime 只读），因此**已撞 ID 的两台 VM 必须手动删一次 `device.info` 再重启服务**，才会按新算法重算指纹并分流成两台设备；新安装的 VM 直接就是新指纹。新算法下同一 VM 改主机名会触发一次"重装"统计（罕见，可接受）。极端情形（主机名+机器ID+MAC+UUID 全一致的完全冷克隆）仍可能撞——极少见。
+- **核验**：`tsc` 双 0；16 组门禁 0 FAIL（全绿）；SEA 四步 + 三处二进制 SHA（`f46662a6…`）逐字节一致；二进制解码锚点 `1.50.19`=2 / `1.50.18`=0 / `collectProductUuid`=2 / `readMachineId`=2 / `readPrimaryMac`=2 / `dmi-product_uuid`=3 / `/etc/machine-id`=1。
+- 已知限制：见上「极端情形」；`product_uuid`/`board_serial` 仍依赖安装期 root 镜像副本（非 root 服务读不到 sysfs 0400），副本缺失时回退 sysfs/dmidecode。下一步：用户真机删 `device.info` 重启验证两台 VM 分流；观察克隆 VM 去重效果。
+- 快照：commit（待记） + tag v1.50.19 推 Gitea main+tag 双 ref 一致；GitHub 按约定未推。
+
 ## v1.50.18 — 2026-11-04（**已构建 · 已推 Gitea**）
 
 - **安装脚本：输入父目录自动在其下创建应用子目录**：用户反馈——安装时输入 `/data` 被 `validate_install_dir` 以「目录层级过浅」拦截，期望「输入 /data 即在其下自动创建 dockermanagementyanzi 目录」。新增 `normalize_install_dir()`（`deploy/linux/install.sh`）：当输入路径的 basename 不是 `dockermanagementyanzi` 时自动补上，最终落点 = `/data/dockermanagementyanzi`；默认 `/opt/dockermanagementyanzi` 与已安装路径（本就以 APP_NAME 结尾）保持不变。校验入口三处（交互输入 / `APP_INSTALL_DIR` / 非交互默认）统一先归一化再过白名单校验；交互场景归一化改变了输入时打印提示。`usage()` 与交互提示同步说明「只需输入父目录即可」。核验：`bash -n` 语法 OK；归一化用例 `/data`→`/data/dockermanagementyanzi`、`/data/`→同、`/mnt/disk1`→`/mnt/disk1/dockermanagementyanzi`、`/opt/dockermanagementyanzi`→不变。
