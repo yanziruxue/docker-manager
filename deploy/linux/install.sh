@@ -66,7 +66,9 @@ usage() {
 
 安装目录:
   交互执行时会提示输入，回车即用默认 /opt/dockermanagementyanzi。
-  目录需为绝对路径、不含 ..、至少两级，且不得落在系统关键目录下
+  只需输入「父目录」即可 —— 例如输入 /data，会自动在其下创建
+  dockermanagementyanzi 子目录，最终落点为 /data/dockermanagementyanzi。
+  目录需为绝对路径、不含 ..、至少两级（归一并校验后），且不得落在系统关键目录下
   （/etc、/usr、/var、/home、/root、/tmp 等会被拒绝；/mnt、/media 下的数据盘目录可用）。
 
 前提: 本脚本不再自动安装 Docker。请先装好 Docker 与 Docker Compose 再执行；
@@ -200,6 +202,30 @@ validate_install_dir() {
   return 0
 }
 
+# ---------------------------------------------------------------------------
+# 安装目录归一化（v1.50.18）
+#
+# 用户常希望「在某个目录下装」，于是只输入父目录（如 /data）。此时自动在其下
+# 创建 <APP_NAME> 子目录，最终落点 = /data/dockermanagementyanzi。
+# 规则：basename 不是 APP_NAME 时就补上 APP_NAME（无论层级深浅），保证安装目录
+# 就是应用自身目录（里面放二进制 + data/ logs/ config/ 子目录）。
+#   · 默认 /opt/dockermanagementyanzi 与已安装路径本就以 APP_NAME 结尾 ⇒ 不变
+#   · /data                          → /data/dockermanagementyanzi
+#   · /data/dockermanagementyanzi    → 不变（已是应用目录）
+# 注：本函数只负责「补 APP_NAME」，路径合法性（绝对路径 / 字符白名单 / 非系统目录）
+# 仍由 validate_install_dir() 把关，这里不重复判断。
+# ---------------------------------------------------------------------------
+normalize_install_dir() {
+  local d="$1" base
+  d="${d%/}"                       # 去尾斜杠
+  [ -n "$d" ] || return 1
+  base="${d##*/}"
+  if [ "$base" != "$APP_NAME" ]; then
+    d="${d}/${APP_NAME}"
+  fi
+  printf '%s' "$d"
+}
+
 # 统一安装目录提示：有旧版本时回车沿用旧路径升级；无旧版本时回车用默认 /opt/dockermanagementyanzi
 # ★ 提示语按「有/无旧版本」分别措辞（v1.42.0）：旧版本场景只说「回车升级 / 手动输入新路径」，
 #   不再把「否则回车使用 /opt/...」这种**当前场景根本不适用**的分支塞进同一行；
@@ -213,21 +239,25 @@ else
 fi
 
 if [ -n "${APP_INSTALL_DIR:-}" ]; then
-  INSTALL_DIR="$APP_INSTALL_DIR"
+  INSTALL_DIR="$(normalize_install_dir "$APP_INSTALL_DIR")"
+  [ "$INSTALL_DIR" != "$APP_INSTALL_DIR" ] && log "APP_INSTALL_DIR 已归一化：'${APP_INSTALL_DIR}' → '${INSTALL_DIR}'（自动在其下创建 ${APP_NAME} 子目录）"
   log "使用 APP_INSTALL_DIR 指定的安装目录: ${INSTALL_DIR}"
 elif [ -t 0 ]; then
   while true; do
     read -r -p "${PROMPT_TEXT}: " ans || ans=""
-    INSTALL_DIR="${ans:-$PROMPT_DEFAULT}"
+    raw="${ans:-$PROMPT_DEFAULT}"
+    # 归一化：输入父目录（如 /data）自动补 ${APP_NAME} 子目录 → /data/${APP_NAME}
+    INSTALL_DIR="$(normalize_install_dir "$raw")"
     if reason="$(validate_install_dir "$INSTALL_DIR")"; then
+      [ "$INSTALL_DIR" != "$raw" ] && log "已将 '${raw}' 归一化为 '${INSTALL_DIR}'（自动在其下创建 ${APP_NAME} 子目录）"
       unset reason
       break
     fi
     warn "无效的安装目录：${reason}"
-    warn "  示例：/data/${APP_NAME}（回车即默认 ${PROMPT_DEFAULT}）"
+    warn "  示例：/data（将自动创建 ${APP_NAME} 子目录 → /data/${APP_NAME}；回车即默认 ${PROMPT_DEFAULT}）"
   done
 else
-  INSTALL_DIR="$PROMPT_DEFAULT"
+  INSTALL_DIR="$(normalize_install_dir "$PROMPT_DEFAULT")"
   log "非交互环境：使用默认安装目录 ${INSTALL_DIR}（可用 APP_INSTALL_DIR 覆盖）"
 fi
 

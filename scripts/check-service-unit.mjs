@@ -300,8 +300,10 @@ check(
     /grep -E '\^WorkingDirectory='/.test(inst),
 );
 check(
-  "★ v1.41.5+：用户输入非旧路径即作为新安装目录（仍过 validate_install_dir，并触发迁移询问）",
-  /INSTALL_DIR="\$\{ans:-\$PROMPT_DEFAULT\}"/.test(inst) &&
+  "★ v1.41.5+：用户输入非旧路径即作为新安装目录（先归一化补 APP_NAME，仍过 validate_install_dir，并触发迁移询问）",
+  /raw="\$\{ans:-\$PROMPT_DEFAULT\}"/.test(inst) &&
+    /INSTALL_DIR="\$\(normalize_install_dir "\$raw"\)"/.test(inst) &&
+    /validate_install_dir "\$INSTALL_DIR"/.test(inst) &&
     /是否把旧目录的数据/.test(inst),
 );
 // 旧安装目录：探测 / 迁移 / 保留与否
