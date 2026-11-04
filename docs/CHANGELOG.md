@@ -16,6 +16,13 @@
 
 ---
 
+## v1.50.18 — 2026-11-04（**已构建 · 已推 Gitea**）
+
+- **安装脚本：输入父目录自动在其下创建应用子目录**：用户反馈——安装时输入 `/data` 被 `validate_install_dir` 以「目录层级过浅」拦截，期望「输入 /data 即在其下自动创建 dockermanagementyanzi 目录」。新增 `normalize_install_dir()`（`deploy/linux/install.sh`）：当输入路径的 basename 不是 `dockermanagementyanzi` 时自动补上，最终落点 = `/data/dockermanagementyanzi`；默认 `/opt/dockermanagementyanzi` 与已安装路径（本就以 APP_NAME 结尾）保持不变。校验入口三处（交互输入 / `APP_INSTALL_DIR` / 非交互默认）统一先归一化再过白名单校验；交互场景归一化改变了输入时打印提示。`usage()` 与交互提示同步说明「只需输入父目录即可」。核验：`bash -n` 语法 OK；归一化用例 `/data`→`/data/dockermanagementyanzi`、`/data/`→同、`/mnt/disk1`→`/mnt/disk1/dockermanagementyanzi`、`/opt/dockermanagementyanzi`→不变。
+- **门禁同步**：`scripts/check-service-unit.mjs` 的「用户输入非旧路径即作为新安装目录」断言原锚定字面量 `INSTALL_DIR="${ans:-$PROMPT_DEFAULT}"`，被归一化重构（改用 `raw` 中间变量 + `normalize_install_dir` 调用）打破，导致 1 FAIL；更新为断言 `raw=` 捕获输入 → `INSTALL_DIR="$(normalize_install_dir "$raw")"` → 仍过 `validate_install_dir "$INSTALL_DIR"` → 迁移询问仍在，准确反映不变式（属设计变更后的假红，非漏检）。`tsc` 双 0、16 组门禁 0 FAIL（全绿）、SEA 四步 + 三处二进制 SHA（`85882433…`）逐字节一致、二进制解码锚点 `1.50.18`=6 / `1.50.17`=0 / `collectGpuStats`=12 / `TELEMETRY_PATH`=6。
+- 已知限制：无。下一步：真机输入 `/data` 验证自动建子目录并装到 `/data/dockermanagementyanzi`；旧安装目录探测仍读 systemd 单元 WorkingDirectory，升级回车沿用不变。
+- 快照：commit 0b49ecc + tag v1.50.18 推 Gitea main+tag 双 ref 一致；GitHub 按约定未推。
+
 ## v1.50.17 — 2026-11-04（**已构建 · 已推 Gitea**）
 
 - **新增：仪表盘「显卡」磁贴（核显 + 独显 用量 / 显存 / 温度）**：用户需求——在仪表盘页面增加显卡的调用和使用率，包括核显与独显。
