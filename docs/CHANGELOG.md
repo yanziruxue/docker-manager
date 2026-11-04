@@ -21,7 +21,7 @@
 - **上报端点精简：移除内网直连 `192.168.24.10:30507`，仅走公网域名**：用户要求只用域名上报。改 `server/telemetry.ts` 的 `TELEMETRY_ENDPOINTS` 兜底数组由 `["http://192.168.24.10:30507", "https://yanzi-api.ziruxue.top"]`（双通道 fallback）改为单元素 `["https://yanzi-api.ziruxue.top"]`，fallback 循环天然退化为单通道；同步更新 `sendReport` 注释（不再"换备用端点"）与 `docs/上报接口速览.md`（端点表改为单条、失败策略去掉"先换备用端点"）。`TELEMETRY_ENDPOINT` 环境变量覆盖能力不变（自建/调试仍可用）。
 - 核验：tsc server 0；16 组门禁 0 FAIL（全绿）；SEA 四步 + 三处二进制 SHA（`f7754ae1…`）逐字节一致；二进制解码锚点 `1.50.21`=2 / `1.50.20`=0 / 内网 IP `192.168.24.10:30507`=0（已从二进制移除）/ 域名 `yanzi-api.ziruxue.top` 仍存在。
 - 已知限制：无。下一步：无。
-- 快照：commit（待记） + tag v1.50.21 推 Gitea main+tag 双 ref 一致；GitHub 按约定未推。
+- 快照：commit bd1a1f4 + tag v1.50.21 推 Gitea main+tag 双 ref 一致；GitHub 按约定未推。
 
 ## v1.50.20 — 2026-11-04（**已构建 · 已推 Gitea**）
 
