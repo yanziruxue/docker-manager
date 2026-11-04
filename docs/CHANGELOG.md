@@ -16,6 +16,13 @@
 
 ---
 
+## v1.50.20 — 2026-11-04（**已构建 · 已推 Gitea**）
+
+- **修复：两台 VM 删 `device.info` 重启后设备指纹仍相同（统计主键仍撞）**：用户反馈按指引删 `device.info` 重启后 ID 仍一致。两个根因：① **路径不对**——真实安装目录是 v1.50.18 引入的 `/data/dockermanagementyanzi`（或更早自定义路径），而示例写的是 `/opt/...`，`rm` 删的是不存在的文件、`device.info` 根本没动；② 即便路径正确，若两台是「完全克隆」（主机名 / 机器 ID / 系统 UUID / 主网卡 MAC 全一致），纯硬件维度在 v1.50.19 仍会撞。修复（`server/telemetry.ts`）：`deviceId` 由「纯硬件指纹哈希」改为 `sha256(硬件指纹 | 安装实例随机 nonce)`——nonce 在标识文件**重建**时由 `crypto.randomUUID()` 生成并持久化进 `device.info`（重启不变），于是任何两个安装实例（含同硬件 / 克隆 VM）删一次文件重启后必分流为两个设备（telemetry 业界标准的 install-instance id 做法，硬件指纹退为辅助）。`DeviceInfo` 接口新增 `nonce?` 字段；`toDeviceInfo` 透传。`getDeviceInfo` 的「完好文件只读返回」逻辑不变——旧 intact 的 `device.info`（无 nonce）仍按原 `deviceId` 返回，仅在重建（删文件）时换成 nonce 版，向后兼容。
+- 核验：tsc server 0；16 组门禁 0 FAIL（全绿）；SEA 四步 + 三处二进制 SHA（`ef973fc5…`）逐字节一致；二进制解码锚点 `1.50.20`=2 / `1.50.19`=0 / `randomUUID`=22 入包。
+- 已知限制：无。下一步：用户升级到 v1.50.20 后，**先 `systemctl show dockermanagementyanzi -p WorkingDirectory` 确认真实安装目录**，再到该目录 `data/device.info` 删除并重启；两台 VM 将各自生成不同 nonce → 远端统计拆分为两台。
+- 快照：commit eadddaf + tag v1.50.20 推 Gitea main+tag 双 ref 一致；GitHub 按约定未推。
+
 ## v1.50.19 — 2026-11-04（**已构建 · 已推 Gitea**）
 
 - **修复：虚拟机设备指纹撞车（统计主键全 VM 同一台）**：用户反馈——两台虚拟机装的本服务，设备标识（硬件指纹/统计主键）一模一样，导致远端统计把多台 VM 合并成一台。根因在 `server/telemetry.ts` 的 `collectHardwareFingerprint()`：原逻辑对**虚拟化环境**把 6 个硬件维度（`system|cpu|gpu|memory|disk|board`）**全部强制置 `"0"`**，注释写"避免虚拟机硬件同质化导致碰撞"，实际效果相反——所有 VM 指纹都等于 `sha256("0|0|0|0|0|0")` 这一个常量哈希。修复：**移除虚拟化归零**，虚拟化环境也如实采集 6 维（采集失败本就返回空串，已有兜底）；指纹原始串升级为 `system|cpu|gpu|memory|disk|board|productUuid|host|machineId|mac`——新增 **系统 UUID（`/sys/class/dmi/id/product_uuid`，root 镜像副本 `/run/dockermanagementyanzi/dmi-product_uuid` 优先）+ 主机名（`os.hostname()`）+ 机器 ID（`/etc/machine-id`）+ 主网卡 MAC（默认路由出口网卡 `/sys/class/net/<dev>/address`，兜底首个 up 非 lo）** 四个实例级维度，打散模板/克隆 VM 的碰撞。新增 `collectProductUuid()` / `readMachineId()` / `readPrimaryMac()` 三个采集函数。
