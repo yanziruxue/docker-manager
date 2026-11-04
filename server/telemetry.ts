@@ -53,7 +53,7 @@ export type TelemetryEvent = "install" | "heartbeat";
  */
 export type ReportTrigger = "startup" | "periodic" | "retry" | "manual";
 
-/** 本机设备标识的 6 维硬件属性（统计主键 = 这 6 维的哈希，不依赖随机 UUID） */
+/** 本机设备标识的 6 维硬件属性（仅展示 / 复算校验用，不直接作为统计主键） */
 export interface DeviceHardware {
   /** 系统（安装的操作系统 + 版本） */
   system: string;
@@ -94,14 +94,17 @@ const MTIME_TOLERANCE_MS = 2000;
 
 /** 标识文件内容（写一次，之后只读） */
 export interface DeviceInfo {
-  /** 主标识：本机硬件指纹（主板+CPU+内存+硬盘+显卡+系统 6 维哈希），统计去重唯一依据 */
+  /** 主标识：sha256(硬件指纹 | 安装实例随机 nonce)，统计去重唯一依据。
+   *  随机部分保证：同硬件 / 克隆 / 模板 VM 的多个安装实例也能彼此区分（纯硬件维度在虚拟机上必然撞）。 */
   deviceId: string;
   /** 标识文件创建时间（≈ 安装时间；重装 / 重建后为新的时间） */
   createdAt: string;
   /** 是否虚拟化环境 */
   virtualized: boolean;
-  /** 安装时采集的 6 维硬件快照（与 deviceId 同源，可复算校验；不再刷新） */
+  /** 安装时采集的 6 维硬件快照（仅展示，不再刷新） */
   hardware: DeviceHardware;
+  /** 安装实例随机 nonce（重建时生成并持久化；deviceId 的随机分量，与硬件指纹共同构成主标识） */
+  nonce?: string;
 }
 
 /** 运行态（可随时重写；不进标识文件，故不影响「创建时间 == 修改时间」判据） */
@@ -178,6 +181,7 @@ function toDeviceInfo(raw: Record<string, unknown>): DeviceInfo | null {
     createdAt: String(raw.createdAt || ""),
     virtualized: !!raw.virtualized,
     hardware: (raw.hardware || {}) as DeviceHardware,
+    nonce: typeof raw.nonce === "string" ? raw.nonce : undefined,
   };
 }
 
@@ -295,11 +299,15 @@ export function getDeviceInfo(): DeviceInfoResult {
   }
 
   const fp = collectHardwareFingerprint();
+  // 主标识 = 硬件指纹 + 安装实例随机 nonce：即便两台 VM 硬件/克隆完全相同（主机名/机器ID/UUID/MAC 全同），
+  // 重建时各自生成不同 nonce，也能分流成两个设备。nonce 持久化在 device.info，重启不变。
+  const nonce = crypto.randomUUID();
   const info: DeviceInfo = {
-    deviceId: fp.fingerprint,
+    deviceId: crypto.createHash("sha256").update(`${fp.fingerprint}|${nonce}`).digest("hex"),
     createdAt: new Date().toISOString(),
     virtualized: fp.virtualized,
     hardware: collectHardwareAttrs(),
+    nonce,
   };
   writeDeviceFile(info);
   // 限流窗口不因「被限流的重建」而顺延：否则持续被改写时永远报不出下一次 install

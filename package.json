@@ -1,6 +1,6 @@
 {
   "name": "docker-stack-manager",
-  "version": "1.50.19",
+  "version": "1.50.20",
   "type": "module",
   "scripts": {
     "dev": "vite",
