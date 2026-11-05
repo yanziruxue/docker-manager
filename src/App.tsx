@@ -885,6 +885,7 @@ export default function App() {
               autoCloseDelay={settings?.modal?.autoCloseDelay ?? 5}
               composeTemplates={settings?.compose?.templates ?? []}
               autoDetectWebui={settings?.compose?.autoDetectWebui ?? true}
+              doubleClickIconEditStack={settings?.modal?.doubleClickIconEditStack ?? true}
               defaultVisibleColumns={settings?.columnVisibility?.stackList}
               onOpenContainerDetail={(name) => handleNavigate("containers", { focusContainerName: name })}
             />

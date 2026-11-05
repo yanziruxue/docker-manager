@@ -729,6 +729,12 @@ export interface ModalConfig {
    * ★ 用户在磁贴下拉里手动选过的网卡存在 localStorage，**优先级高于本设置**。
    */
   defaultNetIface: string;
+  /**
+   * 堆栈管理页「图标」列双击打开编辑堆栈弹窗（v1.50.24）：
+   * - `true`（默认）= 双击某堆栈图标直接打开「编辑堆栈」弹窗（等同右键 → 编辑堆栈）；
+   * - `false`（默认）            = 关闭此快捷操作，双击图标无反应。
+   */
+  doubleClickIconEditStack: boolean;
 }
 
 /** 列可见性默认配置 */

@@ -340,11 +340,13 @@ interface StacksProps {
   composeTemplates?: ComposeTemplate[];
   /** 编辑堆栈 LABELS 页是否自动识别 WebUI 端口/URL（来自系统设置 → 编辑堆栈；默认开） */
   autoDetectWebui?: boolean;
+  /** 堆栈管理页「图标」列双击打开编辑堆栈弹窗（来自系统设置 → 页面设置；默认开） */
+  doubleClickIconEditStack?: boolean;
   /** 点击容器子表「状态」格回调（跳转容器详情，由 App 提供跨页导航） */
   onOpenContainerDetail?: (containerName: string) => void;
 }
 
-export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLanguage = "zh", tagLibrary = [], onCreateTag, defaultVisibleColumns, defaultSubColumns, autoCloseDelay = 5, composeTemplates = [], autoDetectWebui = true, onOpenContainerDetail }: StacksProps) {
+export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLanguage = "zh", tagLibrary = [], onCreateTag, defaultVisibleColumns, defaultSubColumns, autoCloseDelay = 5, composeTemplates = [], autoDetectWebui = true, doubleClickIconEditStack = true, onOpenContainerDetail }: StacksProps) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   // 排序：默认按堆栈名称升序；名称/状态/标签/容器数 列头可点击切换
@@ -858,7 +860,11 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
                   {visibleStackColumns.has("icon") && (
                     <td className="px-3 py-3">
                       <div className="flex justify-center">
-                        <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center overflow-hidden flex-shrink-0">
+                        <div
+                          className={`w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center overflow-hidden flex-shrink-0 ${doubleClickIconEditStack ? "cursor-pointer hover:bg-blue-100 hover:ring-1 hover:ring-blue-300 transition-colors" : ""}`}
+                          title={doubleClickIconEditStack ? L("Double-click to edit stack", "双击图标打开编辑堆栈") : undefined}
+                          onDoubleClick={doubleClickIconEditStack ? () => setEditStack(stack) : undefined}
+                        >
                           {stack.icon ? <img src={stack.icon} alt="" className="w-7 h-7 rounded" /> : <Layers size={16} className="text-slate-400" />}
                         </div>
                       </div>

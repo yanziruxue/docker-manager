@@ -16,6 +16,18 @@
 
 ---
 
+## v1.50.24 — 2026-11-05（**已构建 · 已推 Gitea**）
+
+- **新增：堆栈图标双击打开编辑堆栈弹窗 + 设置中心开关**：用户要求——双击「堆栈管理」页的堆栈图标即可打开右键菜单里的「编辑堆栈」弹窗，并在「设置中心 → 页面设置」增加一张开关卡片可开启/关闭该功能。默认**开启**；关闭后双击图标无反应，右键菜单不受影响。
+  - `src/types.ts`：`ModalConfig` 新增 `doubleClickIconEditStack: boolean`（页面设置）。
+  - `src/pages/Settings.tsx`：① 默认 `modal` 对象补 `doubleClickIconEditStack: true`（旧配置文件无此字段时回填默认开）；②「页面设置」新增卡片「堆栈图标双击」（`MousePointerClick` 图标 + `Toggle`），`active={data.modal?.doubleClickIconEditStack !== false}`，`onChange` 写 `update("modal","doubleClickIconEditStack",val)`；③ 补 `MousePointerClick` 的 lucide 导入。
+  - `src/App.tsx`：给 `<Stacks>` 透传 `doubleClickIconEditStack={settings?.modal?.doubleClickIconEditStack ?? true}`。
+  - `src/pages/Stacks.tsx`：`StacksProps` 加 `doubleClickIconEditStack?: boolean`（默认 `true`）；「图标」列的图标容器加 `onDoubleClick={() => setEditStack(stack)}`（受开关控制）、`title` 提示「双击图标打开编辑堆栈」（i18n `L()`）、开关开启时附 `cursor-pointer` + hover 蓝底/蓝环反馈；关闭时不绑定事件、不显示提示、不改变指针样式。
+- **另：答疑「Compose 终端 - webyanzi」**（纯查询，未改代码）：`TerminalModal`（Stacks.tsx 2581）是预设 compose 命令快捷面板而非交互式 shell；`docker compose ps`(status) 与 `logs` 走 `else` 分支不执行真实命令、只打印固定文案「命令已发送（日志/状态输出请在对应页面查看）」并 `onRefresh()` 刷新列表，故 `ps` 无输出属设计如此；`up -d/down/pull/restart` 才走 `stackActionApi` 并回显结果；`root@compose:~#` 是装饰性提示符。
+- 核验：tsc src 0；tsc server 0；46 组门禁 0 FAIL；SEA 四步 + 三处二进制 SHA（`68b18964…`）逐字节一致（postject 产物 = zip 成员 = deb 成员）；ELF `7f454c46`/e_machine `62`；原始字节 `1.50.24`=2 / `1.50.23`=0；前端解码锚点 `双击图标打开编辑堆栈`=1 / `双击堆栈图标打开编辑弹窗`=1 / `堆栈图标双击`=1 / `开启后，在「堆栈管理」页双击某个堆栈的图标`=1 / `Double-click to edit stack`=1 / `doubleClickIconEditStack`=6；旧功能锚点 `与容器管理共用同一套标签库`=1 / `在此输入 compose 内容`=1 均保留。
+- 已知限制：无。下一步：无。
+- 快照：commit 待定 + tag v1.50.24 推 Gitea main+tag 双 ref 一致；GitHub 按约定未推。
+
 ## v1.50.23 — 2026-11-05（**已构建 · 已推 Gitea**）
 
 - **新增：堆栈级独立标签（编辑堆栈 → SETTINGS 页选择，与容器/标签库共用同一套标签）**：用户要求——给堆栈增加"选择标签"功能，像容器那样共用同一套标签库，在编辑堆栈的 SETTINGS 页选择，堆栈管理页「标签」列显示这些标签。此前堆栈「标签」列是**聚合各服务 LABELS 挂载的标签**（`collectStackTags` 遍历 `webuiLabels`），现改为展示**堆栈级专属标签**（SETTINGS 页选择）。

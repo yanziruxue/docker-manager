@@ -43,6 +43,7 @@ import {
   FileCode2,
   KeyRound,
   LogOut,
+  MousePointerClick,
   ShieldCheck,
   ShieldAlert,
   Radio,
@@ -271,6 +272,8 @@ function getDefaultSettings(): SystemSettings {
       defaultNetIface: "",
       // 引擎切换超时（秒，v1.46.0）：超时未加载成功核心数据则回退原引擎
       engineSwitchTimeout: 30,
+      // 堆栈管理页「图标」列双击打开编辑堆栈弹窗（v1.50.24，默认开）
+      doubleClickIconEditStack: true,
     },
     compose: {
       templates: [
@@ -4304,6 +4307,18 @@ docker-compose version</code>
                     : "尚未选定引擎，无法列出网卡。"}
                 </p>
               )}
+            </Card>
+
+            <Card title="堆栈图标双击" icon={<MousePointerClick size={16} />}>
+              <FormField
+                label="双击堆栈图标打开编辑弹窗"
+                hint="开启后，在「堆栈管理」页双击某个堆栈的图标即可直接打开「编辑堆栈」弹窗（等同于右键 → 编辑堆栈）。关闭后双击图标无反应。"
+              >
+                <Toggle
+                  active={data.modal?.doubleClickIconEditStack !== false}
+                  onChange={(val) => update("modal", "doubleClickIconEditStack", val)}
+                />
+              </FormField>
             </Card>
           </div>
         )}
