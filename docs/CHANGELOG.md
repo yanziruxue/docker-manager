@@ -23,7 +23,7 @@
   2. **创建后直接进入该堆栈的「编辑堆栈」弹窗**：`CreateStackModal` 新增 `onCreated(name)` 回调，创建成功（editor 路径与堆栈备份路径均）后不再直接关闭，而是回调父组件；父组件 `handleStackCreated` 负责 `setCreateMode(false)` + `onRefresh` + 通过 `fetchEngineStacks(engineId)` 直接取回新建堆栈的完整 `Stack` 对象并 `setEditStack(...)` 打开 `StackEditorModal`（不依赖 `stacks` prop 的异步刷新时序）。`src/api.ts` 的 `fetchEngineStacks` 已导入并使用。
 - 核验：tsc src 0；16 组门禁 0 FAIL（全绿）；SEA 四步 + 三处二进制 SHA（`fc371ad7…`）逐字节一致；ELF `7f454c46`/e_machine `62`；前端解码锚点 `services:\n  web:`=0（默认模板已移除）/ `在此输入 compose 内容`=1（新占位符入包）/ `onCreated`=2（接线生效）/ `编辑堆栈`=4。
 - 已知限制：无。下一步：无。
-- 快照：commit（待记） + tag v1.50.22 推 Gitea main+tag 双 ref 一致；GitHub 按约定未推。
+- 快照：commit 1cb9c01 + tag v1.50.22 推 Gitea main+tag 双 ref 一致；GitHub 按约定未推。
 
 ## v1.50.21 — 2026-11-04（**已构建 · 已推 Gitea**）
 
