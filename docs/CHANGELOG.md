@@ -26,7 +26,7 @@
 - **另：答疑「Compose 终端 - webyanzi」**（纯查询，未改代码）：`TerminalModal`（Stacks.tsx 2581）是预设 compose 命令快捷面板而非交互式 shell；`docker compose ps`(status) 与 `logs` 走 `else` 分支不执行真实命令、只打印固定文案「命令已发送（日志/状态输出请在对应页面查看）」并 `onRefresh()` 刷新列表，故 `ps` 无输出属设计如此；`up -d/down/pull/restart` 才走 `stackActionApi` 并回显结果；`root@compose:~#` 是装饰性提示符。
 - 核验：tsc src 0；tsc server 0；46 组门禁 0 FAIL；SEA 四步 + 三处二进制 SHA（`68b18964…`）逐字节一致（postject 产物 = zip 成员 = deb 成员）；ELF `7f454c46`/e_machine `62`；原始字节 `1.50.24`=2 / `1.50.23`=0；前端解码锚点 `双击图标打开编辑堆栈`=1 / `双击堆栈图标打开编辑弹窗`=1 / `堆栈图标双击`=1 / `开启后，在「堆栈管理」页双击某个堆栈的图标`=1 / `Double-click to edit stack`=1 / `doubleClickIconEditStack`=6；旧功能锚点 `与容器管理共用同一套标签库`=1 / `在此输入 compose 内容`=1 均保留。
 - 已知限制：无。下一步：无。
-- 快照：commit 待定 + tag v1.50.24 推 Gitea main+tag 双 ref 一致；GitHub 按约定未推。
+- 快照：commit a8401b3 + tag v1.50.24 推 Gitea；`ls-remote` 核对 main/tag 双 ref 均指向 `a8401b37f31aedf83d449eaa0a19b337b428e3c9`（随后 CHANGELOG 补 SHA 再推一次 main，故 main 会前进一提交）；GitHub 按约定未推。
 
 ## v1.50.23 — 2026-11-05（**已构建 · 已推 Gitea**）
 
