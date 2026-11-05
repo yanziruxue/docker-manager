@@ -312,15 +312,11 @@ function parseComposeServices(composeContent: string, envContent?: string): Comp
   return services;
 }
 
-/** 汇总某堆栈 LABELS 中所有服务挂载的标签（按 id 去重，保留标签库最新快照） */
+/** 取某堆栈在「编辑堆栈 → SETTINGS 页」选择的专属标签（与容器/标签库共用同一套标签）。
+ * 注意：这是堆栈级独立选择，与 LABELS 各服务挂载的标签无关——列表「标签」列展示此集合。 */
 function collectStackTags(stack: Stack): ResourceTag[] {
-  const map = new Map<string, ResourceTag>();
-  for (const l of stack.webuiLabels || []) {
-    for (const t of l.tags || []) {
-      if (t && t.id && !map.has(t.id)) map.set(t.id, t);
-    }
-  }
-  return Array.from(map.values());
+  const list = (stack.settings?.tags || []).filter((t) => t && t.id);
+  return list;
 }
 
 interface StacksProps {
@@ -1973,6 +1969,16 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
 
               <FormField label="描述">
                 <Input value={settings.description} onChange={(val) => setSettings({ ...settings, description: val })} />
+              </FormField>
+
+              <FormField label="标签" hint="与容器管理共用同一套标签库；此处选择的标签将显示在堆栈管理页「标签」列">
+                <TagSelect
+                  library={tagLibrary}
+                  value={settings.tags || []}
+                  onChange={(next) => setSettings({ ...settings, tags: next })}
+                  onCreateTag={onCreateTag}
+                  placeholder="选择标签（容器管理/堆栈管理列表将同步显示）"
+                />
               </FormField>
             </div>
           )}

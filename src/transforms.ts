@@ -295,6 +295,7 @@ export function transformStacks(raw: any[]): Stack[] {
         stopTimeout: s.settings?.stopTimeout ?? 30,
         autoUpdateEnabled: s.settings?.autoUpdateEnabled ?? false,
         autoUpdateMode: s.settings?.autoUpdateMode || "notify" as const,
+        tags: (s as any).tags || [],
       },
       envContent: s.envContent || "",
       webuiLabels: s.webuiLabels || [],

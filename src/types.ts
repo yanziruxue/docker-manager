@@ -333,6 +333,8 @@ export interface StackSettings {
   stopTimeout: number;
   autoUpdateEnabled: boolean;
   autoUpdateMode: "notify" | "auto";
+  /** 堆栈级标签（编辑堆栈 → SETTINGS 页选择，与容器/标签库共用同一套标签）；存于 .stack-meta.json 顶层 */
+  tags?: ResourceTag[];
 }
 
 export interface Stack {

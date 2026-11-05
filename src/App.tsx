@@ -375,6 +375,14 @@ export default function App() {
       const tagLibrary = settingsRef.current?.tags || [];
       const resolveTag = (t: any) => (t && tagLibrary.find((lib: any) => lib.id === t.id)) || null;
       const xfStacks = transformStacks(rawStacks);
+      // 堆栈级标签（编辑堆栈 → SETTINGS 页选择）按 id 对齐全局标签库：重命名/改色后展示层即时同步，被删除的标签自动失效
+      for (const st of xfStacks) {
+        if (Array.isArray(st.settings?.tags)) {
+          st.settings.tags = st.settings.tags
+            .map(resolveTag)
+            .filter((t: any) => !!t);
+        }
+      }
       for (const st of xfStacks) {
         if (!st.webuiLabels || st.webuiLabels.length === 0) continue;
         for (const label of st.webuiLabels) {

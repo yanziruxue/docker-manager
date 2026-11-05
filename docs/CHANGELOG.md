@@ -16,6 +16,19 @@
 
 ---
 
+## v1.50.23 — 2026-11-05（**已构建 · 已推 Gitea**）
+
+- **新增：堆栈级独立标签（编辑堆栈 → SETTINGS 页选择，与容器/标签库共用同一套标签）**：用户要求——给堆栈增加"选择标签"功能，像容器那样共用同一套标签库，在编辑堆栈的 SETTINGS 页选择，堆栈管理页「标签」列显示这些标签。此前堆栈「标签」列是**聚合各服务 LABELS 挂载的标签**（`collectStackTags` 遍历 `webuiLabels`），现改为展示**堆栈级专属标签**（SETTINGS 页选择）。
+  - `src/types.ts`：`StackSettings` 新增 `tags?: ResourceTag[]`。
+  - `src/transforms.ts`：把服务端返回的顶层 `s.tags` 读入 `stack.settings.tags`（`getStacks` 在 `.stack-meta.json` 顶层读取并随堆栈对象返回）。
+  - `server/docker.ts`：`getStacks` 解析 `meta.tags`（顶层）并在两个返回分支写入 `tags`；`saveStackSettings` 已把整个 body 摊平写入 `.stack-meta.json`（与 `description` 同机制），故 SETTINGS 保存即自动持久化，无需新增字段。
+  - `src/App.tsx`：在堆栈交叉引用循环中，对 `st.settings.tags` 按全局标签库 `tagLibrary` 重新解析（重命名/改色后展示层即时同步，被删除标签自动失效，与 `label.tags` 同一套逻辑）。
+  - `src/pages/Stacks.tsx`：① `StackEditorModal` 的 **SETTINGS 子页**在「描述」下方新增「标签」`FormField`，内嵌复用 `TagSelect`（共享 `tagLibrary` + `onCreateTag`，支持选择/新建，与容器标签体验一致）；② `collectStackTags` 改为返回 `stack.settings.tags`（堆栈管理页「标签」列与排序均改用此专属集合，不再聚合 LABELS）。
+- **行为变化（重要）**：堆栈管理页「标签」列**不再展示**各服务 LABELS 聚合出来的标签，只展示在 SETTINGS 页手动选择的堆栈级标签。容器侧的标签（来自 LABELS，传导到容器管理页）不受影响，仍按原逻辑工作。
+- 核验：tsc src 0；tsc server 0；16→46 组门禁 0 FAIL（全绿）；SEA 四步 + 三处二进制 SHA（`8f4c7bb3…`）逐字节一致；ELF `7f454c46`/e_machine `62`；前端解码锚点 `与容器管理共用同一套标签库`=1（SETTINGS 提示入包）/ `此处选择的标签将显示在堆栈管理页`=1 / `选择标签（容器管理/堆栈管理列表将同步显示）`=2（LABELS+SETTINGS 两处 TagSelect）/ `在此输入 compose 内容`=1；原始字节 `1.50.23`=2 / `1.50.22`=0。
+- 已知限制：无。下一步：无。
+- 快照：commit 待定 + tag v1.50.23 推 Gitea main+tag 双 ref 一致；GitHub 按约定未推。
+
 ## v1.50.22 — 2026-11-05（**已构建 · 已推 Gitea**）
 
 - **新建堆栈体验两项改动（用户要求）**：

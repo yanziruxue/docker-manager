@@ -1849,6 +1849,7 @@ export async function getStacks(engine: DockerEngine): Promise<any[]> {
       let metaIcon = "";
       let metaWebuiLabels: any[] = [];
       let metaSettings: any = {};
+      let metaTags: any[] = [];
       if (fs.existsSync(metaPath)) {
         try {
           const meta = JSON.parse(fs.readFileSync(metaPath, "utf-8"));
@@ -1857,6 +1858,7 @@ export async function getStacks(engine: DockerEngine): Promise<any[]> {
           metaIcon = meta.icon || "";
           metaWebuiLabels = meta.webuiLabels || [];
           metaSettings = meta.settings || {};
+          metaTags = meta.tags || [];
         } catch { /* ignore */ }
       }
       // description 元文件优先（统一规范）
@@ -1897,6 +1899,7 @@ export async function getStacks(engine: DockerEngine): Promise<any[]> {
           icon: icon || stacks[existingIndex].icon,
           webuiLabels: webuiLabels.length > 0 ? webuiLabels : stacks[existingIndex].webuiLabels,
           settings: { ...stacks[existingIndex].settings, ...settings },
+          tags: metaTags,
         };
       } else {
         // 没有容器数据 — 文件系统补充（堆栈已 down 或仅有 meta 的空记录）
@@ -1924,6 +1927,7 @@ export async function getStacks(engine: DockerEngine): Promise<any[]> {
             autoUpdate: false,
             ...settings,
           },
+          tags: metaTags,
           backupCount: 0,
         });
       }
