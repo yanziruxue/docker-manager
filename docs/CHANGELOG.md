@@ -16,6 +16,21 @@
 
 ---
 
+## v1.50.27 — 2026-11-05（**已构建 · 已推 Gitea**）
+
+- **新增：容器管理页行右键菜单（详情）**：用户要求「容器管理页面增加右键菜单，菜单里有一个详情按钮，点击打开容器详情弹窗」。此前 `Containers.tsx` 完全没有右键菜单（仅在「状态」列点击打开详情）。改动全部集中在 `src/pages/Containers.tsx`：
+  - 引入项目共享组件 `ContextMenu`（`Images` / `Volumes` / `Stacks` 同款），复用现有 `Search` 图标，不新增依赖。
+  - 新增 `contextMenu: { x, y, containerId } | null` state —— **存容器 id 而非对象快照**，避免数据刷新后详情持有陈旧对象。
+  - 主表 `<tr>` 加 `onContextMenu`（`e.preventDefault()` + 记录坐标）、`cursor-context-menu` 与 `title="右键打开操作菜单"`，与 `Images.tsx:1658–1663` 范式一致。
+  - 根 div 末尾渲染 `<ContextMenu>`，菜单**仅一项「详情」**：按 `containerId` 从 `containers` 取最新对象 → `setDetailContainer(target)` + `setDetailTab("info")`，与点击状态列打开的是**同一个** `ContainerDetailModal`（抽屉/居中弹窗跟随「页面设置」）；组件自身在点击后自动 `onClose()` 关菜单。
+  - 未改动：状态列点击、批量勾选、展开资源行、批量操作条、详情弹窗本体、删除确认框。
+- 核验：tsc src 0；tsc server 0；46 组门禁 0 FAIL；SEA 四步 + 三处二进制 SHA（`e69c4d35…`）逐字节一致（postject 产物 = zip 成员 = deb 成员）；zip 包成员 5 个；ELF `7f454c46`/e_machine `62`。
+  - **版本串判据**：两处真实版本常量 `CURRENT_VERSION` / `currentAppVersion()` 均为 `"1.50.27"`；原始字节中 `1.50.26` 残留 1 次，经上下文定位为上一版服务端注释 `// v1.50.26：保留 paused 状态…`（esbuild 保留服务端注释，属项目已记录的「旧版本串假红」坑），**不是版本常量残留**，已断言其全部位于注释行。
+  - **新旧包前端解码对比**：`右键打开操作菜单` 2→3、`cursor-context-menu` 6→7、`详情` 11→12（各 +1，正是本次新增）；`已暂停` 9→9、`双击图标打开编辑堆栈` 1→1、`与容器管理共用同一套标签库` 1→1、`在此输入 compose 内容` 1→1（前几版功能均保留）。
+  - 源码级 10 项断言全 PASS（`ContextMenu` import=1、`contextMenu` state=1、`onContextMenu={(e) =>`=1、`label: "详情"`=1、`setDetailContainer(target); setDetailTab("info");`=1、`setContextMenu(null)`=1 等）。
+- 已知限制：菜单目前只有「详情」一项（按用户要求）；后续如需启动/停止/重启/日志等操作项可在此数组上扩展。下一步：无。
+- 快照：commit 待定 + tag v1.50.27 推 Gitea main+tag 双 ref 一致；GitHub 按约定未推。
+
 ## v1.50.26 — 2026-11-05（**已构建 · 已推 Gitea**）
 
 - **容器子表右键移除「日志」「控制台」**：`src/pages/Stacks.tsx` 的 `getContainerMenuItems` 删 `L("Logs","日志")` 与 `L("Console","控制台")` 两项，保留 `L("Inspect","详情")`（固定跳转容器详情 `info` 页签）；`goDetail` 辅助函数随之收敛为内联单入口；`Terminal` 图标 import 因唯一使用点消失而移除（`FileCode` 在 1380 行另有用，保留）。App.tsx / Containers.tsx 的跨页跳转链路（`focusContainerTab`）保留不动，零回归。

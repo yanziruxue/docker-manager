@@ -36,6 +36,7 @@ import {
 } from "lucide-react";
 import type { Container, LogEntry, ContainerFileEntry, Stack } from "../types";
 import { StatusBadge, Tag } from "../components/Badge";
+import { ContextMenu } from "../components/ContextMenu";
 import { Modal, ConfirmDialog, Drawer } from "../components/Modal";
 import { Toggle, ProgressBar, IconButton, EmptyState, SortableTh } from "../components/UI";
 import { TagGroup } from "../components/TagPicker";
@@ -112,6 +113,8 @@ export function Containers({ containers, onNavigate, onRefresh, loading, error, 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [detailContainer, setDetailContainer] = useState<Container | null>(null);
   const [detailTab, setDetailTab] = useState<"info" | "logs" | "stats" | "terminal" | "file">("info");
+  /** v1.50.27：行右键菜单；存容器 id 而非对象快照，避免刷新后详情数据陈旧 */
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; containerId: string } | null>(null);
 
   // 弹窗中始终使用最新的容器数据
   const activeContainer = useMemo(() => {
@@ -435,7 +438,9 @@ export function Containers({ containers, onNavigate, onRefresh, loading, error, 
               return (
               <React.Fragment key={container.id}>
                 <tr
-                  className={`hover:bg-slate-50 transition-colors ${selected.has(container.id) ? "bg-blue-50/50" : ""}`}
+                  className={`hover:bg-slate-50 transition-colors cursor-context-menu ${selected.has(container.id) ? "bg-blue-50/50" : ""}`}
+                  onContextMenu={(e) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, containerId: container.id }); }}
+                  title="右键打开操作菜单"
                 >
                   <td className="px-4 py-3" onClick={(e) => { e.stopPropagation(); toggleSelect(container.id); }}>
                     <button className="text-slate-400 hover:text-blue-500">
@@ -660,6 +665,25 @@ export function Containers({ containers, onNavigate, onRefresh, loading, error, 
         confirmText="删除"
         danger
       />
+
+      {/* v1.50.27：容器行右键菜单 —— 目前仅「详情」，与点击状态列打开同一个详情弹窗 */}
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={[
+            {
+              label: "详情",
+              icon: <Search size={14} />,
+              onClick: () => {
+                const target = containers.find((c) => c.id === contextMenu.containerId);
+                if (target) { setDetailContainer(target); setDetailTab("info"); }
+              },
+            },
+          ]}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
     </div>
   );
 }
