@@ -16,6 +16,22 @@
 
 ---
 
+## v1.50.25 — 2026-11-05（**已构建 · 已推 Gitea**）
+
+- **移除「Compose 终端」**：用户确认范围为**只删终端入口 + 弹窗**（不删主表格行右键触发点 —— 因 `Stacks.tsx` 注释明确「操作列已移除：所有操作统一走右键菜单」，删触发点会让堆栈页失去全部 14 个操作入口）。
+  - `src/pages/Stacks.tsx`：删右键菜单 `L("Terminal","终端")` 项、`terminalStack` state、`<TerminalModal>` 渲染、**文件末尾 `TerminalModal` 组件整段**（2579–2649）、以及 `stackActionApi` import（该组件是唯一调用点）。
+  - **保留**：853 行主表格行右键触发点及其余 13 项操作、`Terminal` 图标 import（容器右键「控制台」仍用）、容器真实 XTerm 终端、设置中心「Compose 命令」模式卡片、`src/index.css` Terminal 样式、`api.ts` 的 `stackActionApi` 导出（成为死代码但保留零风险）。
+  - 删除后文件由 2649 行 → 2586 行；残留检查 `terminalStack`/`TerminalModal`/`stackActionApi` 均为 0。
+- **修复：容器子表暂停态显示不一致**（用户反馈「暂停状态在容器子表还是显示运行中，堆栈管理显示已停止」）。**真因**：`containersModal` 是点击状态列时保存的 `Stack` 对象快照，只有 `editStack` 有 `useEffect` 按 name 从 `stacks` 同步最新引用，子表没有 → 暂停操作 `onRefresh()` 后主表已刷新、子表仍持有旧 `containers`（`status: running`）。现补同款 `useEffect` 同步；`StatusBadge` 本身已支持 `paused`→「已暂停」（琥珀色），数据同步后即正确显示。
+- **修复：容器右键「日志 / 控制台 / 详情」三个按钮点击没反应**（原 `onClick: () => {}` 空实现）。统一改为跨页跳转到「容器管理 → 对应详情页签」：
+  - `src/pages/Stacks.tsx`：`StacksProps.onOpenContainerDetail` 扩为 `(name, tab?: "info"|"logs"|"terminal")`；`getContainerMenuItems` 三项分别接 `goDetail("logs"/"terminal"/"info")`，先 `setContextMenu(null)` 关菜单，未提供回调时 `disabled`；同时把容器菜单按 `paused / running / 其他` 三分支重构 —— **paused 分支补「恢复」(unpause) 与「停止」**（此前只在 else 给「启动」，暂停后无法在右键恢复；`handleContainerAction` 早已支持 `unpause`）。
+  - `src/App.tsx`：`handleNavigate` 的 opts 加 `focusContainerTab`，新增同名 state，传给 `<Containers>`；`onFocusContainerConsumed` 同时清空 name 与 tab；`onOpenContainerDetail` 透传 tab。
+  - `src/pages/Containers.tsx`：`ContainersProps` 加 `focusContainerTab`，函数签名默认值 `""`，跨页聚焦 `useEffect` 里 `setDetailTab(focusContainerTab || "info")` 并把 tab 加入依赖。
+- 仪表盘 `Dashboard.tsx` 复用子表时未传 `onContainerContextMenu` / `onOpenContainerDetail`，右键本就不弹，本次**未改动**（用户未选该项）。
+- 核验：tsc src 0；tsc server 0；46 组门禁 0 FAIL；SEA 四步 + 三处二进制 SHA（`5ca16b73…`）逐字节一致；zip 包成员 5 个（符合铁律）；ELF `7f454c46`/e_machine `62`；原始字节 `1.50.25`=2 / `1.50.24`=0。**负向断言（解码文本 + 原始字节均 0）**：`Compose 终端 - `、`一键执行常用 compose 命令`、`root@compose:~# 等待命令...`、`命令已发送（日志/状态输出请在对应页面查看）`、`TerminalModal`、`terminalStack`。**正向锚点**：`focusContainerTab`=4、`Unpause`=1、`双击图标打开编辑堆栈`=1、`与容器管理共用同一套标签库`=1、`在此输入 compose 内容`=1（前两版功能均保留）。
+- 已知限制：主表格显示的是**堆栈级聚合状态**（暂停容器后可能显示「已停止」），子表显示**容器级状态**（「已暂停」），两者口径不同属正常。下一步：无。
+- 快照：commit 待定 + tag v1.50.25 推 Gitea main+tag 双 ref 一致；GitHub 按约定未推。
+
 ## v1.50.24 — 2026-11-05（**已构建 · 已推 Gitea**）
 
 - **新增：堆栈图标双击打开编辑堆栈弹窗 + 设置中心开关**：用户要求——双击「堆栈管理」页的堆栈图标即可打开右键菜单里的「编辑堆栈」弹窗，并在「设置中心 → 页面设置」增加一张开关卡片可开启/关闭该功能。默认**开启**；关闭后双击图标无反应，右键菜单不受影响。

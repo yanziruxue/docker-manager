@@ -507,8 +507,11 @@ export default function App() {
 
   // 跨页导航携带的焦点容器：从堆栈子表等入口跳转到容器页后自动打开其详情（消费后即清空）
   const [focusContainerName, setFocusContainerName] = useState<string>("");
-  const handleNavigate = (target: string, opts?: { focusContainerName?: string }) => {
+  /** v1.50.25：跳转时指定容器详情默认打开的页签（日志 / 控制台 / 基本信息） */
+  const [focusContainerTab, setFocusContainerTab] = useState<"info" | "logs" | "terminal" | "">("");
+  const handleNavigate = (target: string, opts?: { focusContainerName?: string; focusContainerTab?: "info" | "logs" | "terminal" }) => {
     setFocusContainerName(opts?.focusContainerName ?? "");
+    setFocusContainerTab(opts?.focusContainerTab ?? "");
     setPage(target as PageKey);
   };
 
@@ -869,7 +872,8 @@ export default function App() {
               defaultVisibleColumns={settings?.columnVisibility?.containers}
               containerDetailStyle={settings?.modal?.containerDetailStyle ?? "drawer"}
               focusContainerName={focusContainerName}
-              onFocusContainerConsumed={() => setFocusContainerName("")}
+              focusContainerTab={focusContainerTab}
+              onFocusContainerConsumed={() => { setFocusContainerName(""); setFocusContainerTab(""); }}
             />
           )}
           {page === "stacks" && (
@@ -887,7 +891,7 @@ export default function App() {
               autoDetectWebui={settings?.compose?.autoDetectWebui ?? true}
               doubleClickIconEditStack={settings?.modal?.doubleClickIconEditStack ?? true}
               defaultVisibleColumns={settings?.columnVisibility?.stackList}
-              onOpenContainerDetail={(name) => handleNavigate("containers", { focusContainerName: name })}
+              onOpenContainerDetail={(name, tab) => handleNavigate("containers", { focusContainerName: name, focusContainerTab: tab })}
             />
           )}
           {page === "images" && (

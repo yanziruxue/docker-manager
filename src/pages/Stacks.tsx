@@ -51,7 +51,6 @@ import { formatBytes } from "../transforms";
 import {
   createStackApi,
   createStackFromBackupApi,
-  stackActionApi,
   streamStackActions,
   removeStackApi,
   saveStackComposeApi,
@@ -343,7 +342,7 @@ interface StacksProps {
   /** 堆栈管理页「图标」列双击打开编辑堆栈弹窗（来自系统设置 → 页面设置；默认开） */
   doubleClickIconEditStack?: boolean;
   /** 点击容器子表「状态」格回调（跳转容器详情，由 App 提供跨页导航） */
-  onOpenContainerDetail?: (containerName: string) => void;
+  onOpenContainerDetail?: (containerName: string, tab?: "info" | "logs" | "terminal") => void;
 }
 
 export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLanguage = "zh", tagLibrary = [], onCreateTag, defaultVisibleColumns, defaultSubColumns, autoCloseDelay = 5, composeTemplates = [], autoDetectWebui = true, doubleClickIconEditStack = true, onOpenContainerDetail }: StacksProps) {
@@ -409,6 +408,14 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
       if (updated) setEditStack(updated);
     }
   }, [stacks]);
+  // 刷新 stacks 后同步容器子表引用（v1.50.25）：子表持有的是点击时的 Stack 快照，
+  // 容器暂停/启动后主表已刷新，子表若不跟随会一直显示旧状态（如暂停后仍显示「运行中」）。
+  useEffect(() => {
+    if (containersModal) {
+      const updated = stacks.find(s => s.name === containersModal.name);
+      if (updated) setContainersModal(updated);
+    }
+  }, [stacks]);
   const [createMode, setCreateMode] = useState(false);
   /**
    * 新建堆栈成功后：关闭新建弹窗 + 刷新列表 + 直接打开该堆栈的「编辑堆栈」弹窗。
@@ -427,7 +434,6 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
       /* 拉取失败则静默：用户可在列表里手动点编辑 */
     }
   };
-  const [terminalStack, setTerminalStack] = useState<Stack | null>(null);
   const [logStack, setLogStack] = useState<Stack | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ id: string; name: string } | null>(null);
   /**
@@ -691,7 +697,6 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
     }
 
     items.push({ separator: true });
-    items.push({ label: L("Terminal", "终端"), icon: <Terminal size={14} />, onClick: () => { setContextMenu(null); setTerminalStack(stack); } });
     items.push({ label: L("Backup", "备份"), icon: <Package size={14} />, onClick: () => { setContextMenu(null); handleBackup(stack.name); }, disabled: isOperating });
     items.push({ label: L("Duplicate", "复制"), icon: <Copy size={14} />, onClick: () => { setContextMenu(null); setTimeout(() => { setCreateMode(true); }, 100); } });
 
@@ -703,7 +708,11 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
     const isRunning = container.status === "running";
     const isOperating = operatingStacks.has(container.name);
 
-    if (isRunning) {
+    if (container.status === "paused") {
+      // 暂停态：需先「恢复」(unpause) 才能继续运行；此前该分支只给「启动」，暂停后无法在右键恢复
+      items.push({ label: L("Unpause", "恢复"), icon: <Play size={14} />, onClick: () => { setContextMenu(null); handleContainerAction(container.name, "unpause"); }, disabled: isOperating });
+      items.push({ label: L("Stop", "停止"), icon: <Square size={14} />, onClick: () => { setContextMenu(null); handleContainerAction(container.name, "stop"); }, disabled: isOperating });
+    } else if (isRunning) {
       items.push({ label: L("Stop", "停止"), icon: <Square size={14} />, onClick: () => handleContainerAction(container.name, "stop"), disabled: isOperating });
       items.push({ label: L("Pause", "暂停"), icon: <Lock size={14} />, onClick: () => handleContainerAction(container.name, "pause"), disabled: isOperating });
       items.push({ label: L("Restart", "重启"), icon: <RotateCw size={14} />, onClick: () => handleContainerAction(container.name, "restart"), disabled: isOperating });
@@ -712,9 +721,15 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
     }
 
     items.push({ separator: true });
-    items.push({ label: L("Logs", "日志"), icon: <FileCode size={14} />, onClick: () => {} });
-    items.push({ label: L("Console", "控制台"), icon: <Terminal size={14} />, onClick: () => {} });
-    items.push({ label: L("Inspect", "详情"), icon: <Search size={14} />, onClick: () => {} });
+    // 三个入口统一走跨页跳转到「容器管理 → 对应详情页签」（v1.50.25）；此前 onClick 为空实现，点了没反应
+    const canGoDetail = !!onOpenContainerDetail;
+    const goDetail = (tab: "info" | "logs" | "terminal") => {
+      setContextMenu(null);
+      onOpenContainerDetail?.(container.name, tab);
+    };
+    items.push({ label: L("Logs", "日志"), icon: <FileCode size={14} />, onClick: () => goDetail("logs"), disabled: !canGoDetail });
+    items.push({ label: L("Console", "控制台"), icon: <Terminal size={14} />, onClick: () => goDetail("terminal"), disabled: !canGoDetail });
+    items.push({ label: L("Inspect", "详情"), icon: <Search size={14} />, onClick: () => goDetail("info"), disabled: !canGoDetail });
 
     if (container.hasUpdate) {
       items.push({ separator: true });
@@ -954,9 +969,6 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
 
       {/* Create Stack Modal */}
       {createMode && <CreateStackModal onClose={() => setCreateMode(false)} engineId={engineId} onRefresh={onRefresh} onCreated={handleStackCreated} />}
-
-      {/* Terminal Modal */}
-      {terminalStack && <TerminalModal stack={terminalStack} onClose={() => setTerminalStack(null)} engineId={engineId} onRefresh={onRefresh} />}
 
       {/* Stack Log Modal */}
       {logStack && <StackLogModal stack={logStack} onClose={() => setLogStack(null)} engineId={engineId} />}
@@ -2571,78 +2583,6 @@ function StackLogModal({ stack, onClose, engineId }: { stack: Stack; onClose: ()
         ) : (
           <pre className="text-xs text-slate-200 font-mono whitespace-pre-wrap break-all">{logs.join("\n")}</pre>
         )}
-      </div>
-    </Modal>
-  );
-}
-
-// ============ Terminal Modal ============
-
-function TerminalModal({ stack, onClose, engineId, onRefresh }: { stack: Stack; onClose: () => void; engineId?: string; onRefresh?: () => void }) {
-  const [output, setOutput] = useState<string[]>(["root@compose:~# 等待命令..."]);
-  const [running, setRunning] = useState(false);
-
-  const composeCommands = [
-    { label: "docker compose ps", action: "status" },
-    { label: "docker compose up -d", action: "up" },
-    { label: "docker compose down", action: "down" },
-    { label: "docker compose pull", action: "pull" },
-    { label: "docker compose restart", action: "restart" },
-    { label: "docker compose logs", action: "logs" },
-  ];
-
-  const runCommand = async (cmd: string, action: string | null) => {
-    if (running || !engineId) return;
-    setRunning(true);
-    setOutput((prev) => [...prev, "$ " + cmd]);
-    try {
-      if (action && action !== "status" && action !== "logs") {
-        const result = await stackActionApi(engineId, stack.name, action as any);
-        setOutput((prev) => [...prev, result || "执行成功"]);
-      } else {
-        setOutput((prev) => [...prev, "命令已发送（日志/状态输出请在对应页面查看）"]);
-      }
-      onRefresh?.();
-    } catch (e: any) {
-      setOutput((prev) => [...prev, "错误: " + (e.message || "执行失败")]);
-    } finally {
-      setRunning(false);
-    }
-  };
-
-  return (
-    <Modal open={true} onClose={onClose} title={`Compose 终端 - ${stack.name}`} size="lg">
-      <div className="space-y-3">
-        <div className="flex flex-wrap gap-1.5">
-          {composeCommands.map((cmd) => (
-            <button
-              key={cmd.label}
-              onClick={() => runCommand(cmd.label, cmd.action)}
-              disabled={running}
-              className="px-3 py-1.5 text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 disabled:opacity-50 font-mono"
-            >
-              {cmd.label}
-            </button>
-          ))}
-        </div>
-        <div className="bg-slate-900 rounded-lg p-4 h-[50vh] overflow-y-auto font-mono text-xs">
-          <div className="space-y-0.5">
-            {output.map((line, i) => (
-              <div key={i} className={line.startsWith("错误") ? "text-red-400" : line.startsWith("$") ? "text-yellow-400" : "text-slate-300"}>
-                {line}
-              </div>
-            ))}
-            {running && (
-              <div className="text-green-400">
-                <span className="animate-pulse">{">"}</span> 执行中...
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-      <div className="flex items-center gap-2 mt-3 text-xs text-slate-400">
-        <Terminal size={12} />
-        <span>一键执行常用 compose 命令</span>
       </div>
     </Modal>
   );

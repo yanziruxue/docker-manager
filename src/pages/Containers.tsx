@@ -69,6 +69,8 @@ interface ContainersProps {
   focusContainerName?: string;
   /** 焦点容器已消费回调（App 清空状态，避免刷新后重复打开） */
   onFocusContainerConsumed?: () => void;
+  /** v1.50.25：焦点容器详情默认打开的页签（info / logs / terminal），空则回落 info */
+  focusContainerTab?: "info" | "logs" | "terminal" | "";
   /** 堆栈列表：用于按 container.stackId 映射出所属堆栈名称 */
   stacks?: Stack[];
 }
@@ -104,7 +106,7 @@ function uptimeDays(uptime: string): string {
   return m[2].toLowerCase() === "month" ? `${n * 30}天` : `${n}天`;
 }
 
-export function Containers({ containers, onNavigate, onRefresh, loading, error, engineId, defaultVisibleColumns, containerDetailStyle = "drawer", focusContainerName, onFocusContainerConsumed, stacks }: ContainersProps) {
+export function Containers({ containers, onNavigate, onRefresh, loading, error, engineId, defaultVisibleColumns, containerDetailStyle = "drawer", focusContainerName, focusContainerTab = "", onFocusContainerConsumed, stacks }: ContainersProps) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -124,10 +126,10 @@ export function Containers({ containers, onNavigate, onRefresh, loading, error, 
     const target = containers.find((c) => c.name === focusContainerName);
     if (!target) return;
     setDetailContainer(target);
-    setDetailTab("info");
+    setDetailTab(focusContainerTab || "info");
     onFocusContainerConsumed?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusContainerName, containers]);
+  }, [focusContainerName, focusContainerTab, containers]);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [showColumnPicker, setShowColumnPicker] = useState(false);
