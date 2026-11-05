@@ -16,6 +16,20 @@
 
 ---
 
+## v1.50.26 — 2026-11-05（**已构建 · 已推 Gitea**）
+
+- **容器子表右键移除「日志」「控制台」**：`src/pages/Stacks.tsx` 的 `getContainerMenuItems` 删 `L("Logs","日志")` 与 `L("Console","控制台")` 两项，保留 `L("Inspect","详情")`（固定跳转容器详情 `info` 页签）；`goDetail` 辅助函数随之收敛为内联单入口；`Terminal` 图标 import 因唯一使用点消失而移除（`FileCode` 在 1380 行另有用，保留）。App.tsx / Containers.tsx 的跨页跳转链路（`focusContainerTab`）保留不动，零回归。
+- **修复：容器暂停后显示「已停止」**（用户反馈「容器子表和编辑堆栈页面显示已停止」）。**真因不在 UI 而在数据源**——Docker `listContainers` 的 `State` 对暂停容器返回 `"paused"`，但被两层一刀切吞掉：
+  - `server/docker.ts:1802`：`c.State === "running" ? "running" : "stopped"` → 容器级 paused 变 stopped；现改为三态 `running / paused / stopped`。
+  - `src/transforms.ts:260`：前端又做一次同样的一刀切，即使服务端传 paused 也会变回 stopped；现同步透传。
+  - `server/docker.ts:1754–1759`：堆栈级聚合 `running === 0 → "stopped"`，单容器暂停时主表状态列同样显示「已停止」；现新增 `paused` 计数，`running === 0 && paused > 0 → "paused"`，其余 `partial / stopped` 逻辑不变。
+  - `src/transforms.ts:247` 的 `statusMap` 与 `src/types.ts:20` 的 `StackStatus` 补 `paused`（此前兜底成 stopped）；`src/pages/Stacks.tsx` 的 `statusRank` 补 `paused: 2`、状态筛选下拉补「已暂停」。
+  - **联动**：`StatusBadge` 本就支持 `paused`→「已暂停」（琥珀色）；v1.50.25 加的容器右键 `paused` 分支（恢复 unpause / 停止）此前因数据源永远不给 paused 而**从未生效**，本次才真正可用。v1.50.25 条目里的「已知限制：主表格可能显示已停止」就此消除。
+  - 说明：编辑堆栈弹窗本身不渲染状态徽章，它读取的是同一份 `stack.status`；修数据源后，容器子表、堆栈管理页状态列（含编辑弹窗背后的列表）均显示「已暂停」。仪表盘 `Dashboard.tsx` 的堆栈统计/筛选未加 paused 分类（卡片徽章本身已能显示「已暂停」），本次不动。
+- 核验：tsc src 0；tsc server 0；46 组门禁 0 FAIL；SEA 四步 + 三处二进制 SHA（`15636138…`）逐字节一致；zip 包成员 5 个；ELF `7f454c46`/e_machine `62`；原始字节 `1.50.26`=3 / `1.50.25`=0（旧包二进制 `1.50.25`=2 作对照）。**新旧包前端解码对比**：`Console` old=1→new=0、`控制台` old=1→new=0、`Logs` old=2→new=1（主表「查看日志」保留）、`已暂停` old=8→new=9（新增筛选项）、`paused` old=35→new=41；旧功能锚点 `双击图标打开编辑堆栈`=1、`与容器管理共用同一套标签库`=1、`在此输入 compose 内容`=1 均保留。**源码级 13 项断言全 PASS**（含 `L("Console","控制台")`=0、`  Terminal,`=0、`c.State === "paused"`=2、`export type StackStatus = ... "paused"`=1）。
+- 已知限制：无。下一步：无。
+- 快照：commit 待定 + tag v1.50.26 推 Gitea main+tag 双 ref 一致；GitHub 按约定未推。
+
 ## v1.50.25 — 2026-11-05（**已构建 · 已推 Gitea**）
 
 - **移除「Compose 终端」**：用户确认范围为**只删终端入口 + 弹窗**（不删主表格行右键触发点 —— 因 `Stacks.tsx` 注释明确「操作列已移除：所有操作统一走右键菜单」，删触发点会让堆栈页失去全部 14 个操作入口）。

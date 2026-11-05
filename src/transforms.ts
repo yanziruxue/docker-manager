@@ -247,6 +247,7 @@ export function transformStacks(raw: any[]): Stack[] {
     const statusMap: Record<string, StackStatus> = {
       running: "running",
       stopped: "stopped",
+      paused: "paused",
       partial: "partial",
     };
 
@@ -257,7 +258,8 @@ export function transformStacks(raw: any[]): Stack[] {
       containerName: c.containerName || undefined,
       image: c.image || "",
       tag: c.tag || "latest",
-      status: c.status === "running" ? "running" : "stopped",
+      // v1.50.26：透传 paused，此前前端二次一刀切会把它变回 stopped
+      status: c.status === "running" ? "running" : c.status === "paused" ? "paused" : "stopped",
       network: c.network || "bridge",
       ip: c.ip || "—",
       ports: c.ports || "—",

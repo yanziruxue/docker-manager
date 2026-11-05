@@ -8,7 +8,6 @@ import {
   Copy,
   Trash2,
   Globe,
-  Terminal,
   GitBranch,
   Search,
   Plus,
@@ -620,7 +619,7 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
 
   const filtered = useMemo(() => {
     // 状态排序权重：running < partial < stopped < error < updating
-    const statusRank: Record<string, number> = { running: 0, partial: 1, stopped: 2, error: 3, updating: 4 };
+    const statusRank: Record<string, number> = { running: 0, partial: 1, stopped: 2, paused: 2, error: 3, updating: 4 };
     const list = stacks.filter((s) => {
       const matchSearch = s.name.toLowerCase().includes(search.toLowerCase()) || s.description.toLowerCase().includes(search.toLowerCase());
       const matchStatus = statusFilter === "all" || s.status === statusFilter;
@@ -721,15 +720,9 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
     }
 
     items.push({ separator: true });
-    // 三个入口统一走跨页跳转到「容器管理 → 对应详情页签」（v1.50.25）；此前 onClick 为空实现，点了没反应
+    // 详情入口跳转到「容器管理 → 容器详情」基本信息页签（v1.50.25）；v1.50.26 移除日志/控制台两项
     const canGoDetail = !!onOpenContainerDetail;
-    const goDetail = (tab: "info" | "logs" | "terminal") => {
-      setContextMenu(null);
-      onOpenContainerDetail?.(container.name, tab);
-    };
-    items.push({ label: L("Logs", "日志"), icon: <FileCode size={14} />, onClick: () => goDetail("logs"), disabled: !canGoDetail });
-    items.push({ label: L("Console", "控制台"), icon: <Terminal size={14} />, onClick: () => goDetail("terminal"), disabled: !canGoDetail });
-    items.push({ label: L("Inspect", "详情"), icon: <Search size={14} />, onClick: () => goDetail("info"), disabled: !canGoDetail });
+    items.push({ label: L("Inspect", "详情"), icon: <Search size={14} />, onClick: () => { setContextMenu(null); onOpenContainerDetail?.(container.name, "info"); }, disabled: !canGoDetail });
 
     if (container.hasUpdate) {
       items.push({ separator: true });
@@ -776,6 +769,7 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
             <option value="running">运行中</option>
             <option value="stopped">已停止</option>
             <option value="partial">部分运行</option>
+            <option value="paused">已暂停</option>
           </select>
 
           <span className="text-sm text-slate-400">{filtered.length} 个堆栈</span>

@@ -1752,9 +1752,13 @@ export async function getStacks(engine: DockerEngine): Promise<any[]> {
     const workingDir = labels["com.docker.compose.project.working_dir"] || "";
 
     const running = projectContainers.filter((c) => c.State === "running").length;
+    // v1.50.26：Docker 的 paused 是独立 State；全部/部分容器暂停且无运行容器时，
+    // 堆栈状态应为「已暂停」而非「已停止」（此前 running===0 一律判 stopped）
+    const paused = projectContainers.filter((c) => c.State === "paused").length;
     const total = projectContainers.length;
     let status: string;
     if (running === total) status = "running";
+    else if (running === 0 && paused > 0) status = "paused";
     else if (running === 0) status = "stopped";
     else status = "partial";
 
@@ -1799,7 +1803,9 @@ export async function getStacks(engine: DockerEngine): Promise<any[]> {
         containerName: (c.Names?.[0] || "").replace(/^\//, ""),
         image: image,
         tag: tag,
-        status: c.State === "running" ? "running" : "stopped",
+        // v1.50.26：保留 paused 状态，此前与 exited 一起被吞成 stopped，
+        // 导致暂停后容器子表显示「已停止」、右键 paused 分支永不生效
+        status: c.State === "running" ? "running" : c.State === "paused" ? "paused" : "stopped",
         network: netKeys[0] || "bridge",
         ip: ip || "—",
         ports: ports || "—",

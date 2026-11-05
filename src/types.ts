@@ -17,7 +17,7 @@ export interface ContainerFileEntry {
   /** 符号链接目标（仅 isSymlink 时有值） */
   target?: string;
 }
-export type StackStatus = "running" | "stopped" | "partial" | "error" | "updating";
+export type StackStatus = "running" | "stopped" | "paused" | "partial" | "error" | "updating";
 export type RestartPolicy = "always" | "unless-stopped" | "on-failure" | "no";
 export type NetworkMode = "bridge" | "host" | "macvlan" | "custom";
 export type PullPolicy = "always" | "ifnotpresent";
