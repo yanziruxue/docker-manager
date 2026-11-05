@@ -27,7 +27,7 @@
 - **行为变化（重要）**：堆栈管理页「标签」列**不再展示**各服务 LABELS 聚合出来的标签，只展示在 SETTINGS 页手动选择的堆栈级标签。容器侧的标签（来自 LABELS，传导到容器管理页）不受影响，仍按原逻辑工作。
 - 核验：tsc src 0；tsc server 0；16→46 组门禁 0 FAIL（全绿）；SEA 四步 + 三处二进制 SHA（`8f4c7bb3…`）逐字节一致；ELF `7f454c46`/e_machine `62`；前端解码锚点 `与容器管理共用同一套标签库`=1（SETTINGS 提示入包）/ `此处选择的标签将显示在堆栈管理页`=1 / `选择标签（容器管理/堆栈管理列表将同步显示）`=2（LABELS+SETTINGS 两处 TagSelect）/ `在此输入 compose 内容`=1；原始字节 `1.50.23`=2 / `1.50.22`=0。
 - 已知限制：无。下一步：无。
-- 快照：commit 待定 + tag v1.50.23 推 Gitea main+tag 双 ref 一致；GitHub 按约定未推。
+- 快照：commit d3bf50b + tag v1.50.23 推 Gitea main+tag 双 ref 一致（均指向 d3bf50bfabb3663f14c681e49d381047161b6364）；GitHub 按约定未推。
 
 ## v1.50.22 — 2026-11-05（**已构建 · 已推 Gitea**）
 
