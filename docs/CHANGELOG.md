@@ -29,7 +29,7 @@
   - **新旧包前端解码对比**：`右键打开操作菜单` 2→3、`cursor-context-menu` 6→7、`详情` 11→12（各 +1，正是本次新增）；`已暂停` 9→9、`双击图标打开编辑堆栈` 1→1、`与容器管理共用同一套标签库` 1→1、`在此输入 compose 内容` 1→1（前几版功能均保留）。
   - 源码级 10 项断言全 PASS（`ContextMenu` import=1、`contextMenu` state=1、`onContextMenu={(e) =>`=1、`label: "详情"`=1、`setDetailContainer(target); setDetailTab("info");`=1、`setContextMenu(null)`=1 等）。
 - 已知限制：菜单目前只有「详情」一项（按用户要求）；后续如需启动/停止/重启/日志等操作项可在此数组上扩展。下一步：无。
-- 快照：commit 待定 + tag v1.50.27 推 Gitea main+tag 双 ref 一致；GitHub 按约定未推。
+- 快照：commit b55c03c + tag v1.50.27 推 Gitea；`ls-remote` 核对 main/tag 双 ref 均指向 `b55c03c3cc26b80c984ed11e8d7e574e3099a133`（随后 CHANGELOG 补 SHA 再推一次 main，故 main 会前进一提交）；GitHub 按约定未推。
 
 ## v1.50.26 — 2026-11-05（**已构建 · 已推 Gitea**）
 
