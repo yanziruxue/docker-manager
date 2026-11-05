@@ -63,6 +63,7 @@ import {
   batchStackActionApi,
   containerActionApi,
   fetchContainerLogs,
+  fetchEngineStacks,
 } from "../api";
 import { addOpLog } from "../opLog";
 import { StatusBadge, Tag } from "../components/Badge";
@@ -411,6 +412,23 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
     }
   }, [stacks]);
   const [createMode, setCreateMode] = useState(false);
+  /**
+   * 新建堆栈成功后：关闭新建弹窗 + 刷新列表 + 直接打开该堆栈的「编辑堆栈」弹窗。
+   * 通过 fetchEngineStacks 直接取回新建堆栈（不依赖 stacks prop 的异步刷新时序），
+   * 拿到完整 Stack 对象传给 StackEditorModal。
+   */
+  const handleStackCreated = async (name: string) => {
+    setCreateMode(false);
+    onRefresh?.();
+    if (!engineId) return;
+    try {
+      const list = await fetchEngineStacks(engineId);
+      const created = list.find((s) => s.name === name);
+      if (created) setEditStack(created);
+    } catch {
+      /* 拉取失败则静默：用户可在列表里手动点编辑 */
+    }
+  };
   const [terminalStack, setTerminalStack] = useState<Stack | null>(null);
   const [logStack, setLogStack] = useState<Stack | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ id: string; name: string } | null>(null);
@@ -933,7 +951,7 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
       {editStack && <StackEditorModal stack={editStack} onClose={() => setEditStack(null)} engineId={engineId} onRefresh={onRefresh} tagLibrary={tagLibrary} onCreateTag={onCreateTag} composeTemplates={composeTemplates} autoDetectWebui={autoDetectWebui} />}
 
       {/* Create Stack Modal */}
-      {createMode && <CreateStackModal onClose={() => setCreateMode(false)} engineId={engineId} onRefresh={onRefresh} />}
+      {createMode && <CreateStackModal onClose={() => setCreateMode(false)} engineId={engineId} onRefresh={onRefresh} onCreated={handleStackCreated} />}
 
       {/* Terminal Modal */}
       {terminalStack && <TerminalModal stack={terminalStack} onClose={() => setTerminalStack(null)} engineId={engineId} onRefresh={onRefresh} />}
@@ -2070,17 +2088,11 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
 
 // ============ Create Stack Modal ============
 
-function CreateStackModal({ onClose, engineId, onRefresh }: { onClose: () => void; engineId?: string; onRefresh?: () => void }) {
+function CreateStackModal({ onClose, engineId, onRefresh, onCreated }: { onClose: () => void; engineId?: string; onRefresh?: () => void; onCreated?: (name: string) => void }) {
   const [method, setMethod] = useState("editor");
   const [stackName, setStackName] = useState("");
   const [stackDescription, setStackDescription] = useState("");
-  const [composeContent, setComposeContent] = useState(`services:
-  web:
-    restart: unless-stopped
-    ports:
-      - "8080:80"
-    image: nginx:alpine
-`);
+  const [composeContent, setComposeContent] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [yamlValid, setYamlValid] = useState(true);
@@ -2183,7 +2195,7 @@ function CreateStackModal({ onClose, engineId, onRefresh }: { onClose: () => voi
     try {
       await createStackApi(engineId, stackName.trim(), stackDescription.trim(), composeContent);
       onRefresh?.();
-      onClose();
+      onCreated?.(stackName.trim());
     } catch (e: any) {
       setCreateError(e.message || "创建失败");
     } finally {
@@ -2202,7 +2214,7 @@ function CreateStackModal({ onClose, engineId, onRefresh }: { onClose: () => voi
     try {
       await createStackFromBackupApi(engineId, stackName.trim(), backupFile);
       onRefresh?.();
-      onClose();
+      onCreated?.(stackName.trim());
     } catch (e: any) {
       setCreateError(e.message || "创建失败");
     } finally {
@@ -2257,7 +2269,7 @@ function CreateStackModal({ onClose, engineId, onRefresh }: { onClose: () => voi
                 }}
                 onValidChange={setYamlValid}
                 minHeight={260}
-                placeholder={"services:\n  web:\n    restart: unless-stopped\n    ports:\n      - '8080:80'\n    image: nginx:alpine"}
+                placeholder={"在此输入 compose 内容，或使用「上传文件 / 命令转换 / 堆栈备份」初始化"}
               />
             </FormField>
           </div>

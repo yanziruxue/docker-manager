@@ -16,6 +16,15 @@
 
 ---
 
+## v1.50.22 — 2026-11-05（**已构建 · 已推 Gitea**）
+
+- **新建堆栈体验两项改动（用户要求）**：
+  1. **移除新建弹窗的默认示例 compose**：`CreateStackModal` 的 `composeContent` 初始值由内置 `services: web: ... nginx:alpine` 模板改为空串；编辑器占位提示同步改为中性文案「在此输入 compose 内容，或使用「上传文件 / 命令转换 / 堆栈备份」初始化」（不再展示 nginx 模板）。创建仍需非空校验（`composeContent.trim()` 为空时提示「compose 文件内容不能为空」），用户需自行粘贴 / 上传 / 转换 / 备份初始化。
+  2. **创建后直接进入该堆栈的「编辑堆栈」弹窗**：`CreateStackModal` 新增 `onCreated(name)` 回调，创建成功（editor 路径与堆栈备份路径均）后不再直接关闭，而是回调父组件；父组件 `handleStackCreated` 负责 `setCreateMode(false)` + `onRefresh` + 通过 `fetchEngineStacks(engineId)` 直接取回新建堆栈的完整 `Stack` 对象并 `setEditStack(...)` 打开 `StackEditorModal`（不依赖 `stacks` prop 的异步刷新时序）。`src/api.ts` 的 `fetchEngineStacks` 已导入并使用。
+- 核验：tsc src 0；16 组门禁 0 FAIL（全绿）；SEA 四步 + 三处二进制 SHA（`fc371ad7…`）逐字节一致；ELF `7f454c46`/e_machine `62`；前端解码锚点 `services:\n  web:`=0（默认模板已移除）/ `在此输入 compose 内容`=1（新占位符入包）/ `onCreated`=2（接线生效）/ `编辑堆栈`=4。
+- 已知限制：无。下一步：无。
+- 快照：commit（待记） + tag v1.50.22 推 Gitea main+tag 双 ref 一致；GitHub 按约定未推。
+
 ## v1.50.21 — 2026-11-04（**已构建 · 已推 Gitea**）
 
 - **上报端点精简：移除内网直连 `192.168.24.10:30507`，仅走公网域名**：用户要求只用域名上报。改 `server/telemetry.ts` 的 `TELEMETRY_ENDPOINTS` 兜底数组由 `["http://192.168.24.10:30507", "https://yanzi-api.ziruxue.top"]`（双通道 fallback）改为单元素 `["https://yanzi-api.ziruxue.top"]`，fallback 循环天然退化为单通道；同步更新 `sendReport` 注释（不再"换备用端点"）与 `docs/上报接口速览.md`（端点表改为单条、失败策略去掉"先换备用端点"）。`TELEMETRY_ENDPOINT` 环境变量覆盖能力不变（自建/调试仍可用）。
