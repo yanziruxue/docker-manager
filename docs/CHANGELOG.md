@@ -30,7 +30,7 @@
 - 仪表盘 `Dashboard.tsx` 复用子表时未传 `onContainerContextMenu` / `onOpenContainerDetail`，右键本就不弹，本次**未改动**（用户未选该项）。
 - 核验：tsc src 0；tsc server 0；46 组门禁 0 FAIL；SEA 四步 + 三处二进制 SHA（`5ca16b73…`）逐字节一致；zip 包成员 5 个（符合铁律）；ELF `7f454c46`/e_machine `62`；原始字节 `1.50.25`=2 / `1.50.24`=0。**负向断言（解码文本 + 原始字节均 0）**：`Compose 终端 - `、`一键执行常用 compose 命令`、`root@compose:~# 等待命令...`、`命令已发送（日志/状态输出请在对应页面查看）`、`TerminalModal`、`terminalStack`。**正向锚点**：`focusContainerTab`=4、`Unpause`=1、`双击图标打开编辑堆栈`=1、`与容器管理共用同一套标签库`=1、`在此输入 compose 内容`=1（前两版功能均保留）。
 - 已知限制：主表格显示的是**堆栈级聚合状态**（暂停容器后可能显示「已停止」），子表显示**容器级状态**（「已暂停」），两者口径不同属正常。下一步：无。
-- 快照：commit 待定 + tag v1.50.25 推 Gitea main+tag 双 ref 一致；GitHub 按约定未推。
+- 快照：commit 1a16e06 + tag v1.50.25 推 Gitea；`ls-remote` 核对 main/tag 双 ref 均指向 `1a16e0632a17feeec31d4992a6de75a33901f3dc`（随后 CHANGELOG 补 SHA 再推一次 main，故 main 会前进一提交）；GitHub 按约定未推。
 
 ## v1.50.24 — 2026-11-05（**已构建 · 已推 Gitea**）
 
