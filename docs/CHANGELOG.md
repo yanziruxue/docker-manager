@@ -28,7 +28,7 @@
   - 说明：编辑堆栈弹窗本身不渲染状态徽章，它读取的是同一份 `stack.status`；修数据源后，容器子表、堆栈管理页状态列（含编辑弹窗背后的列表）均显示「已暂停」。仪表盘 `Dashboard.tsx` 的堆栈统计/筛选未加 paused 分类（卡片徽章本身已能显示「已暂停」），本次不动。
 - 核验：tsc src 0；tsc server 0；46 组门禁 0 FAIL；SEA 四步 + 三处二进制 SHA（`15636138…`）逐字节一致；zip 包成员 5 个；ELF `7f454c46`/e_machine `62`；原始字节 `1.50.26`=3 / `1.50.25`=0（旧包二进制 `1.50.25`=2 作对照）。**新旧包前端解码对比**：`Console` old=1→new=0、`控制台` old=1→new=0、`Logs` old=2→new=1（主表「查看日志」保留）、`已暂停` old=8→new=9（新增筛选项）、`paused` old=35→new=41；旧功能锚点 `双击图标打开编辑堆栈`=1、`与容器管理共用同一套标签库`=1、`在此输入 compose 内容`=1 均保留。**源码级 13 项断言全 PASS**（含 `L("Console","控制台")`=0、`  Terminal,`=0、`c.State === "paused"`=2、`export type StackStatus = ... "paused"`=1）。
 - 已知限制：无。下一步：无。
-- 快照：commit 待定 + tag v1.50.26 推 Gitea main+tag 双 ref 一致；GitHub 按约定未推。
+- 快照：commit 155acd3 + tag v1.50.26 推 Gitea；`ls-remote` 核对 main/tag 双 ref 均指向 `155acd34789ce24b959e23146504c7de3ba3bad8`（随后 CHANGELOG 补 SHA 再推一次 main，故 main 会前进一提交）；GitHub 按约定未推。
 
 ## v1.50.25 — 2026-11-05（**已构建 · 已推 Gitea**）
 
