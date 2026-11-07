@@ -29,7 +29,7 @@
 - **验证**：`vite build` 通过且 `dist/login-banner.svg` 在嵌入清单（前端文件 4→5）；双 `tsc --noEmit` 0 错误；`npm run test:gates` 全绿；静态托管 dist 用 Edge 无头截图目检登录页（左栏 banner 卡片渲染正常、配色统一、无遮挡溢出）；SEA 四步 + 三处二进制 SHA-256 逐字节一致；ELF / 嵌入版本串核验通过。
 - **未完成 / 已知限制**：小屏（<lg）左栏整体隐藏、不显示 banner（沿既有响应式策略）。
 - **下一步**：无。
-- 快照：commit `（见 git log）` + tag `v1.50.35` 推 Gitea；GitHub 未推。
+- 快照：commit `76a8312` + tag `v1.50.35` 推 Gitea；GitHub 未推。
 
 ---
 
