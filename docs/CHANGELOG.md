@@ -16,6 +16,23 @@
 
 ---
 
+## v1.50.30 — 2026-11-07（**已构建 · 待推 Gitea**）
+
+- **需求**：用户看到堆栈日志每行最左边有「方框问号」，要求日志改成「原生终端窗口那种显示」。确认范围＝**仅堆栈日志弹窗**（容器详情「日志」页保留现有三列结构化视图），工具栏保留「容器 / 行数」下拉，不加级别筛选、不加搜索/字号/全屏；容器控制台 `XTermTerminal` 不动。
+- **根因**：Docker Engine `/containers/:id/logs` 对非 TTY 容器返回 multiplexed stream，每条日志帧前有 8 字节头 `[type(1)=1 stdout / 2 stderr | 0,0,0 | size(4,大端)]`。旧实现 `server/docker.ts` 把整个 Buffer 直接 `.toString("utf-8")` 再 `split("\n")`（注释已承认有 header 却未处理）→ 帧头控制字节 `0x01/0x00` 与非法 UTF-8 字节（如 `0x8A`）变成 `U+0001 / U+0000 / U+FFFD`，被字体画成「□?」；`src/transforms.ts` 那个 `charCodeAt(0)<32 → substring(8)` 按**字符**砍 8 位同样不可靠（UTF-8 解码后帧头不一定是 8 个字符），容器详情页偶尔会砍掉时间戳前几位。
+- **改动**（6 个源码/脚本文件 + 版本与文档）：
+  - 新增 `server/log-demux.ts`：`demuxDockerLogStream(buf)` 在**字节层**循环读 8 字节头 → `readUInt32BE(4)` 取长度 → 帧体单独 `toString("utf-8")` 拼接；一帧都解析不成功时判定为 TTY raw stream 原样解码（避免误砍正文前 8 字节）；尾部不足一帧的残字节丢弃。
+  - `server/docker.ts:getContainerLogs`：callback 的 string / Buffer / Readable 三条分支统一收敛为 `Buffer`，交给 demux 后再 `split("\n")`；返回类型 `string[]` 与 `/api/engines/:id/containers/:cid/logs` 契约不变。
+  - 新增 `src/components/LogTerminal.tsx`：复用项目已有 `@xterm/xterm` + `@xterm/addon-fit`（**零新增依赖**），`disableStdin: true` 只读实例，同款深色主题、`scrollback: 10000`、`FitAddon` + `ResizeObserver` 自适应列宽；ANSI 颜色原生解析、长行按终端列宽换行、选中即复制、无 WebSocket / 无 shell；每次 tail 快照 `term.reset()` → 逐行 `writeln` → `scrollToBottom()`。
+  - `src/pages/Stacks.tsx:StackLogModal`：内容区 `<pre className="…whitespace-pre-wrap break-all">{logs.join("\n")}</pre>` 换成 `<LogTerminal lines={logs} />`，容器 `overflow-auto` → `overflow-hidden`（滚动交给终端）；容器 / 行数下拉、加载态、三档空态文案（含 v1.50.29 的「该容器暂无日志输出」）全部保留。
+  - **未动**：`src/pages/Containers.tsx`（容器详情日志页）、`src/transforms.ts`（demux 后 `charCodeAt(0)<32` 不再触发，兜底自然失效）、`src/components/XTermTerminal.tsx`（交互式控制台链路）。
+  - `package.json`：1.50.29 → **1.50.30**；新增 `test:logdemux` 并接入 `test:gates`（16 → 17 组）。
+- **新增门禁** `scripts/check-log-demux.mjs`：esbuild 编译真实 `server/log-demux.ts`，用**真实 Buffer 帧**跑 24 项断言 —— stdout/stderr 多帧拼接、时间戳完整、无 C0 控制字符 / 无 `U+FFFD`、帧头含 `0x8A` 不产生乱码、TTY raw stream 不误砍、中文 / emoji 无损、半帧丢弃、源码接线（server 不再直出 `toString`、LogTerminal 只读且不连 WS、弹窗不再用 `<pre>`）。★ **负向自检已实测**：把 demux 的 `return parts.join("")` 注入为 `return buf.toString("utf-8")` ⇒ `PASS=15 FAIL=9 / exit 1`；还原后 `PASS=24 FAIL=0`。
+- 核验：双 `tsc --noEmit` 0；`npm run test:gates` **17 组全绿 0 FAIL**（各脚本汇总 PASS=35/40/30/41/75/18/15/34/80/47/44/34/39/76/20/46 + 新门禁 24）；SEA 四步 + 三处二进制 SHA-256 逐字节一致 `8371e38e89b497898f4bb7506c501a09d9797f1a868037f414bc8c4e82e5aef7`（postject 产物 = zip 成员 = deb 成员）；zip 成员 5 个；ELF `7f454c46` / e_machine `62`；两处真实版本常量 `CURRENT_VERSION` / `currentAppVersion()` 注入值 `1.50.30`（bundle 原始字节 2 次），旧串 `1.50.29` 原始字节 0 次。
+  - **新旧包前端解码对比**：新包解码出 5 段 base64，其中 1,153,767 B 与本次 `dist/assets/index-ejfpmz-M.js` **逐字节一致**（SHA `e108d34bbd1a4eecfa08826e7414602edc42e599666b130b893642850eb5e11e`）；独有锚点 `disableStdin:!0` 0→1、`scrollToBottom` 6→7；旧功能锚点 `该容器暂无日志输出` 1→1 保留；服务端段 `demuxDockerLogStream` = 2。
+- 已知限制：① 仍是一次性 `tail` 快照，不是 `docker logs -f` 流式跟随（切换容器 / 行数会重新拉取）；② 容器详情页仍走 `transformLogs` 三列结构化显示（按用户选择保留）；③ 容器详情「基本信息」页签仍无 ExitCode / RestartCount / OOMKilled / FinishedAt。下一步：如需流式跟随可复用现有 WS/SSE 通道；如需容器详情页也终端化，直接复用 `LogTerminal`。
+- 快照：commit 待补 + tag v1.50.30 推 Gitea，发布后补记；GitHub 按约定未推。
+
 ## v1.50.29 — 2026-11-07（**已构建 · 已推 Gitea**）
 
 - **修复：堆栈管理 → 右键「查看日志」弹窗内容为空**（用户反馈「堆栈日志是空的」，接续上一轮「容器崩溃重复重启怎么查原因」的排查）。**根因是 `StackLogModal` 自身两个缺陷叠加，不是容器没有日志**：

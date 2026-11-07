@@ -14,6 +14,7 @@ import { notify, markManualContainerOp, markManualStackOp } from "./notify.js";
 import { resolveBackupDir, backupFilePath, runTar, copyTree, BACKUP_NAME_PREFIX, tsCompact } from "./backup.js";
 import { zipDirectory, extractZip } from "./zip.js";
 import { collectGpuStats, type GpuStat } from "./telemetry.js";
+import { demuxDockerLogStream } from "./log-demux.js";
 
 /**
  * 拼接路径：SSH 引擎用 POSIX 路径（远程 Linux），本地引擎用系统路径
@@ -3119,7 +3120,8 @@ export async function getContainerLogs(engine: DockerEngine, containerId: string
   const container = docker.getContainer(containerId);
 
   // dockerode logs 返回的是 stream，用 callback 方式获取
-  const raw: string = await new Promise((resolve, reject) => {
+  // v1.50.30：统一收集为 Buffer，交给 demuxDockerLogStream 在字节层剥离 8 字节帧头
+  const raw: Buffer = await new Promise<Buffer>((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error("获取日志超时")), 10000);
 
     container.logs({
@@ -3136,7 +3138,7 @@ export async function getContainerLogs(engine: DockerEngine, containerId: string
 
       // stream 可能是 Readable stream 或直接是字符串/Buffer
       if (typeof stream === "string" || Buffer.isBuffer(stream)) {
-        resolve(stream.toString("utf-8"));
+        resolve(Buffer.isBuffer(stream) ? stream : Buffer.from(stream, "utf-8"));
         return;
       }
 
@@ -3147,20 +3149,20 @@ export async function getContainerLogs(engine: DockerEngine, containerId: string
           if (Buffer.isBuffer(chunk)) chunks.push(chunk);
           else if (typeof chunk === "string") chunks.push(Buffer.from(chunk));
         });
-        stream.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
+        stream.on("end", () => resolve(Buffer.concat(chunks)));
         stream.on("error", (e: any) => reject(e));
         // 安全超时
-        setTimeout(() => resolve(Buffer.concat(chunks).toString("utf-8")), 8000);
+        setTimeout(() => resolve(Buffer.concat(chunks)), 8000);
       } else if (stream) {
-        resolve(String(stream));
+        resolve(Buffer.from(String(stream), "utf-8"));
       } else {
-        resolve("");
+        resolve(Buffer.alloc(0));
       }
     });
   });
 
-  // Docker 日志格式：每行前面可能有 8 字节 header
-  return raw.split("\n").filter((l) => l.trim());
+  // 非 TTY 容器每条日志帧带 8 字节 multiplex header；TTY 容器由 demux 自动识别为 raw stream
+  return demuxDockerLogStream(raw).split("\n").filter((l) => l.trim());
 }
 
 /**

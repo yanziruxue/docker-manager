@@ -1,6 +1,6 @@
 {
   "name": "docker-stack-manager",
-  "version": "1.50.29",
+  "version": "1.50.30",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -23,7 +23,8 @@
     "test:imagerepo": "node scripts/check-images-repo-display.mjs",
     "test:notifclear": "node scripts/check-notifications-clear.mjs",
     "test:cpuload": "node scripts/check-cpu-load-split.mjs",
-    "test:gates": "npm run lint:hooks && npm run lint:notify && npm run test:secrets && npm run test:logs && npm run test:auth && npm run test:restart && npm run test:thermal && npm run test:install && npm run test:service && npm run test:backup && npm run test:logpack && npm run test:netiface && npm run test:diskselect && npm run test:imagerepo && npm run test:notifclear && npm run test:cpuload",
+    "test:logdemux": "node scripts/check-log-demux.mjs",
+    "test:gates": "npm run lint:hooks && npm run lint:notify && npm run test:secrets && npm run test:logs && npm run test:auth && npm run test:restart && npm run test:thermal && npm run test:install && npm run test:service && npm run test:backup && npm run test:logpack && npm run test:netiface && npm run test:diskselect && npm run test:imagerepo && npm run test:notifclear && npm run test:cpuload && npm run test:logdemux",
     "build:frontend": "node scripts/check-hooks.mjs && vite build",
     "build:server": "tsc -p server/tsconfig.json",
     "build:binary": "vite build && node scripts/build-binary.mjs",

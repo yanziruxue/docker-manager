@@ -73,6 +73,7 @@ import { TagGroup, TagSelect } from "../components/TagPicker";
 import { LoadingState, ErrorState } from "../components/DataState";
 import { YamlEditor } from "../components/YamlEditor";
 import { EnvEditor } from "../components/EnvEditor";
+import { LogTerminal } from "../components/LogTerminal";
 import { StackContainersModal } from "../components/StackContainersModal";
 
 /* ---------------- 堆栈图标：SVG 代码支持 ----------------
@@ -2586,7 +2587,7 @@ function StackLogModal({ stack, onClose, engineId }: { stack: Stack; onClose: ()
           <option value={1000}>1000</option>
         </select>
       </div>
-      <div className="bg-slate-900 rounded-lg p-4 h-[500px] overflow-auto">
+      <div className="bg-slate-900 rounded-lg p-4 h-[500px] overflow-hidden">
         {loading ? (
           <div className="text-slate-400 text-sm">加载中...</div>
         ) : containers.length === 0 ? (
@@ -2594,7 +2595,7 @@ function StackLogModal({ stack, onClose, engineId }: { stack: Stack; onClose: ()
         ) : logs.length === 0 ? (
           <div className="text-slate-400 text-sm">该容器暂无日志输出：可能刚重建、日志被清空，或应用未向 stdout/stderr 打印内容</div>
         ) : (
-          <pre className="text-xs text-slate-200 font-mono whitespace-pre-wrap break-all">{logs.join("\n")}</pre>
+          <LogTerminal lines={logs} />
         )}
       </div>
     </Modal>
