@@ -2535,19 +2535,29 @@ function CreateStackModal({ onClose, engineId, onRefresh, onCreated }: { onClose
 function StackLogModal({ stack, onClose, engineId }: { stack: Stack; onClose: () => void; engineId?: string }) {
   const [logs, setLogs] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedContainer, setSelectedContainer] = useState<string>("");
   const [tail, setTail] = useState(200);
+  // v1.50.29：初值直接取第一个容器的真实标识，避免首次空请求（原实现会连发两次）
+  const [selectedContainer, setSelectedContainer] = useState<string>(
+    () => stack.containers[0]?.containerName || stack.containers[0]?.containerId || stack.containers[0]?.name || ""
+  );
 
-  const runningContainers = stack.containers.filter((c) => c.status === "running");
+  // v1.50.29：列出堆栈内全部容器（此前只列 running，崩溃重启中的容器选不到 → 日志永远空）；
+  // value 优先真实容器名/短 id，避免 compose container_name 自定义时按服务名查 404
+  const containers = stack.containers.map((c) => ({
+    value: c.containerName || c.containerId || c.name,
+    label: c.containerName && c.containerName !== c.name ? `${c.name} (${c.containerName})` : c.name,
+    status: c.status,
+  }));
+  const statusText: Record<string, string> = {
+    running: "运行中", stopped: "已停止", paused: "已暂停", restarting: "重启中", updating: "更新中",
+  };
 
   useEffect(() => {
-    if (!engineId || runningContainers.length === 0) { setLoading(false); return; }
-    const target = selectedContainer || runningContainers[0].name;
-    if (!selectedContainer) setSelectedContainer(target);
+    if (!engineId || !selectedContainer) { setLogs([]); setLoading(false); return; }
     setLoading(true);
-    fetchContainerLogs(engineId, target, tail)
+    fetchContainerLogs(engineId, selectedContainer, tail)
       .then((lines) => setLogs(lines))
-      .catch(() => setLogs(["获取日志失败"]))
+      .catch((e: any) => setLogs([`获取日志失败：${e?.message || "未知错误"}`]))
       .finally(() => setLoading(false));
   }, [engineId, selectedContainer, tail, stack.name]);
 
@@ -2560,8 +2570,8 @@ function StackLogModal({ stack, onClose, engineId }: { stack: Stack; onClose: ()
           onChange={(e) => setSelectedContainer(e.target.value)}
           className="text-sm border border-slate-200 rounded-lg px-2 py-1 bg-white"
         >
-          {runningContainers.map((c) => (
-            <option key={c.name} value={c.name}>{c.name}</option>
+          {containers.map((c) => (
+            <option key={c.value} value={c.value}>{c.label} · {statusText[c.status] || c.status}</option>
           ))}
         </select>
         <label className="text-xs text-slate-500">行数</label>
@@ -2579,8 +2589,10 @@ function StackLogModal({ stack, onClose, engineId }: { stack: Stack; onClose: ()
       <div className="bg-slate-900 rounded-lg p-4 h-[500px] overflow-auto">
         {loading ? (
           <div className="text-slate-400 text-sm">加载中...</div>
+        ) : containers.length === 0 ? (
+          <div className="text-slate-400 text-sm">该堆栈暂无容器（可能已 down 或尚未创建）</div>
         ) : logs.length === 0 ? (
-          <div className="text-slate-400 text-sm">暂无日志</div>
+          <div className="text-slate-400 text-sm">该容器暂无日志输出：可能刚重建、日志被清空，或应用未向 stdout/stderr 打印内容</div>
         ) : (
           <pre className="text-xs text-slate-200 font-mono whitespace-pre-wrap break-all">{logs.join("\n")}</pre>
         )}

@@ -16,6 +16,24 @@
 
 ---
 
+## v1.50.29 — 2026-11-07（**已构建 · 已推 Gitea**）
+
+- **修复：堆栈管理 → 右键「查看日志」弹窗内容为空**（用户反馈「堆栈日志是空的」，接续上一轮「容器崩溃重复重启怎么查原因」的排查）。**根因是 `StackLogModal` 自身两个缺陷叠加，不是容器没有日志**：
+  - `src/pages/Stacks.tsx:2541/2544`：下拉数据源 `runningContainers = stack.containers.filter(c => c.status === "running")`，且 `length === 0` 时直接 `setLoading(false); return`。崩溃重启中的容器状态是 `restarting`/`stopped`，**全被过滤** → 下拉无选项、`logs` 保持 `[]` → 显示「暂无日志」。
+  - `src/pages/Stacks.tsx:2545`：即便有 running 容器，传给 `fetchContainerLogs` 的是**服务名**（如 `web`），而服务端 `getContainerLogs` 直接 `docker.getContainer(cid)`；真实容器名通常是 `<project>-<service>-1` 或 compose 自定义 `container_name`，按服务名查会 404 → 「获取日志失败」。
+  - 而 `StackContainer` 类型（`src/types.ts:294`）本就有 `containerName`（真实名）与 `containerId`（12 位短 id），`server/docker.ts` 的 `getStacks` 一直在带出 —— 只是该弹窗没用。
+- **改动**（全部集中在 `src/pages/Stacks.tsx` 的 `StackLogModal`）：
+  - 下拉改为列 **全部** `stack.containers`（含 `restarting` / `stopped` / `paused`），option 文案 `服务名 (真实容器名) · 状态`；`docker logs` 对 exited/restarting 容器同样可用，故能直接查崩溃容器的上一轮日志。
+  - `value` 取 `containerName || containerId || name`（优先真实容器名、回退短 id、最后回退服务名），消除 404。
+  - `selectedContainer` 改用惰性初值直接取第一个容器的真实标识，去掉原实现「首次空值 → effect 内 set → 触发第二次请求」的连发两次问题。
+  - 三档空态文案区分：`该堆栈暂无容器（可能已 down 或尚未创建）` / `该容器暂无日志输出：可能刚重建、日志被清空，或应用未向 stdout/stderr 打印内容` / 请求失败时显示 `获取日志失败：<message>`（原来只有无信息的固定文案）。
+- 核验：tsc src 0；tsc server 0；46 组门禁 0 FAIL；SEA 四步 + 三处二进制 SHA（`cb6c3425…`）逐字节一致（postject 产物 = zip 成员 = deb 成员）；zip 包成员 5 个；ELF `7f454c46`/e_machine `62`。
+  - **版本串判据**：两处真实版本常量 `CURRENT_VERSION` / `currentAppVersion()` 均为 `"1.50.29"`；原始字节中 `1.50.28` 残留 1 次，定位为 v1.50.28 服务端注释 `// v1.50.26：保留 paused 状态；v1.50.28：透传 restarting…`，全部位于注释行。
+  - **新旧包前端解码对比**：`该容器暂无日志输出` 0→1、`该堆栈暂无容器` 1→2（另一处来自 `StackContainersModal.tsx:126` 的容器子表空态，非重复冲突）、`重启中` 5→6（新增状态映射）；`暂无日志` 3→3（删 1 处旧文案，但新文案「该容器暂无**日志输出**」含该子串，故总数持平）；旧功能锚点 `与容器管理共用同一套标签库`=1、`双击图标打开编辑堆栈`=1、`右键打开操作菜单`=3、`在此输入 compose 内容`=1 全保留。
+  - 源码级 **11 项断言全 PASS**（含 `const runningContainers = stack.containers.filter`=0、`runningContainers.map`=0、旧「暂无日志」空态=0、`c.containerName || c.containerId || c.name`=1）。
+- 已知限制：① `server/docker.ts:3162` 注释承认日志有 8 字节 multiplex header 但未 demux（只影响行首乱码，不影响「空」），本次未动；② 容器详情「基本信息」页签仍无 ExitCode / RestartCount / OOMKilled / 上次退出时间（`server/docker.ts:500` 已并行 inspect，补字段成本低），本次未动。下一步：如需要再补这两项。
+- 快照：commit 待定 + tag v1.50.29 推 Gitea main+tag 双 ref 一致；GitHub 按约定未推。
+
 ## v1.50.28 — 2026-11-07（**已构建 · 已推 Gitea**）
 
 - **修复：堆栈管理页容器子表状态列不显示「重启中」**（用户反馈）。根因与 v1.50.26 的 `paused` 完全同类，且多一层「执行中」覆盖：
