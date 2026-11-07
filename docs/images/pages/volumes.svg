@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 760" font-family="'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif">
+  <rect width="1200" height="760" fill="#0B1220"/>
+  <rect width="200" height="760" fill="#0E1830"/>
+  <rect x="24" y="22" width="26" height="26" rx="7" fill="#2563EB"/>
+  <text x="60" y="40" fill="#E2E8F0" font-size="15" font-weight="600">Docker 管理</text>
+  <g font-size="13">
+    <text x="34" y="88" fill="#7C8DB0">◧ 仪表盘</text><text x="34" y="130" fill="#7C8DB0">▤ 容器管理</text><text x="34" y="170" fill="#7C8DB0">⚗ 堆栈管理</text><text x="34" y="210" fill="#7C8DB0">▣ 镜像管理</text>
+    <rect x="12" y="226" width="176" height="34" rx="8" fill="#1D4ED8"/><text x="34" y="248" fill="#fff">▤ 数据卷管理</text>
+    <text x="34" y="290" fill="#7C8DB0">◈ 网络管理</text><text x="34" y="330" fill="#7C8DB0">◉ 通知中心</text><text x="34" y="370" fill="#7C8DB0">⚙ 设置中心</text>
+  </g>
+  <text x="232" y="46" fill="#E2E8F0" font-size="19" font-weight="700">数据卷管理 <tspan fill="#64748B" font-size="13">18 个卷</tspan></text>
+  <rect x="1074" y="24" width="98" height="32" rx="9" fill="#1D4ED8"/><text x="1123" y="45" fill="#fff" font-size="13" text-anchor="middle">＋ 创建卷</text>
+  <line x1="200" y1="64" x2="1200" y2="64" stroke="#1E2A4A"/>
+  <rect x="228" y="86" width="380" height="34" rx="9" fill="#111C33" stroke="#1E2A4A"/>
+  <text x="268" y="108" fill="#64748B" font-size="12">搜索卷名、驱动或容器…</text>
+  <rect x="620" y="86" width="130" height="34" rx="9" fill="#111C33" stroke="#1E2A4A"/>
+  <text x="685" y="108" fill="#94A3B8" font-size="12" text-anchor="middle">全部未关联卷</text>
+  <rect x="1020" y="86" width="152" height="34" rx="9" fill="#111C33" stroke="#EF4444"/>
+  <text x="1096" y="108" fill="#F87171" font-size="12" text-anchor="middle">批量删除 (2)</text>
+  <g font-size="12" fill="#64748B">
+    <text x="244" y="156">☐</text><text x="286" y="156">卷名称</text><text x="560" y="156">驱动</text><text x="660" y="156">挂载点</text><text x="900" y="156">关联容器</text><text x="1040" y="156">创建时间</text><text x="1120" y="156">操作</text>
+  </g>
+  <line x1="228" y1="168" x2="1172" y2="168" stroke="#1E2A4A"/>
+  <g font-size="12">
+    <g><text x="244" y="200" fill="#3B82F6">☑</text><text x="286" y="200" fill="#E2E8F0">media_config</text><text x="560" y="200" fill="#94A3B8">local</text><text x="660" y="200" fill="#94A3B8">/var/lib/docker/volumes/…</text><text x="900" y="200" fill="#7DD3FC">jellyfin</text><text x="1040" y="200" fill="#94A3B8">30 天前</text><text x="1120" y="200" fill="#3B82F6">快照 ⤓</text></g>
+    <line x1="228" y1="218" x2="1172" y2="218" stroke="#16203B"/>
+    <g><text x="244" y="250" fill="#3B82F6">☑</text><text x="286" y="250" fill="#E2E8F0">pgdata</text><text x="560" y="250" fill="#94A3B8">local</text><text x="660" y="250" fill="#94A3B8">/var/lib/docker/volumes/…</text><text x="900" y="250" fill="#7DD3FC">postgres</text><text x="1040" y="250" fill="#94A3B8">45 天前</text><text x="1120" y="250" fill="#3B82F6">快照 ⤓</text></g>
+    <line x1="228" y1="268" x2="1172" y2="268" stroke="#16203B"/>
+    <g><text x="244" y="300" fill="#64748B">☐</text><text x="286" y="300" fill="#E2E8F0">cache_tmp</text><text x="560" y="300" fill="#94A3B8">local</text><text x="660" y="300" fill="#94A3B8">/var/lib/docker/volumes/…</text><text x="900" y="300" fill="#F59E0B">未关联</text><text x="1040" y="300" fill="#94A3B8">2 天前</text><text x="1120" y="300" fill="#F87171">删除</text></g>
+  </g>
+  <g>
+    <rect x="228" y="360" width="944" height="368" rx="12" fill="#0E1830" stroke="#1E2A4A"/>
+    <text x="252" y="392" fill="#94A3B8" font-size="12">▼ 页面能力</text>
+    <g font-size="13" fill="#CBD5E1">
+      <text x="252" y="426">· 列表交叉展示：每个卷显示哪些容器正在挂载它</text>
+      <text x="252" y="456">· 「全部未关联卷」一键筛出孤儿卷，配合批量删除回收空间</text>
+      <text x="252" y="486">· 导出快照：把卷内容打包下载备份（tar）</text>
+      <text x="252" y="516">· 创建卷时可指定驱动与标签</text>
+    </g>
+    <!-- 快照示意 -->
+    <rect x="252" y="548" width="896" height="150" rx="10" fill="#111C33" stroke="#1E2A4A"/>
+    <text x="272" y="578" fill="#E2E8F0" font-size="13" font-weight="600">导出快照示例</text>
+    <g font-size="11" fill="#64748B">
+      <text x="272" y="606">pgdata_2026-11-07.tar.gz</text><text x="272" y="628" fill="#94A3B8">压缩导出 · 128 MB · 含卷内全部文件</text>
+    </g>
+    <rect x="272" y="646" width="560" height="10" rx="5" fill="#1E2A4A"/><rect x="272" y="646" width="410" height="10" rx="5" fill="#22C55E"/>
+    <text x="850" y="656" fill="#4ADE80" font-size="12">74%</text>
+  </g>
+</svg>

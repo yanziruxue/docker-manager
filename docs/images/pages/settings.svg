@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 760" font-family="'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif">
+  <rect width="1200" height="760" fill="#0B1220"/>
+  <rect width="200" height="760" fill="#0E1830"/>
+  <rect x="24" y="22" width="26" height="26" rx="7" fill="#2563EB"/>
+  <text x="60" y="40" fill="#E2E8F0" font-size="15" font-weight="600">Docker 管理</text>
+  <g font-size="13">
+    <text x="34" y="88" fill="#7C8DB0">◧ 仪表盘</text><text x="34" y="130" fill="#7C8DB0">▤ 容器管理</text><text x="34" y="170" fill="#7C8DB0">⚗ 堆栈管理</text><text x="34" y="210" fill="#7C8DB0">▣ 镜像管理</text><text x="34" y="250" fill="#7C8DB0">▤ 数据卷管理</text><text x="34" y="290" fill="#7C8DB0">◈ 网络管理</text><text x="34" y="330" fill="#7C8DB0">◉ 通知中心</text>
+    <rect x="12" y="346" width="176" height="34" rx="8" fill="#1D4ED8"/><text x="34" y="368" fill="#fff">⚙ 设置中心</text>
+  </g>
+  <text x="232" y="46" fill="#E2E8F0" font-size="19" font-weight="700">设置中心</text>
+  <line x1="200" y1="64" x2="1200" y2="64" stroke="#1E2A4A"/>
+  <!-- 左侧 12 分区 -->
+  <g font-size="13">
+    <text x="252" y="104" fill="#7C8DB0">用户</text>
+    <text x="252" y="140" fill="#7C8DB0">列显隐</text>
+    <rect x="236" y="156" width="200" height="34" rx="8" fill="#1D4ED8"/><text x="252" y="178" fill="#fff">引擎配置</text>
+    <text x="252" y="216" fill="#7C8DB0">标签管理</text>
+    <text x="252" y="252" fill="#7C8DB0">编辑堆栈</text>
+    <text x="252" y="288" fill="#7C8DB0">页面设置</text>
+    <text x="252" y="324" fill="#7C8DB0">镜像更新</text>
+    <text x="252" y="360" fill="#7C8DB0">备份管理</text>
+    <text x="252" y="396" fill="#7C8DB0">通知</text>
+    <text x="252" y="432" fill="#7C8DB0">日志</text>
+    <text x="252" y="468" fill="#7C8DB0">硬件信息</text>
+    <text x="252" y="504" fill="#7C8DB0">系统更新 ●</text>
+  </g>
+  <!-- 右侧：引擎配置面板 -->
+  <g>
+    <rect x="470" y="88" width="702" height="290" rx="12" fill="#111C33" stroke="#1E2A4A"/>
+    <text x="494" y="118" fill="#E2E8F0" font-size="14" font-weight="600">引擎配置 · 多主机接入</text>
+    <g font-size="11">
+      <rect x="494" y="136" width="646" height="56" rx="9" fill="#0E1830" stroke="#22C55E"/>
+      <circle cx="518" cy="164" r="6" fill="#22C55E"/><text x="536" y="160" fill="#E2E8F0">NAS-飞牛（本机 Socket）</text><text x="536" y="178" fill="#64748B">unix:///var/run/docker.sock</text>
+      <text x="1118" y="168" fill="#22C55E" text-anchor="end">当前</text>
+      <rect x="494" y="200" width="646" height="56" rx="9" fill="#0E1830" stroke="#1E2A4A"/>
+      <circle cx="518" cy="228" r="6" fill="#F59E0B"/><text x="536" y="224" fill="#E2E8F0">ECS 备机（远程 SSH）</text><text x="536" y="242" fill="#64748B">ssh root@60.x.x.x:50224</text>
+      <rect x="494" y="264" width="646" height="56" rx="9" fill="#0E1830" stroke="#1E2A4A"/>
+      <circle cx="518" cy="292" r="6" fill="#F87171"/><text x="536" y="288" fill="#E2E8F0">办公机（远程 TCP + TLS）</text><text x="536" y="306" fill="#64748B">tcp://192.168.1.8:2376</text>
+    </g>
+    <rect x="494" y="336" width="112" height="32" rx="8" fill="#1D4ED8"/><text x="550" y="357" fill="#fff" font-size="12" text-anchor="middle">＋ 添加引擎</text>
+  </g>
+  <g>
+    <rect x="470" y="394" width="702" height="160" rx="12" fill="#111C33" stroke="#1E2A4A"/>
+    <text x="494" y="424" fill="#E2E8F0" font-size="14" font-weight="600">Docker 全局配置 · 镜像加速源（直接读写 daemon.json）</text>
+    <rect x="494" y="440" width="646" height="66" rx="9" fill="#0B1220" stroke="#1E2A4A"/>
+    <g font-family="Consolas,monospace" font-size="11" fill="#CBD5E1">
+      <text x="512" y="466">{ "registry-mirrors": [ "https://docker.xuanyuan.me",</text>
+      <text x="512" y="488">  "https://fnnas" ], "insecure-registries": [...] }</text>
+    </g>
+    <rect x="494" y="516" width="96" height="30" rx="8" fill="#1D4ED8"/><text x="542" y="536" fill="#fff" font-size="12" text-anchor="middle">APPLY</text>
+    <text x="606" y="536" fill="#64748B" font-size="11">内容变化后询问是否重启 Docker；保留其余配置项</text>
+  </g>
+  <g>
+    <rect x="470" y="570" width="342" height="158" rx="12" fill="#111C33" stroke="#1E2A4A"/>
+    <text x="494" y="600" fill="#E2E8F0" font-size="14" font-weight="600">备份管理</text>
+    <g font-size="11" fill="#94A3B8">
+      <text x="494" y="626">· 三级备份策略：周 / 月 / 年</text>
+      <text x="494" y="648">· 按档位保留并自动清理过期备份</text>
+      <text x="494" y="670">· 下载备份 / 上传备份并恢复</text>
+      <text x="494" y="692">· 当天文件永不打包、先验证再清理原始</text>
+    </g>
+  </g>
+  <g>
+    <rect x="830" y="570" width="342" height="158" rx="12" fill="#111C33" stroke="#2563EB"/>
+    <text x="854" y="600" fill="#E2E8F0" font-size="14" font-weight="600">系统更新（OTA）<tspan fill="#22C55E" font-size="11">　● 可升级 v1.50.35</tspan></text>
+    <rect x="854" y="616" width="290" height="10" rx="5" fill="#1E2A4A"/><rect x="854" y="616" width="180" height="10" rx="5" fill="#1D4ED8"/>
+    <text x="854" y="648" fill="#94A3B8" font-size="11">下载 62%（直连 / gh-proxy 镜像自动切换）</text>
+    <text x="854" y="674" fill="#94A3B8" font-size="11">下载 → 解压 → 替换二进制 → 完成，仅替换</text>
+    <text x="854" y="692" fill="#94A3B8" font-size="11">二进制本体，data/ 与 config/ 不受影响</text>
+  </g>
+</svg>

@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Docker Manager Yanzi · 界面导览</title>
+<style>
+  :root{
+    --bg:#0B1220; --panel:#111C33; --line:#1E2A4A; --txt:#E2E8F0;
+    --muted:#64748B; --accent:#2563EB; --accent2:#3B82F6;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--txt);font-family:'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif}
+  header{padding:48px 24px 8px;text-align:center}
+  header h1{font-size:30px;font-weight:700;letter-spacing:.5px}
+  header h1 .b{color:var(--accent2)}
+  header p{margin-top:10px;color:var(--muted);font-size:14px}
+  .badges{display:flex;gap:10px;justify-content:center;margin-top:18px;flex-wrap:wrap}
+  .badges span{font-size:12px;color:#94A3B8;border:1px solid var(--line);background:var(--panel);border-radius:999px;padding:6px 14px}
+  nav{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin:28px auto 8px;max-width:1100px;padding:0 16px;position:sticky;top:0;z-index:9;background:linear-gradient(var(--bg) 82%,transparent)}
+  nav a{font-size:13px;color:#94A3B8;text-decoration:none;border:1px solid var(--line);border-radius:999px;padding:7px 16px;background:var(--panel);transition:.15s}
+  nav a:hover{color:#fff;border-color:var(--accent);background:#16255c}
+  main{max-width:1200px;margin:0 auto;padding:12px 20px 72px}
+  section{margin-top:44px}
+  section h2{font-size:20px;font-weight:700;display:flex;align-items:center;gap:10px}
+  section h2 .tag{font-size:11px;color:#7DD3FC;background:#132743;border-radius:999px;padding:3px 10px;font-weight:400}
+  section>p{color:var(--muted);font-size:13px;margin:8px 0 14px;max-width:860px;line-height:1.8}
+  .shot{border:1px solid var(--line);border-radius:16px;overflow:hidden;background:var(--panel);box-shadow:0 12px 40px rgba(0,0,0,.35)}
+  .shot img{display:block;width:100%;height:auto}
+  .shot figcaption{padding:12px 18px;color:#94A3B8;font-size:12px;border-top:1px solid var(--line)}
+  footer{text-align:center;color:#475569;font-size:12px;padding:36px 0 44px;line-height:2}
+  footer a{color:var(--accent2);text-decoration:none}
+</style>
+</head>
+<body>
+<header>
+  <h1>🐳 Docker Manager <span class="b">Yanzi</span> · 界面导览</h1>
+  <p>面向自建 NAS / 服务器的一体化 Docker 可视化管理面板 — 全部界面一页看完</p>
+  <div class="badges">
+    <span>单文件二进制 · Linux x86_64</span><span>多引擎接入（Socket / TCP / SSH）</span><span>中文界面</span><span>应用内 OTA</span>
+  </div>
+</header>
+
+<nav>
+  <a href="#login">登录页</a><a href="#dashboard">仪表盘</a><a href="#containers">容器管理</a><a href="#stacks">堆栈管理</a>
+  <a href="#images">镜像管理</a><a href="#volumes">数据卷</a><a href="#networks">网络管理</a><a href="#notifications">通知中心</a><a href="#settings">设置中心</a>
+</nav>
+
+<main>
+  <section id="login">
+    <h2>登录页 <span class="tag">安全会话</span></h2>
+    <p>左侧深海军蓝品牌区 + 右侧登录表单；首次使用进入初始设置向导。支持多用户、找回码自助恢复、空闲自动登出、中/英文与明暗主题。</p>
+    <figure class="shot"><img src="images/pages/login.svg" alt="登录页"/><figcaption>登录页 — banner 主视觉嵌入左栏，与品牌区同源配色</figcaption></figure>
+  </section>
+
+  <section id="dashboard">
+    <h2>仪表盘 <span class="tag">全局总览</span></h2>
+    <p>整机与容器全局状态一览：处理器逐核占用、内存、显卡、容器图标卡片墙、网络速率（网卡可切换）、每块磁盘独立读写曲线。四张资源磁贴共享悬停十字线与提示框，时长可调。</p>
+    <figure class="shot"><img src="images/pages/dashboard.svg" alt="仪表盘"/><figcaption>仪表盘 — 8 类磁贴实时曲线，温度监控零提权接入 sysfs</figcaption></figure>
+  </section>
+
+  <section id="containers">
+    <h2>容器管理 <span class="tag">高频操作</span></h2>
+    <p>全部容器平面清单：搜索 / 状态筛选 / 自定义列 / 导出清单；标签胶囊与所属堆栈交叉展示；行尾球形按钮一键打开 WebUI。点击行进入详情页：资源监控四卡曲线、只读 xterm 日志（字节级 demux 无乱码）、交互式 Web 终端。</p>
+    <figure class="shot"><img src="images/pages/containers.svg" alt="容器管理"/><figcaption>容器管理 + 容器详情页 — 单列基本信息、四卡资源曲线</figcaption></figure>
+  </section>
+
+  <section id="stacks">
+    <h2>堆栈管理 <span class="tag">核心页面</span></h2>
+    <p>以 docker-compose 堆栈为中心（交互蓝本来自 Unraid Compose）：整栈启停 / 重建 / 更新检测；编辑弹窗含 COMPOSE（YAML 高亮在线编辑/上传/下载）、SETTINGS（名称/描述/标签/图标自动匹配）、LABELS（逐服务 WebUI 与图标）三页签。</p>
+    <figure class="shot"><img src="images/pages/stacks.svg" alt="堆栈管理"/><figcaption>堆栈管理 + 编辑弹窗 — 自定义图标输入即自动匹配图库</figcaption></figure>
+  </section>
+
+  <section id="images">
+    <h2>镜像管理 <span class="tag">国内拉取加固</span></h2>
+    <p>本地 / 未使用 / 悬空分类统计；拉取进度实时显示、并发锁防重复；保护标记防误清理；tar 离线导入；后台定时检查镜像更新并推送通知。加速源直接读写 daemon.json，国内拉取自动走加速。</p>
+    <figure class="shot"><img src="images/pages/images.svg" alt="镜像管理"/><figcaption>镜像管理 — 拉取进度 + 加固策略</figcaption></figure>
+  </section>
+
+  <section id="volumes">
+    <h2>数据卷管理 <span class="tag">存储</span></h2>
+    <p>卷列表交叉展示关联容器；一键筛出孤儿卷并批量删除；卷内容打包导出快照备份。</p>
+    <figure class="shot"><img src="images/pages/volumes.svg" alt="数据卷管理"/><figcaption>数据卷管理 — 关联展示 + 快照导出</figcaption></figure>
+  </section>
+
+  <section id="networks">
+    <h2>网络管理 <span class="tag">拓扑</span></h2>
+    <p>Docker 网络列表与驱动（bridge / host / macvlan / null）标识、关联容器占用；新建网络支持子网 / 网关 / 标签；与容器、堆栈页联动。</p>
+    <figure class="shot"><img src="images/pages/networks.svg" alt="网络管理"/><figcaption>网络管理 — 新建表单 + 联动展示</figcaption></figure>
+  </section>
+
+  <section id="notifications">
+    <h2>通知中心 <span class="tag">事件聚合</span></h2>
+    <p>镜像更新 / 容器异常 / 备份计划 / 应用升级等事件统一聚合、持久化保存；滚动加载历史、关键词搜索、一键清空当前视图；支持 Webhook 推送外部渠道。</p>
+    <figure class="shot"><img src="images/pages/notifications.svg" alt="通知中心"/><figcaption>通知中心 — 分级图标 + 服务端分页</figcaption></figure>
+  </section>
+
+  <section id="settings">
+    <h2>设置中心 <span class="tag">12 分区</span></h2>
+    <p>用户 / 列显隐 / 引擎配置（多主机接入 + 镜像加速源）/ 标签管理 / 编辑堆栈 / 页面设置（含图标库目录绑定）/ 镜像更新调度 / 备份管理（周/月/年三级策略）/ 通知 / 日志 / 硬件信息 / 系统更新（OTA 实时进度条，国内自动切镜像）。</p>
+    <figure class="shot"><img src="images/pages/settings.svg" alt="设置中心"/><figcaption>设置中心 — 引擎配置 / 加速源 / 备份 / OTA</figcaption></figure>
+  </section>
+</main>
+
+<footer>
+  Docker Manager Yanzi · 全矢量界面导览（零图片资源，加载即渲染）<br/>
+  <a href="https://github.com/yanziruxue/docker-manager">GitHub</a> · 单文件二进制部署 · 数据全部留在自己手里
+</footer>
+</body>
+</html>

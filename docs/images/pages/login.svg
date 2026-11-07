@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 760" font-family="'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif">
+  <rect width="1200" height="760" fill="#F1F5F9"/>
+  <!-- 左侧品牌区（登录页） -->
+  <rect width="540" height="760" fill="#0B1220"/>
+  <rect x="0" y="0" width="540" height="760" fill="url(#lg)"/>
+  <defs>
+    <linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0B1220"/><stop offset="0.5" stop-color="#0F1B33"/><stop offset="1" stop-color="#123055"/>
+    </linearGradient>
+  </defs>
+  <circle cx="470" cy="90" r="140" fill="#ffffff" opacity="0.04"/>
+  <circle cx="60" cy="560" r="180" fill="#ffffff" opacity="0.03"/>
+  <rect x="44" y="40" width="36" height="36" rx="10" fill="#2563EB"/>
+  <text x="52" y="65" fill="#fff" font-size="20">🐳</text>
+  <text x="92" y="64" fill="#E2E8F0" font-size="16" font-weight="600">Docker 管理</text>
+  <text x="44" y="200" fill="#F1F5F9" font-size="30" font-weight="700">每一台容器，<tspan x="44" dy="40">都该有「在哪、什么状态」的答案</tspan></text>
+  <text x="44" y="286" fill="#94A3B8" font-size="13">面向自托管 NAS / 服务器的 Docker 可视化管理平台：</text>
+  <text x="44" y="308" fill="#94A3B8" font-size="13">容器、堆栈、镜像、数据卷、网络集中管理，数据全部留在自己手里。</text>
+  <g font-size="13" fill="#CBD5E1">
+    <circle cx="52" cy="352" r="4" fill="#3B82F6"/><text x="66" y="356">容器与堆栈管理：启停、重建、终端，一目了然</text>
+    <circle cx="52" cy="384" r="4" fill="#3B82F6"/><text x="66" y="388">资源监控：CPU / 内存 / 网络 / 磁盘实时曲线</text>
+    <circle cx="52" cy="416" r="4" fill="#3B82F6"/><text x="66" y="420">WebUI 自动识别：服务端口一键直达</text>
+    <circle cx="52" cy="448" r="4" fill="#3B82F6"/><text x="66" y="452">找回码 + 双重验证：凭据自助恢复</text>
+  </g>
+  <!-- banner 展示卡 -->
+  <rect x="44" y="492" width="452" height="182" rx="14" fill="#0E1830" stroke="#2563EB" stroke-opacity="0.4"/>
+  <g transform="translate(64,510) scale(0.35)">
+    <path d="M40 90 L200 20 L360 90 L200 160 Z" fill="#2563EB" opacity="0.35"/>
+    <rect x="150" y="60" width="44" height="34" rx="4" fill="#3B82F6"/>
+    <rect x="204" y="60" width="44" height="34" rx="4" fill="#22C55E"/>
+    <rect x="150" y="102" width="44" height="34" rx="4" fill="#F59E0B"/>
+    <rect x="204" y="102" width="44" height="34" rx="4" fill="#EF4444"/>
+    <path d="M330 130 q60 -10 90 -50 q-30 -6 -60 8 q10 -30 -12 -46 q-18 20 -14 44 q-24 -14 -48 -4 q20 26 44 48 Z" fill="#60A5FA"/>
+  </g>
+  <text x="222" y="546" fill="#F1F5F9" font-size="17" font-weight="700">Docker Manager Yanzi</text>
+  <text x="222" y="568" fill="#64748B" font-size="10">SINGLE BINARY · LINUX X86_64</text>
+  <g font-size="10" fill="#94A3B8">
+    <rect x="64" y="592" width="86" height="22" rx="11" fill="#16203B"/><text x="107" y="607" text-anchor="middle">单文件二进制</text>
+    <rect x="158" y="592" width="86" height="22" rx="11" fill="#16203B"/><text x="201" y="607" text-anchor="middle">多引擎接入</text>
+    <rect x="252" y="592" width="92" height="22" rx="11" fill="#16203B"/><text x="298" y="607" text-anchor="middle">实时资源监控</text>
+    <rect x="352" y="592" width="92" height="22" rx="11" fill="#16203B"/><text x="398" y="607" text-anchor="middle">应用内 OTA</text>
+  </g>
+  <text x="44" y="712" fill="#64748B" font-size="11">自托管 · 数据不出内网 · 单文件二进制即可运行</text>
+  <!-- 右侧表单 -->
+  <rect x="720" y="230" width="360" height="310" rx="16" fill="#ffffff" stroke="#E2E8F0"/>
+  <text x="760" y="286" fill="#0F172A" font-size="22" font-weight="700">欢迎回来</text>
+  <text x="760" y="312" fill="#64748B" font-size="12">登录以继续管理你的 Docker 主机</text>
+  <rect x="760" y="336" width="280" height="42" rx="10" fill="#F8FAFC" stroke="#E2E8F0"/>
+  <text x="776" y="362" fill="#94A3B8" font-size="12">用户名</text>
+  <rect x="760" y="390" width="280" height="42" rx="10" fill="#F8FAFC" stroke="#E2E8F0"/>
+  <text x="776" y="416" fill="#94A3B8" font-size="12">密码</text>
+  <rect x="760" y="446" width="280" height="42" rx="10" fill="#1D4ED8"/>
+  <text x="900" y="472" fill="#fff" font-size="14" text-anchor="middle" font-weight="600">登 录</text>
+  <text x="900" y="516" fill="#94A3B8" font-size="11" text-anchor="middle">忘记密码？使用找回码自助恢复</text>
+  <text x="900" y="700" fill="#94A3B8" font-size="11" text-anchor="middle">首次使用将进入初始设置向导 · 支持中/英文与明暗主题</text>
+</svg>

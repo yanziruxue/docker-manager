@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 760" font-family="'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif">
+  <rect width="1200" height="760" fill="#0B1220"/>
+  <rect width="200" height="760" fill="#0E1830"/>
+  <rect x="24" y="22" width="26" height="26" rx="7" fill="#2563EB"/>
+  <text x="60" y="40" fill="#E2E8F0" font-size="15" font-weight="600">Docker 管理</text>
+  <g font-size="13">
+    <text x="34" y="88" fill="#7C8DB0">◧ 仪表盘</text><text x="34" y="130" fill="#7C8DB0">▤ 容器管理</text><text x="34" y="170" fill="#7C8DB0">⚗ 堆栈管理</text>
+    <rect x="12" y="186" width="176" height="34" rx="8" fill="#1D4ED8"/><text x="34" y="208" fill="#fff">▣ 镜像管理</text>
+    <text x="34" y="250" fill="#7C8DB0">▤ 数据卷管理</text><text x="34" y="290" fill="#7C8DB0">◈ 网络管理</text><text x="34" y="330" fill="#7C8DB0">◉ 通知中心</text><text x="34" y="370" fill="#7C8DB0">⚙ 设置中心</text>
+  </g>
+  <text x="232" y="46" fill="#E2E8F0" font-size="19" font-weight="700">镜像管理 <tspan fill="#64748B" font-size="13">32 个 · 悬空 3 · 未使用 7</tspan></text>
+  <rect x="1074" y="24" width="98" height="32" rx="9" fill="#1D4ED8"/><text x="1123" y="45" fill="#fff" font-size="13" text-anchor="middle">⤓ 拉取镜像</text>
+  <line x1="200" y1="64" x2="1200" y2="64" stroke="#1E2A4A"/>
+  <g font-size="12" text-anchor="middle">
+    <rect x="228" y="86" width="90" height="34" rx="9" fill="#1D4ED8"/><text x="273" y="108" fill="#fff">本地镜像</text>
+    <rect x="326" y="86" width="90" height="34" rx="9" fill="#111C33" stroke="#1E2A4A"/><text x="371" y="108" fill="#94A3B8">未使用 7</text>
+    <rect x="424" y="86" width="90" height="34" rx="9" fill="#111C33" stroke="#1E2A4A"/><text x="469" y="108" fill="#94A3B8">悬空 3</text>
+    <rect x="920" y="86" width="120" height="34" rx="9" fill="#111C33" stroke="#1E2A4A"/><text x="980" y="108" fill="#FDBA74">导入镜像 ⤒</text>
+    <rect x="1048" y="86" width="124" height="34" rx="9" fill="#111C33" stroke="#1E2A4A"/><text x="1110" y="108" fill="#F87171">清理悬空</text>
+  </g>
+  <g font-size="12" fill="#64748B">
+    <text x="244" y="156">镜像</text><text x="600" y="156">标签</text><text x="700" y="156">大小</text><text x="790" y="156">创建时间</text><text x="920" y="156">保护</text><text x="1060" y="156">操作</text>
+  </g>
+  <line x1="228" y1="168" x2="1172" y2="168" stroke="#1E2A4A"/>
+  <g font-size="12">
+    <g><text x="244" y="198" fill="#E2E8F0">jellyfin/jellyfin</text><text x="600" y="198" fill="#7DD3FC">latest</text><text x="700" y="198" fill="#94A3B8">412 MB</text><text x="790" y="198" fill="#94A3B8">6 天前</text>
+      <rect x="912" y="182" width="76" height="22" rx="11" fill="#14301F"/><text x="950" y="197" fill="#4ADE80" font-size="10" text-anchor="middle">不被清理</text>
+      <text x="1060" y="198" fill="#3B82F6">更新检查</text></g>
+    <line x1="228" y1="216" x2="1172" y2="216" stroke="#16203B"/>
+    <g><text x="244" y="248" fill="#E2E8F0">postgres</text><text x="600" y="248" fill="#7DD3FC">16-alpine</text><text x="700" y="248" fill="#94A3B8">241 MB</text><text x="790" y="248" fill="#94A3B8">30 天前</text>
+      <rect x="912" y="232" width="76" height="22" rx="11" fill="#14301F"/><text x="950" y="247" fill="#4ADE80" font-size="10" text-anchor="middle">不被清理</text>
+      <text x="1060" y="248" fill="#3B82F6">更新检查</text></g>
+    <line x1="228" y1="266" x2="1172" y2="266" stroke="#16203B"/>
+    <g><text x="244" y="298" fill="#E2E8F0">nginx</text><text x="600" y="298" fill="#7DD3FC">1.27</text><text x="700" y="298" fill="#94A3B8">188 MB</text><text x="790" y="298" fill="#94A3B8">12 天前</text>
+      <rect x="912" y="282" width="76" height="22" rx="11" fill="#16203B" stroke="#1E2A4A"/><text x="950" y="297" fill="#94A3B8" font-size="10" text-anchor="middle">允许清理</text>
+      <text x="1060" y="298" fill="#3B82F6">更新检查</text></g>
+    <line x1="228" y1="316" x2="1172" y2="316" stroke="#16203B"/>
+    <g opacity="0.6"><text x="244" y="348" fill="#CBD5E1">&lt;none&gt;</text><text x="600" y="348" fill="#94A3B8">&lt;none&gt;</text><text x="700" y="348" fill="#94A3B8">88 MB</text>
+      <rect x="912" y="332" width="76" height="22" rx="11" fill="#16203B" stroke="#1E2A4A"/><text x="950" y="347" fill="#94A3B8" font-size="10" text-anchor="middle">允许清理</text>
+      <text x="1060" y="348" fill="#F87171">删除</text></g>
+  </g>
+  <!-- 拉取进度 -->
+  <g>
+    <rect x="228" y="392" width="944" height="336" rx="12" fill="#0E1830" stroke="#1E2A4A"/>
+    <text x="252" y="424" fill="#94A3B8" font-size="12">▼ 拉取镜像 · 实时进度（并发锁防重复）</text>
+    <text x="252" y="456" fill="#E2E8F0" font-size="13" font-family="Consolas,monospace">docker pull library/alpine:3.20</text>
+    <rect x="252" y="472" width="700" height="10" rx="5" fill="#1E2A4A"/><rect x="252" y="472" width="455" height="10" rx="5" fill="#1D4ED8"/>
+    <text x="970" y="482" fill="#3B82F6" font-size="12">65%</text>
+    <g font-size="11" fill="#64748B">
+      <text x="252" y="520">国内拉取加固：</text>
+      <text x="252" y="544" fill="#94A3B8">· 本地 Socket 引擎 → docker pull CLI（走 daemon 的 registry-mirrors 加速源）</text>
+      <text x="252" y="568" fill="#94A3B8">· 远程 SSH / TCP 引擎 → 由远端服务器本地 daemon 执行拉取，同样吃各自加速源</text>
+      <text x="252" y="592" fill="#94A3B8">· 加速源在「设置中心 → 引擎配置」直接读写 daemon.json，改后询问重启 Docker</text>
+    </g>
+    <g font-size="11" fill="#64748B">
+      <text x="252" y="640">镜像更新检查：</text>
+      <text x="252" y="664" fill="#94A3B8">· 「镜像更新」调度：选定星期与时间点，后台定时比对远端标签</text>
+      <text x="252" y="688" fill="#94A3B8">· 发现新版本 → 通知中心推送「更新完成（镜像拉取成功）」/「容器停止/异常」等事件</text>
+    </g>
+  </g>
+</svg>
