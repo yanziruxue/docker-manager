@@ -11,6 +11,8 @@
 ![Runtime](https://img.shields.io/badge/Node%2022-SEA%20单文件-7C3AED)
 ![Port](https://img.shields.io/badge/port-5024-D97706)
 
+**🖥️ [界面导览 · 全部页面一页看完（点此打开）](docs/preview.html)**
+
 </div>
 
 ---
@@ -20,6 +22,7 @@
 - [项目背景](#项目背景)
 - [功能总览](#功能总览)
 - [页面功能导览](#页面功能导览)
+- [界面导览预览页](#界面导览预览页)
 - [技术架构](#技术架构)
 - [安装与部署](#安装与部署)
 - [常见问题](#常见问题)
@@ -168,6 +171,16 @@
 | **本地 Socket** | 直连 `/var/run/docker.sock` | 与 Docker 同机部署，最快最稳（推荐） |
 | **远程 TCP** | `tcp://` 连接远端 daemon，支持 TLS 自签证书 | 远端已开启 2375 / 2376 端口 |
 | **远程 SSH** | 免装 agent，SSH 登录后在服务器本地执行 `docker` CLI | 仅有 SSH 权限的 NAS / 云主机 |
+
+---
+
+## 界面导览预览页
+
+除本页分节截图外，仓库还提供一个独立的**图库式预览页 [`docs/preview.html`](docs/preview.html)**——深色主题、锚点导航，全部 9 个页面矢量界面一页看完：
+
+- **GitHub / Gitea 网页上**：直接点击上方链接即可跳转查看（HTML 源码方式），或把链接前加 `https://htmlpreview.github.io/?` 渲染成网页；
+- **克隆到本地**：双击 `docs/preview.html` 用浏览器打开即为成品页面；
+- **分享给别人**：直接把 `docs/preview.html` 连同 `docs/images/pages/` 目录一起发送（或发布为静态站点），零外部依赖、加载即渲染。
 
 ---
 
