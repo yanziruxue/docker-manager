@@ -1930,10 +1930,6 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
                 </FormField>
               </div>
 
-              <FormField label="描述">
-                <Input value={settings.description} onChange={(val) => setSettings({ ...settings, description: val })} />
-              </FormField>
-
               <FormField label="标签" hint="与容器管理共用同一套标签库；此处选择的标签将显示在堆栈管理页「标签」列">
                 <TagSelect
                   library={tagLibrary}
@@ -1942,6 +1938,10 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
                   onCreateTag={onCreateTag}
                   placeholder="选择标签（容器管理/堆栈管理列表将同步显示）"
                 />
+              </FormField>
+
+              <FormField label="描述">
+                <Input value={settings.description} onChange={(val) => setSettings({ ...settings, description: val })} />
               </FormField>
             </div>
           )}
