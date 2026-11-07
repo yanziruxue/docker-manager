@@ -29,7 +29,7 @@
   - **新旧包前端解码对比**：`重启中` old=4→new=5（新增筛选项）、`restartingNames` old=0→new=2；`已暂停` 9→9、`双击图标打开编辑堆栈` 1→1、`与容器管理共用同一套标签库` 1→1、`在此输入 compose 内容` 1→1、`右键打开操作菜单` 3→3（前几版功能全保留）。服务端段原始字节 `stackContainerStateMap` old=0→new=2、`v1.50.28` new=1。
   - 源码级 **19 项断言全 PASS**（含两处旧一刀切写法归零、`restartingNames` prop/传参/渲染各 1、`statusRank` 与筛选各 1）。
 - 已知限制：`Dashboard.tsx` 复用子表时未传 `operatingNames`/`restartingNames`，仪表盘子表只显示真实状态（能显示 Docker 的 restarting）；仪表盘堆栈统计/筛选仍无「重启中」分类，本次不动。下一步：无。
-- 快照：commit 待定 + tag v1.50.28 推 Gitea main+tag 双 ref 一致；GitHub 按约定未推。
+- 快照：commit `2824534` + tag v1.50.28 推 Gitea；`ls-remote` 核对 main/tag 双 ref 均指向 `28245349c104796f0d217a6faabe8d80e3d6a686`（随后 CHANGELOG 补 SHA 再推一次 main，故 main 会前进一提交）；GitHub 按约定未推。
 
 ## v1.50.27 — 2026-11-05（**已构建 · 已推 Gitea**）
 
