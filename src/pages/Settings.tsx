@@ -53,6 +53,7 @@ import {
   FileText,
   Eye,
   Smartphone,
+  FolderOpen,
 } from "lucide-react";
 import type { SystemSettings, DockerEngine, UpdateInfo, UpdateState, ResourceTag, ComposeTemplate, AppInfo, LogListResult, LogTailResult, NetInterfaceOption, NotifyRuntimeStatus } from "../types";
 // 值导入（不是 type）：密钥「清除」哨兵值
@@ -132,6 +133,7 @@ import {
   fetchNetInterfacesApi,
   testNotifyApi,
   fetchNotifyStatusApi,
+  checkCustomIconDirApi,
 } from "../api";
 import { copyText, selectNodeText } from "../lib/clipboard";
 
@@ -2183,6 +2185,26 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
   const patchTag = (id: string, patch: Partial<ResourceTag>) =>
     setTags(tags.map((t) => (t.id === id ? { ...t, ...patch } : t)));
   const removeTag = (id: string) => setTags(tags.filter((t) => t.id !== id));
+
+  // 自定义图标库目录（v1.50.32）：「检测目录」只探测不落盘，路径仍由底部「保存设置」写入 settings.json
+  const [iconDirCheck, setIconDirCheck] = useState<{ ok: boolean; message: string } | null>(null);
+  const [iconDirChecking, setIconDirChecking] = useState(false);
+  const handleCheckIconDir = async () => {
+    setIconDirChecking(true);
+    setIconDirCheck(null);
+    try {
+      const r = await checkCustomIconDirApi(String(data.modal?.iconDir ?? ""));
+      let message = "";
+      if (r.unbound) message = "当前未绑定目录：将使用原有的堆栈 icon/ 图库方案";
+      else if (r.ok) message = `目录可用：识别到 ${r.count} 个可自动匹配的图标（共 ${r.files} 个图标文件）`;
+      else message = `目录不可用：${r.error}`;
+      setIconDirCheck({ ok: r.ok, message });
+    } catch (e: any) {
+      setIconDirCheck({ ok: false, message: `检测失败：${e?.message || "请求失败"}` });
+    } finally {
+      setIconDirChecking(false);
+    }
+  };
 
   const update = (section: string, field: string, value: any) => {
     // section 只会取 docker / notifications 等对象段；defaultsVersion 等标量段不参与
@@ -4319,6 +4341,41 @@ docker-compose version</code>
                   onChange={(val) => update("modal", "doubleClickIconEditStack", val)}
                 />
               </FormField>
+            </Card>
+
+            <Card title="图标库目录" icon={<FolderOpen size={16} />}>
+              <FormField
+                label="自定义图标文件夹（服务端绝对路径）"
+                hint="填写运行本服务那台机器上的图标目录绝对路径，如 /mnt/user/appdata/icons。留空 = 未绑定，使用原有的堆栈 icon/ 图库方案。点击底部「保存设置」后立即生效。"
+              >
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={String(data.modal?.iconDir ?? "")}
+                    onChange={(v) => { update("modal", "iconDir", v); setIconDirCheck(null); }}
+                    placeholder="/mnt/user/appdata/icons"
+                    className="flex-1"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleCheckIconDir}
+                    disabled={iconDirChecking}
+                    className="flex items-center gap-1.5 px-3 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50 whitespace-nowrap"
+                  >
+                    {iconDirChecking ? <Loader2 size={14} className="animate-spin" /> : <FolderOpen size={14} />}
+                    检测目录
+                  </button>
+                </div>
+              </FormField>
+              {iconDirCheck && (
+                <p className={`text-xs mt-1.5 ${iconDirCheck.ok ? "text-green-600" : "text-amber-600"}`}>
+                  {iconDirCheck.message}
+                </p>
+              )}
+              <div className="mt-3 rounded-lg bg-slate-50 border border-slate-100 px-3 py-2.5 text-xs text-slate-500 space-y-1">
+                <p>绑定后自动识别：堆栈 / 容器 / 服务名与图标文件名（不含扩展名）同名即自动套用，大小写不敏感；compose 的 <code>&lt;项目&gt;-&lt;服务&gt;-1</code> 命名会自动派生出服务名。</p>
+                <p>同名多格式优先级：<b>png &gt; jpg/jpeg &gt; ico &gt; 其他</b>（svg / webp / gif）。手工设置的图标优先保留，自定义目录找不到匹配时回落原图库。</p>
+                <p>支持 png / jpg / gif / svg / webp / ico，单张上限 2MB；「编辑堆栈」的图库下拉也会合并显示本目录图标。远程 SSH / TCP 引擎读取的是本服务所在机器的目录。</p>
+              </div>
             </Card>
           </div>
         )}

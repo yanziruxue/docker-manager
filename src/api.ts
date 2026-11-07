@@ -997,6 +997,18 @@ export function listStackIconsApi(engineId: string, stackName: string): Promise<
   return request(`/engines/${engineId}/stacks/${encodeURIComponent(stackName)}/icons`);
 }
 
+// ============ 自定义图标库目录（v1.50.32，设置中心 → 页面设置） ============
+
+/** 列出自定义图标目录：映射（自动匹配用）+ 文件清单（图库下拉用）+ 绑定状态/错误 */
+export function listCustomIconsApi(): Promise<import("./custom-icons").CustomIconsPayload> {
+  return request("/custom-icons");
+}
+
+/** 检测目录（设置卡片用）：不落盘，只回报可用图标数量与错误 */
+export function checkCustomIconDirApi(dir: string): Promise<import("./custom-icons").CustomIconCheckResult> {
+  return request("/custom-icons/check", { method: "POST", body: JSON.stringify({ dir }) });
+}
+
 /** 检查堆栈更新 */
 export function checkStackUpdatesApi(engineId: string, stackName?: string): Promise<{ stackName: string; containers: { name: string; hasUpdate: boolean }[] }[]> {
   return request(`/engines/${engineId}/stacks/check-updates`, {

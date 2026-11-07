@@ -59,12 +59,14 @@ import {
   saveStackSettingsApi,
   uploadStackIconApi,
   listStackIconsApi,
+  listCustomIconsApi,
   backupStackApi,
   batchStackActionApi,
   containerActionApi,
   fetchContainerLogs,
   fetchEngineStacks,
 } from "../api";
+import type { CustomIconEntry } from "../custom-icons";
 import { addOpLog } from "../opLog";
 import { StatusBadge, Tag } from "../components/Badge";
 import { ContextMenu, type MenuItem } from "../components/ContextMenu";
@@ -1322,11 +1324,12 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
   const labelIconInputRef = useRef<HTMLInputElement>(null);
   const pendingLabelIconIndexRef = useRef<number>(-1);
 
-  // v1.49.0 堆栈图库（icon/ 文件夹）下拉：图标字段「编辑代码/SVG」左侧可选已有本地图标
+  // v1.49.0 堆栈图库（icon/ 文件夹）+ v1.50.32 自定义图标目录：合并为同一个下拉
   const [galleryTarget, setGalleryTarget] = useState<IconTarget | null>(null);
   const [galleryFiles, setGalleryFiles] = useState<string[]>([]);
+  const [galleryCustom, setGalleryCustom] = useState<CustomIconEntry[]>([]);
   const [galleryLoading, setGalleryLoading] = useState(false);
-  /** 打开图库下拉：拉取 icon/ 文件夹文件列表 */
+  /** 打开图库下拉：并行拉取本堆栈图库与自定义图标文件夹 */
   const openIconGallery = async (t: IconTarget) => {
     if (galleryTarget) {
       const same =
@@ -1336,48 +1339,78 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
     }
     setGalleryTarget(t);
     setGalleryFiles([]);
+    setGalleryCustom([]);
     if (!engineId) return;
     setGalleryLoading(true);
     try {
-      const files = await listStackIconsApi(engineId, stack.name);
+      const [files, custom] = await Promise.all([
+        listStackIconsApi(engineId, stack.name).catch(() => [] as string[]),
+        listCustomIconsApi().catch(() => null),
+      ]);
       setGalleryFiles(files);
+      setGalleryCustom(custom?.entries || []);
     } catch { /* 拉取失败显示空态 */ }
     finally { setGalleryLoading(false); }
   };
-  /** 从图库选择图标：写入目标字段的本地 URL */
-  const pickGalleryIcon = (t: IconTarget, file: string) => {
-    setIconUrl(t, `/api/stack-icons/${encodeURIComponent(stack.name)}/${encodeURIComponent(file)}`);
+  /** 从图库选择图标：写入目标字段的本地 URL（自定义目录或本堆栈图库） */
+  const pickGalleryIcon = (t: IconTarget, url: string) => {
+    setIconUrl(t, url);
     setGalleryTarget(null);
   };
-  /** 图库下拉面板（按钮左侧弹出）：缩略图 + 文件名列表 */
+  /** 单个图标行：两个来源共用，缩略图 + 文件名 */
+  const galleryItem = (t: IconTarget, key: string, name: string, url: string) => (
+    <button
+      key={key}
+      type="button"
+      onClick={() => pickGalleryIcon(t, url)}
+      className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-50"
+      title={name}
+    >
+      <img src={url} alt="" className="w-5 h-5 rounded flex-shrink-0" />
+      <span className="truncate">{name}</span>
+    </button>
+  );
+  /** 图库下拉面板（按钮左侧弹出）：共享图标库 + 本堆栈图库 */
   const galleryPanel = (t: IconTarget) => {
     if (!galleryTarget || galleryTarget.kind !== t.kind) return null;
     if (t.kind === "label" && galleryTarget.kind === "label" && galleryTarget.index !== t.index) return null;
+    const empty = galleryFiles.length === 0 && galleryCustom.length === 0;
     return (
       <div className="absolute z-30 mt-1 w-64 max-h-60 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg py-1">
         {galleryLoading ? (
           <div className="px-3 py-2 text-xs text-slate-400 flex items-center gap-2">
             <Loader2 size={12} className="animate-spin" /> 读取图库...
           </div>
-        ) : galleryFiles.length === 0 ? (
-          <div className="px-3 py-2 text-xs text-slate-400">图库为空：上传或保存图标后自动存入堆栈 icon/ 文件夹</div>
+        ) : empty ? (
+          <div className="px-3 py-2 text-xs text-slate-400">
+            图标库为空：可在「设置中心 → 页面设置」绑定图标文件夹，或上传图标存入本堆栈 icon/ 目录
+          </div>
         ) : (
-          galleryFiles.map((f) => (
-            <button
-              key={f}
-              type="button"
-              onClick={() => pickGalleryIcon(t, f)}
-              className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-50"
-              title={f}
-            >
-              <img
-                src={`/api/stack-icons/${encodeURIComponent(stack.name)}/${encodeURIComponent(f)}`}
-                alt=""
-                className="w-5 h-5 rounded flex-shrink-0"
-              />
-              <span className="truncate">{f}</span>
-            </button>
-          ))
+          <>
+            {galleryCustom.length > 0 && (
+              <>
+                <div className="px-3 py-1 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                  共享图标库（{galleryCustom.length}）
+                </div>
+                {galleryCustom.map((e) => galleryItem(t, `custom-${e.name}`, e.name, e.url))}
+              </>
+            )}
+            {galleryFiles.length > 0 && (
+              <>
+                <div className="px-3 py-1 mt-1 pt-1 border-t border-slate-100 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                  本堆栈图库（{galleryFiles.length}）
+                </div>
+                {galleryFiles.map((f) =>
+                  galleryItem(
+                    t,
+                    `stack-${f}`,
+                    f,
+                    `/api/stack-icons/${encodeURIComponent(stack.name)}/${encodeURIComponent(f)}`
+                  )
+                )}
+              </>
+            )}
+          </>
         )}
       </div>
     );
@@ -1388,7 +1421,7 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
       <button
         type="button"
         onClick={() => openIconGallery(t)}
-        title="从堆栈图库（icon 文件夹）选择图标"
+        title="从图标库选择（共享图标文件夹 + 本堆栈图库）"
         className="flex items-center gap-1 px-3 py-1.5 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 whitespace-nowrap"
       >
         <FolderOpen size={14} /> 图库 <ChevronDown size={12} />

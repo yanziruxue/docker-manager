@@ -16,6 +16,27 @@
 
 ---
 
+## v1.50.32 — 2026-11-07（**已构建 · 推 Gitea 中**）
+
+- **需求**：用户有一整个图标文件夹，希望与原有堆栈图库「合成一个」：绑定路径时按名称自动识别、未绑定时用现有方案；路径设置放在「设置中心 → 页面设置」新增图标卡片。确认规则：**绑定目录优先、原图库兜底**；服务名 `server` 自动匹配 `server.png/jpg/ico`，格式优先级 **png > jpg/jpeg > ico > 其他**；路径为**服务端绝对路径**。
+- **设计**：图标文件夹是运行本服务的机器上的目录，浏览器无法直接读取 ⇒ 服务端只读扫描并提供同源取图 URL；映射由服务端按格式优先级去重后下发给前端，前端在 `App.tsx` 数据装配层统一补齐 `icon` 字段，一处生效到堆栈列表 / 容器列表 / Dashboard 卡片。
+  - 优先级：① 手工显式图标（图库手选 `/api/stack-icons/<name>/<file>`、外链、内嵌 SVG）**保留不覆盖** → ② 绑定目录同名自动图标 → ③ 原 `icon.*` 自动回退 / 堆栈 `icon/` 图库 → ④ 路径留空或不可读时映射为空，**行为完全等同现状**。
+  - 名称候选：堆栈名 / 容器名 / compose 派生服务名（`<项目>-<服务>-1`、`下划线` 旧式命名），大小写不敏感。
+- **已完成**：
+  - `server/custom-icons.ts` 🆕：目录解析（绝对路径 / 拒绝 `..` / realpath / 可读性探测）、图标枚举（普通文件 + 扩展白名单 + 2MB 上限）、`customIconExtRank` 格式优先级、`buildCustomIconMap` 同名去重、`resolveCustomIconFile` 取图防穿越（含符号链接越界）。
+  - `server/index.ts`：新增 `GET /api/custom-icons`（`{bound,dir,error,entries,map}`）、`POST /api/custom-icons/check`（设置卡片探测，不落盘）、`GET /api/custom-icons/:file`（同源取图）；`materializeLocalIcon` 本地引用白名单补 `/api/custom-icons/`，避免保存堆栈设置时把引用误当外链转存。
+  - `server/settings.ts` 默认 `modal.iconDir: ""`；`src/types.ts` `ModalConfig.iconDir?: string`（可选，兼容旧 settings.json；`getSettings()` 的 `modal` 二级合并自动继承）。
+  - `src/custom-icons.ts` 🆕 纯函数：`shouldAutoFillIcon`（识别可覆盖的原图库自动回退）、`iconNameCandidates`（名称派生）、`pickCustomIcon`（查表）；`src/api.ts` 新增 `listCustomIconsApi` / `checkCustomIconDirApi`。
+  - `src/App.tsx`：`loadEngineData` 并行拉图标映射，在 LABELS 图标传导与 stackId 标记之后统一补齐容器 / 堆栈图标；保存设置后立即重拉数据使新路径即时生效。
+  - `src/pages/Settings.tsx`：页面设置新增「图标库目录」卡片（路径输入 +「检测目录」按钮 + 识别数量 / 具体错误 + 规则说明），跟随底部统一「保存设置」落盘。
+  - `src/pages/Stacks.tsx`：编辑堆栈的「图库」下拉并行拉两个来源并**分组显示**「共享图标库 / 本堆栈图库」，点选写入对应 URL；未绑定时下拉等同旧行为。
+  - `scripts/check-custom-icons.mjs` 🆕（64 项）：真实临时目录 + esbuild 编译服务端/前端真实模块，断言格式优先级、目录与取图安全、名称派生、覆盖规则与全链路接线；接入 `test:gates`（18 → **19 组**）。修正 `scripts/check-backup-naming.mjs` 旧锚点假红：`FolderOpen` 自本版起被新卡片合法复用，改为「仅当确实服务于图标库目录卡片时允许存在」。
+  - `package.json`：1.50.31 → **1.50.32**，新增 `test:customicons`。
+- **验证**：双 `tsc --noEmit` 0；新门禁 `PASS=64 FAIL=0`；**负向自检**：把 `customIconExtRank(".png")` 由 0 注入为 3 ⇒ `PASS=61 FAIL=3 / exit 1`，还原 ⇒ `64/0`；`npm run test:gates` **19 组全绿 0 FAIL**；SEA 四步 + 三处二进制 SHA-256 逐字节一致 `8d6b7273ecc36e111115628f675726fa42169a8f4b9745d719272841859e342f`（postject 产物 = zip 成员 = deb 成员）；ELF `7f454c46` / e_machine `62`；zip 成员 5 个；bundle 版本常量 `1.50.32`×3、旧串 `1.50.31`×0，服务端锚点 `customIconExtRank`×3 / `resolveCustomIconDir`×3 / `/api/custom-icons/check`×1；本次 `dist/assets/index-CsmNY0Yd.js`（1,159,092 B，SHA `87a26a273220d417df71610110f566c5ed996d08aed0de0a9b9dedcf4e8b799f`）逐字节嵌进新包，旧包前端 JS 1,154,691 B（SHA `526d1b20…`）；前端新增锚点 `iconDir` 0→3、`共享图标库` 0→1、`本堆栈图库` 0→2、`图标库目录` 0→1、`检测目录` 0→1、`/custom-icons` 0→2。
+- **未完成 / 已知限制**：未做浏览器端真机复现（靠真实模块行为验证 + 字节级嵌入证据闭环）；目录内容变化后需等下一次数据轮询或点保存刷新；远端 SSH / TCP 引擎读的是本服务所在机器的目录，不是远端主机；上传图标仍落各堆栈 `icon/` 目录，不写自定义文件夹。
+- **下一步**：无。可选：自定义目录增加前端缓存 / 目录变更监听；图库下拉加搜索与分页（图标数量大时）。
+- 快照：commit 待补 + tag v1.50.32 推 Gitea，发布后补记；包 SHA-256：zip `fb6d64bf8ec8be223d5dcbecdb3f61e3cac8a8f6c86c4267aca5454adf3b40d1`、deb `5586f2da6686223c426cd982e1ac8cc57dd1769023337ea2f54722418ebb5cc4`；二进制 SHA 见上。GitHub 按约定未推（2026-11-07 的一次性全量同步为特例，未恢复常态双推）。
+
 ## v1.50.31 — 2026-11-07（**已构建 · 已推 Gitea**）
 
 - **需求**：用户反馈「创建新堆栈弹窗点击创建后白屏」，P0 阻断级回归。

@@ -735,6 +735,13 @@ export interface ModalConfig {
    * - `false`（默认）            = 关闭此快捷操作，双击图标无反应。
    */
   doubleClickIconEditStack: boolean;
+  /**
+   * 自定义图标库目录（v1.50.32，设置中心 → 页面设置 → 图标库目录）：
+   * 运行本服务机器上的绝对路径；留空 = 未绑定 ⇒ 使用原有堆栈 icon/ 图库方案。
+   * 绑定后按名称（不含扩展名）自动匹配图标，格式优先级 png > jpg > ico > 其他。
+   * 可选字段：旧 settings.json 无此键时回落为空串。
+   */
+  iconDir?: string;
 }
 
 /** 列可见性默认配置 */

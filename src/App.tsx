@@ -20,6 +20,7 @@ import {
   fetchActivitiesPage,
   fetchSettings,
   saveSettingsApi,
+  listCustomIconsApi,
   checkUpdateApi,
   applyUpdateApi,
   fetchAppVersion,
@@ -44,6 +45,15 @@ import {
 } from "./transforms";
 import type { PageKey, Container, DockerImage, DockerVolume, DockerEngine, Stack, SystemSettings, ActivityLog, EngineResourceStats, UpdateInfo, ImageUpdateDetail, ImageUpdateSummaryView, ImageUpdateStatusView, ResourceTag } from "./types";
 import { randomTagColor } from "./components/TagPicker";
+import {
+  shouldAutoFillIcon,
+  iconNameCandidates,
+  pickCustomIcon,
+  type CustomIconsPayload,
+} from "./custom-icons";
+
+/** 自定义图标库拉取失败时的空映射：所有页面回落原有图标方案，绝不因新接口异常丢数据 */
+const EMPTY_CUSTOM_ICONS: CustomIconsPayload = { bound: false, dir: "", error: "", entries: [], map: {} };
 
 /** 把后端检查明细摊平成 { repo:tag -> 是否有更新 }；多 tag 镜像的每个标签都写入，保证表格逐行能匹配 */
 function toRefMap(details: ImageUpdateDetail[]): Record<string, boolean> {
@@ -354,7 +364,7 @@ export default function App() {
     setDataError(null);
     try {
       let coreOk = false; // 容器列表请求成功 = 引擎可达 = 切换成功
-      const [rawContainers, rawImages, rawVolumes, rawStacks, rawActivities] = await Promise.all([
+      const [rawContainers, rawImages, rawVolumes, rawStacks, rawActivities, customIcons] = await Promise.all([
         fetchEngineContainers(engineId)
           .then((r) => { coreOk = true; return r; })
           .catch(() => []),
@@ -362,6 +372,8 @@ export default function App() {
         fetchEngineVolumes(engineId).catch(() => ({ Volumes: [] })),
         fetchEngineStacks(engineId).catch(() => []),
         fetchActivitiesPage(engineId, 50, 0).catch(() => ({ items: [], total: 0, hasMore: false })),
+        // 自定义图标库（v1.50.32）：未绑定 / 接口失败 ⇒ 空映射，行为等同原有方案
+        listCustomIconsApi().catch(() => EMPTY_CUSTOM_ICONS),
       ]);
       // 已被更新的加载取代（如超时回退后重拉原引擎）⇒ 丢弃本批结果
       if (seq !== loadSeqRef.current) return false;
@@ -430,6 +442,37 @@ export default function App() {
           );
           for (const c of matched) c.stackId = st.id;
         }
+      }
+
+      // ============ 自定义图标库自动匹配（v1.50.32）============
+      // 优先级：手工显式图标（图库手选 / 外链 / 内嵌 SVG）> 绑定目录同名图标 > 原 icon.* 自动回退。
+      // 映射由服务端按 png > jpg > ico > 其他 去重构造；未绑定时为空 ⇒ 本段完全不改动数据。
+      const customIconMap = customIcons?.map || {};
+      // 堆栈：按堆栈名匹配
+      for (const st of xfStacks) {
+        if (!shouldAutoFillIcon(st.icon)) continue;
+        const url = pickCustomIcon(customIconMap, [st.name]);
+        if (url) st.icon = url;
+      }
+      // 容器：LABELS 手工图标已在上面的传导中写入 c.icon，这里只补仍为空 / icon.* 回退的容器
+      const stackById = new Map(xfStacks.map((s) => [s.id, s]));
+      for (const c of xfContainers) {
+        if (!shouldAutoFillIcon(c.icon)) continue;
+        const st = stackById.get(c.stackId || "");
+        const candidates = iconNameCandidates(c.name || "", st?.name);
+        // compose 服务名也参与匹配（容器名被自定义时仍能命中 server.png）
+        if (st) {
+          for (const svc of st.containers || []) {
+            const hit =
+              (svc.containerId && c.id === svc.containerId) ||
+              (svc.containerName && c.name === svc.containerName) ||
+              c.name === `${st.name}-${svc.name}` ||
+              c.name.startsWith(`${st.name}-${svc.name}-`);
+            if (hit) candidates.push(...iconNameCandidates(svc.name));
+          }
+        }
+        const url = pickCustomIcon(customIconMap, candidates);
+        if (url) c.icon = url;
       }
 
       // 交叉引用：解析容器镜像名（c.Image 可能返回 sha256 摘要而非镜像名）
@@ -611,10 +654,12 @@ export default function App() {
     try {
       const saved = await saveSettingsApi(newSettings);
       setSettings(saved);
+      // 图标库目录保存后立即重拉数据：loadEngineData 会重新读取映射并补齐图标
+      if (activeEngineId) void loadEngineData(activeEngineId);
     } catch (err) {
       console.error("保存设置失败:", err);
     }
-  }, []);
+  }, [activeEngineId, loadEngineData]);
 
   // 标签库新建标签（v1.49.2）：堆栈 LABELS 标签选择器输入无匹配时「+ 新建」直达，
   // 随机色 + id 与系统设置「标签管理」同规则，落盘后同步本地 settings 状态

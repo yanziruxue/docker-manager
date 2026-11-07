@@ -74,6 +74,13 @@ import {
 import { getImageLocks, setImageLock } from "./image-locks.js";
 import { createFullBackup, restoreFullBackup, restoreUploadedBackup, exportConfigArchive, listBackupFiles, deleteBackupFile, backupFilePath, migrateLegacyBackups } from "./backup.js";
 import { getSettings, saveSettings, redactSettings, secretsAreEncrypted } from "./settings.js";
+import {
+  resolveCustomIconDir,
+  listCustomIconEntries,
+  buildCustomIconMap,
+  resolveCustomIconFile,
+  type CustomIconEntry,
+} from "./custom-icons.js";
 import { startUpdateScheduler, getSchedulerStatus, runSchedulerCheckNow, checkEngineImages, getImageUpdateCache, startBackupScheduler, getBackupSchedulerStatus } from "./scheduler.js";
 import { addPushClient, removePushClient } from "./push.js";
 import { readDaemonConfigInfo, writeDaemonConfig, writeDaemonConfigText, restartDockerService, refreshPrivileges } from "./daemon-config.js";
@@ -1085,7 +1092,8 @@ function dedupeIconFilename(dir: string, name: string): string {
 
 /** 把远程 URL / data URI 图标转存为堆栈图库本地图标；返回本地 URL，无法转换时返回 null（保留原引用兜底） */
 async function materializeLocalIcon(stackDir: string, url: string): Promise<string | null> {
-  if (!url || url.startsWith("/api/stack-icons/")) return null; // 已是本地图库引用
+  // 已是本地图标引用（堆栈图库 / 自定义图标文件夹）⇒ 不再转存
+  if (!url || url.startsWith("/api/stack-icons/") || url.startsWith("/api/custom-icons/")) return null;
   const dir = path.join(stackDir, "icon");
   const stackName = path.basename(stackDir);
   const localUrl = (filename: string) =>
@@ -1220,6 +1228,81 @@ app.get("/api/stack-icons/:name/:file", (req, res) => {
   res.setHeader("Content-Type", ICON_EXT_CT[path.extname(file).toLowerCase()] || "image/png");
   res.setHeader("Cache-Control", "no-cache");
   res.send(readFileSync(p));
+});
+
+// ============ 自定义图标库目录（v1.50.32）：设置中心 → 页面设置 ============
+
+/** 当前绑定的图标目录：每次请求读 settings.json，保存设置后立即生效 */
+function boundCustomIconDir() {
+  return resolveCustomIconDir(getSettings()?.modal?.iconDir);
+}
+
+/** 列出自定义图标库：映射（前端自动匹配用）+ 文件清单（图库下拉用）+ 绑定状态/错误 */
+app.get("/api/custom-icons", (_req, res) => {
+  const bound = !!String(getSettings()?.modal?.iconDir ?? "").trim();
+  const { dir, error } = boundCustomIconDir();
+  let entries: CustomIconEntry[] = [];
+  if (dir) {
+    try {
+      entries = listCustomIconEntries(dir);
+    } catch (e: any) {
+      res.json({
+        success: true,
+        data: { bound, dir, error: `读取图标目录失败：${e?.message || "无权限"}`, entries: [], map: {} },
+      });
+      return;
+    }
+  }
+  res.json({ success: true, data: { bound, dir, error, entries, map: buildCustomIconMap(entries) } });
+});
+
+/** 检测目录（设置卡片用）：不落盘，只回报可用图标数量与错误；留空视为未绑定 */
+app.post("/api/custom-icons/check", (req, res) => {
+  const raw = String((req.body as any)?.dir ?? "");
+  const { dir, error } = resolveCustomIconDir(raw);
+  if (error) {
+    res.json({ success: true, data: { ok: false, count: 0, files: 0, error, unbound: false } });
+    return;
+  }
+  if (!dir) {
+    res.json({ success: true, data: { ok: true, count: 0, files: 0, error: "", unbound: true } });
+    return;
+  }
+  try {
+    const entries = listCustomIconEntries(dir);
+    res.json({
+      success: true,
+      data: {
+        ok: true,
+        count: Object.keys(buildCustomIconMap(entries)).length,
+        files: entries.length,
+        error: "",
+        unbound: false,
+      },
+    });
+  } catch (e: any) {
+    res.json({
+      success: true,
+      data: { ok: false, count: 0, files: 0, error: `读取图标目录失败：${e?.message || "无权限"}`, unbound: false },
+    });
+  }
+});
+
+/** 提供自定义图标库单个文件（防穿越 / 符号链接越界 / 扩展名白名单 / 2MB） */
+app.get("/api/custom-icons/:file", (req, res) => {
+  const { dir, error: dirError } = boundCustomIconDir();
+  if (!dir) {
+    res.status(404).send(dirError || "未绑定图标目录");
+    return;
+  }
+  const { file, error } = resolveCustomIconFile(dir, req.params.file);
+  if (!file) {
+    res.status(404).send(error);
+    return;
+  }
+  res.setHeader("Content-Type", ICON_EXT_CT[path.extname(file).toLowerCase()] || "image/png");
+  res.setHeader("Cache-Control", "no-cache");
+  res.send(readFileSync(file));
 });
 
 /** 检查堆栈更新 */

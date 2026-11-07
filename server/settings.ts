@@ -194,6 +194,12 @@ const DEFAULT_SETTINGS = {
      * 服务端归一化 5~300，非法值回落默认。
      */
     engineSwitchTimeout: 30,
+    /**
+     * 自定义图标库目录（v1.50.32，设置中心 → 页面设置 → 图标库目录）。
+     * 运行本服务机器上的**绝对路径**；留空 = 未绑定 ⇒ 沿用堆栈 icon/ 图库方案。
+     * 绑定后按名称自动匹配图标，格式优先级 png > jpg/jpeg > ico > 其他。
+     */
+    iconDir: "",
   },
   /**
    * Compose 模板（系统设置 → Compose 管理 维护）：
