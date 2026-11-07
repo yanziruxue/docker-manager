@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 760" font-family="'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif">
+  <rect width="1200" height="760" fill="#0B1220"/>
+  <rect width="200" height="760" fill="#0E1830"/>
+  <rect x="24" y="22" width="26" height="26" rx="7" fill="#2563EB"/>
+  <text x="60" y="40" fill="#E2E8F0" font-size="15" font-weight="600">Docker 管理</text>
+  <g font-size="13">
+    <text x="34" y="88" fill="#7C8DB0">◧ 仪表盘</text><text x="34" y="130" fill="#7C8DB0">▤ 容器管理</text><text x="34" y="170" fill="#7C8DB0">⚗ 堆栈管理</text><text x="34" y="210" fill="#7C8DB0">▣ 镜像管理</text><text x="34" y="250" fill="#7C8DB0">▤ 数据卷管理</text><text x="34" y="290" fill="#7C8DB0">◈ 网络管理</text>
+    <rect x="12" y="306" width="176" height="34" rx="8" fill="#1D4ED8"/><text x="34" y="328" fill="#fff">◉ 通知中心</text>
+    <text x="34" y="370" fill="#7C8DB0">⚙ 设置中心</text>
+  </g>
+  <text x="232" y="46" fill="#E2E8F0" font-size="19" font-weight="700">通知中心 <tspan fill="#64748B" font-size="13">3 条未读</tspan></text>
+  <line x1="200" y1="64" x2="1200" y2="64" stroke="#1E2A4A"/>
+  <rect x="228" y="86" width="380" height="34" rx="9" fill="#111C33" stroke="#1E2A4A"/>
+  <text x="268" y="108" fill="#64748B" font-size="12">搜索通知…</text>
+  <rect x="1040" y="86" width="132" height="34" rx="9" fill="#111C33" stroke="#1E2A4A"/>
+  <text x="1106" y="108" fill="#94A3B8" font-size="12" text-anchor="middle">清空当前显示</text>
+  <!-- 通知列表 -->
+  <g font-size="12">
+    <rect x="228" y="140" width="944" height="86" rx="10" fill="#111C33" stroke="#2563EB"/>
+    <circle cx="266" cy="183" r="14" fill="#14301F"/><text x="266" y="188" fill="#4ADE80" font-size="13" text-anchor="middle">✓</text>
+    <text x="296" y="176" fill="#E2E8F0" font-weight="600">镜像更新完成</text>
+    <text x="296" y="198" fill="#94A3B8">qbittorrent 检测到新版本 5.1.2 → 已按计划自动拉取成功</text>
+    <text x="1150" y="176" fill="#64748B" font-size="11" text-anchor="end">10 分钟前</text>
+  </g>
+  <g font-size="12">
+    <rect x="228" y="238" width="944" height="86" rx="10" fill="#111C33" stroke="#1E2A4A"/>
+    <circle cx="266" cy="281" r="14" fill="#301E1E"/><text x="266" y="286" fill="#F87171" font-size="13" text-anchor="middle">!</text>
+    <text x="296" y="274" fill="#E2E8F0" font-weight="600">容器停止 / 异常</text>
+    <text x="296" y="296" fill="#94A3B8">monitor · grafana 意外退出（exit 137），可在容器管理页查看日志定位</text>
+    <text x="1150" y="274" fill="#64748B" font-size="11" text-anchor="end">1 小时前</text>
+  </g>
+  <g font-size="12">
+    <rect x="228" y="336" width="944" height="86" rx="10" fill="#111C33" stroke="#1E2A4A"/>
+    <circle cx="266" cy="379" r="14" fill="#1E2A3A"/><text x="266" y="384" fill="#7DD3FC" font-size="13" text-anchor="middle">↻</text>
+    <text x="296" y="372" fill="#E2E8F0" font-weight="600">应用内升级可用</text>
+    <text x="296" y="394" fill="#94A3B8">发现新版本 v1.50.35，前往「设置中心 → 系统更新」一键升级（国内自动走镜像加速）</text>
+    <text x="1150" y="372" fill="#64748B" font-size="11" text-anchor="end">3 小时前</text>
+  </g>
+  <g font-size="12">
+    <rect x="228" y="434" width="944" height="86" rx="10" fill="#111C33" stroke="#1E2A4A" opacity="0.6"/>
+    <circle cx="266" cy="477" r="14" fill="#1E2A3A"/><text x="266" y="482" fill="#7DD3FC" font-size="13" text-anchor="middle">▤</text>
+    <text x="296" y="470" fill="#CBD5E1" font-weight="600">备份计划执行完成</text>
+    <text x="296" y="492" fill="#64748B">本周堆栈与配置已打包，保留策略自动清理 2 份过期备份</text>
+    <text x="1150" y="470" fill="#475569" font-size="11" text-anchor="end">周一 03:00</text>
+  </g>
+  <text x="572" y="560" fill="#475569" font-size="12" text-anchor="middle">— 向下滚动加载更早的历史（服务端分页）—</text>
+  <g>
+    <rect x="228" y="590" width="944" height="138" rx="12" fill="#0E1830" stroke="#1E2A4A"/>
+    <text x="252" y="622" fill="#94A3B8" font-size="12">页面能力</text>
+    <g font-size="12" fill="#CBD5E1">
+      <text x="252" y="650">· 操作结果 / 镜像更新 / 备份计划 / 容器异常 / 应用升级 统一聚合，持久化保存</text>
+      <text x="252" y="676">· 按关键词搜索；「清空当前显示」只清视图不删数据</text>
+      <text x="252" y="702">· Webhook 通知（设置中心 → 通知）把关键事件推送到企业微信 / 钉钉等外部渠道</text>
+    </g>
+  </g>
+</svg>
