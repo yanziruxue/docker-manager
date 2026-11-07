@@ -1,0 +1,124 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700" viewBox="0 0 1200 700" font-family="'PingFang SC','Microsoft YaHei','Noto Sans SC','Helvetica Neue',Arial,sans-serif">
+  <rect width="1200" height="700" fill="#FFFFFF"/>
+  <text x="600" y="42" text-anchor="middle" fill="#0F172A" font-size="26" font-weight="700">功能总览 · 八大模块</text>
+
+  <!-- ============ Row 1 ============ -->
+  <!-- 1 仪表盘 -->
+  <g>
+    <rect x="60" y="76" width="255" height="240" rx="12" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.5"/>
+    <rect x="60" y="76" width="255" height="46" rx="12" fill="#2563EB"/>
+    <rect x="60" y="106" width="255" height="16" fill="#2563EB"/>
+    <text x="82" y="106" fill="#FFFFFF" font-size="17" font-weight="700">仪表盘</text>
+    <g fill="#475569" font-size="13.5">
+      <text x="82" y="152">· 引擎概览与容器 / 镜像 / 堆栈统计</text>
+      <text x="82" y="180">· 每块磁盘 read / write MB/s + 利用率</text>
+      <text x="90" y="199" font-size="12" fill="#94A3B8">四瓦片共享悬停十字线与提示</text>
+      <text x="82" y="226">· 网络曲线支持接口切换（含 vNIC）</text>
+      <text x="82" y="253">· CPU 总体负载 · 系统运行时长</text>
+      <text x="82" y="280">· 温度监控（sysfs 零提权）</text>
+    </g>
+  </g>
+  <!-- 2 容器管理 -->
+  <g>
+    <rect x="335" y="76" width="255" height="240" rx="12" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.5"/>
+    <rect x="335" y="76" width="255" height="46" rx="12" fill="#0D9488"/>
+    <rect x="335" y="106" width="255" height="16" fill="#0D9488"/>
+    <text x="357" y="106" fill="#FFFFFF" font-size="17" font-weight="700">容器管理</text>
+    <g fill="#475569" font-size="13.5">
+      <text x="357" y="152">· 启停 / 重启 / 删除 / 强制停止</text>
+      <text x="357" y="180">· 详情页资源四卡实时曲线</text>
+      <text x="365" y="199" font-size="12" fill="#94A3B8">CPU / 内存 / 网络 I/O / 磁盘 I/O</text>
+      <text x="357" y="226">· 原生终端只读日志（xterm + demux）</text>
+      <text x="357" y="253">· 端口映射 IPv4 / IPv6 去重展示</text>
+      <text x="357" y="280">· WebUI 一键跳转 · 交互式 Web 终端</text>
+    </g>
+  </g>
+  <!-- 3 堆栈管理 -->
+  <g>
+    <rect x="610" y="76" width="255" height="240" rx="12" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.5"/>
+    <rect x="610" y="76" width="255" height="46" rx="12" fill="#7C3AED"/>
+    <rect x="610" y="106" width="255" height="16" fill="#7C3AED"/>
+    <text x="632" y="106" fill="#FFFFFF" font-size="17" font-weight="700">堆栈管理</text>
+    <g fill="#475569" font-size="13.5">
+      <text x="632" y="152">· compose 在线编辑 / 上传 / 下载</text>
+      <text x="632" y="180">· 编辑弹窗 SETTINGS / LABELS 页签</text>
+      <text x="632" y="207">· 服务级 WebUI / 标签 / 图标配置</text>
+      <text x="632" y="234">· 自定义图标库按名自动识别</text>
+      <text x="640" y="253" font-size="12" fill="#94A3B8">png &gt; jpg &gt; ico · 输入框自动匹配</text>
+      <text x="632" y="280">· 标签库与容器管理共用</text>
+    </g>
+  </g>
+  <!-- 4 镜像管理 -->
+  <g>
+    <rect x="885" y="76" width="255" height="240" rx="12" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.5"/>
+    <rect x="885" y="76" width="255" height="46" rx="12" fill="#EA580C"/>
+    <rect x="885" y="106" width="255" height="16" fill="#EA580C"/>
+    <text x="907" y="106" fill="#FFFFFF" font-size="17" font-weight="700">镜像管理</text>
+    <g fill="#475569" font-size="13.5">
+      <text x="907" y="152">· 拉取 / 删除 / 批量清理悬空镜像</text>
+      <text x="907" y="180">· 国内网络拉取加固</text>
+      <text x="915" y="199" font-size="12" fill="#94A3B8">远程引擎走服务器本地 CLI 加速</text>
+      <text x="907" y="226">· 加速源直接读写 daemon.json</text>
+      <text x="907" y="253">· sudoers 最小授权自动配置</text>
+      <text x="907" y="280">· 拉取进度与并发锁防重复</text>
+    </g>
+  </g>
+
+  <!-- ============ Row 2 ============ -->
+  <!-- 5 数据卷与网络 -->
+  <g>
+    <rect x="60" y="336" width="255" height="240" rx="12" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.5"/>
+    <rect x="60" y="336" width="255" height="46" rx="12" fill="#0891B2"/>
+    <rect x="60" y="366" width="255" height="16" fill="#0891B2"/>
+    <text x="82" y="366" fill="#FFFFFF" font-size="17" font-weight="700">数据卷与网络</text>
+    <g fill="#475569" font-size="13.5">
+      <text x="82" y="412">· 数据卷创建 / 删除 / 挂载点占用</text>
+      <text x="82" y="440">· Docker 网络查看与管理</text>
+      <text x="82" y="467">· 卷使用情况一目了然</text>
+      <text x="82" y="494">· 与容器 / 堆栈联动展示</text>
+    </g>
+  </g>
+  <!-- 6 通知中心 -->
+  <g>
+    <rect x="335" y="336" width="255" height="240" rx="12" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.5"/>
+    <rect x="335" y="336" width="255" height="46" rx="12" fill="#D97706"/>
+    <rect x="335" y="366" width="255" height="16" fill="#D97706"/>
+    <text x="357" y="366" fill="#FFFFFF" font-size="17" font-weight="700">通知中心</text>
+    <g fill="#475569" font-size="13.5">
+      <text x="357" y="412">· 操作结果统一聚合</text>
+      <text x="357" y="440">· 升级 / 备份 / 计划任务状态</text>
+      <text x="357" y="467">· 异常事件即时提醒</text>
+      <text x="357" y="494">· 一键清空已读</text>
+    </g>
+  </g>
+  <!-- 7 安全与会话 -->
+  <g>
+    <rect x="610" y="336" width="255" height="240" rx="12" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.5"/>
+    <rect x="610" y="336" width="255" height="46" rx="12" fill="#DC2626"/>
+    <rect x="610" y="366" width="255" height="16" fill="#DC2626"/>
+    <text x="632" y="366" fill="#FFFFFF" font-size="17" font-weight="700">安全与会话</text>
+    <g fill="#475569" font-size="13.5">
+      <text x="632" y="412">· 登录认证 + 初始化向导</text>
+      <text x="632" y="440">· 多用户管理</text>
+      <text x="632" y="467">· 空闲自动登出（可配置）</text>
+      <text x="632" y="494">· 密钥加密存储，绝不入库</text>
+    </g>
+  </g>
+  <!-- 8 设置中心与 OTA -->
+  <g>
+    <rect x="885" y="336" width="255" height="240" rx="12" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.5"/>
+    <rect x="885" y="336" width="255" height="46" rx="12" fill="#16A34A"/>
+    <rect x="885" y="366" width="255" height="16" fill="#16A34A"/>
+    <text x="907" y="366" fill="#FFFFFF" font-size="17" font-weight="700">设置中心与 OTA</text>
+    <g fill="#475569" font-size="13.5">
+      <text x="907" y="412">· 中 / 英界面切换 · 明暗主题</text>
+      <text x="907" y="440">· 应用内一键检查升级</text>
+      <text x="907" y="467">· 实时进度条（下载→解压→替换）</text>
+      <text x="907" y="494">· 被墙自动回退 gh-proxy 镜像</text>
+      <text x="915" y="513" font-size="12" fill="#94A3B8">支持 UPDATE_MIRROR 自定义</text>
+      <text x="907" y="540">· 升级仅替换二进制，数据不动</text>
+    </g>
+  </g>
+
+  <text x="600" y="628" text-anchor="middle" fill="#94A3B8" font-size="14">全部能力打包在一个约 41 MB 的 Linux x64 单文件里 · zip / deb 双格式分发 · 支持 quick-install.sh 一键安装</text>
+</svg>
