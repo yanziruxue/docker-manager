@@ -444,6 +444,8 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
 
   // 操作状态
   const [operatingStacks, setOperatingStacks] = useState<Set<string>>(new Set());
+  /** v1.50.28：重启中的容器；子表状态优先显示「重启中」而非笼统的「执行中」 */
+  const [restartingContainers, setRestartingContainers] = useState<Set<string>>(new Set());
   const [operationError, setOperationError] = useState<string | null>(null);
   const [batchOperating, setBatchOperating] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -597,6 +599,8 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
   // 容器操作（堆栈内单个容器）
   const handleContainerAction = async (containerName: string, action: "start" | "stop" | "restart" | "pause" | "unpause") => {
     if (!engineId) return;
+    // v1.50.28：重启动作单独标记，让容器子表显示「重启中」
+    if (action === "restart") setRestartingContainers((prev) => new Set(prev).add(containerName));
     addOperating(containerName);
     const actionNames: Record<string, string> = { start: "启动容器", stop: "停止容器", restart: "重启容器", pause: "暂停容器", unpause: "恢复容器" };
     try {
@@ -608,6 +612,7 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
       setOperationError(e.message || "操作失败");
     } finally {
       removeOperating(containerName);
+      if (action === "restart") setRestartingContainers((prev) => { const n = new Set(prev); n.delete(containerName); return n; });
     }
   };
 
@@ -619,7 +624,7 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
 
   const filtered = useMemo(() => {
     // 状态排序权重：running < partial < stopped < error < updating
-    const statusRank: Record<string, number> = { running: 0, partial: 1, stopped: 2, paused: 2, error: 3, updating: 4 };
+    const statusRank: Record<string, number> = { running: 0, partial: 1, restarting: 1, stopped: 2, paused: 2, error: 3, updating: 4 };
     const list = stacks.filter((s) => {
       const matchSearch = s.name.toLowerCase().includes(search.toLowerCase()) || s.description.toLowerCase().includes(search.toLowerCase());
       const matchStatus = statusFilter === "all" || s.status === statusFilter;
@@ -770,6 +775,7 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
             <option value="stopped">已停止</option>
             <option value="partial">部分运行</option>
             <option value="paused">已暂停</option>
+            <option value="restarting">重启中</option>
           </select>
 
           <span className="text-sm text-slate-400">{filtered.length} 个堆栈</span>
@@ -975,6 +981,7 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
           onClose={() => setContainersModal(null)}
           defaultVisibleColumns={defaultSubColumns}
           operatingNames={operatingStacks}
+          restartingNames={restartingContainers}
           language={menuLanguage}
           onContainerContextMenu={(e, stack, container) =>
             setContextMenu({ x: e.clientX, y: e.clientY, stack, container })

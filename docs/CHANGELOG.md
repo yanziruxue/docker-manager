@@ -16,6 +16,21 @@
 
 ---
 
+## v1.50.28 — 2026-11-07（**已构建 · 已推 Gitea**）
+
+- **修复：堆栈管理页容器子表状态列不显示「重启中」**（用户反馈）。根因与 v1.50.26 的 `paused` 完全同类，且多一层「执行中」覆盖：
+  - `server/docker.ts:1808`：堆栈内容器状态只判 `running / paused`，其余一律 `stopped` → Docker `State: "restarting"` 被吞成「已停止」。现抽出 `stackContainerStateMap`（`running/paused/restarting` + 兜底 `stopped`），与前端 `transformContainers` 的 `stateMap` 对齐。
+  - `src/transforms.ts:262`：`transformStacks` 内又做一次同样的一刀切，即使服务端传 `restarting` 也会变回 stopped。现抽出 `STACK_CONTAINER_STATUS_MAP: Record<string, ContainerStatus>` 透传；`statusMap` 同步补 `restarting: "restarting"`。
+  - `server/docker.ts` 堆栈级聚合：新增 `restarting` 计数，`running === 0 && restarting > 0 → "restarting"`（优先级高于 v1.50.26 的 paused 分支，因重启中是活跃过渡态），避免主表把重启中误报成「已停止」；`src/types.ts` 的 `StackStatus` 加 `"restarting"`；`Stacks.tsx` 的 `statusRank` 补 `restarting: 1`、状态筛选下拉补「重启中」。
+  - `src/components/StackContainersModal.tsx:169`：原 `operatingNames?.has(name) ? "operating" : container.status` 会把真实 restarting 盖成「执行中」；且右键点「重启」时 `handleContainerAction` 走 `addOperating(containerName)`，显示的是笼统的「执行中」。现新增可选 `restartingNames?: Set<string>`，状态优先级改为 **「重启中」（真实状态或本地重启标记） > 「执行中」 > 真实状态**；`Stacks.tsx` 新增 `restartingContainers` state，在 `action === "restart"` 期间加入/移除并传给子表。其他操作（启动/停止/暂停/恢复）仍显示「执行中」。
+  - 对照：容器管理页 `transformContainers.stateMap`、`StatusBadge`（`restarting`→「重启中」蓝色脉冲）、`ContainerStatus` 本就支持该状态，只有「堆栈 → 容器子表」链路缺失；本次**未改动容器管理页**。
+- 核验：tsc src 0；tsc server 0；46 组门禁 0 FAIL；SEA 四步 + 三处二进制 SHA（`b06e0d7f…`）逐字节一致（postject 产物 = zip 成员 = deb 成员）；zip 包成员 5 个；ELF `7f454c46`/e_machine `62`。
+  - **版本串判据**：两处真实版本常量 `CURRENT_VERSION` / `currentAppVersion()` 均为 `"1.50.28"`；原始字节中 `1.50.27` = **0**（旧版本串零残留）。
+  - **新旧包前端解码对比**：`重启中` old=4→new=5（新增筛选项）、`restartingNames` old=0→new=2；`已暂停` 9→9、`双击图标打开编辑堆栈` 1→1、`与容器管理共用同一套标签库` 1→1、`在此输入 compose 内容` 1→1、`右键打开操作菜单` 3→3（前几版功能全保留）。服务端段原始字节 `stackContainerStateMap` old=0→new=2、`v1.50.28` new=1。
+  - 源码级 **19 项断言全 PASS**（含两处旧一刀切写法归零、`restartingNames` prop/传参/渲染各 1、`statusRank` 与筛选各 1）。
+- 已知限制：`Dashboard.tsx` 复用子表时未传 `operatingNames`/`restartingNames`，仪表盘子表只显示真实状态（能显示 Docker 的 restarting）；仪表盘堆栈统计/筛选仍无「重启中」分类，本次不动。下一步：无。
+- 快照：commit 待定 + tag v1.50.28 推 Gitea main+tag 双 ref 一致；GitHub 按约定未推。
+
 ## v1.50.27 — 2026-11-05（**已构建 · 已推 Gitea**）
 
 - **新增：容器管理页行右键菜单（详情）**：用户要求「容器管理页面增加右键菜单，菜单里有一个详情按钮，点击打开容器详情弹窗」。此前 `Containers.tsx` 完全没有右键菜单（仅在「状态」列点击打开详情）。改动全部集中在 `src/pages/Containers.tsx`：

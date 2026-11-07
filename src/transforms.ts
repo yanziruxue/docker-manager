@@ -241,6 +241,14 @@ export function transformVolumes(raw: any): DockerVolume[] {
   });
 }
 
+/** v1.50.28：堆栈内容器状态映射，与 transformContainers 的 stateMap 对齐（透传 restarting） */
+const STACK_CONTAINER_STATUS_MAP: Record<string, ContainerStatus> = {
+  running: "running",
+  paused: "paused",
+  restarting: "restarting",
+  stopped: "stopped",
+};
+
 /** 转换堆栈列表 */
 export function transformStacks(raw: any[]): Stack[] {
   return raw.map((s) => {
@@ -248,6 +256,8 @@ export function transformStacks(raw: any[]): Stack[] {
       running: "running",
       stopped: "stopped",
       paused: "paused",
+      // v1.50.28：无运行容器但有重启中容器时，堆栈状态为「重启中」
+      restarting: "restarting",
       partial: "partial",
     };
 
@@ -258,8 +268,8 @@ export function transformStacks(raw: any[]): Stack[] {
       containerName: c.containerName || undefined,
       image: c.image || "",
       tag: c.tag || "latest",
-      // v1.50.26：透传 paused，此前前端二次一刀切会把它变回 stopped
-      status: c.status === "running" ? "running" : c.status === "paused" ? "paused" : "stopped",
+      // v1.50.26 透传 paused；v1.50.28 透传 restarting，此前前端二次一刀切会把它变回 stopped
+      status: STACK_CONTAINER_STATUS_MAP[c.status] || "stopped",
       network: c.network || "bridge",
       ip: c.ip || "—",
       ports: c.ports || "—",

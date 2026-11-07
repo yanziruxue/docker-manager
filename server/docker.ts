@@ -1744,6 +1744,13 @@ export async function getStacks(engine: DockerEngine): Promise<any[]> {
 
   const stacks: any[] = [];
   const seenProjects = new Set<string>();
+  // v1.50.28：堆栈内容器状态映射，与前端 transformContainers 的 stateMap 对齐。
+  // 此前 running/paused 之外一律 stopped，Docker 的 restarting 被吞掉，子表永远看不到「重启中」
+  const stackContainerStateMap: Record<string, string> = {
+    running: "running",
+    paused: "paused",
+    restarting: "restarting",
+  };
 
   for (const [projectName, projectContainers] of projectMap) {
     seenProjects.add(projectName);
@@ -1755,9 +1762,13 @@ export async function getStacks(engine: DockerEngine): Promise<any[]> {
     // v1.50.26：Docker 的 paused 是独立 State；全部/部分容器暂停且无运行容器时，
     // 堆栈状态应为「已暂停」而非「已停止」（此前 running===0 一律判 stopped）
     const paused = projectContainers.filter((c) => c.State === "paused").length;
+    // v1.50.28：restarting 是 Docker 的独立 State；无运行容器但有重启中容器时，
+    // 堆栈状态应为「重启中」而非「已停止」（重启中是活跃过渡态，优先级高于 paused）
+    const restarting = projectContainers.filter((c) => c.State === "restarting").length;
     const total = projectContainers.length;
     let status: string;
     if (running === total) status = "running";
+    else if (running === 0 && restarting > 0) status = "restarting";
     else if (running === 0 && paused > 0) status = "paused";
     else if (running === 0) status = "stopped";
     else status = "partial";
@@ -1803,9 +1814,9 @@ export async function getStacks(engine: DockerEngine): Promise<any[]> {
         containerName: (c.Names?.[0] || "").replace(/^\//, ""),
         image: image,
         tag: tag,
-        // v1.50.26：保留 paused 状态，此前与 exited 一起被吞成 stopped，
-        // 导致暂停后容器子表显示「已停止」、右键 paused 分支永不生效
-        status: c.State === "running" ? "running" : c.State === "paused" ? "paused" : "stopped",
+        // v1.50.26：保留 paused 状态；v1.50.28：透传 restarting（Docker 重启过程中的独立 State），
+        // 此前两者之外一律被吞成 stopped，导致子表显示「已停止」
+        status: stackContainerStateMap[c.State] || "stopped",
         network: netKeys[0] || "bridge",
         ip: ip || "—",
         ports: ports || "—",

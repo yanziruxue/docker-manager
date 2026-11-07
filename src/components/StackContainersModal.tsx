@@ -26,6 +26,8 @@ interface StackContainersModalProps {
   defaultVisibleColumns?: string[];
   /** 操作中的容器 / 堆栈名集合：命中时状态显示为「执行中」 */
   operatingNames?: Set<string>;
+  /** v1.50.28：重启中的容器名集合；命中时状态优先显示「重启中」 */
+  restartingNames?: Set<string>;
   /** 右键容器行回调（堆栈页用于打开右键菜单）；不传则忽略右键 */
   onContainerContextMenu?: (e: React.MouseEvent, stack: Stack, container: StackContainer) => void;
   /** 标题语言（默认中文） */
@@ -44,6 +46,7 @@ export function StackContainersModal({
   onClose,
   defaultVisibleColumns,
   operatingNames,
+  restartingNames,
   onContainerContextMenu,
   language = "zh",
   onOpenContainerDetail,
@@ -166,7 +169,13 @@ export function StackContainersModal({
                           }`}
                         >
                           <StatusBadge
-                            status={operatingNames?.has(container.name) ? "operating" : container.status}
+                            status={
+                              // v1.50.28：真实 restarting 或本地重启标记一律显示「重启中」，
+                              // 优先级高于笼统的「执行中」；其余操作仍显示「执行中」
+                              container.status === "restarting" || restartingNames?.has(container.name)
+                                ? "restarting"
+                                : operatingNames?.has(container.name) ? "operating" : container.status
+                            }
                           />
                         </button>
                       </td>
