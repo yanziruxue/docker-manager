@@ -29,7 +29,7 @@
 - **验证**：双 `tsc --noEmit` 0 错误；`npm run test:gates` **19 组全绿 0 FAIL**；SEA 四步 + 三处二进制 SHA-256 逐字节一致（`a9752b93…3a9770`）；ELF `7f454c46` / e_machine `62`；zip 5 成员；`dist/assets/index-*.js`（1,158,531 B）逐字节嵌进二进制；旧图库锚点（`galleryButton`/`共享图标库`/`本堆栈图库`）与新组件字符串（`图标库为空：可在`/`读取图库`/`无匹配图标`）核验通过。
 - **未完成 / 已知限制**：无浏览器真机复现，靠类型检查 + 门禁 + 字节级嵌入证据闭环；自动匹配仅按文件名（stem）子串过滤，未做模糊/拼音匹配。
 - **下一步**：无（纯 UI 精炼，自动识别与图库后端链路 v1.50.32 已就绪）。
-- 快照：commit + tag `v1.50.33` 推 Gitea，发布后补记；GitHub 按约定不推、未建 Release（OTA 不生效，需手动部署或建 Release）。
+- 快照：commit `982a8a9` + tag `v1.50.33` 推 Gitea；GitHub 按约定不推、未建 Release（OTA 不生效，需手动部署或建 Release）。
 
 ---
 
