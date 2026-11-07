@@ -25,7 +25,7 @@
 - **验证**：`vite build` 1691 模块转换通过、双 `tsc --noEmit` 0 错误；`npm run test:gates` **19 组全绿 0 FAIL（66 断言）**；SEA 四步 + 三处二进制 SHA-256 逐字节一致（`a128f23e…0908c8`）；ELF `7f454c46` / e_machine `62`；嵌入版本串 `1.50.34` 核验通过；zip 5 成员、deb md5sums 一致。
 - **未完成 / 已知限制**：无浏览器真机复现，靠类型检查 + 门禁 + 字节级嵌入证据闭环。
 - **下一步**：无（纯字段换位）。
-- 快照：commit `（待提交）` + tag `v1.50.34` 推 Gitea；GitHub 按约定不推、未建 Release（OTA 不生效，需手动部署或建 Release）。
+- 快照：commit `2253a5f` + tag `v1.50.34` 推 Gitea；GitHub 按约定不推、未建 Release（OTA 不生效，需手动部署或建 Release）。
 
 ---
 
