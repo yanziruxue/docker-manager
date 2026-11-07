@@ -32,7 +32,7 @@
   - **新旧包前端解码对比**：`该容器暂无日志输出` 0→1、`该堆栈暂无容器` 1→2（另一处来自 `StackContainersModal.tsx:126` 的容器子表空态，非重复冲突）、`重启中` 5→6（新增状态映射）；`暂无日志` 3→3（删 1 处旧文案，但新文案「该容器暂无**日志输出**」含该子串，故总数持平）；旧功能锚点 `与容器管理共用同一套标签库`=1、`双击图标打开编辑堆栈`=1、`右键打开操作菜单`=3、`在此输入 compose 内容`=1 全保留。
   - 源码级 **11 项断言全 PASS**（含 `const runningContainers = stack.containers.filter`=0、`runningContainers.map`=0、旧「暂无日志」空态=0、`c.containerName || c.containerId || c.name`=1）。
 - 已知限制：① `server/docker.ts:3162` 注释承认日志有 8 字节 multiplex header 但未 demux（只影响行首乱码，不影响「空」），本次未动；② 容器详情「基本信息」页签仍无 ExitCode / RestartCount / OOMKilled / 上次退出时间（`server/docker.ts:500` 已并行 inspect，补字段成本低），本次未动。下一步：如需要再补这两项。
-- 快照：commit 待定 + tag v1.50.29 推 Gitea main+tag 双 ref 一致；GitHub 按约定未推。
+- 快照：commit `386618f` + tag v1.50.29 推 Gitea；`ls-remote` 核对 main/tag 双 ref 均指向 `386618fa81c78fc002ed0cbc9644e16c80563d64`（随后 CHANGELOG 补 SHA 再推一次 main，故 main 会前进一提交）；GitHub 按约定未推。
 
 ## v1.50.28 — 2026-11-07（**已构建 · 已推 Gitea**）
 
