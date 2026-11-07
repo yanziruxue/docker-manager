@@ -16,6 +16,23 @@
 
 ---
 
+## v1.50.35 — 2026-11-07（**已构建 · 已推 Gitea**）
+
+- **需求（UI）**：把 README 的 banner 主视觉（`docs/images/banner.svg`）用到**登录页左侧品牌区**，整体页面搭配美观。
+- **已完成**：
+  - `public/login-banner.svg` 🆕：banner 同源副本（vite 复制进 `dist/`，由 SEA 打包嵌入，运行时 `/login-banner.svg` 直出）。
+  - `src/components/auth/LoginPage.tsx`：`AuthLayout` 左侧品牌区改造——
+    - 渐变背景由 `blue-700→blue-500` 改为与 banner 同源的深海军蓝 `#0B1220→#0F1B33→#123055`，装饰圆改蓝色系低透明度，与底部 banner 卡片自然融合；
+    - 底部新增 banner 展示卡（`rounded-xl` + `ring-1 ring-white/10` + 投影，禁选中/禁拖拽），原「自托管 · 数据不出内网」说明移至卡片下方（文案修正为「单文件二进制即可运行」）；
+    - 半透明前景元素（Logo 行/亮点图标底/badge）透明度微调适配新底色。
+  - `package.json` 升 `1.50.34 → 1.50.35`。
+- **验证**：`vite build` 通过且 `dist/login-banner.svg` 在嵌入清单（前端文件 4→5）；双 `tsc --noEmit` 0 错误；`npm run test:gates` 全绿；静态托管 dist 用 Edge 无头截图目检登录页（左栏 banner 卡片渲染正常、配色统一、无遮挡溢出）；SEA 四步 + 三处二进制 SHA-256 逐字节一致；ELF / 嵌入版本串核验通过。
+- **未完成 / 已知限制**：小屏（<lg）左栏整体隐藏、不显示 banner（沿既有响应式策略）。
+- **下一步**：无。
+- 快照：commit `（见 git log）` + tag `v1.50.35` 推 Gitea；GitHub 未推。
+
+---
+
 ## v1.50.34 — 2026-11-07（**已构建 · 已推 Gitea**）
 
 - **需求（UI 微调）**：编辑堆栈弹窗「SETTINGS 页」中，**描述**与**标签**两个字段交换位置——标签上移、描述下置（用户要求）。

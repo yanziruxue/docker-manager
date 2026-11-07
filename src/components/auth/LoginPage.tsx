@@ -49,8 +49,10 @@ export function LoginPage({ onDone, notice }: Props) {
 
 /**
  * v1.48.0 登录页分栏骨架（仿品牌落地页）：
- * 左侧蓝色渐变品牌区（Logo + 主标语 + 功能亮点列表 + 底部说明），
+ * 左侧品牌区（Logo + 主标语 + 功能亮点列表 + 底部品牌 banner 展示），
  * 右侧白色表单区；小屏（<lg）左栏隐藏、只显表单。
+ * v1.50.35：品牌区配色与 docs/images/banner.svg 同源（深海军蓝渐变），
+ * 底部嵌入 banner 主视觉（public/login-banner.svg，vite 复制进 dist 由 SEA 嵌入）。
  */
 function AuthLayout({ children }: { children: React.ReactNode }) {
   const features: { icon: React.ReactNode; text: string; badge?: string }[] = [
@@ -64,16 +66,16 @@ function AuthLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex h-screen bg-white">
-      {/* 左侧品牌区 */}
-      <aside className="hidden lg:flex w-[46%] max-w-[640px] flex-shrink-0 relative overflow-hidden bg-gradient-to-br from-blue-700 via-blue-600 to-blue-500 flex-col justify-between px-10 py-8 text-white">
+      {/* 左侧品牌区（渐变与 banner.svg 背景同源，使底部 banner 卡片自然融入） */}
+      <aside className="hidden lg:flex w-[46%] max-w-[640px] flex-shrink-0 relative overflow-hidden bg-gradient-to-br from-[#0B1220] via-[#0F1B33] to-[#123055] flex-col justify-between px-10 py-8 text-white">
         {/* 装饰圆 */}
-        <div className="absolute -top-24 -right-16 w-72 h-72 rounded-full bg-white/5 pointer-events-none" />
-        <div className="absolute top-1/3 -left-20 w-80 h-80 rounded-full bg-white/5 pointer-events-none" />
-        <div className="absolute -bottom-28 right-10 w-64 h-64 rounded-full bg-black/5 pointer-events-none" />
+        <div className="absolute -top-24 -right-16 w-72 h-72 rounded-full bg-blue-500/10 pointer-events-none" />
+        <div className="absolute top-1/3 -left-20 w-80 h-80 rounded-full bg-cyan-400/5 pointer-events-none" />
+        <div className="absolute -bottom-28 right-10 w-64 h-64 rounded-full bg-blue-400/5 pointer-events-none" />
 
         {/* Logo 行 */}
         <div className="relative flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-lg bg-white/15 ring-1 ring-white/25 flex items-center justify-center">
+          <div className="w-9 h-9 rounded-lg bg-white/10 ring-1 ring-white/20 flex items-center justify-center">
             <Boxes size={20} />
           </div>
           <span className="font-semibold tracking-wide">Docker 管理</span>
@@ -86,19 +88,19 @@ function AuthLayout({ children }: { children: React.ReactNode }) {
             <br />
             都该有「在哪、什么状态」的答案
           </h1>
-          <p className="mt-4 text-sm leading-relaxed text-blue-100 max-w-md">
+          <p className="mt-4 text-sm leading-relaxed text-blue-100/80 max-w-md">
             面向自托管 NAS / 服务器的 Docker 可视化管理平台：
             容器、堆栈、镜像、数据卷、网络集中管理，资源曲线实时呈现，数据全部留在自己手里。
           </p>
           <ul className="mt-6 space-y-2.5 max-w-md">
             {features.map((f, i) => (
-              <li key={i} className="flex items-center gap-2.5 text-[13px] text-blue-50">
-                <span className="w-5 h-5 rounded-md bg-white/15 flex items-center justify-center flex-shrink-0">
+              <li key={i} className="flex items-center gap-2.5 text-[13px] text-blue-50/90">
+                <span className="w-5 h-5 rounded-md bg-white/10 flex items-center justify-center flex-shrink-0">
                   {f.icon}
                 </span>
                 <span className="truncate">{f.text}</span>
                 {f.badge && (
-                  <span className="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-white/15 text-blue-100 leading-none">
+                  <span className="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-white/10 text-blue-100 leading-none">
                     {f.badge}
                   </span>
                 )}
@@ -107,10 +109,18 @@ function AuthLayout({ children }: { children: React.ReactNode }) {
           </ul>
         </div>
 
-        {/* 底部说明 */}
-        <p className="relative text-xs text-blue-200/80">
-          自托管 · 数据不出内网 · 一个 Docker 容器即可运行
-        </p>
+        {/* 底部：品牌 banner 展示卡（与 README 主视觉同源）+ 说明 */}
+        <div className="relative">
+          <img
+            src="/login-banner.svg"
+            alt="Docker Manager Yanzi"
+            className="w-full rounded-xl ring-1 ring-white/10 shadow-lg shadow-black/30 select-none pointer-events-none"
+            draggable={false}
+          />
+          <p className="mt-2.5 text-xs text-blue-200/70">
+            自托管 · 数据不出内网 · 单文件二进制即可运行
+          </p>
+        </div>
       </aside>
 
       {/* 右侧表单区 */}

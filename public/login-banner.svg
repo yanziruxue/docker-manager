@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="320" viewBox="0 0 1200 320" font-family="'PingFang SC','Microsoft YaHei','Noto Sans SC','Helvetica Neue',Arial,sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0B1220"/>
+      <stop offset="0.55" stop-color="#0F1B33"/>
+      <stop offset="1" stop-color="#123055"/>
+    </linearGradient>
+    <linearGradient id="boxBlue" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3BA9F5"/>
+      <stop offset="1" stop-color="#1D7FD6"/>
+    </linearGradient>
+    <linearGradient id="boxTeal" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3ED6C4"/>
+      <stop offset="1" stop-color="#18A999"/>
+    </linearGradient>
+    <linearGradient id="boxAmber" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFC66B"/>
+      <stop offset="1" stop-color="#F09A3E"/>
+    </linearGradient>
+    <pattern id="dots" width="26" height="26" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1.4" fill="#3B82F6" opacity="0.18"/>
+    </pattern>
+  </defs>
+
+  <rect width="1200" height="320" fill="url(#bg)"/>
+  <rect width="1200" height="320" fill="url(#dots)"/>
+  <circle cx="1090" cy="40" r="150" fill="#2563EB" opacity="0.10"/>
+  <circle cx="120" cy="300" r="120" fill="#0EA5E9" opacity="0.08"/>
+
+  <!-- 左侧：容器堆叠插画（抽象集装箱 + 鲸背弧线） -->
+  <g transform="translate(64,58)">
+    <!-- 鲸背弧线 -->
+    <path d="M -18 196 C 30 150 210 150 262 196 L 262 206 L -18 206 Z" fill="#1E3A5F"/>
+    <path d="M -18 196 C 30 150 210 150 262 196" fill="none" stroke="#3BA9F5" stroke-width="3" opacity="0.85"/>
+    <!-- 尾巴 -->
+    <path d="M -34 178 C -50 160 -46 140 -30 130 C -34 148 -26 160 -14 168 Z" fill="#3BA9F5" opacity="0.9"/>
+    <!-- 喷水 -->
+    <g stroke="#7DD3FC" stroke-width="3" stroke-linecap="round" opacity="0.9">
+      <line x1="30" y1="128" x2="22" y2="106"/>
+      <line x1="36" y1="126" x2="36" y2="100"/>
+      <line x1="42" y1="128" x2="50" y2="106"/>
+    </g>
+    <!-- 集装箱三层 -->
+    <g>
+      <rect x="52" y="112" width="52" height="30" rx="4" fill="url(#boxAmber)"/>
+      <rect x="112" y="112" width="52" height="30" rx="4" fill="url(#boxTeal)"/>
+      <rect x="82" y="74" width="52" height="30" rx="4" fill="url(#boxBlue)"/>
+      <rect x="142" y="74" width="52" height="30" rx="4" fill="url(#boxAmber)"/>
+      <rect x="112" y="36" width="52" height="30" rx="4" fill="url(#boxTeal)"/>
+      <!-- 集装箱纹路 -->
+      <g stroke="#0B1220" stroke-opacity="0.25" stroke-width="2">
+        <line x1="66" y1="112" x2="66" y2="142"/><line x1="80" y1="112" x2="80" y2="142"/><line x1="94" y1="112" x2="94" y2="142"/>
+        <line x1="126" y1="112" x2="126" y2="142"/><line x1="140" y1="112" x2="140" y2="142"/><line x1="154" y1="112" x2="154" y2="142"/>
+        <line x1="96" y1="74" x2="96" y2="104"/><line x1="110" y1="74" x2="110" y2="104"/><line x1="124" y1="74" x2="124" y2="104"/>
+        <line x1="156" y1="74" x2="156" y2="104"/><line x1="170" y1="74" x2="170" y2="104"/><line x1="184" y1="74" x2="184" y2="104"/>
+        <line x1="126" y1="36" x2="126" y2="66"/><line x1="140" y1="36" x2="140" y2="66"/><line x1="154" y1="36" x2="154" y2="66"/>
+      </g>
+    </g>
+    <!-- 波浪 -->
+    <g stroke="#38BDF8" stroke-width="3" stroke-linecap="round" opacity="0.7">
+      <line x1="-30" y1="222" x2="10" y2="222"/>
+      <line x1="26" y1="222" x2="66" y2="222"/>
+      <line x1="-10" y1="238" x2="30" y2="238"/>
+      <line x1="46" y1="238" x2="86" y2="238"/>
+    </g>
+  </g>
+
+  <!-- 右侧：标题与副标题 -->
+  <g>
+    <text x="420" y="128" fill="#FFFFFF" font-size="56" font-weight="700" letter-spacing="1">Docker Manager <tspan fill="#38BDF8">Yanzi</tspan></text>
+    <text x="424" y="170" fill="#94A3B8" font-size="21">面向自建 NAS / 服务器的一体化 Docker 可视化管理面板</text>
+
+    <!-- 特性徽章 -->
+    <g font-size="16" font-weight="600">
+      <g>
+        <rect x="424" y="204" width="150" height="38" rx="19" fill="none" stroke="#3BA9F5" stroke-width="1.5"/>
+        <circle cx="448" cy="223" r="5" fill="#3BA9F5"/>
+        <text x="462" y="229" fill="#BFDBFE">单文件二进制</text>
+      </g>
+      <g>
+        <rect x="590" y="204" width="150" height="38" rx="19" fill="none" stroke="#3ED6C4" stroke-width="1.5"/>
+        <circle cx="614" cy="223" r="5" fill="#3ED6C4"/>
+        <text x="628" y="229" fill="#99F6E4">多引擎接入</text>
+      </g>
+      <g>
+        <rect x="756" y="204" width="150" height="38" rx="19" fill="none" stroke="#FFC66B" stroke-width="1.5"/>
+        <circle cx="780" cy="223" r="5" fill="#FFC66B"/>
+        <text x="794" y="229" fill="#FDE68A">实时资源监控</text>
+      </g>
+      <g>
+        <rect x="922" y="204" width="150" height="38" rx="19" fill="none" stroke="#A78BFA" stroke-width="1.5"/>
+        <circle cx="946" cy="223" r="5" fill="#A78BFA"/>
+        <text x="960" y="229" fill="#DDD6FE">应用内 OTA</text>
+      </g>
+    </g>
+
+    <text x="424" y="278" fill="#475569" font-size="15">Node 22 SEA 单可执行文件 · REST + WebSocket + SSE 三通道 · systemd 托管 · 默认端口 5024</text>
+  </g>
+</svg>
