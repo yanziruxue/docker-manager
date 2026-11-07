@@ -16,6 +16,23 @@
 
 ---
 
+## v1.50.31 — 2026-11-07（**已构建 · 推 Gitea 中**）
+
+- **需求**：用户反馈「创建新堆栈弹窗点击创建后白屏」，P0 阻断级回归。
+- **根因**：`CreateStackModal.handleCreate` → `onCreated(name)` → `Stacks.handleStackCreated`（`src/pages/Stacks.tsx:425`）里 `fetchEngineStacks()` 返回的是**后端原始数组**，旧代码直接 `setEditStack(created)` 把原始对象伪装成 `Stack` 交给 `StackEditorModal`。后端 `getStacks`（`server/docker.ts:1941`）的 `settings` 只有 `{autoStart, forceRecreate, timeout, autoUpdate, ...}`，**没有 `name`**；正常列表走 `App.tsx:377 transformStacks()` 会补 `settings.name = s.name`（`src/transforms.ts:298`）。于是 `StackEditorModal` 渲染期 `settings.name.length` 抛 `TypeError: Cannot read properties of undefined` → 整页白屏。「新建后自动打开编辑弹窗」链路自 v1.50.22 引入后一直绕过转换层，右键 / 双击图标编辑均正常。
+- **已完成**：
+  - `src/pages/Stacks.tsx`：从 `../transforms` 引入 `transformStacks`；`handleStackCreated` 改为 `transformStacks(await fetchEngineStacks(engineId))` 后再 `find` / `setEditStack`。
+  - `StackEditorModal` 四个初始化 state 加兜底：`settings` 用 `useState<StackSettings>(() => ({...}))` 逐字段补齐（name / description / iconUrl / defaultProfiles / externalComposePath / externalEnvPath / autoStart / forceRecreate / dockerTimeout / stopTimeout / autoUpdateEnabled / autoUpdateMode / tags），`webuiLabels` 用 `Array.isArray` 兜底，`composeContent` / `envContent` 用 `?? ""`；任何来源的脏对象都不再整页崩。
+  - 新增 `scripts/check-stack-create.mjs` 门禁（17 项）：源码接线断言 + 真实 `transformStacks` 编译后跑模拟后端 raw + 负向证据（未经转换的 raw 访问 `settings.name.length` 必抛错）；接入 `test:gates`（17 → **18 组**）。
+  - 修正 `scripts/check-log-demux.mjs` 假红：版本断言由硬编码 `pkg.version === "1.50.30"` 改为语义比较「不低于 demux 引入版 1.50.30」，避免每次升版假红。
+  - `package.json`：1.50.30 → **1.50.31**，新增 `test:stackcreate`。
+- **验证**：双 `tsc --noEmit` 0；新门禁 `PASS=17 FAIL=0`；**负向自检**：把 `transformStacks(await fetchEngineStacks(engineId))` 注入回 `await fetchEngineStacks(engineId)` ⇒ `PASS=16 FAIL=1 / exit 1`，还原 ⇒ `17/0`；`npm run test:gates` **18 组全绿 0 FAIL**；SEA 四步 + 三处二进制 SHA-256 逐字节一致（发布后补记）；ELF `7f454c46` / e_machine `62`；zip 成员 5 个。
+- **未完成 / 已知限制**：未做浏览器端真机复现，靠静态链路 + 真实转换函数行为验证 + 负向证据闭环。
+- **下一步**：无。可选：全局加 React ErrorBoundary，让任何单点渲染异常降级为错误卡片而非整页白屏。
+- 快照：commit 待补 + tag v1.50.31 推 Gitea，发布后补记；GitHub 按约定未推（2026-11-07 的一次性全量同步为特例，未恢复常态双推）。
+
+---
+
 ## v1.50.30 — 2026-11-07（**已构建 · 已推 Gitea + GitHub（含 Release）**）
 
 - **需求**：用户看到堆栈日志每行最左边有「方框问号」，要求日志改成「原生终端窗口那种显示」。确认范围＝**仅堆栈日志弹窗**（容器详情「日志」页保留现有三列结构化视图），工具栏保留「容器 / 行数」下拉，不加级别筛选、不加搜索/字号/全屏；容器控制台 `XTermTerminal` 不动。

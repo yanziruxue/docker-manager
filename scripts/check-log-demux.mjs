@@ -110,7 +110,16 @@ ok("LogTerminal 复用 xterm 渲染 ANSI", termSrc.includes("@xterm/xterm") && t
 ok("LogTerminal 不连 WebSocket / shell", !termSrc.includes("new WebSocket") && !termSrc.includes("term.onData"));
 ok("堆栈日志弹窗改用 LogTerminal", stacksSrc.includes("<LogTerminal lines={logs} />"));
 ok("弹窗不再用 <pre> + break-all 渲染日志", !stacksSrc.includes('whitespace-pre-wrap break-all">{logs.join'));
-ok("版本号已升到 1.50.30", pkg.version === "1.50.30");
+// 只校验「不低于 demux 引入版」，避免每次升版本号都假红
+const verNums = pkg.version.split(".").map(Number);
+const atLeast = (a, b) => {
+  for (let i = 0; i < 3; i++) {
+    if ((a[i] || 0) > (b[i] || 0)) return true;
+    if ((a[i] || 0) < (b[i] || 0)) return false;
+  }
+  return true;
+};
+ok("版本号不低于 1.50.30（demux 引入版）", atLeast(verNums, [1, 50, 30]));
 
 console.log(`\n结果: PASS=${pass}  FAIL=${fail}`);
 process.exit(fail > 0 ? 1 : 0);

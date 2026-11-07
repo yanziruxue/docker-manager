@@ -42,11 +42,13 @@ import type {
   ResourceTag,
   ComposeTemplate,
   ComposeInsertPosition,
+  StackSettings,
+  StackWebUILabel,
 } from "../types";
 import { convert, type ConvertResult } from "../lib/compose-convert";
 import { copyText, selectNodeText } from "../lib/clipboard";
 import { normalizeInsert, insertPositionLabel } from "../lib/compose-template";
-import { formatBytes } from "../transforms";
+import { formatBytes, transformStacks } from "../transforms";
 import {
   createStackApi,
   createStackFromBackupApi,
@@ -427,7 +429,9 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
     onRefresh?.();
     if (!engineId) return;
     try {
-      const list = await fetchEngineStacks(engineId);
+      // 后端返回的是原始结构（settings 里没有 name 等前端字段），必须走 transformStacks
+      // 补齐成 Stack 再交给 StackEditorModal，否则渲染期 settings.name.length 抛错导致整页白屏
+      const list = transformStacks(await fetchEngineStacks(engineId));
       const created = list.find((s) => s.name === name);
       if (created) setEditStack(created);
     } catch {
@@ -1238,10 +1242,25 @@ const STACK_NAME_HINT = "堆栈名称只能包含小写字母、数字、横线(
 
 function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = [], onCreateTag, composeTemplates = [], autoDetectWebui = true }: { stack: Stack; onClose: () => void; engineId?: string; onRefresh?: () => void; tagLibrary?: ResourceTag[]; onCreateTag?: (name: string) => Promise<ResourceTag | null>; composeTemplates?: ComposeTemplate[]; autoDetectWebui?: boolean }) {
   const [activeTab, setActiveTab] = useState<"compose" | "env" | "webui" | "settings">("compose");
-  const [composeContent, setComposeContent] = useState(stack.composeContent);
-  const [envContent, setEnvContent] = useState(stack.envContent || "");
-  const [webuiLabels, setWebuiLabels] = useState(stack.webuiLabels);
-  const [settings, setSettings] = useState(stack.settings);
+  const [composeContent, setComposeContent] = useState(stack.composeContent ?? "");
+  const [envContent, setEnvContent] = useState(stack.envContent ?? "");
+  const [webuiLabels, setWebuiLabels] = useState<StackWebUILabel[]>(Array.isArray(stack.webuiLabels) ? stack.webuiLabels : []);
+  /** 补齐完整 StackSettings：后端原始对象缺 name 时，下面的 settings.name.length 会抛错导致整页白屏 */
+  const [settings, setSettings] = useState<StackSettings>(() => ({
+    name: stack.settings?.name || stack.name || "",
+    description: stack.settings?.description ?? stack.description ?? "",
+    iconUrl: stack.settings?.iconUrl || stack.icon || "",
+    defaultProfiles: stack.settings?.defaultProfiles || [],
+    externalComposePath: stack.settings?.externalComposePath || "",
+    externalEnvPath: stack.settings?.externalEnvPath || "",
+    autoStart: stack.settings?.autoStart ?? false,
+    forceRecreate: stack.settings?.forceRecreate ?? false,
+    dockerTimeout: stack.settings?.dockerTimeout ?? 60,
+    stopTimeout: stack.settings?.stopTimeout ?? 30,
+    autoUpdateEnabled: stack.settings?.autoUpdateEnabled ?? false,
+    autoUpdateMode: stack.settings?.autoUpdateMode || "notify",
+    tags: stack.settings?.tags || [],
+  }));
   const [yamlValid, setYamlValid] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
