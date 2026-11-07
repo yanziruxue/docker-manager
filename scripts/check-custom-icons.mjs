@@ -7,7 +7,7 @@
  *   ③ 文件枚举：只认普通文件 + 白名单扩展 + 2MB 以内，子目录与非图标文件排除；
  *   ④ 取图防穿越：.. / 子目录 / 非法扩展 / 不存在 / 未绑定 一律拒绝；
  *   ⑤ 名称自动匹配：compose 默认命名派生服务名、大小写不敏感、手工图标不被覆盖；
- *   ⑥ 源码接线：服务端三路由、设置持久化、App 装配、设置卡片、图库下拉合并。
+ *   ⑥ 源码接线：服务端三路由、设置持久化、App 装配、设置卡片、图标输入自动匹配（IconAutoComplete）。
  *
  * 运行：node scripts/check-custom-icons.mjs （已接入 npm run test:gates）
  */
@@ -161,9 +161,12 @@ ok("页面设置新增图标库目录卡片", settingsSrc.includes('title="图�
 ok("卡片写入 modal.iconDir", settingsSrc.includes('update("modal", "iconDir", v)'));
 ok("卡片调用检测接口", settingsSrc.includes("checkCustomIconDirApi("));
 const stacksSrc = read("src/pages/Stacks.tsx");
-ok("图库下拉拉取自定义目录", stacksSrc.includes("listCustomIconsApi().catch(() => null)"));
-ok("图库下拉分组：共享图标库", stacksSrc.includes("共享图标库"));
-ok("图库下拉分组：本堆栈图库", stacksSrc.includes("本堆栈图库"));
+ok("新增图标输入自动匹配组件", fs.existsSync("src/components/IconAutoComplete.tsx"));
+const iconAutoSrc = read("src/components/IconAutoComplete.tsx");
+ok("自动匹配组件拉取自定义目录与堆栈图库", iconAutoSrc.includes("listCustomIconsApi") && iconAutoSrc.includes("listStackIconsApi"));
+ok("自动匹配组件按名称过滤", iconAutoSrc.includes("e.stem.includes(q)"));
+ok("编辑堆栈图标输入接入 IconAutoComplete", stacksSrc.includes("<IconAutoComplete"));
+ok("设置卡片移除冗长描述段落", !settingsSrc.includes("绑定后自动识别：堆栈"));
 const pkg = JSON.parse(read("package.json"));
 // 语义比较「不低于引入版」：避免后续升版本时硬编码断言假红
 const verCmp = (a, b) => {

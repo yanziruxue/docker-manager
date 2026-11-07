@@ -387,6 +387,7 @@ export function Input({
   readOnly,
   className = "",
   onKeyDown,
+  onFocus,
 }: {
   value: string;
   onChange?: (val: string) => void;
@@ -398,6 +399,8 @@ export function Input({
   className?: string;
   /** 回车提交等键盘交互（v1.15.2 起透传：此前该 prop 被静默丢弃，登录页回车不生效） */
   onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+  /** 聚焦时回调（v1.50.33：图标输入框自动匹配用） */
+  onFocus?: () => void;
 }) {
   return (
     <input
@@ -408,6 +411,7 @@ export function Input({
       disabled={disabled}
       readOnly={readOnly}
       onKeyDown={onKeyDown}
+      onFocus={onFocus}
       className={`w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all disabled:bg-slate-50 disabled:text-slate-400 ${className}`}
     />
   );

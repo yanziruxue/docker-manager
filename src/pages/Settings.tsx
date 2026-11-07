@@ -4371,11 +4371,6 @@ docker-compose version</code>
                   {iconDirCheck.message}
                 </p>
               )}
-              <div className="mt-3 rounded-lg bg-slate-50 border border-slate-100 px-3 py-2.5 text-xs text-slate-500 space-y-1">
-                <p>绑定后自动识别：堆栈 / 容器 / 服务名与图标文件名（不含扩展名）同名即自动套用，大小写不敏感；compose 的 <code>&lt;项目&gt;-&lt;服务&gt;-1</code> 命名会自动派生出服务名。</p>
-                <p>同名多格式优先级：<b>png &gt; jpg/jpeg &gt; ico &gt; 其他</b>（svg / webp / gif）。手工设置的图标优先保留，自定义目录找不到匹配时回落原图库。</p>
-                <p>支持 png / jpg / gif / svg / webp / ico，单张上限 2MB；「编辑堆栈」的图库下拉也会合并显示本目录图标。远程 SSH / TCP 引擎读取的是本服务所在机器的目录。</p>
-              </div>
             </Card>
           </div>
         )}

@@ -16,6 +16,23 @@
 
 ---
 
+## v1.50.33 — 2026-11-07（**已构建 · 已推 Gitea**）
+
+- **需求（UI 精炼）**：① 移除「设置中心 → 页面设置 → 图标库目录」卡片下那段 3 行冗长描述文字；② 移除「编辑堆栈」图标字段的「图库」下拉按钮，改为在图标**填入框输入名称即自动匹配**图库图标（参考标签输入框的自动匹配交互）。
+- **已完成**：
+  - `src/components/IconAutoComplete.tsx` 🆕：图标输入框自动匹配组件——聚焦/输入时实时过滤图库（自定义图标目录 `GET /api/custom-icons` + 本堆栈 `icon/` 文件夹 `listStackIconsApi`），下拉点选即写入图标 URL；按名称（去扩展名小写）子串过滤；外部点击 / Esc 关闭；已填 URL、内嵌 SVG、SVG 源码时不弹补全避免干扰；`loading` / 空库 / 无匹配 三态文案。
+  - `src/pages/Stacks.tsx`：删除整套图库下拉状态与按钮（`galleryTarget/galleryFiles/galleryCustom/galleryLoading`、`openIconGallery`、`pickGalleryIcon`、`galleryItem`、`galleryPanel`、`galleryButton` 共 ~105 行）；4 处 `galleryButton(...)` 调用移除；堆栈 SETTINGS 与 LABELS 两处图标 `<Input>` 替换为 `<IconAutoComplete>`；清理无用 import（`FolderOpen`/`ChevronDown`/`listStackIconsApi`/`listCustomIconsApi`/`CustomIconEntry`）。
+  - `src/components/UI.tsx`：`Input` 透传 `onFocus` 回调（仅 `IconAutoComplete` 使用）。
+  - `src/pages/Settings.tsx`：图标库目录卡片移除 3 行描述段落（保留卡片、路径输入、「检测目录」与错误文案）。
+  - `scripts/check-custom-icons.mjs`：旧「图库下拉」断言改为「IconAutoComplete 输入自动匹配」断言（组件存在 / 拉取双来源 / 按名称过滤 / 接入编辑堆栈），并新增「设置卡片移除冗长描述段落」负向断言；含回归注入自检（坏过滤 ⇒ `FAIL=1`、`exit 1`，还原 ⇒ `66/0`）。
+  - `package.json` 升 `1.50.32 → 1.50.33`。
+- **验证**：双 `tsc --noEmit` 0 错误；`npm run test:gates` **19 组全绿 0 FAIL**；SEA 四步 + 三处二进制 SHA-256 逐字节一致（`a9752b93…3a9770`）；ELF `7f454c46` / e_machine `62`；zip 5 成员；`dist/assets/index-*.js`（1,158,531 B）逐字节嵌进二进制；旧图库锚点（`galleryButton`/`共享图标库`/`本堆栈图库`）与新组件字符串（`图标库为空：可在`/`读取图库`/`无匹配图标`）核验通过。
+- **未完成 / 已知限制**：无浏览器真机复现，靠类型检查 + 门禁 + 字节级嵌入证据闭环；自动匹配仅按文件名（stem）子串过滤，未做模糊/拼音匹配。
+- **下一步**：无（纯 UI 精炼，自动识别与图库后端链路 v1.50.32 已就绪）。
+- 快照：commit + tag `v1.50.33` 推 Gitea，发布后补记；GitHub 按约定不推、未建 Release（OTA 不生效，需手动部署或建 Release）。
+
+---
+
 ## v1.50.32 — 2026-11-07（**已构建 · 已推 Gitea**）
 
 - **需求**：用户有一整个图标文件夹，希望与原有堆栈图库「合成一个」：绑定路径时按名称自动识别、未绑定时用现有方案；路径设置放在「设置中心 → 页面设置」新增图标卡片。确认规则：**绑定目录优先、原图库兜底**；服务名 `server` 自动匹配 `server.png/jpg/ico`，格式优先级 **png > jpg/jpeg > ico > 其他**；路径为**服务端绝对路径**。
