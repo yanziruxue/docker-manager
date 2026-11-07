@@ -16,7 +16,7 @@
 
 ---
 
-## v1.50.30 — 2026-11-07（**已构建 · 已推 Gitea**）
+## v1.50.30 — 2026-11-07（**已构建 · 已推 Gitea + GitHub（含 Release）**）
 
 - **需求**：用户看到堆栈日志每行最左边有「方框问号」，要求日志改成「原生终端窗口那种显示」。确认范围＝**仅堆栈日志弹窗**（容器详情「日志」页保留现有三列结构化视图），工具栏保留「容器 / 行数」下拉，不加级别筛选、不加搜索/字号/全屏；容器控制台 `XTermTerminal` 不动。
 - **根因**：Docker Engine `/containers/:id/logs` 对非 TTY 容器返回 multiplexed stream，每条日志帧前有 8 字节头 `[type(1)=1 stdout / 2 stderr | 0,0,0 | size(4,大端)]`。旧实现 `server/docker.ts` 把整个 Buffer 直接 `.toString("utf-8")` 再 `split("\n")`（注释已承认有 header 却未处理）→ 帧头控制字节 `0x01/0x00` 与非法 UTF-8 字节（如 `0x8A`）变成 `U+0001 / U+0000 / U+FFFD`，被字体画成「□?」；`src/transforms.ts` 那个 `charCodeAt(0)<32 → substring(8)` 按**字符**砍 8 位同样不可靠（UTF-8 解码后帧头不一定是 8 个字符），容器详情页偶尔会砍掉时间戳前几位。
@@ -31,7 +31,7 @@
 - 核验：双 `tsc --noEmit` 0；`npm run test:gates` **17 组全绿 0 FAIL**（各脚本汇总 PASS=35/40/30/41/75/18/15/34/80/47/44/34/39/76/20/46 + 新门禁 24）；SEA 四步 + 三处二进制 SHA-256 逐字节一致 `8371e38e89b497898f4bb7506c501a09d9797f1a868037f414bc8c4e82e5aef7`（postject 产物 = zip 成员 = deb 成员）；zip 成员 5 个；ELF `7f454c46` / e_machine `62`；两处真实版本常量 `CURRENT_VERSION` / `currentAppVersion()` 注入值 `1.50.30`（bundle 原始字节 2 次），旧串 `1.50.29` 原始字节 0 次。
   - **新旧包前端解码对比**：新包解码出 5 段 base64，其中 1,153,767 B 与本次 `dist/assets/index-ejfpmz-M.js` **逐字节一致**（SHA `e108d34bbd1a4eecfa08826e7414602edc42e599666b130b893642850eb5e11e`）；独有锚点 `disableStdin:!0` 0→1、`scrollToBottom` 6→7；旧功能锚点 `该容器暂无日志输出` 1→1 保留；服务端段 `demuxDockerLogStream` = 2。
 - 已知限制：① 仍是一次性 `tail` 快照，不是 `docker logs -f` 流式跟随（切换容器 / 行数会重新拉取）；② 容器详情页仍走 `transformLogs` 三列结构化显示（按用户选择保留）；③ 容器详情「基本信息」页签仍无 ExitCode / RestartCount / OOMKilled / FinishedAt。下一步：如需流式跟随可复用现有 WS/SSE 通道；如需容器详情页也终端化，直接复用 `LogTerminal`。
-- 快照：commit `d4ab7da` + tag v1.50.30 推 Gitea；`ls-remote` 核对 main/tag 双 ref 均指向 `d4ab7dac133a9f3c0920383d21dc5e3d1e302efc`；包 SHA-256 `8371e38e89b497898f4bb7506c501a09d9797f1a868037f414bc8c4e82e5aef7`（zip / deb 同值）。随后本条补 SHA 再推一次 main，故 main 会前进一提交，tag 仍指向 `d4ab7da`；GitHub 按约定未推，按近期惯例未创建 Gitea Release（线上最新 Release 仍是 v1.50.22）。
+- 快照：commit `d4ab7da` + tag v1.50.30 推 Gitea；`ls-remote` 核对 main/tag 双 ref 均指向 `d4ab7dac133a9f3c0920383d21dc5e3d1e302efc`；包 SHA-256 `8371e38e89b497898f4bb7506c501a09d9797f1a868037f414bc8c4e82e5aef7`（zip / deb 同值）。随后本条补 SHA 再推一次 main，故 main = `712b076`，tag 仍指向 `d4ab7da`。**GitHub 于 2026-11-07 做一次性全量同步**（仅本次，不恢复常态双推）：main 推 47 个提交（`213d607` → `712b076`，pure fast-forward）、补推 29 个缺失 tag（v1.50.2~v1.50.30），本地 / Gitea / GitHub 三端 refs 逐字节一致（tag 116=116、缺失 0）；并创建 **GitHub Release v1.50.30**，上传版本化 zip / latest 别名 zip / deb / quick-install.sh 共 4 个资产，使 `releases/latest` 由 v1.44.5 前进到 v1.50.30、OTA 生效。Gitea 按近期惯例未创建本版 Release（线上最新仍是 v1.50.22）。
 
 ## v1.50.29 — 2026-11-07（**已构建 · 已推 Gitea**）
 
