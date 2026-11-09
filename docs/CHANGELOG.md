@@ -33,7 +33,7 @@
 - SEA 四步出包；三处二进制 SHA-256 逐字节一致：`c5d98c336bf4c483…bc4d84`（postject = zip = deb）；ELF `7f454c46` / e_machine `62`；嵌入版本 `1.50.36`；前端产物 base64 解码与 `dist/assets/index-*.js` 逐字节一致；`network-zone` / 「内外网自动切换」锚点在位。
 
 ### 快照
-- 快照：commit `（见 git log）` + tag `v1.50.36` 推 Gitea；GitHub 未推（滞后，用户点名再推）。
+- 快照：commit `85cac0a` + tag `v1.50.36` 推 Gitea（双 ref 同 commit，ls-remote 核对）；GitHub 未推（滞后，用户点名再推）。
 
 ---
 
