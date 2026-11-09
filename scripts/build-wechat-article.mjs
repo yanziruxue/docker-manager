@@ -102,7 +102,13 @@ const renderer = {
   image({ href, text }) {
     if (/^https?:/i.test(href)) return ""; // 外链图（徽章）剔除
     const n = images.push({ src: href, caption: imgCaption(href) });
-    return `<section style="${B}margin:16px 0;padding:18px 14px;background:#FFFBEB;border:1px dashed #F59E0B;border-radius:8px;font-size:14px;line-height:1.7;color:#92400E;text-align:center;">📷 <b>在此插入图片 ${n}</b><br/>${imgCaption(href)}<br/><span style="font-size:12px;color:#B45309;">（文件：${href}；公众号不支持 SVG，请用浏览器打开后截图成 PNG 上传）</span></section>`;
+    // 已有同名 PNG 成品（docs/images/*.png）→ 提示直接上传；其余 SVG 提示截图转 PNG
+    const png = href.replace(/\.svg$/i, ".png");
+    const hasPng = png !== href && fs.existsSync(path.join(ROOT, png));
+    const tip = hasPng
+      ? `（文件：<b>${png}</b>，PNG 成品可直接上传；或用 ${href} 高清重制）`
+      : `（文件：${href}；公众号不支持 SVG，请用浏览器打开后截图成 PNG 上传）`;
+    return `<section style="${B}margin:16px 0;padding:18px 14px;background:#FFFBEB;border:1px dashed #F59E0B;border-radius:8px;font-size:14px;line-height:1.7;color:#92400E;text-align:center;">📷 <b>在此插入图片 ${n}</b><br/>${imgCaption(href)}<br/><span style="font-size:12px;color:#B45309;">${tip}</span></section>`;
   },
   link({ href, tokens }) {
     const text = this.parser.parseInline(tokens);
@@ -151,7 +157,7 @@ const page = `<!DOCTYPE html>
     <hr style="border:none;border-top:1px solid #E5E7EB;margin:24px 0;"/>
     <h3 style="margin:0 0 8px;font-size:15px;color:#111827;">📎 配图清单（发帖时按序上传）</h3>
     <ul style="margin:0;padding-left:20px;">${imageList}</ul>
-    <p style="font-size:12px;color:#9CA3AF;margin-top:10px;">提示：SVG 文件用浏览器打开后截图（或 Edge 无头 --screenshot）转 PNG；封面建议用 banner 图 2.35:1 裁剪。</p>
+    <p style="font-size:12px;color:#9CA3AF;margin-top:10px;">提示：全部配图已备好 PNG 成品（docs/images/*.png 与 pages/*.png，2400px 宽 2 倍清晰度），按占位提示直接上传即可；封面建议用 banner.png 按 2.35:1 裁剪。</p>
   </div>
 </div>
 <script>
