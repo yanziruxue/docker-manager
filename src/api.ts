@@ -1009,6 +1009,11 @@ export function checkCustomIconDirApi(dir: string): Promise<import("./custom-ico
   return request("/custom-icons/check", { method: "POST", body: JSON.stringify({ dir }) });
 }
 
+/** 查询当前访问者的内外网分区（v1.50.36：服务端按请求来源 IP 与配置网段判定） */
+export function getNetworkZoneApi(): Promise<{ zone: "intranet" | "internet"; ip: string }> {
+  return request("/network-zone");
+}
+
 /** 检查堆栈更新 */
 export function checkStackUpdatesApi(engineId: string, stackName?: string): Promise<{ stackName: string; containers: { name: string; hasUpdate: boolean }[] }[]> {
   return request(`/engines/${engineId}/stacks/check-updates`, {

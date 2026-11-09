@@ -406,7 +406,7 @@ export default function App() {
           }
           // v1.46.3：仅有描述的标签也参与透传（此前 continue 条件漏了 description，
           // 导致「LABELS 页只填了描述」的服务在容器管理页看不到描述）
-          if (!label.iconUrl && !label.webuiUrl && !label.description && (!label.tags || label.tags.length === 0)) continue;
+          if (!label.iconUrl && !label.webuiUrl && !label.webuiPort && !label.description && (!label.tags || label.tags.length === 0)) continue;
           const matched = xfContainers.filter((c) =>
             c.name === label.serviceName ||
             c.name === `${st.name}-${label.serviceName}` ||
@@ -415,6 +415,8 @@ export default function App() {
           for (const c of matched) {
             if (label.iconUrl) c.icon = label.iconUrl;
             if (label.webuiUrl) c.webuiUrl = label.webuiUrl;
+            // v1.50.36：透传 LABELS 端口，内网模式用「浏览器地址栏 + 端口」拼 WebUI 地址
+            if (label.webuiPort) c.webuiPort = label.webuiPort;
             if (label.description) c.description = label.description;
             // 标签合并去重（同 id 只保留一个）
             if (label.tags && label.tags.length > 0) {

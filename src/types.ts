@@ -243,6 +243,8 @@ export interface Container {
   stats?: ContainerStats;
   hasUpdate?: boolean;
   webuiUrl?: string;
+  /** LABELS 页配置的 WebUI 端口（v1.50.36）：内网模式用「浏览器地址栏 host + 此端口」拼 WebUI 地址 */
+  webuiPort?: string;
   /** 服务描述（v1.46.3，来自所属堆栈 LABELS 页，按服务名匹配透传） */
   description?: string;
   /** 来自所属堆栈 LABELS 页的彩色标签（完整对象，直接带颜色渲染） */
@@ -718,6 +720,12 @@ export interface ModalConfig {
    * 核心数据（容器列表）未加载成功，自动回退到原引擎并提示。默认 30。
    */
   engineSwitchTimeout: number;
+  /**
+   * 内外网自动切换（v1.50.36）：内网网段 CIDR 原始串（逗号/分号/回车分隔）。
+   * 留空 = 默认网段集（RFC1918 三段 + 回环 + 链路本地 + IPv6 私网）。
+   * 容器管理页 WebUI 按访问来源分派：内网 = 浏览器地址栏 + LABELS 端口；外网 = LABELS URL。
+   */
+  intranetCidrs: string;
   /**
    * 网络曲线**默认网卡**（v1.41.6）：仪表盘「网络」磁贴进页面时展示哪个网卡。
    * - `""`（默认）= **自动选第一个物理网卡**（`kind === "host"`，跳过 lo / veth）；

@@ -33,6 +33,7 @@ import {
   Save,
   FilePlus2,
   FolderPlus,
+  Home,
 } from "lucide-react";
 import type { Container, LogEntry, ContainerFileEntry, Stack } from "../types";
 import { StatusBadge, Tag } from "../components/Badge";
@@ -55,6 +56,16 @@ import { transformLogs, shortImageRef } from "../transforms";
 import { addOpLog } from "../opLog";
 import { XTermTerminal } from "../components/XTermTerminal";
 import { LineChart, type LineSeries } from "../components/LineChart";
+// v1.50.36 内外网 WebUI 分派：纯函数解析器 + 分区查询
+import {
+  resolveWebuiUrl,
+  loadWebuiZoneMode,
+  nextWebuiZoneMode,
+  WEBUI_ZONE_MODE_KEY,
+  type WebuiZoneMode,
+  type WebuiZone,
+} from "../webui-url";
+import { getNetworkZoneApi } from "../api";
 
 interface ContainersProps {
   containers: Container[];
@@ -137,6 +148,33 @@ export function Containers({ containers, onNavigate, onRefresh, loading, error, 
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [showColumnPicker, setShowColumnPicker] = useState(false);
   const columnPickerRef = useRef<HTMLDivElement>(null);
+
+  // v1.50.36 内外网 WebUI 分派：三态循环（自动 → 内网 → 外网），非自动选择持久化 localStorage；
+  // 自动模式依赖服务端按访问来源 IP 与「页面设置 → 内外网自动切换」网段判定的分区结果
+  const [zoneMode, setZoneMode] = useState<WebuiZoneMode>(() => loadWebuiZoneMode(localStorage));
+  const [zone, setZone] = useState<WebuiZone>("intranet");
+  useEffect(() => {
+    let alive = true;
+    getNetworkZoneApi()
+      .then((d) => {
+        if (alive && d && (d.zone === "intranet" || d.zone === "internet")) setZone(d.zone);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const cycleZoneMode = () => {
+    const next = nextWebuiZoneMode(zoneMode);
+    setZoneMode(next);
+    if (next === "auto") localStorage.removeItem(WEBUI_ZONE_MODE_KEY);
+    else localStorage.setItem(WEBUI_ZONE_MODE_KEY, next);
+  };
+  /** WebUI 地址统一走解析器（内网 = 地址栏 + LABELS 端口；外网 = LABELS URL；自动按分区） */
+  const openContainerWebui = (c: Container) => {
+    const url = resolveWebuiUrl(c, zoneMode, zone, { protocol: window.location.protocol, hostname: window.location.hostname });
+    if (url) window.open(url, "_blank");
+  };
 
   const handleAction = async (container: Container, action: "start" | "stop" | "restart") => {
     if (!engineId) return;
@@ -356,6 +394,20 @@ export function Containers({ containers, onNavigate, onRefresh, loading, error, 
           <span className="text-sm text-slate-400">{filtered.length} 个容器</span>
         </div>
         <div className="flex items-center gap-2">
+          {/* v1.50.36 内外网切换：WebUI 地址按访问来源分派，点击循环 自动 → 内网 → 外网 */}
+          <button
+            onClick={cycleZoneMode}
+            className="flex items-center gap-1.5 px-3 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
+            title={
+              `WebUI 地址分派模式（点击切换：自动 → 内网 → 外网）\n` +
+              `自动：按访问来源 IP 与「设置中心 → 页面设置 → 内外网自动切换」网段判定（当前判定：${zone === "intranet" ? "内网" : "外网"}）\n` +
+              `内网：浏览器地址栏 ${window.location.protocol}//${window.location.hostname} + LABELS 页端口\n` +
+              `外网：LABELS 页配置的 WebUI URL`
+            }
+          >
+            {zoneMode === "auto" ? <Globe size={14} /> : zoneMode === "intranet" ? <Home size={14} /> : <ArrowUpRight size={14} />}
+            {zoneMode === "auto" ? `自动（${zone === "intranet" ? "内网" : "外网"}）` : zoneMode === "intranet" ? "内网" : "外网"}
+          </button>
           {/* 列选择器 */}
           <div className="relative" ref={columnPickerRef}>
             <button
@@ -599,17 +651,22 @@ export function Containers({ containers, onNavigate, onRefresh, loading, error, 
                   {visibleColumns.has("actions") && (
                     <td className="px-3 py-3">
                       <div className="flex items-center justify-end">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (container.webuiUrl) window.open(container.webuiUrl, "_blank");
-                          }}
-                          disabled={!container.webuiUrl}
-                          className="p-1.5 rounded-lg transition-colors text-slate-400 hover:text-blue-600 hover:bg-blue-50 disabled:opacity-25 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-slate-400"
-                          title={container.webuiUrl ? `打开 WebUI：${container.webuiUrl}` : "该容器未配置 WebUI 地址"}
-                        >
-                          <Globe size={16} />
-                        </button>
+                        {(() => {
+                          const webuiUrl = resolveWebuiUrl(container, zoneMode, zone, { protocol: window.location.protocol, hostname: window.location.hostname });
+                          return (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openContainerWebui(container);
+                              }}
+                              disabled={!webuiUrl}
+                              className="p-1.5 rounded-lg transition-colors text-slate-400 hover:text-blue-600 hover:bg-blue-50 disabled:opacity-25 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-slate-400"
+                              title={webuiUrl ? `打开 WebUI：${webuiUrl}` : "该容器未配置 WebUI 地址"}
+                            >
+                              <Globe size={16} />
+                            </button>
+                          );
+                        })()}
                       </div>
                     </td>
                   )}
@@ -652,6 +709,8 @@ export function Containers({ containers, onNavigate, onRefresh, loading, error, 
           onRequestDelete={setConfirmDelete}
           presentation={containerDetailStyle}
           defaultShell={stacks?.find((s) => s.id === activeContainer.stackId)?.webuiLabels?.find((l) => l.serviceName === activeContainer.name)?.defaultShell}
+          webuiZoneMode={zoneMode}
+          webuiZone={zone}
         />
       )}
 
@@ -777,6 +836,9 @@ function ContainerDetailModal({
   onRequestDelete,
   presentation = "drawer",
   defaultShell,
+  /** v1.50.36 内外网 WebUI 分派：由父级传入（切换按钮在列表工具栏） */
+  webuiZoneMode = "auto",
+  webuiZone = "intranet",
 }: {
   container: Container;
   tab: "info" | "logs" | "stats" | "terminal" | "file";
@@ -790,6 +852,10 @@ function ContainerDetailModal({
   presentation?: "drawer" | "modal";
   /** LABELS 配置的默认 Shell（编辑堆栈 → LABELS），终端连接时优先使用 */
   defaultShell?: string;
+  /** WebUI 分派模式（自动 / 内网 / 外网），与列表工具栏切换按钮联动 */
+  webuiZoneMode?: WebuiZoneMode;
+  /** 服务端判定的访问分区（自动模式消费） */
+  webuiZone?: WebuiZone;
 }) {
   const [logs, setLogs] = useState<{ timestamp: string; level: string; message: string }[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
@@ -1080,15 +1146,20 @@ function ContainerDetailModal({
             >
               <Trash2 size={14} /> 删除
             </button>
-            {container.webuiUrl && (
-              <button
-                onClick={() => window.open(container.webuiUrl, "_blank")}
-                title="打开 WebUI"
-                className="flex items-center gap-1 px-3 py-1.5 text-sm text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50 transition-colors"
-              >
-                <Globe size={14} /> WebUI
-              </button>
-            )}
+            {(() => {
+              // v1.50.36：详情页 WebUI 与列表行内按钮同走解析器（内网 = 地址栏 + 端口；外网 = LABELS URL）
+              const webuiUrl = resolveWebuiUrl(container, webuiZoneMode, webuiZone, { protocol: window.location.protocol, hostname: window.location.hostname });
+              if (!webuiUrl) return null;
+              return (
+                <button
+                  onClick={() => window.open(webuiUrl, "_blank")}
+                  title={`打开 WebUI：${webuiUrl}`}
+                  className="flex items-center gap-1 px-3 py-1.5 text-sm text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50 transition-colors"
+                >
+                  <Globe size={14} /> WebUI
+                </button>
+              );
+            })()}
             {/* v1.46.7 移除显式关闭按钮：Drawer 点遮罩 + ESC、Modal 自带头部 × 均可关闭 */}
           </div>
         </div>

@@ -274,6 +274,8 @@ function getDefaultSettings(): SystemSettings {
       defaultNetIface: "",
       // 引擎切换超时（秒，v1.46.0）：超时未加载成功核心数据则回退原引擎
       engineSwitchTimeout: 30,
+      // 内外网自动切换（v1.50.36）："" = 默认网段集（RFC1918 + 回环 + IPv6 私网）
+      intranetCidrs: "",
       // 堆栈管理页「图标」列双击打开编辑堆栈弹窗（v1.50.24，默认开）
       doubleClickIconEditStack: true,
     },
@@ -4371,6 +4373,25 @@ docker-compose version</code>
                   {iconDirCheck.message}
                 </p>
               )}
+            </Card>
+
+            {/* v1.50.36 内外网自动切换：配置内网网段，容器管理页 WebUI 按访问来源分派 */}
+            <Card title="内外网自动切换" icon={<Globe size={16} />}>
+              <FormField
+                label="内网网段（CIDR 格式，如 192.168.24.0/24）"
+                hint="容器管理页 WebUI 按访问来源自动分派：来源 IP 落在这些网段内视为内网（WebUI = 浏览器地址栏 + LABELS 页端口），否则视为外网（WebUI = LABELS 页 WebUI URL）。多网段用英文逗号、英文分号或回车隔开；留空使用默认网段。点击底部「保存设置」后立即生效。"
+              >
+                <textarea
+                  value={String(data.modal?.intranetCidrs ?? "")}
+                  onChange={(e) => update("modal", "intranetCidrs", e.target.value)}
+                  placeholder={"192.168.24.0/24, 10.0.0.0/8\n172.16.0.0/12"}
+                  rows={4}
+                  className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 resize-y"
+                />
+              </FormField>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                默认内网网段（留空时生效）：127.0.0.0/8、10.0.0.0/8、172.16.0.0/12、192.168.0.0/16、169.254.0.0/16、::1/128、fe80::/10、fc00::/7
+              </p>
             </Card>
           </div>
         )}

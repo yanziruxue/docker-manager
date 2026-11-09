@@ -81,6 +81,7 @@ import {
   resolveCustomIconFile,
   type CustomIconEntry,
 } from "./custom-icons.js";
+import { normalizeIntranetCidrs, clientIpFromRequest, resolveNetworkZone } from "./network-zone.js";
 import { startUpdateScheduler, getSchedulerStatus, runSchedulerCheckNow, checkEngineImages, getImageUpdateCache, startBackupScheduler, getBackupSchedulerStatus } from "./scheduler.js";
 import { addPushClient, removePushClient } from "./push.js";
 import { readDaemonConfigInfo, writeDaemonConfig, writeDaemonConfigText, restartDockerService, refreshPrivileges } from "./daemon-config.js";
@@ -1236,6 +1237,16 @@ app.get("/api/stack-icons/:name/:file", (req, res) => {
 function boundCustomIconDir() {
   return resolveCustomIconDir(getSettings()?.modal?.iconDir);
 }
+
+/**
+ * 内外网分区（v1.50.36）：按请求来源 IP 与「页面设置 → 内外网自动切换」网段判断。
+ * 前端容器管理页据此分派 WebUI 地址（内网 = 浏览器地址栏 + LABELS 端口；外网 = LABELS URL）。
+ */
+app.get("/api/network-zone", (req, res) => {
+  const cidrs = normalizeIntranetCidrs(String(getSettings()?.modal?.intranetCidrs ?? ""));
+  const ip = clientIpFromRequest(req);
+  res.json({ success: true, data: { zone: resolveNetworkZone(ip, cidrs), ip } });
+});
 
 /** 列出自定义图标库：映射（前端自动匹配用）+ 文件清单（图库下拉用）+ 绑定状态/错误 */
 app.get("/api/custom-icons", (_req, res) => {
