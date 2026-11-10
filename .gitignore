@@ -57,3 +57,4 @@ yanzi_Dashboard/
 
 # ===== vite dev 残留 =====
 vite.config.ts.timestamp-*.mjs
+.gate-nav-*
