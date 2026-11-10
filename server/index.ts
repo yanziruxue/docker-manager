@@ -74,6 +74,7 @@ import {
 import { getImageLocks, setImageLock } from "./image-locks.js";
 import { createFullBackup, restoreFullBackup, restoreUploadedBackup, exportConfigArchive, listBackupFiles, deleteBackupFile, backupFilePath, migrateLegacyBackups } from "./backup.js";
 import { getSettings, saveSettings, redactSettings, secretsAreEncrypted } from "./settings.js";
+import { getNavGroups, saveNavGroups } from "./nav-groups.js";
 import {
   resolveCustomIconDir,
   listCustomIconEntries,
@@ -2011,6 +2012,27 @@ app.put("/api/settings", (req, res) => {
     void reportOnToggle(nextEnabled).catch(() => {});
   }
   res.json({ success: true, data: settings });
+});
+
+// ============ 导航分组 API（独立通道，v1.51.2 label 解耦，不污染 main settings） ============
+
+/** 获取导航分组（含旧 settings.json 一次性迁移） */
+app.get("/api/nav-groups", (_req, res) => {
+  try {
+    res.json({ success: true, data: getNavGroups() });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || "读取导航分组失败" });
+  }
+});
+
+/** 保存导航分组（归一化后落盘，不回传任何密钥 / 不借道 /api/settings） */
+app.put("/api/nav-groups", (req, res) => {
+  try {
+    const groups = saveNavGroups(req.body);
+    res.json({ success: true, data: groups });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || "保存导航分组失败" });
+  }
 });
 
 /** 获取当前日志级别（运行时） */

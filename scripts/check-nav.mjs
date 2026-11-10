@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 /**
- * 门禁：导航仪表盘（v1.51.0，label 分支）
+ * 门禁：导航仪表盘（v1.51.0 引入，v1.51.2 解耦至独立通道，label 分支）
  *  - 真模块断言：编译运行 src/webui-url.ts 的 resolveNavAppUrl / normalizeNavLanUrl，
  *    覆盖内外网优先级链、`:端口` / `host:端口` / 完整 URL 三种内网写法、auto 分区分派；
- *  - 源码接线断言：服务端 nav 段默认值 + normalizeNavGroups、NavPage 标签条与内容区切换、
- *    NavEditor 分组/应用 CRUD 与 Docker 聚合入口、App 落盘回调；
+ *  - 源码接线断言：导航配置完全收口在独立模块 server/nav-groups.ts（不污染 main settings.json），
+ *    独立路由 GET/PUT /api/nav-groups、NavPage 标签条与内容区切换、
+ *    NavEditor 分组/应用 CRUD 与 Docker 聚合入口、App 走独立 API 落盘回调；
  *  - 负向自检：注入「内网缺 lanUrl 不回落 url」回归 → 重载模块应检出差异 → 还原 → 复核全绿。
  * 用法：node scripts/check-nav.mjs（退出码非 0 = 有回归）
  */
@@ -87,14 +88,25 @@ ok("聚合入口内网地址自动取 WebUI 端口", editor.includes("webuiPort 
 
 const appSrc = read("src/App.tsx");
 ok("App 提供 handleSaveNavGroups 并透传 NavPage", appSrc.includes("handleSaveNavGroups") && appSrc.includes("<NavPage"));
+ok("App 导航分组走独立通道（fetchNavGroups/saveNavGroupsApi）", appSrc.includes("fetchNavGroups") && appSrc.includes("saveNavGroupsApi"));
+ok("App 不再借道 settings.nav", !appSrc.includes("settings?.nav") && !appSrc.includes("settings?.nav?.groups"));
+
+const navMod = read("server/nav-groups.ts");
+ok("导航分组独立持久化模块存在", navMod.includes("getNavGroups") && navMod.includes("saveNavGroups") && navMod.includes("normalizeNavGroups"));
+ok("独立模块含一次性迁移（migrateFromSettings）", navMod.includes("migrateFromSettings"));
+ok("独立模块钳制条目上限（50 组 / 200 应用）", navMod.includes("slice(0, 50)") && navMod.includes("slice(0, 200)"));
 
 const sset = read("server/settings.ts");
-ok("服务端 DEFAULT_SETTINGS 含 nav 空分组", sset.includes("nav: { groups: []"));
-ok("服务端 getSettings 归一化 nav.groups", sset.includes("normalizeNavGroups(parsed?.nav?.groups)"));
-ok("归一化钳制条目上限（50 组 / 200 应用）", sset.includes("slice(0, 50)") && sset.includes("slice(0, 200)"));
+ok("main settings 已剥离 nav（不含 nav: { groups）", !sset.includes("nav: { groups:"));
+ok("main settings 不再归一化 nav.groups", !sset.includes("normalizeNavGroups(parsed?.nav?.groups)"));
+
+const indexSrc = read("server/index.ts");
+ok("服务端注册 GET /api/nav-groups", indexSrc.includes('app.get("/api/nav-groups"'));
+ok("服务端注册 PUT /api/nav-groups", indexSrc.includes('app.put("/api/nav-groups"'));
 
 const typesSrc = read("src/types.ts");
 ok("类型 NavGroup/NavAppItem/NavConfig 已定义", typesSrc.includes("interface NavGroup") && typesSrc.includes("interface NavAppItem") && typesSrc.includes("NavConfig"));
+ok("SystemSettings 已移除 nav 字段", !typesSrc.includes("nav: NavConfig"));
 
 console.log("== ③ 负向自检（注入回归 → 检出 → 还原） ==");
 // 注入「内网缺 lanUrl 不回落 url」回归：应被 ⑤ 号用例检出

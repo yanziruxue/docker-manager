@@ -301,7 +301,6 @@ function getDefaultSettings(): SystemSettings {
       // 顶层三项 ＝ 应用日志；notify / oplog 子段留空即各自 fallback 365/1024（v1.42.7 起独立、互不继承）
       logRetention: { enabled: true, maxDays: 365, maxTotalMB: 1024, notify: {}, oplog: {} },
     defaultsVersion: 2,
-    nav: { groups: [] },
   };
 }
 

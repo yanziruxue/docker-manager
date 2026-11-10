@@ -21,6 +21,8 @@ import {
   fetchActivitiesPage,
   fetchSettings,
   saveSettingsApi,
+  fetchNavGroups,
+  saveNavGroupsApi,
   listCustomIconsApi,
   checkUpdateApi,
   applyUpdateApi,
@@ -103,6 +105,8 @@ export default function App() {
   const [activitiesLoadingMore, setActivitiesLoadingMore] = useState(false);
   const [resourceStats, setResourceStats] = useState<EngineResourceStats | null>(null);
   const [settings, setSettings] = useState<SystemSettings | null>(null);
+  // 导航分组（v1.51.2 label 解耦：独立 state，不借道 settings / SystemSettings）
+  const [navGroups, setNavGroups] = useState<NavGroup[]>([]);
   const [dataLoading, setDataLoading] = useState(false);
   const [dataError, setDataError] = useState<string | null>(null);
   const [checkingUpdates, setCheckingUpdates] = useState(false);
@@ -296,14 +300,16 @@ export default function App() {
     let updateTimer: ReturnType<typeof setInterval> | null = null;
     (async () => {
       try {
-        const [list, settingsData, versionInfo] = await Promise.all([
+        const [list, settingsData, versionInfo, navGroupsData] = await Promise.all([
           fetchEngines(),
           fetchSettings().catch(() => null),
           fetchAppVersion().catch(() => null),
+          fetchNavGroups().catch(() => []),
         ]);
         setEngines(list);
         if (settingsData) setSettings(settingsData);
         if (versionInfo?.version) setRuntimeVersion(versionInfo.version);
+        setNavGroups(navGroupsData || []);
         // 登录后默认显示页面（v1.42.9）：仅在登录态就绪、settings 已加载时跳转一次。
         // v1.50.7：sessionStorage 已有会话页面记录（刷新/会话内重登）时优先恢复刷新前页面，
         // 仅全新会话（新开标签、无记录）才落到设置里的默认页面。
@@ -664,14 +670,14 @@ export default function App() {
     }
   }, [activeEngineId, loadEngineData]);
 
-  // 导航仪表盘分组落盘（v1.51.0，label 分支）：整体替换 nav.groups，其余设置原样保留
+  // 导航分组落盘（v1.51.2 label 解耦）：走独立 /api/nav-groups 通道，绝不污染 main settings
   const handleSaveNavGroups = useCallback(
     (groups: NavGroup[]) => {
-      const cur = settingsRef.current;
-      if (!cur) return;
-      void handleSaveSettings({ ...cur, nav: { ...(cur.nav || { groups: [] }), groups } });
+      void saveNavGroupsApi(groups).then(setNavGroups).catch((err) => {
+        console.error("保存导航分组失败:", err);
+      });
     },
-    [handleSaveSettings],
+    [],
   );
 
   // 标签库新建标签（v1.49.2）：堆栈 LABELS 标签选择器输入无匹配时「+ 新建」直达，
@@ -920,7 +926,7 @@ export default function App() {
           )}
           {page === "navigation" && (
             <NavPage
-              navGroups={settings?.nav?.groups || []}
+              navGroups={navGroups}
               onSaveNavGroups={handleSaveNavGroups}
               containers={containers}
             />

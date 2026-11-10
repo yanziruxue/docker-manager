@@ -864,8 +864,6 @@ export interface SystemSettings {
   mirror: MirrorConfig;
   /** 应用日志保留策略（系统设置 → 应用日志） */
   logRetention: LogRetentionConfig;
-  /** 导航仪表盘（v1.51.0）：顶部分组标签条 + 应用卡片墙 */
-  nav: NavConfig;
   /** 默认值版本号：服务端据此判断是否需要把老配置重置为新默认值 */
   defaultsVersion?: number;
 }

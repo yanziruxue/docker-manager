@@ -161,13 +161,6 @@ const DEFAULT_SETTINGS = {
   /** 全局彩色标签库（设置页「标签管理」维护，可挂到堆栈 LABELS 服务条目） */
   tags: [],
   /**
-   * 导航仪表盘（v1.51.0，label 分支）：顶部分组标签条 + 应用卡片墙（参照 FlatNas）。
-   * groups 为空 ⇒ 仪表盘标签条只显示「仪表盘 + 管理」两个入口，原有磁贴布局不变。
-   * 每个应用可配 url（外网/统一地址）与 lanUrl（内网地址，支持 `:端口` / `host:端口` 简写），
-   * 打开时按 v1.50.36 的内外网分区判定自动择一跳转。
-   */
-  nav: { groups: [] as Array<Record<string, unknown>> },
-  /**
    * 页面设置（v1.42.9 起由「弹窗设置」改名）：操作结果弹窗的自动关闭延迟（秒）、
    * 容器详情视图样式、登录后默认显示页面等。
    * 启动堆栈等操作完成后，弹窗显示倒计时并在 autoCloseDelay 秒后自动关闭；
@@ -262,37 +255,6 @@ function normalizeComposeInsert(v: any): string {
   return "services";
 }
 
-/**
- * 导航仪表盘分组归一化（v1.51.0）：宽容解析用户 / 旧版数据——
- * 字段全做 trim + 长度钳制、非法条目丢弃、id 缺失补生成；整体条目数设上限防 settings.json 膨胀。
- */
-function normalizeNavGroups(v: any): Array<Record<string, unknown>> {
-  if (!Array.isArray(v)) return [];
-  const str = (x: unknown, cap: number): string => String(x ?? "").trim().slice(0, cap);
-  const genId = () => `n${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
-  const out: Array<Record<string, unknown>> = [];
-  for (const g of v.slice(0, 50)) {
-    if (!g || typeof g !== "object") continue;
-    const name = str((g as any).name, 40);
-    if (!name) continue;
-    const rawApps = Array.isArray((g as any).apps) ? (g as any).apps : [];
-    const apps = rawApps.slice(0, 200).map((a: any) => {
-      const an = (!a || typeof a !== "object") ? {} : a;
-      return {
-        id: str(an.id, 40) || genId(),
-        name: str(an.name, 60) || "未命名",
-        icon: str(an.icon, 300),
-        iconColor: str(an.iconColor, 32),
-        url: str(an.url, 500),
-        lanUrl: str(an.lanUrl, 300),
-        remark: str(an.remark, 200),
-      };
-    });
-    out.push({ id: str((g as any).id, 40) || genId(), name, icon: str((g as any).icon, 300), apps });
-  }
-  return out;
-}
-
 export function getSettings(): any {
   try {
     if (fs.existsSync(SETTINGS_FILE)) {
@@ -346,9 +308,13 @@ export function getSettings(): any {
           autoPull: !!old.autoPull,
         };
       }
+      // ★ 剔除已解耦到独立通道（server/nav-groups.ts）的 nav 键，
+      // 避免 raw settings.json 残留的 nav 透传进返回对象（main 落盘文件保持干净）
+      const parsedClean: any = { ...parsed };
+      delete parsedClean.nav;
       return decryptSecrets({
         ...DEFAULT_SETTINGS,
-        ...parsed,
+        ...parsedClean,
         backup: { ...DEFAULT_SETTINGS.backup, ...(parsed?.backup || {}) },
         // 目录镜像：两个子段各自二级合并，旧配置缺字段时继承默认（关闭）
         mirror: {
@@ -397,8 +363,6 @@ export function getSettings(): any {
           autoDetectWebui: parsed?.compose?.autoDetectWebui !== false,
         },
         columnVisibility: mergedColumns,
-        // 导航仪表盘分组（v1.51.0）：宽容归一化，旧配置无此段时为空数组
-        nav: { groups: normalizeNavGroups(parsed?.nav?.groups) },
         // 上报开关二级合并：旧配置没有 telemetry 段时继承默认值（开启）
         telemetry: { ...DEFAULT_SETTINGS.telemetry, ...(parsed?.telemetry || {}) },
         // 镜像管理页显示选项二级合并：旧配置无此段时继承默认（隐藏 registry 前缀）
@@ -472,6 +436,9 @@ export function secretsAreEncrypted(): boolean {
 export function saveSettings(settings: any): any {
   const prevRaw = readStoredRaw();
   const next = { ...(settings || {}) };
+  // ★ 防御性剥离已解耦到独立通道（server/nav-groups.ts）的 nav 键，
+  // 避免任何来源（旧前端 / 手工）把 nav 重新写回 main settings.json。
+  delete next.nav;
   // ★ 每次保存都打当前版本戳：否则全新安装（DEFAULT_SETTINGS 无 defaultsVersion 字段）
   // 首次保存后磁盘里 defaultsVersion 为 undefined，回读时误判为「旧版」触发迁移清空列显隐。
   next.defaultsVersion = DEFAULTS_VERSION;

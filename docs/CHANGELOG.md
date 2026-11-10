@@ -16,6 +16,46 @@
 
 ---
 
+## v1.51.2 — 2026-11-11（**label 分支 · 已构建 · 已推 Gitea**）
+
+### 导航配置从 main settings 解耦（独立通道，遵循 main 主支完整性铁律）
+
+> 用户铁律：导航页的配置/设置必须全部收口在本页自己的管理页里，label 分支只作为 main 主支的功能扩展，不得污染 main 核心逻辑与落盘 schema。上一版（v1.51.0 / v1.51.1）把 `nav` 配置嵌进了 main 的 `SystemSettings` 与 `settings.json` 落盘通道，违背该原则，本版完整解耦。
+
+- **独立持久化模块** `server/nav-groups.ts`：独立文件 `nav-groups.json` + 内存缓存 + 0600 落盘；迁入原 `normalizeNavGroups` 钳制逻辑（分组 ≤50 / 每组 app ≤200 / 字段 trim + 长度上限 + id 兜底）。
+- **一次性迁移**：首次读取时若 `nav-groups.json` 不存在、而旧 `settings.json.nav.groups` 有数据，自动迁过去并把旧 `nav` 键从 `settings.json` 清除（保持 main 落盘文件干净）。
+- **独立路由** `GET /api/nav-groups`、`PUT /api/nav-groups`（`server/index.ts`）：不借道 `/api/settings`、不回传任何密钥。
+- **独立客户端 API** `fetchNavGroups()` / `saveNavGroupsApi()`（`src/api.ts`，新增 `NavGroup` 类型导入）。
+- **前端数据流重接** `src/App.tsx`：`navGroups` 独立 state，`Promise.all` 并行加载，保存走 `saveNavGroupsApi`（不再借道 `handleSaveSettings` 污染 main）；`NavPage` 改传独立 `navGroups`。
+- **剥离 main schema**：删除 `SystemSettings.nav`（`src/types.ts`）、`DEFAULT_SETTINGS.nav` 与 `getSettings()` 合并行及 `normalizeNavGroups`（`server/settings.ts`）；并防御性剔除 `getSettings` 的 `...parsed` spread 中残留 `nav` 键、以及 `saveSettings` 落盘前的 `next.nav`，确保 main 落盘与返回对象永不含 `nav`。
+- **`src/pages/Settings.tsx`** 默认设置构造移除 `nav` 字段。
+- **门禁同步**：`scripts/check-nav.mjs` 断言从「settings.ts 含 nav」改指「独立模块 + 独立路由 + App 走独立 API + main settings 已剥离 nav / SystemSettings 已移除 nav 字段」。
+
+### 已完成
+- 导航配置彻底从 main `SystemSettings` / `settings.json` 解耦，拥有独立文件 + 路由 + 客户端 API。
+- 老版本（v1.51.0 / v1.51.1）已配置的导航分组，升级后首次访问自动迁移到 `nav-groups.json`，原 `settings.json` 残留 `nav` 键被清除。
+- 双 tsc（src / server）0 错；`npm run test:gates` 全绿（含 check-nav 新断言）。
+- SEA 四步构建 + 三处 SHA 逐字节一致 + ELF `7f454c46` / e_machine 62 硬核验通过。
+
+### 未完成 / 已知限制
+- 无（本次无未完成项）。
+
+### 下一步
+- 维持 label 分支作为 main 主支功能扩展；导航后续增强继续收口在独立通道，不回写 main settings。
+
+### 验证
+- 运行时迁移测试（tsx 隔离 CONFIG_DIR）：旧 `settings.json.nav.groups` → `getNavGroups()` 返回分组、旧 `nav` 键被清除、其余字段（docker / telemetry）保留、`nav-groups.json` 生成 ✓。
+- `getSettings()` 即使遇残留 `nav` 键也不再输出 `nav` ✓。
+- 三处二进制 SHA-256 一致：`787ab27e5cfaf4d1cb0f4a0ed944ae036f007e9a10d390338f0cc7952a0f22ef`（postject = zip 内 = deb 内）；ELF `7f454c46` / e_machine 62 / 130550976 B。
+- latest 别名 `dockermanagementyanzi-linux-x64.zip` 保持 main v1.50.36（43102847 B）未被覆盖；无 main 命名的 v1.51.2 包泄漏（仅 `dockermanagementyanzi-linux-label-x64-v1.51.2.zip` / `dockermanagementyanzi-label_1.51.2_amd64.deb`）。
+
+### 快照
+- 二进制 SHA-256：`787ab27e5cfaf4d1cb0f4a0ed944ae036f007e9a10d390338f0cc7952a0f22ef`（postject = zip = deb 逐字节一致）；ELF `7f454c46` / e_machine 62。
+- 包名：`dockermanagementyanzi-linux-label-x64-v1.51.2.zip` / `dockermanagementyanzi-label_1.51.2_amd64.deb`（分支令牌 `-label-` 区分，不进 OTA）。
+- commit `（见 git log）` + tag `v1.51.2` 推 Gitea `label` 分支（双 ref 同 commit，ls-remote 核对）；GitHub 未推；主线 `main` v1.50.36 不动。
+
+---
+
 ## v1.51.1 — 2026-11-10（**label 分支 · 已构建 · 已推 Gitea**）
 
 ### 导航功能从「仪表盘分页」抽离为独立页面
@@ -38,7 +78,7 @@
 ### 快照
 - 二进制 SHA-256：`191a77c93082d71ab60429764ef9bbfa6169e13766934d59815eb6c2df3b8f27`（postject = zip = deb 逐字节一致）；ELF `7f454c46` / e_machine 62。
 - 包名：`dockermanagementyanzi-linux-label-x64-v1.51.1.zip` / `dockermanagementyanzi-label_1.51.1_amd64.deb`（分支令牌 `-label-` 区分，不进 OTA）。
-- commit `（见 git log）` + tag `v1.51.1` 推 Gitea `label` 分支；GitHub 未推；主线 `main` v1.50.36 不动。
+- commit `6258db1` + tag `v1.51.1` 推 Gitea `label` 分支（双 ref 同 commit，ls-remote 核对）；GitHub 未推；主线 `main` v1.50.36 不动。
 
 ---
 
@@ -3465,7 +3505,7 @@ Failed at step NAMESPACE spawning /bin/sh: No such file or directory
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **v1.43.7**（**已改代码 2026-10-18 · 未出包**，Patch）：**① 清理未使用镜像弹窗清单回退干净两字段 `仓库名:标签`（撤销 v1.43.5 四段式，删 `splitImageRef`/`formatCleanListName` 死代码）；② 上传更新包后展示原始包名**（根因：服务端固定重命名 `pending-update.zip` 致 `fileName` 恒为 `pending-update.zip`，新增 `pending-update.meta.json` sidecar + 前端 `X-File-Name` Header 透传真实包名）。同版含 **v1.43.6**（**已出包 2026-10-18 · 未发布**，Patch）：**「清理未使用镜像」确认弹窗宽度改为「按内容自适应、封顶当前 2 倍」**（`Modal#fitWidth`＝`w-fit max-w-[896px] min-w-[448px]`，`ConfirmDialog#wide` 接 `fitWidth`，宽弹窗清单项 `whitespace-nowrap`+`overflow-auto`）。同版含 **v1.43.5**（**已出包 2026-10-18 · 未发布**，Patch）：**镜像管理页「清理未使用镜像」确认弹窗镜像名改为「注册表 / 命名空间 / 仓库 : 标签」四段式显示**（`splitImageRef`+`formatCleanListName`，无显式 registry 默认补 `docker.io`，dangling 回退 `sha256:短摘要`；删除逻辑仍走 `buildImageRef` 不受影响）。同版含 **v1.43.4**（**已出包 2026-10-18 · 未发布**，Patch）：**镜像管理页「清理未使用镜像」确认弹窗逐条列出将清理的镜像清单**（复用 `ConfirmDialog#list` 新增可选 prop，`Images.tsx` 派生去重清单传入）。同版含 **v1.43.3**（**已出包 2026-10-18 · 未发布**，Patch）：**镜像管理页官方镜像保留 `library/` 命名空间（只省略 `docker.io`）**（Docker API 默认省略，已补回）。同版含 **v1.43.2**（**已出包 2026-10-18 · 未发布**，Patch）：**修复空闲超时策略误将「正在操作」用户踢出登录**（前端「双权威」本地 idle 计时误踢 → 改为纯服务端权威：删除前端本地 idle 主动登出定时器、保留活动节流 `/api/auth/me` 续期、新增 `/api/auth/ping` 只读探活（60s，401 经全局兜底登出）；服务端 `auth.ts#peekSessionUser` 只读不续期）。同版含 **v1.43.1**：修复编辑堆栈 LABELS 自动识别 WebUI 后容器管理「打开 WebUI」需手动应用才生效；**v1.43.0**：登录会话策略改为空闲超时（滑动窗口）。
+| 当前版本 | **v1.43.7**（**已改代码 2026-10-18 · 未出包**，Patch）：**① 清理未使用镜像弹窗清单回退干净两字段 `仓库名:标签`（撤销 v1.43.5 四段式，删 `splitImageRef`/`formatCleanListName` 死代码）；② 上传更新包后展示原始包名**（根因：服务端固定重命名 `pending-update.zip` 致 `fileName` 恒为 `pending-update.zip`，新增 `pending-update.meta.json` sidecar + 前端 `X-File-Name` Header 透传真实包名）。同版含 **v1.43.6**（**已出包 2026-10-18 · 未发布**，Patch）：**「清理未使用镜像」确认弹窗宽度改为「按内容自适应、封顶当前 2 倍」**（`Modal#fitWidth`＝`w-fit max-w-[896px] min-w-[448px]`，`ConfirmDialog#wide` 接 `fitWidth`，宽弹窗清单项 `whitespace-nowrap`+`overflow-auto`）。同版含 **v1.43.5**（**已出包 2026-10-18 · 未发布**，Patch）：**镜像管理页「清理未使用镜像」确认弹窗镜像名改为「注册表 / 命名空间 / 仓库 : 标签」四段式显示**（`splitImageRef`+`formatCleanListName`，无显式 registry 默认补 `docker.io`，dangling 回退 `sha256:短摘要`；删除逻辑仍走 `buildImageRef` 不受影响）。同版含 **v1.43.4**（**已出包 2026-10-18 · 未发布**，Patch）：**镜像管理页「清理未使用镜像」确认弹窗逐条列出将清理的镜像清单**（复用 `ConfirmDialog#list` 新增可选 prop，`Images.tsx` 派生去重清单传入）。同版含 **v1.43.3**（**已出包 2026-10-18 · 未发布**，Patch）：**镜像管理页官方镜像保留 `library/` 命名空间（只省略 `docker.io`）**（Docker API 默认省略，已补回）。同版含 **v1.43.2**（**已出包 2026-10-18 · 未发布**，Patch）：**修复空闲超时策略误将「正在操作」用户踢出登录**（前端「双权威」本地 idle 计时误踢 → 改为纯服务端权威：删除前端本地 idle 主动登出定时器、保留活动节流 `/api/auth/me` 续期、新增 `/api/auth/ping` 只读探活（60s，401 经全局兜底登出）；服务端 `auth.ts#peekSessionUser` 只读不续期）。同版含 **v1.43.1**：修复编辑堆栈 LABELS 自动识别 WebUI 后容器管理「打开 WebUI」需手动应用才生效；**v1.43.0**：登录会话策略改为空闲超时（滑动窗口）。；**label 分支 tip = v1.51.2（2026-11-11 · 已构建 · 已推 Gitea `label` 双 ref）**：本版把导航配置从 main `settings.json` / `SystemSettings` 完整解耦到独立 `nav-groups.json` + `/api/nav-groups` 通道（详见顶部 v1.51.2 变更日志）；主线 `main` 仍 v1.50.36 不动、latest 别名保持 main 字节。
 | 版本号规则 | Major 人工发布；Minor ＝ **新增功能模块 / 新页面**；Patch ＝ 修复/优化/**UI 与交互小改动**（如 `1.35.0 → 1.35.1`）。v1.22.0 因新增「镜像更新→通知中心」与「硬件指纹作主键」两项新能力归为 Minor |
 | 最新 Release | [v1.42.23](https://github.com/yanziruxue/docker-manager/releases/tag/v1.42.23)（**2026-10-16 GitHub + 自建 Gitea 双源发布**）＋ **自建 Gitea [v1.42.23](http://192.168.24.10:8024/yanzi/dockermanagementyanzi/releases/tag/v1.42.23)**（资产＝版本化 zip + latest 别名 zip + `dockermanagementyanzi_1.42.23_amd64.deb` + `quick-install.sh`，两端 SHA 逐字节一致）；两处匿名 `releases/latest` 均指向 v1.42.23；清理＝删除两处 `< v1.40.0` 的全部 release（GitHub 45 + Gitea 9，0 失败），Gitea 保留 `v1.42.3`（≥1.40.0）；⚠️ 本次发布仅 release 资产，`push-via-api.mjs` 同步源码至 GitHub 仓库**尚未执行**；上一已发布版本 [v1.36.0](https://github.com/yanziruxue/docker-manager/releases/tag/v1.36.0)（**2026-09-30 发布** · 主题＝OTA / 一键安装改双源（自建 Gitea 优先、GitHub 保底），确立「**每次发布都发两个地方**」的发布规约）；上一已发布版本 [v1.35.11](https://github.com/yanziruxue/docker-manager/releases/tag/v1.35.11)（**2026-09-30 发布** · 累积发布 **v1.32.0 → v1.35.11**：容器文件管理 / 温度能力 / 详情页与仪表盘演进 / 遥测 `upapi` 三代迭代；assets＝版本化 zip + latest 别名 + `quick-install.sh`，均 `uploaded`；notes 合并 **v1.32.0 → v1.35.11 共 15 个开发版本**；⚠️ 部署顺序＝**服务端 `yanzi/api` 先上**；⚠️ 本版改了 `install.sh`，启用 drivetemp 自动加载需重跑一次）；上一版 [v1.31.1](https://github.com/yanziruxue/docker-manager/releases/tag/v1.31.1) |
 | 源码分支 | `main`（当前发布点 **GitHub** `f99dd2478a9606cbff0aa830622294739108ac7a`（v1.39.0，**7 文件**：4 源文件 + package.json + CHANGELOG + push-via-api.mjs 修正）；**自建 Gitea** `yanzi/dockermanagementyanzi` @ `192.168.24.10:8024`（v1.42.23 release 资产已发布、匿名 `releases/latest` 指向 v1.42.23；旧域名 `git.ziruxue.top` 已不通），源码经 Git Database API 同步 GitHub 仓库另走 `push-via-api.mjs`（**尚未执行**，GitHub 源码仍停在 v1.39.0 `f99dd247`），分 3 次 Git Database API 推送：`f4888d77` 先推 8 个新文件 → `5cfd3412` **补齐 17 个已修改文件** → `5c31a92e` 删除误入库的 2 个 `settings.json`）；**自建 Gitea** `9a1e12d354ec74c0b6d579bd7c506d6b3a7f0758`（整仓提交推送 `022cda3..9a1e12d`）；上一版 `7ec0a17894e84dae7f83b58685caa6a7433fa654`（v1.35.11）；自建 Gitea 镜像 `yanzi/docker-manager-yanzi` @ `73e2063`） |
