@@ -43,7 +43,7 @@ import {
   transformStacks,
   transformActivityLogs,
 } from "./transforms";
-import type { PageKey, Container, DockerImage, DockerVolume, DockerEngine, Stack, SystemSettings, ActivityLog, EngineResourceStats, UpdateInfo, ImageUpdateDetail, ImageUpdateSummaryView, ImageUpdateStatusView, ResourceTag } from "./types";
+import type { PageKey, Container, DockerImage, DockerVolume, DockerEngine, Stack, SystemSettings, ActivityLog, EngineResourceStats, UpdateInfo, ImageUpdateDetail, ImageUpdateSummaryView, ImageUpdateStatusView, ResourceTag, NavGroup } from "./types";
 import { randomTagColor } from "./components/TagPicker";
 import {
   shouldAutoFillIcon,
@@ -663,6 +663,16 @@ export default function App() {
     }
   }, [activeEngineId, loadEngineData]);
 
+  // 导航仪表盘分组落盘（v1.51.0，label 分支）：整体替换 nav.groups，其余设置原样保留
+  const handleSaveNavGroups = useCallback(
+    (groups: NavGroup[]) => {
+      const cur = settingsRef.current;
+      if (!cur) return;
+      void handleSaveSettings({ ...cur, nav: { ...(cur.nav || { groups: [] }), groups } });
+    },
+    [handleSaveSettings],
+  );
+
   // 标签库新建标签（v1.49.2）：堆栈 LABELS 标签选择器输入无匹配时「+ 新建」直达，
   // 随机色 + id 与系统设置「标签管理」同规则，落盘后同步本地 settings 状态
   const handleCreateTag = useCallback(async (name: string): Promise<ResourceTag | null> => {
@@ -905,6 +915,8 @@ export default function App() {
               onNavigate={handleNavigate}
               loading={showDataState ? dataLoading : false}
               error={showDataState ? dataError : null}
+              navGroups={settings?.nav?.groups || []}
+              onSaveNavGroups={handleSaveNavGroups}
             />
           )}
           {page === "containers" && (

@@ -864,8 +864,36 @@ export interface SystemSettings {
   mirror: MirrorConfig;
   /** 应用日志保留策略（系统设置 → 应用日志） */
   logRetention: LogRetentionConfig;
+  /** 导航仪表盘（v1.51.0）：顶部分组标签条 + 应用卡片墙 */
+  nav: NavConfig;
   /** 默认值版本号：服务端据此判断是否需要把老配置重置为新默认值 */
   defaultsVersion?: number;
+}
+
+/** 导航应用卡片（v1.51.0）：url = 外网/统一地址；lanUrl = 内网地址（支持 `:端口` / `host:端口` 简写） */
+export interface NavAppItem {
+  id: string;
+  name: string;
+  /** 图标：自定义图标库名称（查 map 得 URL）或完整 URL（http(s)/data:/api/） */
+  icon?: string;
+  /** 图标底色（Hex，仅首字母色块时生效） */
+  iconColor?: string;
+  url?: string;
+  lanUrl?: string;
+  remark?: string;
+}
+
+/** 导航分组（标签条的一项；apps 为该组卡片墙内容） */
+export interface NavGroup {
+  id: string;
+  name: string;
+  /** 组图标（可选，同 NavAppItem.icon 规则） */
+  icon?: string;
+  apps: NavAppItem[];
+}
+
+export interface NavConfig {
+  groups: NavGroup[];
 }
 
 /** 安装量 / 活跃度上报配置（系统设置 → 硬件信息） */

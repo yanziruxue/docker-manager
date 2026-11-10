@@ -43,3 +43,43 @@ export function resolveWebuiUrl(
   if (mode === "internet") return internetPick();
   return zone === "intranet" ? intranetPick() : internetPick();
 }
+
+/**
+ * 导航应用内网地址归一化（v1.51.0）：
+ * - `http(s)://…` 开头 → 原样（完整地址）；
+ * - `:端口`（如 `:8807`）→ 浏览器协议 + 地址栏 host + 该端口；
+ * - 其余（如 `192.168.24.10:8807` 或 `nas.local`）→ 浏览器协议 + 该值。
+ * 空串返回空串（调用方回落外网地址）。
+ */
+export function normalizeNavLanUrl(
+  lanUrl: string,
+  loc: { protocol: string; hostname: string },
+): string {
+  const v = String(lanUrl || "").trim();
+  if (!v) return "";
+  if (/^https?:\/\//i.test(v)) return v;
+  if (v.startsWith(":")) return `${loc.protocol}//${loc.hostname}${v}`;
+  return `${loc.protocol}//${v}`;
+}
+
+/**
+ * 导航应用地址解析（v1.51.0，导航仪表盘卡片消费）：
+ * - 内网：lanUrl（归一化后）优先，缺省回落 url；
+ * - 外网：url 优先，缺省回落 lanUrl（兜底）；
+ * - 自动：按服务端判定的访问分区分派。
+ * 解析结果为空串时调用方应禁用卡片打开动作。
+ */
+export function resolveNavAppUrl(
+  app: { url?: string; lanUrl?: string },
+  mode: WebuiZoneMode,
+  zone: WebuiZone,
+  loc: { protocol: string; hostname: string },
+): string {
+  const lan = normalizeNavLanUrl(app.lanUrl || "", loc);
+  const wan = String(app.url || "").trim();
+  const intranetPick = () => lan || wan;
+  const internetPick = () => wan || lan;
+  if (mode === "intranet") return intranetPick();
+  if (mode === "internet") return internetPick();
+  return zone === "intranet" ? intranetPick() : internetPick();
+}

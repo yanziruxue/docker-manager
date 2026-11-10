@@ -1,6 +1,6 @@
 {
   "name": "docker-stack-manager",
-  "version": "1.50.36",
+  "version": "1.51.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -26,7 +26,7 @@
     "test:logdemux": "node scripts/check-log-demux.mjs",
     "test:stackcreate": "node scripts/check-stack-create.mjs",
     "test:customicons": "node scripts/check-custom-icons.mjs",
-    "test:gates": "npm run lint:hooks && npm run lint:notify && npm run test:secrets && npm run test:logs && npm run test:auth && npm run test:restart && npm run test:thermal && npm run test:install && npm run test:service && npm run test:backup && npm run test:logpack && npm run test:netiface && npm run test:diskselect && npm run test:imagerepo && npm run test:notifclear && npm run test:cpuload && npm run test:logdemux && npm run test:stackcreate && npm run test:customicons && npm run test:webuizone",
+    "test:gates": "npm run lint:hooks && npm run lint:notify && npm run test:secrets && npm run test:logs && npm run test:auth && npm run test:restart && npm run test:thermal && npm run test:install && npm run test:service && npm run test:backup && npm run test:logpack && npm run test:netiface && npm run test:diskselect && npm run test:imagerepo && npm run test:notifclear && npm run test:cpuload && npm run test:logdemux && npm run test:stackcreate && npm run test:customicons && npm run test:webuizone && npm run test:nav",
     "build:frontend": "node scripts/check-hooks.mjs && vite build",
     "build:server": "tsc -p server/tsconfig.json",
     "build:binary": "vite build && node scripts/build-binary.mjs",
@@ -36,7 +36,8 @@
     "publish": "bash scripts/publish.sh",
     "start": "node server/dist/index.js",
     "preview": "vite preview",
-    "test:webuizone": "node scripts/check-webui-zone.mjs"
+    "test:webuizone": "node scripts/check-webui-zone.mjs",
+    "test:nav": "node scripts/check-nav.mjs"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",
