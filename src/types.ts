@@ -705,8 +705,8 @@ export interface ModalConfig {
   /** 操作结果弹窗自动关闭延迟（秒）；0 = 不自动关闭 */
   autoCloseDelay: number;
   /**
-   * 登录后默认显示的页面（v1.42.9）：dashboard / containers / stacks / images /
-   * volumes / networks / notifications / settings。空串或非法值回落为 "dashboard"。
+   * 登录后默认显示的页面（v1.42.9）：navigation / dashboard / containers / stacks /
+   * images / volumes / networks / notifications / settings。空串或非法值回落为 "dashboard"。
    */
   defaultPage: PageKey;
   /**
@@ -1131,6 +1131,7 @@ export interface MirrorRuntimeState {
 // ============ UI 类型 ============
 
 export type PageKey =
+  | "navigation"
   | "dashboard"
   | "containers"
   | "stacks"

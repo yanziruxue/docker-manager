@@ -17,10 +17,7 @@ import {
 import { Tile, useStoredFlag } from "../components/Tile";
 import { TileGrid, useMinWidth } from "../components/TileGrid";
 import { LineChart, type LineSeries } from "../components/LineChart";
-import { NavBoard, useNavIconMap } from "../components/NavBoard";
-import { NavEditor } from "../components/NavEditor";
-import { LayoutDashboard, Settings2 } from "lucide-react";
-import type { EngineResourceStats as EngineStats, NavGroup } from "../types";
+import type { EngineResourceStats as EngineStats } from "../types";
 
 /** 本地保留的实时曲线点上限（1 秒 1 点 ⇒ 约 1 分钟），更早的交给 3 秒轮询的历史段 */
 const LIVE_SAMPLE_LIMIT = 60;
@@ -79,10 +76,6 @@ interface DashboardProps {
   onNavigate: (page: string) => void;
   loading?: boolean;
   error?: string | null;
-  /** 导航仪表盘分组（v1.51.0）：顶部分组标签条 + 应用卡片墙；空 = 仅「仪表盘 + 管理」 */
-  navGroups?: NavGroup[];
-  /** 导航分组整体落盘（管理弹窗保存回调） */
-  onSaveNavGroups?: (groups: NavGroup[]) => void;
 }
 
 const NO_STATS = "正在获取引擎资源数据…";
@@ -189,18 +182,10 @@ export function Dashboard({
   onNavigate,
   loading,
   error,
-  navGroups,
-  onSaveNavGroups,
 }: DashboardProps) {
   // 未使用镜像（含悬空）：无任何容器引用
   const unusedImages = images.filter((i) => i.associatedContainers.length === 0).length;
   const danglingImages = images.filter((i) => i.isDangling).length;
-
-  // ===== 导航仪表盘（v1.51.0，label 分支）：顶部标签条 + 分组卡片墙 =====
-  const [navTab, setNavTab] = useState<string>(typeof window !== "undefined" && new URLSearchParams(window.location.search).get("navTab") || "__dashboard");
-  const [navEditing, setNavEditing] = useState(false);
-  const navIconMap = useNavIconMap();
-  const activeNavGroup = (navGroups || []).find((g) => g.id === navTab) || null;
 
   // 资源时间序列：每 3s 拉一次最近 5 分钟样本（当前值仍由 SSE 实时推送）
   const [history, setHistory] = useState<ResourceSample[]>([]);
@@ -268,104 +253,43 @@ export function Dashboard({
   if (loading && containers.length === 0) return <LoadingState message="正在加载仪表盘数据..." />;
   if (error) return <ErrorState message={error} />;
 
-  const groups = navGroups || [];
-  // 选中分组被删除时回落仪表盘（useMemo 不必：渲染期兜底足够）
-  const showNavBoard = activeNavGroup && groups.some((g) => g.id === activeNavGroup.id);
-
   return (
     <div className="p-6">
-      {/* ===== 导航标签条（v1.51.0）：仪表盘 + 各分组 + 管理，默认显示 ===== */}
-      <div className="flex items-center gap-1.5 mb-4 flex-wrap">
-        <button
-          onClick={() => setNavTab("__dashboard")}
-          className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-[13px] transition-colors ${
-            !showNavBoard
-              ? "bg-blue-600 text-white font-medium shadow-sm"
-              : "bg-white text-slate-600 border border-slate-200 hover:border-blue-300"
-          }`}
-        >
-          <LayoutDashboard size={13} /> 仪表盘
-        </button>
-        {groups.map((g) => (
-          <button
-            key={g.id}
-            onClick={() => setNavTab(g.id)}
-            className={`px-3.5 py-1.5 rounded-full text-[13px] transition-colors ${
-              navTab === g.id && showNavBoard
-                ? "bg-blue-600 text-white font-medium shadow-sm"
-                : "bg-white text-slate-600 border border-slate-200 hover:border-blue-300"
-            }`}
-          >
-            {g.name}
-            <span className={`ml-1 text-[11px] ${navTab === g.id && showNavBoard ? "text-blue-100" : "text-slate-400"}`}>
-              {g.apps.length}
-            </span>
-          </button>
-        ))}
-        <button
-          onClick={() => setNavEditing(true)}
-          className="ml-1 flex items-center gap-1 px-2.5 py-1.5 rounded-full text-[12px] text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
-          title="管理导航分组与入口"
-        >
-          <Settings2 size={13} /> 管理
-        </button>
-      </div>
-
-      {showNavBoard && activeNavGroup ? (
-        /* ===== 导航分组卡片墙 ===== */
-        <NavBoard group={activeNavGroup} iconMap={navIconMap} onOpenEditor={() => setNavEditing(true)} />
-      ) : (
-        /* ===== 原有磁贴仪表盘 ===== */
-        <TileGrid
-          columns={[
-            /* 第 1 列 · 系统（2 列档并入存储） */
-            <>
-              <SystemTile stats={resourceStats} engineId={engineId} />
-              <CpuTile stats={resourceStats} history={series} />
-              <MemTile stats={resourceStats} history={series} />
-              <GpuTile stats={resourceStats} history={series} />
-              {mergeIo && <DiskTile stats={resourceStats} history={series} />}
-            </>,
-            /* 第 2 列 · 应用（2 列档并入网络） */
-            <>
-              <ContainersTile containers={containers} onNavigate={onNavigate} />
-              <ContainerStatsTile engineId={engineId} />
-              <StacksTile stacks={stacks} defaultSubColumns={defaultSubColumns} onNavigate={onNavigate} />
-              <ImagesTile
-                total={images.length}
-                unused={unusedImages}
-                dangling={danglingImages}
-                onNavigate={onNavigate}
-              />
-              {mergeIo && <NetTile stats={resourceStats} history={series} engineId={engineId} />}
-            </>,
-            ...(mergeIo
-              ? []
-              : [
-                    /* 第 3 列 · 网络与存储（单列档堆在末尾还原顺序，3 列档独占一列） */
-                    <>
-                      <NetTile stats={resourceStats} history={series} engineId={engineId} />
-                      <DiskTile stats={resourceStats} history={series} />
-                    </>,
-                  ]),
-          ]}
-        />
-      )}
-
-      {/* 导航管理弹窗 */}
-      {navEditing && onSaveNavGroups && (
-        <NavEditor
-          groups={groups}
-          containers={containers}
-          onSave={(next) => {
-            onSaveNavGroups(next);
-            setNavEditing(false);
-            // 当前选中的分组被删时回落仪表盘
-            if (navTab !== "__dashboard" && !next.some((g) => g.id === navTab)) setNavTab("__dashboard");
-          }}
-          onClose={() => setNavEditing(false)}
-        />
-      )}
+      {/* ===== 原有磁贴仪表盘 ===== */}
+      <TileGrid
+        columns={[
+          /* 第 1 列 · 系统（2 列档并入存储） */
+          <>
+            <SystemTile stats={resourceStats} engineId={engineId} />
+            <CpuTile stats={resourceStats} history={series} />
+            <MemTile stats={resourceStats} history={series} />
+            <GpuTile stats={resourceStats} history={series} />
+            {mergeIo && <DiskTile stats={resourceStats} history={series} />}
+          </>,
+          /* 第 2 列 · 应用（2 列档并入网络） */
+          <>
+            <ContainersTile containers={containers} onNavigate={onNavigate} />
+            <ContainerStatsTile engineId={engineId} />
+            <StacksTile stacks={stacks} defaultSubColumns={defaultSubColumns} onNavigate={onNavigate} />
+            <ImagesTile
+              total={images.length}
+              unused={unusedImages}
+              dangling={danglingImages}
+              onNavigate={onNavigate}
+            />
+            {mergeIo && <NetTile stats={resourceStats} history={series} engineId={engineId} />}
+          </>,
+          ...(mergeIo
+            ? []
+            : [
+                  /* 第 3 列 · 网络与存储（单列档堆在末尾还原顺序，3 列档独占一列） */
+                  <>
+                    <NetTile stats={resourceStats} history={series} engineId={engineId} />
+                    <DiskTile stats={resourceStats} history={series} />
+                  </>,
+                ]),
+        ]}
+      />
     </div>
   );
 }

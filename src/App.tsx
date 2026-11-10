@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { TopBar } from "./components/TopBar";
 import { Dashboard } from "./pages/Dashboard";
+import { NavPage } from "./pages/NavPage";
 import { Containers } from "./pages/Containers";
 import { Stacks } from "./pages/Stacks";
 import { Images } from "./pages/Images";
@@ -67,7 +68,7 @@ function toRefMap(details: ImageUpdateDetail[]): Record<string, boolean> {
 
 /** 合法页面键（v1.50.7 提升到模块级：sessionStorage 恢复与登录默认页共用） */
 const VALID_PAGES: PageKey[] = [
-  "dashboard", "containers", "stacks", "images",
+  "navigation", "dashboard", "containers", "stacks", "images",
   "volumes", "networks", "notifications", "settings",
 ];
 
@@ -915,8 +916,13 @@ export default function App() {
               onNavigate={handleNavigate}
               loading={showDataState ? dataLoading : false}
               error={showDataState ? dataError : null}
+            />
+          )}
+          {page === "navigation" && (
+            <NavPage
               navGroups={settings?.nav?.groups || []}
               onSaveNavGroups={handleSaveNavGroups}
+              containers={containers}
             />
           )}
           {page === "containers" && (

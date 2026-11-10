@@ -16,6 +16,32 @@
 
 ---
 
+## v1.51.1 — 2026-11-10（**label 分支 · 已构建 · 已推 Gitea**）
+
+### 导航功能从「仪表盘分页」抽离为独立页面
+
+> 上一版（v1.51.0）把导航仪表盘做成了仪表盘内的一个分页（顶部标签条 + 分组切换）。本版按需求把它抽成**顶部导航里的一级页面「导航」**，位于「仪表盘」左侧，不再与仪表盘磁贴混在一个分页里。
+
+- **新增一级页面 `导航`**：`src/pages/NavPage.tsx`（扁平化提取自 Dashboard 的导航区块），承载「分组标签条 + 应用卡片墙 + 管理弹窗」全部能力；空分组时显示引导空状态。
+- **顶部导航新增 `导航` 项**（lucide `Compass` 图标），作为**最左侧**入口，位于「仪表盘」之前。
+- **`PageKey` 增加 `navigation`**：`VALID_PAGES`、`ModalConfig.defaultPage` 注释、服务端取值全链路打通，登录默认页可选「导航」。
+- **`Dashboard` 还原为纯磁贴页**：移除 nav 标签条 / NavBoard / NavEditor / `navGroups`·`onSaveNavGroups` 入参及相关 state，相关导入一并清理。
+- **门禁同步**：`scripts/check-nav.mjs` 源码接线断言从 `Dashboard.tsx` 改指 `NavPage.tsx`（否则旧断言会误报回归）。
+
+### 已完成
+- 导航能力完整迁移到独立页面，行为与 v1.51.0 一致（内外网择址、图标三态、Docker 一键聚合、深链 `?navTab=`）。
+- 类型检查（src + server）0 错；全套门禁 19 组全绿（含 nav 门禁 31 断言）；label 包三处二进制 SHA-256 逐字节一致。
+
+### 已知限制
+- 与 v1.51.0 一致：FlatNas 组件生态（天气 / RSS / 音乐 / Todo 等）本版仍不做。
+
+### 快照
+- 二进制 SHA-256：`191a77c93082d71ab60429764ef9bbfa6169e13766934d59815eb6c2df3b8f27`（postject = zip = deb 逐字节一致）；ELF `7f454c46` / e_machine 62。
+- 包名：`dockermanagementyanzi-linux-label-x64-v1.51.1.zip` / `dockermanagementyanzi-label_1.51.1_amd64.deb`（分支令牌 `-label-` 区分，不进 OTA）。
+- commit `（见 git log）` + tag `v1.51.1` 推 Gitea `label` 分支；GitHub 未推；主线 `main` v1.50.36 不动。
+
+---
+
 ## v1.51.0 — 2026-11-10（**label 分支 · 已构建 · 已推 Gitea**）
 
 ### 导航仪表盘（参照 FlatNas）

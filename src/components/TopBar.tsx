@@ -1,7 +1,7 @@
 import React from "react";
 import {
   Bell, RefreshCw, UserCircle, LogOut, Boxes, LayoutDashboard, Container, Layers,
-  Image as ImageIcon, Database, Network, Settings,
+  Image as ImageIcon, Database, Network, Settings, Compass,
 } from "lucide-react";
 import type { PageKey } from "../types";
 import type { AuthUser } from "../api";
@@ -40,6 +40,7 @@ interface TopBarProps {
 
 /** 顶部导航项（v1.47.0 自 Sidebar 迁入） */
 const navItems: { key: PageKey; label: string; icon: React.ReactNode }[] = [
+  { key: "navigation", label: "导航", icon: <Compass size={16} /> },
   { key: "dashboard", label: "仪表盘", icon: <LayoutDashboard size={16} /> },
   { key: "containers", label: "容器管理", icon: <Container size={16} /> },
   { key: "stacks", label: "堆栈管理", icon: <Layers size={16} /> },

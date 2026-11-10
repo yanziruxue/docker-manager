@@ -3,7 +3,7 @@
  * 门禁：导航仪表盘（v1.51.0，label 分支）
  *  - 真模块断言：编译运行 src/webui-url.ts 的 resolveNavAppUrl / normalizeNavLanUrl，
  *    覆盖内外网优先级链、`:端口` / `host:端口` / 完整 URL 三种内网写法、auto 分区分派；
- *  - 源码接线断言：服务端 nav 段默认值 + normalizeNavGroups、Dashboard 标签条与内容区切换、
+ *  - 源码接线断言：服务端 nav 段默认值 + normalizeNavGroups、NavPage 标签条与内容区切换、
  *    NavEditor 分组/应用 CRUD 与 Docker 聚合入口、App 落盘回调；
  *  - 负向自检：注入「内网缺 lanUrl 不回落 url」回归 → 重载模块应检出差异 → 还原 → 复核全绿。
  * 用法：node scripts/check-nav.mjs（退出码非 0 = 有回归）
@@ -67,12 +67,11 @@ ok("外网缺 url 回落 lanUrl", mod.resolveNavAppUrl({ url: "", lanUrl: ":80" 
 ok("双空 → 空串（调用方禁用卡片）", mod.resolveNavAppUrl({ url: "", lanUrl: " " }, "auto", "internet", loc) === "");
 
 console.log("== ② 源码接线断言 ==");
-const dash = read("src/pages/Dashboard.tsx");
-ok("Dashboard 接收 navGroups/onSaveNavGroups", dash.includes("navGroups") && dash.includes("onSaveNavGroups"));
-ok("Dashboard 顶部标签条渲染分组按钮", dash.includes("groups.map((g) => (") && dash.includes("setNavTab(g.id)"));
-ok("标签条含「仪表盘」入口", dash.includes("仪表盘"));
-ok("选中分组渲染 NavBoard、否则渲染 TileGrid", dash.includes("<NavBoard") && dash.includes("<TileGrid"));
-ok("导航管理弹窗挂载", dash.includes("<NavEditor"));
+const navPage = read("src/pages/NavPage.tsx");
+ok("NavPage 接收 navGroups/onSaveNavGroups", navPage.includes("navGroups") && navPage.includes("onSaveNavGroups"));
+ok("NavPage 顶部标签条渲染分组按钮", navPage.includes("groups.map((g) => (") && navPage.includes("setNavTab(g.id)"));
+ok("选中分组渲染 NavBoard、无分组提示空状态", navPage.includes("<NavBoard") && navPage.includes("还没有导航分组"));
+ok("导航管理弹窗挂载", navPage.includes("<NavEditor"));
 
 const board = read("src/components/NavBoard.tsx");
 ok("NavBoard 走 resolveNavAppUrl 解析地址", board.includes("resolveNavAppUrl"));
@@ -87,7 +86,7 @@ ok("NavEditor Docker 一键聚合", editor.includes("DockerImport") && editor.in
 ok("聚合入口内网地址自动取 WebUI 端口", editor.includes("webuiPort ? `:${c.webuiPort}`"));
 
 const appSrc = read("src/App.tsx");
-ok("App 提供 handleSaveNavGroups 并透传 Dashboard", appSrc.includes("handleSaveNavGroups") && appSrc.includes("navGroups={settings?.nav?.groups"));
+ok("App 提供 handleSaveNavGroups 并透传 NavPage", appSrc.includes("handleSaveNavGroups") && appSrc.includes("<NavPage"));
 
 const sset = read("server/settings.ts");
 ok("服务端 DEFAULT_SETTINGS 含 nav 空分组", sset.includes("nav: { groups: []"));
