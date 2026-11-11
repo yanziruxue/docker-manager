@@ -875,7 +875,11 @@ export interface SystemSettings {
   defaultsVersion?: number;
 }
 
-/** 导航应用卡片（v1.51.0）：url = 外网/统一地址；lanUrl = 内网地址（支持 `:端口` / `host:端口` 简写） */
+/** 导航应用类型（v1.51.7）：self=自托管（含内外网地址/备用/公开，走内外网分区）；ext=非自托管（外链，直接打开） */
+export type NavAppKind = "self" | "ext";
+
+/** 导航应用卡片（v1.51.0）：url = 外网/统一地址；lanUrl = 内网地址（支持 `:端口` / `host:端口` 简写）。
+ * v1.51.7 扩展 kind / titleColor / 备用地址 / 公开 / 图标缩放，全部可选且向后兼容。 */
 export interface NavAppItem {
   id: string;
   name: string;
@@ -886,15 +890,35 @@ export interface NavAppItem {
   url?: string;
   lanUrl?: string;
   remark?: string;
+  /** 类型：self=自托管（默认，v1.51.7 起）；ext=非自托管外链（点击直接打开 url） */
+  kind?: NavAppKind;
+  /** 标题颜色（卡片名称文字色，Hex；v1.51.7） */
+  titleColor?: string;
+  /** 外网备用地址（自托管，按序回退；v1.51.7） */
+  urlBackups?: string[];
+  /** 内网备用地址（自托管，按序回退；v1.51.7） */
+  lanBackups?: string[];
+  /** 是否公开（自托管，预留：匿名可见；v1.51.7） */
+  isPublic?: boolean;
+  /** 图标缩放%（自托管图标区，默认 100，范围 50–200；v1.51.7） */
+  iconZoom?: number;
 }
 
-/** 导航分组（标签条的一项；apps 为该组卡片墙内容） */
+/** 导航分组（标签条的一项；apps 为该组卡片墙内容）。v1.51.7 增加卡片布局/尺寸参数（参照 FlatNas） */
 export interface NavGroup {
   id: string;
   name: string;
   /** 组图标（可选，同 NavAppItem.icon 规则） */
   icon?: string;
   apps: NavAppItem[];
+  /** 卡片布局（v1.51.7，参照 FlatNas）：vertical=图标在上（默认）；horizontal=图标在左、文字在右（描述按行显示） */
+  cardLayout?: "vertical" | "horizontal";
+  /** 卡片宽度 px（v1.51.7，参照 FlatNas cardSize，默认 120） */
+  cardSize?: number;
+  /** 卡片间距 px（v1.51.7，参照 FlatNas gridGap，默认 16） */
+  gridGap?: number;
+  /** 图标尺寸 px（v1.51.7，参照 FlatNas iconSize，默认 48） */
+  iconSize?: number;
 }
 
 export interface NavConfig {

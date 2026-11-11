@@ -1,14 +1,15 @@
 /**
  * 导航仪表盘管理弹窗（v1.51.0，label 分支）：
  * - 分组：新增 / 改名 / 删除 / 上移下移；
- * - 应用：新增 / 编辑（名称、图标、底色、外网 URL、内网地址、备注）/ 删除 / 上移下移；
- * - Docker 一键聚合：勾选容器（优先有 WebUI/端口的）批量生成为当前分组的应用卡片
- *   （内网地址自动填 `:端口`，外网地址取容器 WebUI URL，图标沿用容器已解析图标）。
+ * - 分组卡片设置（v1.51.7，参照 FlatNas）：布局（垂直/水平）、卡片大小、卡片间距、图标大小；
+ * - 应用：新增 / 编辑（经 NavAppModal，区分自托管/非自托管）/ 删除 / 上移下移；
+ * - Docker 一键聚合：勾选容器（优先有 WebUI/端口的）批量生成为当前分组的应用卡片。
  * 保存通过 onSave(groups) 整体落盘（服务端 normalizeNavGroups 兜底校验）。
  */
 import { useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, ChevronLeft, Pencil, Plus, Rocket, Trash2, X } from "lucide-react";
 import type { Container, NavAppItem, NavGroup } from "../types";
+import { NavAppModal } from "./NavAppModal";
 
 /** 随机 id（与标签库同风格：时间戳 36 进制 + 随机尾） */
 function genId(): string {
@@ -37,74 +38,48 @@ function AppRow({
   app,
   index,
   count,
-  onChange,
+  onEdit,
   onDelete,
   onMove,
 }: {
   app: NavAppItem;
   index: number;
   count: number;
-  onChange: (next: NavAppItem) => void;
+  onEdit: () => void;
   onDelete: () => void;
   onMove: (dir: -1 | 1) => void;
 }) {
-  const [editing, setEditing] = useState(false);
-  if (!editing) {
-    return (
-      <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-slate-100 bg-white">
-        <span
-          className="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 text-[11px] font-bold text-white"
-          style={{ background: app.iconColor || "#3B82F6" }}
-        >
-          {(app.name || "?").slice(0, 1).toUpperCase()}
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="text-[13px] text-slate-700 truncate">{app.name}</div>
-          <div className="text-[11px] text-slate-400 truncate">
-            {app.lanUrl ? `内网 ${app.lanUrl}` : "内网未配置"} · {app.url ? `外网 ${app.url}` : "外网未配置"}
-          </div>
-        </div>
-        <button onClick={() => setEditing(true)} className="p-1 text-slate-400 hover:text-blue-600" title="编辑">
-          <Pencil size={13} />
-        </button>
-        <button onClick={() => onMove(-1)} disabled={index === 0} className="p-1 text-slate-400 hover:text-slate-700 disabled:opacity-30" title="上移">
-          <ArrowUp size={13} />
-        </button>
-        <button onClick={() => onMove(1)} disabled={index === count - 1} className="p-1 text-slate-400 hover:text-slate-700 disabled:opacity-30" title="下移">
-          <ArrowDown size={13} />
-        </button>
-        <button onClick={onDelete} className="p-1 text-slate-400 hover:text-red-600" title="删除">
-          <Trash2 size={13} />
-        </button>
-      </div>
-    );
-  }
   return (
-    <div className="px-2.5 py-2 rounded-lg border border-blue-200 bg-blue-50/40 space-y-2">
-      <div className="grid grid-cols-2 gap-2">
-        <Field label="名称">
-          <input className={inputCls} value={app.name} onChange={(e) => onChange({ ...app, name: e.target.value })} />
-        </Field>
-        <Field label="图标（自定义图标库名称或完整 URL，留空=首字母）">
-          <input className={inputCls} value={app.icon || ""} onChange={(e) => onChange({ ...app, icon: e.target.value })} placeholder="如 qbittorrent 或 https://…" />
-        </Field>
-        <Field label="内网地址（:端口 / host:端口 / 完整 URL）">
-          <input className={inputCls} value={app.lanUrl || ""} onChange={(e) => onChange({ ...app, lanUrl: e.target.value })} placeholder=":8807" />
-        </Field>
-        <Field label="外网 / 统一地址">
-          <input className={inputCls} value={app.url || ""} onChange={(e) => onChange({ ...app, url: e.target.value })} placeholder="https://nas.example.com:8807" />
-        </Field>
-        <Field label="图标底色（Hex，首字母色块生效）">
-          <input className={inputCls} value={app.iconColor || ""} onChange={(e) => onChange({ ...app, iconColor: e.target.value })} placeholder="#3B82F6" />
-        </Field>
-        <Field label="备注">
-          <input className={inputCls} value={app.remark || ""} onChange={(e) => onChange({ ...app, remark: e.target.value })} />
-        </Field>
+    <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-slate-100 bg-white">
+      <span
+        className="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 text-[11px] font-bold text-white"
+        style={{ background: app.iconColor || "#3B82F6" }}
+      >
+        {(app.name || "?").slice(0, 1).toUpperCase()}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="text-[13px] text-slate-700 truncate flex items-center gap-1.5">
+          {app.name}
+          {app.kind === "ext" && (
+            <span className="text-[10px] px-1 rounded bg-slate-100 text-slate-400">外链</span>
+          )}
+        </div>
+        <div className="text-[11px] text-slate-400 truncate">
+          {app.lanUrl ? `内网 ${app.lanUrl}` : "内网未配置"} · {app.url ? `外网 ${app.url}` : "外网未配置"}
+        </div>
       </div>
-      <div className="flex items-center justify-between">
-        <button onClick={onDelete} className="text-xs text-red-500 hover:text-red-600">删除此入口</button>
-        <button onClick={() => setEditing(false)} className="px-3 py-1 text-xs text-white bg-blue-600 rounded-lg hover:bg-blue-700">完成</button>
-      </div>
+      <button onClick={onEdit} className="p-1 text-slate-400 hover:text-blue-600" title="编辑">
+        <Pencil size={13} />
+      </button>
+      <button onClick={() => onMove(-1)} disabled={index === 0} className="p-1 text-slate-400 hover:text-slate-700 disabled:opacity-30" title="上移">
+        <ArrowUp size={13} />
+      </button>
+      <button onClick={() => onMove(1)} disabled={index === count - 1} className="p-1 text-slate-400 hover:text-slate-700 disabled:opacity-30" title="下移">
+        <ArrowDown size={13} />
+      </button>
+      <button onClick={onDelete} className="p-1 text-slate-400 hover:text-red-600" title="删除">
+        <Trash2 size={13} />
+      </button>
     </div>
   );
 }
@@ -121,7 +96,6 @@ function DockerImport({
 }) {
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const sorted = useMemo(() => {
-    // 有 WebUI / 端口的排前面（聚合的主要目标）
     return [...containers].sort((a, b) => {
       const s = (c: Container) => (c.webuiUrl || c.webuiPort ? 0 : 1);
       return s(a) - s(b) || a.name.localeCompare(b.name);
@@ -139,7 +113,7 @@ function DockerImport({
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <p className="text-xs text-slate-500">勾选容器生成入口（内网地址自动取 WebUI 端口，外网取其 WebUI URL）</p>
-        <button onClick={onClose} className="text-xs text-slate-400 hover:text-slate-600">取消</button>
+        <button onClick={onClose} className="text-xs text-slate-400 hover:text-slate-600">返回</button>
       </div>
       <div className="max-h-64 overflow-y-auto space-y-1 pr-1">
         {sorted.map((c) => (
@@ -210,13 +184,18 @@ export function NavEditor({
     return i >= 0 ? i : 0;
   });
   const [importing, setImporting] = useState(false);
+  const [appModal, setAppModal] = useState<{ open: boolean; initial: NavAppItem | null; groupId?: string }>({
+    open: false,
+    initial: null,
+    groupId: undefined,
+  });
   const active = draft[activeIdx];
 
   const updateActive = (patch: Partial<NavGroup>) => {
     setDraft((prev) => prev.map((g, i) => (i === activeIdx ? { ...g, ...patch } : g)));
   };
   const addGroup = () => {
-    const g: NavGroup = { id: genId(), name: `分组 ${draft.length + 1}`, apps: [] };
+    const g: NavGroup = { id: genId(), name: `分组 ${draft.length + 1}`, apps: [], cardLayout: "vertical", cardSize: 120, gridGap: 16, iconSize: 48 };
     setDraft((prev) => [...prev, g]);
     setActiveIdx(draft.length);
   };
@@ -234,10 +213,6 @@ export function NavEditor({
     });
     setActiveIdx((cur) => (cur === idx ? idx + dir : cur));
   };
-  const addApp = () => {
-    const a: NavAppItem = { id: genId(), name: "新入口", icon: "", iconColor: "#3B82F6", url: "", lanUrl: "", remark: "" };
-    updateActive({ apps: [...(active?.apps || []), a] });
-  };
   const importApps = (picked: Container[]) => {
     const items: NavAppItem[] = picked.map((c) => ({
       id: genId(),
@@ -247,9 +222,25 @@ export function NavEditor({
       url: c.webuiUrl || "",
       lanUrl: c.webuiPort ? `:${c.webuiPort}` : "",
       remark: "",
+      kind: "self",
     }));
     updateActive({ apps: [...(active?.apps || []), ...items] });
     setImporting(false);
+  };
+  const handleSaveApp = (gid: string, app: NavAppItem) => {
+    setDraft((prev) =>
+      prev.map((g) => {
+        if (g.id === gid) {
+          const exists = g.apps.some((a) => a.id === app.id);
+          return {
+            ...g,
+            apps: exists ? g.apps.map((a) => (a.id === app.id ? app : a)) : [...g.apps, app],
+          };
+        }
+        return { ...g, apps: g.apps.filter((a) => a.id !== app.id) };
+      }),
+    );
+    setAppModal({ open: false, initial: null });
   };
 
   return (
@@ -292,17 +283,65 @@ export function NavEditor({
             </button>
           </div>
 
-          {/* 右侧：当前分组的名称与入口列表 */}
+          {/* 右侧：当前分组的名称 / 卡片设置 / 入口列表 */}
           <div className="flex-1 flex flex-col min-w-0">
             {active ? (
               <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                <div className="flex items-center gap-2">
-                  <input
-                    className={inputCls + " max-w-[240px] font-medium"}
-                    value={active.name}
-                    onChange={(e) => updateActive({ name: e.target.value })}
-                    placeholder="分组名称"
+                <input
+                  className={inputCls + " max-w-[240px] font-medium"}
+                  value={active.name}
+                  onChange={(e) => updateActive({ name: e.target.value })}
+                  placeholder="分组名称"
+                />
+
+                {/* 卡片设置（v1.51.7，参照 FlatNas） */}
+                <div className="rounded-xl border border-slate-100 bg-slate-50/60 p-3 space-y-3">
+                  <p className="text-xs font-medium text-slate-600">卡片设置（参照 FlatNas）</p>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[12px] text-slate-500 w-16">布局</span>
+                    <div className="flex gap-1">
+                      {(["vertical", "horizontal"] as const).map((lay) => (
+                        <button
+                          key={lay}
+                          onClick={() => updateActive({ cardLayout: lay })}
+                          className={`px-2.5 py-1 text-[12px] rounded-md border ${
+                            (active.cardLayout || "vertical") === lay
+                              ? "bg-blue-50 text-blue-600 border-blue-300"
+                              : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"
+                          }`}
+                        >
+                          {lay === "vertical" ? "垂直" : "水平"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <SliderRow
+                    label="卡片大小"
+                    value={active.cardSize ?? 120}
+                    min={60}
+                    max={240}
+                    unit="px"
+                    onChange={(v) => updateActive({ cardSize: v })}
                   />
+                  <SliderRow
+                    label="卡片间距"
+                    value={active.gridGap ?? 16}
+                    min={0}
+                    max={60}
+                    unit="px"
+                    onChange={(v) => updateActive({ gridGap: v })}
+                  />
+                  <SliderRow
+                    label="图标大小"
+                    value={active.iconSize ?? 48}
+                    min={16}
+                    max={96}
+                    unit="px"
+                    onChange={(v) => updateActive({ iconSize: v })}
+                  />
+                </div>
+
+                <div className="flex items-center gap-2">
                   <button
                     onClick={() => setImporting((v) => !v)}
                     className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50"
@@ -311,7 +350,10 @@ export function NavEditor({
                     {importing ? "返回编辑" : "从容器生成"}
                   </button>
                   <div className="flex-1" />
-                  <button onClick={addApp} className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-white bg-blue-600 rounded-lg hover:bg-blue-700">
+                  <button
+                    onClick={() => setAppModal({ open: true, initial: null, groupId: active.id })}
+                    className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-white bg-blue-600 rounded-lg hover:bg-blue-700"
+                  >
                     <Plus size={12} /> 添加入口
                   </button>
                 </div>
@@ -326,7 +368,7 @@ export function NavEditor({
                         app={a}
                         index={i}
                         count={active.apps.length}
-                        onChange={(next) => updateActive({ apps: active.apps.map((x) => (x.id === a.id ? next : x)) })}
+                        onEdit={() => setAppModal({ open: true, initial: a, groupId: active.id })}
                         onDelete={() => updateActive({ apps: active.apps.filter((x) => x.id !== a.id) })}
                         onMove={(dir) => {
                           const apps = [...active.apps];
@@ -365,6 +407,49 @@ export function NavEditor({
           </button>
         </div>
       </div>
+
+      {/* 添加 / 编辑项目弹窗 */}
+      {appModal.open && (
+        <NavAppModal
+          groups={draft}
+          containers={containers}
+          initial={appModal.initial}
+          initialGroupId={appModal.groupId || active?.id}
+          onSave={handleSaveApp}
+          onClose={() => setAppModal({ open: false, initial: null })}
+        />
+      )}
+    </div>
+  );
+}
+
+function SliderRow({
+  label,
+  value,
+  min,
+  max,
+  unit,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  unit: string;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-[12px] text-slate-500 w-16">{label}</span>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="flex-1 accent-blue-500"
+      />
+      <span className="text-[11px] text-slate-500 w-12 text-right">{value}{unit}</span>
     </div>
   );
 }

@@ -16,6 +16,29 @@
 
 ---
 
+## v1.51.7 — 2026-11-11（**main 分支 · 已构建 · 已推 Gitea**）
+
+### 改动
+- **添加项目分两种类型**（导航页「管理分组 → 添加入口」打开新弹窗 `src/components/NavAppModal.tsx`）：
+  - **自托管**：按 FlatNas「添加新项目」布局——标题 + 标题颜色、描述（多行）、外网链接（可＋备用地址）、内网链接（可＋备用地址）、图标区（预览 / 已缓存徽标 / ⚡智能匹配 / 缩放滑块 / 图片URL）、公开开关；并支持**从 Docker 容器自动填写**（选容器后自动填标题/图标/内外网地址）。
+  - **非自托管**：仅 名称 / 链接 / 图标 / 描述，点击**直接打开链接**（不走内外网分区）。
+  - 弹窗顶部「分组」下拉 = 决定该项目加到哪个分组（对应截图顶部 app 下拉）。
+- **管理分组增加卡片设置**（参照 FlatNas，`NavEditor.tsx` 分组设置面板）：卡片布局（垂直/水平）、卡片大小、卡片间距、图标大小 四档滑块。
+- **`src/types.ts`**：`NavAppItem` 增 `kind/titleColor/urlBackups/lanBackups/isPublic/iconZoom`；`NavGroup` 增 `cardLayout/cardSize/gridGap/iconSize`（全部可选、向后兼容）。
+- **`server/nav-groups.ts`**：`normalizeNavGroups` 保留并钳制上述新字段，旧数据回落默认。
+- **`src/components/NavBoard.tsx`**：按分组 `cardSize/gridGap/iconSize/cardLayout` 渲染；`ext` 链接直接打开；`self` 主地址为空时回退备用地址。
+- **`deploy/linux/install.sh`**：恢复门禁要求的 `CANDIDATE_ALL="$CANDIDATE_USERS"` 字面行（`pick_existing_user` 编号映射==展示列表，隐藏的服务账户不参与编号）。
+- 版本号 `1.51.6 → 1.51.7`。
+
+### 验证（硬证据）
+- 双 tsc（src/server）0 错；`npm run test:gates` 全绿（80 PASS / 0 FAIL，含 install 账户编号门禁）。
+- SEA 四步构建 + 三处 SHA-256 逐字节一致 `64aec6445a547740df8086dc2a58cffdf0d359eeea8671eca5ac7346ce188da3`（postject = zip 内 = deb 内）；ELF `7f454c46` / e_machine=62 / 130550976 B。
+- 嵌入前端 base64 解码与 `dist/assets/index-*.js` 逐字节一致（SHA `20228538…`）；新 UI 文案（自托管/非自托管/添加新项目/确认添加/从 Docker 容器自动填写/智能匹配/卡片设置（参照 FlatNas）/卡片大小/卡片间距/图标大小/公开）全部落地。
+- 交付包：`dockermanagementyanzi-linux-x64-v1.51.7.zip`（41.1 MB）、`dockermanagementyanzi_1.51.7_amd64.deb`（40.9 MB）；latest 别名 `dockermanagementyanzi-linux-x64.zip`（43102847 B = main v1.50.36）**未覆盖**。
+
+### 下一步
+- 等用户验收：自托管/非自托管两种添加流程、分组卡片大小/间距/布局滑块手感、Docker 自动填写与智能匹配图标；GitHub 仍不推（Gitea-only 约定）。
+
 ## v1.51.6 — 2026-11-11（**main 分支 · 已构建 · 已推 Gitea**）
 
 ### 缘起

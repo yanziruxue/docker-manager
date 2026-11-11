@@ -438,6 +438,10 @@ if command -v getent >/dev/null 2>&1; then
 elif [ -r /etc/passwd ]; then
   CANDIDATE_USERS="$(awk -F: '$3 >= 1000 && $3 < 65534 && $7 != "" && $7 !~ /(nologin|false)$/ { print $1 }' /etc/passwd 2>/dev/null || true)"
 fi
+# ★ v1.42.2：编号映射 == 展示列表（隐藏的服务账户不参与编号）。
+#   CANDIDATE_ALL 与 CANDIDATE_USERS 同值（都是已过滤掉 nologin/false 的登录用户），
+#   下方 pick_existing_user 的「序号 → 用户名」映射与展示列表严格一致。
+CANDIDATE_ALL="$CANDIDATE_USERS"
 
 # 取 GECOS 描述：只取**第一个逗号前的全名**（避免 "Libvirt Qemu,,," 尾随逗号串）。
 user_desc() {
@@ -503,13 +507,13 @@ pick_existing_user() {
       cdesc="$(user_desc "$cand")"
       log "  ${i}) ${cand}$( [ -n "$cdesc" ] && printf '（%s）' "$cdesc" )"
       i=$((i + 1))
-    done <<< "$CANDIDATE_USERS"
+    done <<< "$CANDIDATE_ALL"
     read -r -p "请输入服务运行账户（序号或用户名，须为已存在的非 root 系统用户）: " pick
     # 纯数字 → 按序号取对应用户名；否则视为直接输入的用户名
     if printf '%s' "$pick" | grep -qE '^[0-9]+$'; then
-      sel="$(printf '%s\n' "$CANDIDATE_USERS" | sed -n "${pick}p")"
+      sel="$(printf '%s\n' "$CANDIDATE_ALL" | sed -n "${pick}p")"
       APP_RUN_AS_USER="${sel:-}"
-      [ -n "$APP_RUN_AS_USER" ] || err "序号 ${pick} 超出候选范围（共 $(printf '%s\n' "$CANDIDATE_USERS" | grep -c .) 个用户）"
+      [ -n "$APP_RUN_AS_USER" ] || err "序号 ${pick} 超出候选范围（共 $(printf '%s\n' "$CANDIDATE_ALL" | grep -c .) 个用户）"
     else
       APP_RUN_AS_USER="$pick"
     fi

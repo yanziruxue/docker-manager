@@ -26,6 +26,12 @@ function normalizeNavGroups(v: any): Array<Record<string, unknown>> {
   if (!Array.isArray(v)) return [];
   const str = (x: unknown, cap: number): string => String(x ?? "").trim().slice(0, cap);
   const genId = () => `n${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  /** 数值钳制：非有限数或越界回落默认 */
+  const num = (x: unknown, min: number, max: number, dflt: number): number => {
+    const n = typeof x === "number" && isFinite(x) ? x : NaN;
+    if (isNaN(n)) return dflt;
+    return Math.min(max, Math.max(min, Math.round(n)));
+  };
   const out: Array<Record<string, unknown>> = [];
   for (const g of v.slice(0, 50)) {
     if (!g || typeof g !== "object") continue;
@@ -34,6 +40,10 @@ function normalizeNavGroups(v: any): Array<Record<string, unknown>> {
     const rawApps = Array.isArray((g as any).apps) ? (g as any).apps : [];
     const apps = rawApps.slice(0, 200).map((a: any) => {
       const an = (!a || typeof a !== "object") ? {} : a;
+      const backups = (raw: unknown, cap: number, each: number): string[] => {
+        if (!Array.isArray(raw)) return [];
+        return raw.slice(0, 10).map((x) => str(x, each)).filter(Boolean).slice(0, cap);
+      };
       return {
         id: str(an.id, 40) || genId(),
         name: str(an.name, 60) || "未命名",
@@ -42,9 +52,27 @@ function normalizeNavGroups(v: any): Array<Record<string, unknown>> {
         url: str(an.url, 500),
         lanUrl: str(an.lanUrl, 300),
         remark: str(an.remark, 200),
+        // v1.51.7：类型 + 卡片增强字段（全部可选，缺省回落）
+        kind: an.kind === "ext" ? "ext" : "self",
+        titleColor: str(an.titleColor, 32),
+        urlBackups: backups(an.urlBackups, 10, 500),
+        lanBackups: backups(an.lanBackups, 10, 300),
+        isPublic: Boolean(an.isPublic),
+        iconZoom: num(an.iconZoom, 50, 200, 100),
       };
     });
-    out.push({ id: str((g as any).id, 40) || genId(), name, icon: str((g as any).icon, 300), apps });
+    const gl = (g as any).cardLayout === "horizontal" ? "horizontal" : "vertical";
+    out.push({
+      id: str((g as any).id, 40) || genId(),
+      name,
+      icon: str((g as any).icon, 300),
+      apps,
+      // v1.51.7：分组卡片布局/尺寸（参照 FlatNas）
+      cardLayout: gl,
+      cardSize: num((g as any).cardSize, 60, 240, 120),
+      gridGap: num((g as any).gridGap, 0, 60, 16),
+      iconSize: num((g as any).iconSize, 16, 96, 48),
+    });
   }
   return out;
 }
