@@ -16,6 +16,27 @@
 
 ---
 
+## v1.51.8 — 2026-11-11（**main 分支 · 已构建 · 已推 Gitea**）
+
+### 改动
+- **导航「页面设置」重构为整页设计**（用户纠正：此前「页面设置」按钮实际打开分组管理，语义错误）：原按钮拆为两个——「页面设置」（整页外观/环境）+「管理分组」（分组卡片尺寸/间距，即 v1.51.7 已实现，保留不动）。
+- **新增独立弹窗** `src/components/NavPageSettingsModal.tsx`：四分区——背景图片（URL + 本地上传 + 预览 + 模糊）/ 环境天气效果 / 内外网默认模式 / 白昼模式。
+- **新增独立持久化通道**（沿用 nav-groups 铁律，不污染 main `settings.json`/`SystemSettings`）：`server/nav-page-settings.ts`（`nav-page-settings.json` 独立文件 + `getNavPageSettings`/`saveNavPageSettings`/`normalizeNavPageSettings`，全字段可选、枚举非法回落、bgBlur 钳制 0–40）；`GET/PUT /api/nav-page-settings`；`POST /api/nav-assets`（背景图上传，复用 `express.raw` + `X-Filename` 净化 + 防穿越）+ `GET /api/nav-assets/:file` 静态服务（扩展名白名单 + basename 净化）。
+- **天气效果** `src/components/WeatherEffect.tsx`：纯前端 canvas 粒子（无/雨/雪/樱花/落叶），不依赖外部天气 API；`pointer-events-none` 固定覆盖整页。
+- **内外网默认模式**：`NavNetworkMode`（auto/lan/wan）→ `NavBoard` 映射为 `WebuiZoneMode`（auto/intranet/internet），覆盖单卡自动判定。
+- **白昼模式**：`NavTheme`（auto/light/dark）作用于整页背景与天气层；auto 跟随系统 `prefers-color-scheme`。
+- **类型** `src/types.ts`：新增 `NavTheme`/`NavNetworkMode`/`NavWeather`/`NavPageSettings`。**客户端** `src/api.ts` 新增 `fetchNavPageSettings`/`saveNavPageSettingsApi`/`uploadNavAssetApi`；`src/App.tsx` 登录后一并拉取并下传。
+- 版本号 `1.51.7 → 1.51.8`。
+
+### 验证（硬证据）
+- 双 tsc（src/server）0 错；`npm run test:gates` 全绿（38 ok / 0 FAIL）。
+- SEA 四步构建 + 三处 SHA-256 逐字节一致 `c69eeab6430fa758e649f44667794ff522a4d8466af501e763a5055f711aa610`（postject = zip 内 = deb 内）；ELF `7f454c46` / e_machine=62 / 140840768 B。
+- 嵌入前端 base64 解码与 `dist/assets/index-*.js|css` 逐字节一致；运行时 `CURRENT_VERSION="1.51.8"`（二进制内 `1.51.7`/`1.51.4` 命中均为历史代码注释，非运行版本，已用独有锚点排除假红）。
+- 交付包：`dockermanagementyanzi-linux-x64-v1.51.8.zip`（43.4 MB）、`dockermanagementyanzi_1.51.8_amd64.deb`（43.1 MB）；latest 别名 `dockermanagementyanzi-linux-x64.zip`（固定 main v1.50.36）**未覆盖**。
+
+### 下一步
+- 等用户验收：背景图 URL/上传、天气五选一观感、内外网默认模式覆盖面、白昼模式跟随/强制；GitHub 仍不推（Gitea-only 约定）。
+
 ## v1.51.7 — 2026-11-11（**main 分支 · 已构建 · 已推 Gitea**）
 
 ### 改动

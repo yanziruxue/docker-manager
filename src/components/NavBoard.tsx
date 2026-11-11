@@ -7,7 +7,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { ExternalLink } from "lucide-react";
-import type { NavAppItem, NavGroup } from "../types";
+import type { NavAppItem, NavGroup, NavNetworkMode } from "../types";
 import { getNetworkZoneApi, listCustomIconsApi } from "../api";
 import { resolveNavAppUrl, type WebuiZone, type WebuiZoneMode } from "../webui-url";
 import type { CustomIconsPayload } from "../custom-icons";
@@ -146,11 +146,14 @@ export function NavBoard({
   iconMap,
   onOpenEditor,
   onAddApp,
+  navNetworkMode,
 }: {
   group: NavGroup;
   iconMap: Record<string, string>;
   onOpenEditor: () => void;
   onAddApp: () => void;
+  /** 内外网默认访问模式（v1.51.8，由导航页「页面设置」下传）：覆盖单卡自动判定 */
+  navNetworkMode?: NavNetworkMode;
 }) {
   const [zone, setZone] = useState<WebuiZone>("intranet");
   useEffect(() => {
@@ -163,7 +166,9 @@ export function NavBoard({
     };
   }, []);
   const apps = group.apps || [];
-  const mode: WebuiZoneMode = "auto";
+  // navNetworkMode：auto=按访问 IP 自动分区；lan=强制内网；wan=强制外网
+  const mode: WebuiZoneMode =
+    navNetworkMode === "lan" ? "intranet" : navNetworkMode === "wan" ? "internet" : "auto";
   const layout = group.cardLayout || "vertical";
   const cardSize = group.cardSize || 120;
   const gridGap = group.gridGap ?? 16;

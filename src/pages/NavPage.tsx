@@ -2,14 +2,17 @@
  * 导航页（v1.51.0，label 分支）：独立一级页面（顶部导航「导航」项，位于「仪表盘」左侧），
  * 承载原 Dashboard 内的「分组标签条 + 应用卡片墙 + 管理弹窗」。
  * 与原 Dashboard 分页解耦：不再是仪表盘的一个分页，而是顶部导航里的一个独立入口。
- * 每个分组是一个标签（FlatNas 风格），点击切换该分组的卡片墙；「管理」打开 NavEditor 整体编辑。
+ * 每个分组是一个标签（FlatNas 风格），点击切换该分组的卡片墙；「管理分组」打开 NavEditor；
+ * 「页面设置」打开 NavPageSettingsModal（整页外观/环境，v1.51.8）。
  * 图标解析 / 内外网分区复用 NavBoard（独立拉取 /api/custom-icons 与 /api/network-zone）。
  */
 import React, { useState, useEffect, useCallback } from "react";
-import { Compass, Settings2 } from "lucide-react";
+import { Compass, Settings2, SlidersHorizontal } from "lucide-react";
 import { NavBoard, useNavIconMap } from "../components/NavBoard";
 import { NavEditor } from "../components/NavEditor";
-import type { Container, NavGroup } from "../types";
+import { NavPageSettingsModal } from "../components/NavPageSettingsModal";
+import { WeatherEffect } from "../components/WeatherEffect";
+import type { Container, NavGroup, NavPageSettings, NavNetworkMode, NavTheme } from "../types";
 
 interface NavPageProps {
   /** 导航分组（v1.51.0）：标签条 + 应用卡片墙；空 = 提示新建 */
@@ -18,10 +21,15 @@ interface NavPageProps {
   onSaveNavGroups: (groups: NavGroup[]) => void;
   /** Docker 一键聚合用：当前引擎容器列表 */
   containers: Container[];
+  /** 导航页「页面设置」（整页外观/环境，v1.51.8） */
+  navPageSettings: NavPageSettings;
+  /** 导航页「页面设置」落盘回调 */
+  onSaveNavPageSettings: (s: NavPageSettings) => void;
 }
 
-export function NavPage({ navGroups, onSaveNavGroups, containers }: NavPageProps) {
+export function NavPage({ navGroups, onSaveNavGroups, containers, navPageSettings, onSaveNavPageSettings }: NavPageProps) {
   const groups = navGroups || [];
+  const settings = navPageSettings || {};
   const [navTab, setNavTab] = useState<string>(() => {
     if (typeof window !== "undefined") {
       const t = new URLSearchParams(window.location.search).get("navTab");
@@ -32,8 +40,9 @@ export function NavPage({ navGroups, onSaveNavGroups, containers }: NavPageProps
   });
   const [navEditing, setNavEditing] = useState(false);
   const [navEditAdd, setNavEditAdd] = useState(false);
+  const [navPageSettingsOpen, setNavPageSettingsOpen] = useState(false);
   const navIconMap = useNavIconMap();
-  // 打开管理弹窗：默认进入当前选中分组（不自动追加入口）
+  // 打开分组管理弹窗：默认进入当前选中分组（不自动追加入口）
   const openEditor = useCallback(() => {
     setNavEditAdd(false);
     setNavEditing(true);
@@ -43,6 +52,8 @@ export function NavPage({ navGroups, onSaveNavGroups, containers }: NavPageProps
     setNavEditAdd(true);
     setNavEditing(true);
   }, []);
+  // 打开页面设置弹窗（整页外观/环境）
+  const openPageSettings = useCallback(() => setNavPageSettingsOpen(true), []);
 
   // 选中的分组被删除 / 列表变空时回落到第一个（保持始终有有效选中项）
   const effectiveTab = groups.some((g) => g.id === navTab) ? navTab : groups[0]?.id || "";
@@ -58,10 +69,44 @@ export function NavPage({ navGroups, onSaveNavGroups, containers }: NavPageProps
     }
   }, [effectiveTab]);
 
+  // 白昼模式：auto=跟随系统；light=强制白昼；dark=强制夜间
+  const [systemDark, setSystemDark] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    setSystemDark(mq.matches);
+    const h = (e: MediaQueryListEvent) => setSystemDark(e.matches);
+    mq.addEventListener("change", h);
+    return () => mq.removeEventListener("change", h);
+  }, []);
+  const resolvedTheme: NavTheme =
+    (settings.theme || "auto") === "auto" ? (systemDark ? "dark" : "light") : settings.theme!;
+
+  // 背景层：有背景图用图（含模糊），否则回落渐变（按白昼模式分亮/暗）
+  const hasBg = !!settings.bgImage;
+  const bgLayerStyle: React.CSSProperties = hasBg
+    ? {
+        backgroundImage: `url("${settings.bgImage}")`,
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+        filter: (settings.bgBlur ?? 0) > 0 ? `blur(${settings.bgBlur}px)` : undefined,
+      }
+    : {};
+  const fallbackBg = resolvedTheme === "dark"
+    ? "bg-gradient-to-br from-slate-900 via-slate-800 to-slate-700"
+    : "bg-gradient-to-br from-rose-200 via-fuchsia-200 to-indigo-300";
+
+  const navNetworkMode: NavNetworkMode = settings.navNetworkMode || "auto";
+
   return (
-    <div className="relative min-h-full bg-gradient-to-br from-rose-200 via-fuchsia-200 to-indigo-300 p-6">
-      {/* 分组标签条 + 管理 */}
-      <div className="flex items-center gap-2 mb-5 flex-wrap">
+    <div className={`relative isolate min-h-full ${fallbackBg} p-6 overflow-hidden`}>
+      {/* 背景图层（置于内容之下，模糊仅作用于背景图） */}
+      {hasBg && <div className="absolute inset-[-24px] -z-20" style={bgLayerStyle} aria-hidden="true" />}
+      {/* 环境天气效果（纯前端 canvas，置于内容之下、背景之上） */}
+      <WeatherEffect weather={settings.weather || "none"} />
+
+      {/* 分组标签条 + 页面设置 / 管理分组 */}
+      <div className="flex items-center gap-2 mb-5 flex-wrap relative">
         {groups.length === 0 && (
           <span className="text-[13px] text-white/80 px-1">还没有分组</span>
         )}
@@ -81,21 +126,36 @@ export function NavPage({ navGroups, onSaveNavGroups, containers }: NavPageProps
             </span>
           </button>
         ))}
-        <button
-          onClick={openEditor}
-          className="ml-auto flex items-center gap-1 px-3.5 py-1.5 rounded-full text-[13px] font-medium text-rose-600 bg-white/75 backdrop-blur-sm shadow-sm hover:bg-white transition-colors"
-          title="页面设置（管理导航分组与入口）"
-        >
-          <Settings2 size={13} /> 页面设置
-        </button>
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={openPageSettings}
+            className="flex items-center gap-1 px-3.5 py-1.5 rounded-full text-[13px] font-medium text-rose-600 bg-white/75 backdrop-blur-sm shadow-sm hover:bg-white transition-colors"
+            title="页面设置（背景图片 / 环境天气 / 内外网默认模式 / 白昼模式）"
+          >
+            <SlidersHorizontal size={13} /> 页面设置
+          </button>
+          <button
+            onClick={openEditor}
+            className="flex items-center gap-1 px-3.5 py-1.5 rounded-full text-[13px] font-medium text-rose-600 bg-white/75 backdrop-blur-sm shadow-sm hover:bg-white transition-colors"
+            title="管理导航分组与入口"
+          >
+            <Settings2 size={13} /> 管理分组
+          </button>
+        </div>
       </div>
 
       {activeNavGroup ? (
-        <NavBoard group={activeNavGroup} iconMap={navIconMap} onOpenEditor={openEditor} onAddApp={addAppToActive} />
+        <NavBoard
+          group={activeNavGroup}
+          iconMap={navIconMap}
+          onOpenEditor={openEditor}
+          onAddApp={addAppToActive}
+          navNetworkMode={navNetworkMode}
+        />
       ) : (
         <div className="flex flex-col items-center justify-center py-20 rounded-2xl border border-white/40 bg-white/30 backdrop-blur-sm text-white">
           <Compass size={36} className="mb-3 opacity-90" />
-          <p className="text-sm">还没有导航分组，点右上角「管理」新建一个分组并添加入口</p>
+          <p className="text-sm">还没有导航分组，点右上角「管理分组」新建一个分组并添加入口</p>
           <button
             onClick={openEditor}
             className="mt-4 px-4 py-2 text-sm text-white bg-rose-500 rounded-full hover:bg-rose-600 shadow-md transition-colors"
@@ -105,7 +165,7 @@ export function NavPage({ navGroups, onSaveNavGroups, containers }: NavPageProps
         </div>
       )}
 
-      {/* 导航管理弹窗 */}
+      {/* 导航分组管理弹窗 */}
       {navEditing && (
         <NavEditor
           groups={groups}
@@ -120,6 +180,18 @@ export function NavPage({ navGroups, onSaveNavGroups, containers }: NavPageProps
             if (effectiveTab && !next.some((g) => g.id === effectiveTab)) setNavTab(next[0]?.id || "");
           }}
           onClose={() => { setNavEditing(false); setNavEditAdd(false); }}
+        />
+      )}
+
+      {/* 导航页「页面设置」弹窗 */}
+      {navPageSettingsOpen && (
+        <NavPageSettingsModal
+          initial={settings}
+          onSave={(s) => {
+            onSaveNavPageSettings(s);
+            setNavPageSettingsOpen(false);
+          }}
+          onClose={() => setNavPageSettingsOpen(false)}
         />
       )}
     </div>

@@ -23,6 +23,8 @@ import {
   saveSettingsApi,
   fetchNavGroups,
   saveNavGroupsApi,
+  fetchNavPageSettings,
+  saveNavPageSettingsApi,
   listCustomIconsApi,
   checkUpdateApi,
   applyUpdateApi,
@@ -46,7 +48,7 @@ import {
   transformStacks,
   transformActivityLogs,
 } from "./transforms";
-import type { PageKey, Container, DockerImage, DockerVolume, DockerEngine, Stack, SystemSettings, ActivityLog, EngineResourceStats, UpdateInfo, ImageUpdateDetail, ImageUpdateSummaryView, ImageUpdateStatusView, ResourceTag, NavGroup } from "./types";
+import type { PageKey, Container, DockerImage, DockerVolume, DockerEngine, Stack, SystemSettings, ActivityLog, EngineResourceStats, UpdateInfo, ImageUpdateDetail, ImageUpdateSummaryView, ImageUpdateStatusView, ResourceTag, NavGroup, NavPageSettings } from "./types";
 import { randomTagColor } from "./components/TagPicker";
 import {
   shouldAutoFillIcon,
@@ -116,6 +118,8 @@ export default function App() {
   const [settings, setSettings] = useState<SystemSettings | null>(null);
   // 导航分组（v1.51.2 label 解耦：独立 state，不借道 settings / SystemSettings）
   const [navGroups, setNavGroups] = useState<NavGroup[]>([]);
+  // 导航页「页面设置」（v1.51.8：整页外观/环境，独立 state，不借道 settings / SystemSettings）
+  const [navPageSettings, setNavPageSettings] = useState<NavPageSettings>({});
   const [dataLoading, setDataLoading] = useState(false);
   const [dataError, setDataError] = useState<string | null>(null);
   const [checkingUpdates, setCheckingUpdates] = useState(false);
@@ -309,16 +313,18 @@ export default function App() {
     let updateTimer: ReturnType<typeof setInterval> | null = null;
     (async () => {
       try {
-        const [list, settingsData, versionInfo, navGroupsData] = await Promise.all([
+        const [list, settingsData, versionInfo, navGroupsData, navPageSettingsData] = await Promise.all([
           fetchEngines(),
           fetchSettings().catch(() => null),
           fetchAppVersion().catch(() => null),
           fetchNavGroups().catch(() => []),
+          fetchNavPageSettings().catch(() => ({})),
         ]);
         setEngines(list);
         if (settingsData) setSettings(settingsData);
         if (versionInfo?.version) setRuntimeVersion(versionInfo.version);
         setNavGroups(navGroupsData || []);
+        setNavPageSettings(navPageSettingsData || {});
         // 登录后默认显示页面（v1.42.9）：仅在登录态就绪、settings 已加载时跳转一次。
         // v1.50.7：sessionStorage 已有会话页面记录（刷新/会话内重登）时优先恢复刷新前页面，
         // 仅全新会话（新开标签、无记录）才落到设置里的默认页面。
@@ -702,6 +708,16 @@ export default function App() {
     [],
   );
 
+  // 导航页「页面设置」落盘（v1.51.8：独立通道，不借道 settings / SystemSettings）
+  const handleSaveNavPageSettings = useCallback(
+    (s: NavPageSettings) => {
+      void saveNavPageSettingsApi(s).then(setNavPageSettings).catch((err) => {
+        console.error("保存导航页页面设置失败:", err);
+      });
+    },
+    [],
+  );
+
   // 标签库新建标签（v1.49.2）：堆栈 LABELS 标签选择器输入无匹配时「+ 新建」直达，
   // 随机色 + id 与系统设置「标签管理」同规则，落盘后同步本地 settings 状态
   const handleCreateTag = useCallback(async (name: string): Promise<ResourceTag | null> => {
@@ -952,6 +968,8 @@ export default function App() {
               navGroups={navGroups}
               onSaveNavGroups={handleSaveNavGroups}
               containers={containers}
+              navPageSettings={navPageSettings}
+              onSaveNavPageSettings={handleSaveNavPageSettings}
             />
           )}
           {page === "containers" && (

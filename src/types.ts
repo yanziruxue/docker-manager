@@ -925,6 +925,31 @@ export interface NavConfig {
   groups: NavGroup[];
 }
 
+/**
+ * 导航页「页面设置」（整页外观/环境，v1.51.8）：与分组卡片设置（v1.51.7）解耦——
+ * 分组设置管「某分组的卡片布局/尺寸/间距/图标大小」；本设置管「整页背景/天气/内外网默认模式/白昼」。
+ * 全部字段可选 + 缺省回落，向后兼容（旧 nav-page-settings.json 缺字段不报错）。
+ */
+/** 白昼模式：auto=跟随系统；light=强制白昼；dark=强制夜间 */
+export type NavTheme = "auto" | "light" | "dark";
+/** 内外网默认访问模式（v1.51.8）：覆盖单卡自动判定；auto=按访问 IP 自动分区；lan=强制内网；wan=强制外网 */
+export type NavNetworkMode = "auto" | "lan" | "wan";
+/** 环境天气效果（v1.51.8，参照 FlatNas）：不依赖外部天气 API，纯前端 canvas 粒子 */
+export type NavWeather = "none" | "rain" | "snow" | "sakura" | "leaves";
+
+export interface NavPageSettings {
+  /** 背景图片：URL（http(s)/data:/api/）或留空=无（回落默认渐变） */
+  bgImage?: string;
+  /** 背景模糊 px（0=不模糊）；仅当 bgImage 存在时生效 */
+  bgBlur?: number;
+  /** 环境天气效果 */
+  weather?: NavWeather;
+  /** 白昼模式 */
+  theme?: NavTheme;
+  /** 内外网默认访问模式（覆盖单卡自动判定） */
+  navNetworkMode?: NavNetworkMode;
+}
+
 /** 安装量 / 活跃度上报配置（系统设置 → 硬件信息） */
 export interface TelemetryConfig {
   /** 是否上传安装数量统计（默认 true；关闭后不再向远端发送任何数据） */

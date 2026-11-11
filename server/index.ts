@@ -75,6 +75,7 @@ import { getImageLocks, setImageLock } from "./image-locks.js";
 import { createFullBackup, restoreFullBackup, restoreUploadedBackup, exportConfigArchive, listBackupFiles, deleteBackupFile, backupFilePath, migrateLegacyBackups } from "./backup.js";
 import { getSettings, saveSettings, redactSettings, secretsAreEncrypted } from "./settings.js";
 import { getNavGroups, saveNavGroups } from "./nav-groups.js";
+import { getNavPageSettings, saveNavPageSettings } from "./nav-page-settings.js";
 import {
   resolveCustomIconDir,
   listCustomIconEntries,
@@ -87,7 +88,7 @@ import { startUpdateScheduler, getSchedulerStatus, runSchedulerCheckNow, checkEn
 import { addPushClient, removePushClient } from "./push.js";
 import { readDaemonConfigInfo, writeDaemonConfig, writeDaemonConfigText, restartDockerService, refreshPrivileges } from "./daemon-config.js";
 import { CURRENT_VERSION, getInstallDir, checkForUpdate, performUpdate, performUpdateFromUpload, getUpdateState, getUpdateDir, markUpdateError, saveUploadPackage, getPendingUpload, getPendingUploadPath, schedulePendingExpiry, discardPendingUpload, cancelPendingExpiry, cancelUpdate } from "./updater.js";
-import { COMPOSE_DIR } from "./paths.js";
+import { COMPOSE_DIR, configPath } from "./paths.js";
 import {
   getTelemetryStatus,
   reportOnce,
@@ -2033,6 +2034,69 @@ app.put("/api/nav-groups", (req, res) => {
   } catch (err: any) {
     res.status(500).json({ success: false, error: err?.message || "保存导航分组失败" });
   }
+});
+
+// ============ 导航页「页面设置」API（整页外观/环境，v1.51.8，独立通道） ============
+
+/** 获取导航页「页面设置」（整页背景/天气/内外网默认模式/白昼） */
+app.get("/api/nav-page-settings", (_req, res) => {
+  try {
+    res.json({ success: true, data: getNavPageSettings() });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || "读取导航页面设置失败" });
+  }
+});
+
+/** 保存导航页「页面设置」（归一化后落盘，不借道 /api/settings） */
+app.put("/api/nav-page-settings", (req, res) => {
+  try {
+    const data = saveNavPageSettings(req.body);
+    res.json({ success: true, data });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || "保存导航页面设置失败" });
+  }
+});
+
+// ============ 导航页背景资源上传（v1.51.8，独立 nav-assets 目录） ============
+
+const NAV_ASSETS_DIR = configPath("nav-assets");
+try { mkdirSync(NAV_ASSETS_DIR, { recursive: true }); } catch { /* 目录创建失败：上传时再报错 */ }
+
+/** 上传导航页背景图（本地图片）→ 保存进 nav-assets 目录，返回可访问 URL */
+app.post("/api/nav-assets", express.raw({ type: "image/*", limit: "2mb" }), (req, res) => {
+  try {
+    mkdirSync(NAV_ASSETS_DIR, { recursive: true });
+    const rawName = req.get("X-Filename") ? decodeURIComponent(req.get("X-Filename") as string) : "";
+    const contentType = req.get("Content-Type") || "image/png";
+    let filename = rawName ? sanitizeIconFilename(rawName, ICON_CT_EXT[contentType] || ".png") : "";
+    if (!filename || !ICON_FILE_RE.test(filename)) {
+      filename = `bg-${Date.now()}${ICON_CT_EXT[contentType] || ".png"}`;
+    }
+    filename = dedupeIconFilename(NAV_ASSETS_DIR, filename);
+    writeFileSync(path.join(NAV_ASSETS_DIR, filename), req.body as Buffer);
+    res.json({ success: true, data: { url: `/api/nav-assets/${encodeURIComponent(filename)}` } });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || "背景图上传失败" });
+  }
+});
+
+/** 提供 nav-assets 背景图静态文件 */
+app.get("/api/nav-assets/:file", (req, res) => {
+  // ★ 防路径穿越：只认单段文件名 + 扩展名白名单；decoded 参数含分隔符直接拒绝
+  const raw = req.params.file || "";
+  const file = path.basename(raw);
+  if (file !== raw || file.includes("/") || file.includes("\\") || !ICON_FILE_RE.test(file)) {
+    res.status(404).send("Not found");
+    return;
+  }
+  const p = path.join(NAV_ASSETS_DIR, file);
+  if (!existsSync(p) || !statSync(p).isFile()) {
+    res.status(404).send("Not found");
+    return;
+  }
+  res.setHeader("Content-Type", ICON_EXT_CT[path.extname(file).toLowerCase()] || "image/png");
+  res.setHeader("Cache-Control", "no-cache");
+  res.send(readFileSync(p));
 });
 
 /** 获取当前日志级别（运行时） */

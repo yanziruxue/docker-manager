@@ -1,4 +1,4 @@
-import type { DockerEngine, EngineResourceStats, ResourceSample, SystemSettings, SchedulerStatus, SchedulerLastResult, ImageUpdateSummaryView, DockerNetwork, NetworkCreateOptions, NetInterfaceOption, ContainerFileEntry, AppInfo, LogListResult, LogTailResult, LogPruneResult, LogPackResult, LogPackConfig, LogArchiveInfo, MirrorRuntimeState, NotifyRuntimeStatus, NotifyTestResult, ActivityLog, NavGroup } from "./types";
+import type { DockerEngine, EngineResourceStats, ResourceSample, SystemSettings, SchedulerStatus, SchedulerLastResult, ImageUpdateSummaryView, DockerNetwork, NetworkCreateOptions, NetInterfaceOption, ContainerFileEntry, AppInfo, LogListResult, LogTailResult, LogPruneResult, LogPackResult, LogPackConfig, LogArchiveInfo, MirrorRuntimeState, NotifyRuntimeStatus, NotifyTestResult, ActivityLog, NavGroup, NavPageSettings } from "./types";
 
 const BASE = "/api";
 
@@ -1271,6 +1271,41 @@ export function saveNavGroupsApi(groups: NavGroup[]): Promise<NavGroup[]> {
     method: "PUT",
     body: JSON.stringify(groups),
   });
+}
+
+// ============ 导航页「页面设置」API（整页外观/环境，v1.51.8，独立通道） ============
+
+/** 获取导航页「页面设置」（整页背景/天气/内外网默认模式/白昼） */
+export function fetchNavPageSettings(): Promise<NavPageSettings> {
+  return request<NavPageSettings>("/nav-page-settings");
+}
+
+/** 保存导航页「页面设置」（归一化后落盘，不借道 /settings） */
+export function saveNavPageSettingsApi(settings: NavPageSettings): Promise<NavPageSettings> {
+  return request<NavPageSettings>("/nav-page-settings", {
+    method: "PUT",
+    body: JSON.stringify(settings),
+  });
+}
+
+/**
+ * 上传导航页背景图（本地图片）→ 返回可访问 URL（/api/nav-assets/<file>）。
+ * 以原始二进制 + X-Filename 头上传（复用服务端净化/防穿越逻辑），不走 JSON request 助手。
+ */
+export async function uploadNavAssetApi(blob: Blob, filename: string): Promise<{ url: string }> {
+  const res = await fetch(`${BASE}/nav-assets`, {
+    method: "POST",
+    headers: {
+      "X-Filename": encodeURIComponent(filename || `bg-${Date.now()}.png`),
+      "Content-Type": blob.type || "image/png",
+    },
+    credentials: "include",
+    body: blob,
+  });
+  const json = await res.json().catch(() => ({ success: false, error: "响应解析失败" }));
+  if (!res.ok || !json.success) throw new ApiError(json.error || "背景图上传失败");
+  if (res.status === 401) notifyUnauthorized("/nav-assets");
+  return json.data as { url: string };
 }
 
 /** 检测服务器上可用的 Compose 命令 */
