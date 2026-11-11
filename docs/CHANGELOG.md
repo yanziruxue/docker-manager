@@ -16,6 +16,31 @@
 
 ---
 
+## v1.51.14 — 2026-11-11（**main 分支 · 已构建 · 已推 Gitea**）
+
+### 改动
+- **移除「添加新项目」弹窗底部的高级字段折叠区**（原「更多设置」：标题颜色 / 图标缩放 / 公开标记 / 外网备用地址 / 内网备用地址）。主表单只剩用户清单里的字段：分组 / 名称 / 描述 / ☐自托管 / 内网链接（勾选自托管时显示）/ 外网链接 / 图标 / 备注。
+- `src/components/NavAppModal.tsx`：整块删除折叠区 JSX（3743 B）、`ChevronDown` import、`showMore` + 5 个高级字段 state、3 个 backup 增删函数；图标预览改用 `previewZoom` / `previewTitleColor`（取自 `initial`）。
+- **⭐ 数据不丢铁律**：`confirm()` 中 `titleColor` / `urlBackups` / `lanBackups` / `isPublic` / `iconZoom` 改为**从 `initial` 原样透传**（`?? 100` / `?? false` 兜底），编辑已有项目时高级值不被清空；`types.ts`、`server/nav-groups.ts`、`NavBoard.tsx` 的字段定义、归一化与渲染层**全部未动**，备用地址回退 / 标题色 / 图标缩放继续生效，仅不再提供编辑入口。
+- **门禁改造** `scripts/check-nav.mjs`：② 新增 3 条断言（折叠区零残留：`更多设置` / `showMore` / `<ChevronDown` / `type="range"` / `type="color"` / `＋外网备用地址` 全零；主表单 8 类字段齐全；`confirm()` 段必须含 5 个 `initial?.xxx` 透传锚点）；④ 进程级负向自检由 4 例扩为 **5 例**，循环改造为支持 `rel` 跨文件注入，新增「注入折叠区回归到 `NavAppModal.tsx`」必须被检出。
+- 版本号 `1.51.13 → 1.51.14`。
+
+### 验证（硬证据）
+- 双 tsc（src / server）0 错；`npm run test:gates` **GATES_EXIT=0**（pipefail 实跑），22 行结果全部 `FAIL=0`，FAIL 行扫描为空（完整日志 1275 行）；`check-nav` **65 ok / 0 FAIL**。
+- 负向自检：③ 解析器注入回归 + ④ 五例进程级注入回归（`<NavEditor` / 顶栏分组设置文字按钮 / 齿轮接线缺失 / 顶栏添加项目按钮 / 底部高级字段折叠区）全部被检出（子进程 `exit 1`），还原后 `65 ok / 0 FAIL` 且 5 处源码字节级一致。
+- SEA 四步构建（干净 node 基座 → postject 注入 130616512 B，未虚增）+ **三处 SHA-256 逐字节一致** `d9bb1fda24f7303f07cbf4c3b0583b7c17234feff12f7024740038b8fc5423c0`（postject = zip 内 = deb 内，均 130616512 B，`ALL_MATCH`）。
+- ELF `7f454c46` / e_machine=62；运行时版本精确锚点 `CURRENT_VERSION = true ? "1.51.14" : "0.0.0-dev"` 二进制 1 处、旧版 `1.51.13` 锚点 **0 处**；5 个 dist 文件（`index.html` / `assets/index-D9hjB1cS.js` / `assets/index-CQhYoUo1.css` / `docker.png` / `login-banner.svg`）的 base64 在 `bundle.js` 与 SEA 二进制中各命中 1 次，与 `dist` 逐字节一致。
+- 交付包：`dockermanagementyanzi-linux-x64-v1.51.14.zip`（43121655 B）、`dockermanagementyanzi_1.51.14_amd64.deb`（42838202 B）；包成员固定 5 个、0755/0644 权限位正确；latest 别名（固定 main v1.50.36，43102847 B）**未覆盖**。
+
+### 未完成 / 已知限制
+- 高级字段（标题颜色、备用地址、公开标记、图标缩放）**不再有 UI 编辑入口**，既有值只读保留；如需修改须直接编辑 `nav-groups.json`。这是按「移除弹窗下边的更多设置」的刻意取舍。
+- 源码级门禁不覆盖真实点击；建议人工冒烟：新建项目 → 保存后编辑 → 确认既有高级字段值未被清空 → 主表单底部不再出现折叠区。
+
+### 下一步
+- 等用户验收弹窗精简效果；GitHub 仍不推（Gitea-only 约定）。
+
+---
+
 ## v1.51.13 — 2026-11-11（**main 分支 · 已构建 · 已推 Gitea**）
 
 ### 改动

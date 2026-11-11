@@ -2,7 +2,8 @@
 /**
  * 门禁：导航仪表盘（v1.51.0 引入，v1.51.2 解耦至独立通道，v1.51.11 移除管理弹窗，
  *   v1.51.12 顶栏删除分组设置文字按钮、入口改为标题行「＋」右边齿轮扳手；
- *   v1.51.13 删除顶栏「＋添加项目」，添加新项目唯一入口 = 标题行「＋」）
+ *   v1.51.13 删除顶栏「＋添加项目」，添加新项目唯一入口 = 标题行「＋」；
+ *   v1.51.14 弹窗移除底部高级字段折叠区，高级值从 initial 透传不丢数据）
  *  - 真模块断言：编译运行 src/webui-url.ts 的 resolveNavAppUrl / normalizeNavLanUrl，
  *    覆盖内外网优先级链、`:端口` / `host:端口` / 完整 URL 三种内网写法、auto 分区分派；
  *  - 源码接线断言：导航配置完全收口在独立模块 server/nav-groups.ts（不污染 main settings.json），
@@ -10,7 +11,8 @@
  *    v1.51.11 起 NavEditor 弹窗已删除，项目 CRUD 由 NavPage + NavAppModal 直接落盘、
  *    分组新建/删除由 NavGroupSettingsModal 接管、卡片 hover ✎ 由 NavBoard.onEditApp 直达；
  *  - 负向自检①：注入「内网缺 lanUrl 不回落 url」回归 → 重载模块应检出差异 → 还原 → 复核全绿；
- *  - 负向自检②：进程级注入 4 类回归（<NavEditor / 顶栏分组设置文字按钮 / 齿轮接线缺失 / 顶栏添加项目按钮）
+ *  - 负向自检②：进程级注入 5 类回归（<NavEditor / 顶栏分组设置文字按钮 / 齿轮接线缺失 /
+ *    顶栏添加项目按钮 / 高级字段折叠区），支持跨文件注入 NavPage.tsx 与 NavAppModal.tsx
  *    → 重跑本门禁应 exit 1 → 还原 → 字节级一致。
  * 用法：node scripts/check-nav.mjs（退出码非 0 = 有回归）
  */
@@ -81,7 +83,7 @@ ok("★ NavPage 不再挂载/导入 NavEditor 弹窗",
   !navPage.includes("<NavEditor") && !navPage.includes('from "../components/NavEditor"'));
 ok("★ NavEditor.tsx 文件已删除", !fs.existsSync(path.join(ROOT, "src/components/NavEditor.tsx")));
 ok("★ NavPage 无管理弹窗状态与入口", !navPage.includes("navEditing") && !navPage.includes("openEditor"));
-// v1.51.12：顶栏只保留「页面设置 / 添加项目」；分组设置唯一入口改为标题行「＋」右边的齿轮扳手
+// v1.51.12：分组设置唯一入口 = 标题行「＋」右边齿轮扳手；v1.51.13 起顶栏仅剩「页面设置」
 const topbarActions = (navPage.split('<div className="ml-auto flex items-center gap-2">')[1] || "").split("</div>")[0] || "";
 ok("★ 顶栏操作区仅「页面设置」（无管理分组、无分组设置/添加项目文字按钮，v1.51.13）",
   topbarActions.includes("页面设置") &&
@@ -116,6 +118,19 @@ ok("★ NavAppModal 编辑态支持删除项目", appModal.includes("onDelete") 
 ok("NavAppModal 单表单字段（自托管/内网/外网/备注）",
   appModal.includes("自托管") && appModal.includes("内网链接") && appModal.includes("外网链接") && appModal.includes("备注"));
 ok("NavAppModal 注释不再引用 NavEditor", !appModal.includes("NavEditor"));
+ok("★ NavAppModal 已移除底部高级字段折叠区（v1.51.14）",
+  !appModal.includes("更多设置") && !appModal.includes("showMore") &&
+  !appModal.includes("<ChevronDown") && !appModal.includes('type="range"') &&
+  !appModal.includes('type="color"') && !appModal.includes("＋外网备用地址"));
+ok("★ 主表单保持用户清单字段（分组/名称/描述/自托管/内网/外网/图标/备注）",
+  ["分组", "名称", "描述", "自托管", "内网链接",
+   "外网链接", "图标", "备注"].every((k) => appModal.includes(k)));
+ok("★ 高级字段保存时从 initial 透传（编辑已有项目不丢数据）",
+  (() => {
+    const seg = appModal.split("const confirm = () => {")[1]?.split("onSave(groupId, app);")[0] || "";
+    return !!seg && ["initial?.titleColor", "initial?.urlBackups", "initial?.lanBackups",
+      "initial?.isPublic", "initial?.iconZoom"].every((k) => seg.includes(k));
+  })());
 
 const gs = read("src/components/NavGroupSettingsModal.tsx");
 ok("★ 分组设置接管分组新建/删除", gs.includes("addGroup") && gs.includes("removeGroup"));
@@ -166,8 +181,8 @@ if (BROKEN === ORIGINAL) {
   ok("还原字节级一致", read(TARGET) === ORIGINAL);
 }
 
-console.log("== ④ 负向自检（进程级注入 4 类回归 → 重跑本门禁应 exit 1） ==");
-// 父进程注入 4 类回归文本，子进程跳过 ④（NAV_GATE_NEGATIVE_CHILD=1）只跑 ①②③，
+console.log("== ④ 负向自检（进程级注入 5 类回归 → 重跑本门禁应 exit 1） ==");
+// 父进程注入 5 类回归文本，子进程跳过 ④（NAV_GATE_NEGATIVE_CHILD=1）只跑 ①②③，
 // 若 ② 的对应断言确实生效，子进程必因 FAIL 而 exit 1。
 if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
   const NAV_PAGE_REL = "src/pages/NavPage.tsx";
@@ -194,16 +209,22 @@ if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
         '<div className="ml-auto flex items-center gap-2"><button>添加项目</button>',
       ),
     },
+    {
+      name: "注入底部高级字段折叠区回归",
+      rel: "src/components/NavAppModal.tsx",
+      inject: (s) => s + "\n{/* 更多设置 */}\n",
+    },
   ];
   for (const c of cases) {
-    const orig = read(NAV_PAGE_REL);
+    const rel = c.rel || NAV_PAGE_REL;
+    const orig = read(rel);
     const mutated = c.inject(orig);
     if (mutated === orig) {
       failCount++;
       console.log(`  FAIL  负向自检锚点失效（${c.name}，请更新门禁）`);
       continue;
     }
-    fs.writeFileSync(path.join(ROOT, NAV_PAGE_REL), mutated, "utf8");
+    fs.writeFileSync(path.join(ROOT, rel), mutated, "utf8");
     let childFailed = false;
     try {
       execFileSync(process.execPath, [fileURLToPath(import.meta.url)], {
@@ -213,10 +234,10 @@ if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
     } catch (e) {
       childFailed = e.status === 1;
     } finally {
-      fs.writeFileSync(path.join(ROOT, NAV_PAGE_REL), orig, "utf8");
+      fs.writeFileSync(path.join(ROOT, rel), orig, "utf8");
     }
     ok(`${c.name}被检出（子进程 exit 1）`, childFailed);
-    ok(`${c.name}还原字节级一致`, read(NAV_PAGE_REL) === orig);
+    ok(`${c.name}还原字节级一致`, read(rel) === orig);
   }
 }
 

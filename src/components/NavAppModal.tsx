@@ -5,11 +5,12 @@
  * - 「自托管」复选框替代旧版双类型 tab：勾选=self（内外网分区跳转），不勾选=ext（点击直接打开外网链接）。
  * - 「描述」写 description（卡片副标题）；「备注」写 remark（hover 提示），两者语义分离且旧数据回落兼容。
  * - 图标区支持从 Docker 容器自动带出图标与内外网链接、自定义图标库智能匹配、图片 URL / 图标库名称直填。
- * - v1.51.7 的标题颜色 / 内外网备用地址 / 公开 / 图标缩放收进「更多设置」折叠，数据与能力均不丢失。
+ * - v1.51.14：底部高级字段折叠区已移除，主表单仅保留用户清单内字段；标题颜色 / 链接备链 /
+ *   公开标记 / 图标缩放改为保存时从 initial 原样透传，既有数据不丢，表单不再提供编辑入口。
  * 保存经 onSave(groupId, app) 由 NavPage 直接落盘；编辑态可经 onDelete(appId) 删除项目（v1.51.11）。
  */
 import { useMemo, useState } from "react";
-import { Check, ChevronDown, Globe, Trash2, X, Zap } from "lucide-react";
+import { Check, Globe, Trash2, X, Zap } from "lucide-react";
 import type { Container, NavAppItem, NavGroup } from "../types";
 import { resolveNavIconSrc, useNavIconMap } from "./NavBoard";
 
@@ -72,13 +73,9 @@ export function NavAppModal({
   const [url, setUrl] = useState(initial?.url || "");
   const [icon, setIcon] = useState(initial?.icon || "");
 
-  // 更多设置（v1.51.7 能力保留）
-  const [showMore, setShowMore] = useState(false);
-  const [titleColor, setTitleColor] = useState(initial?.titleColor || "#0F172A");
-  const [iconZoom, setIconZoom] = useState<number>(initial?.iconZoom || 100);
-  const [isPublic, setIsPublic] = useState<boolean>(!!initial?.isPublic);
-  const [urlBackups, setUrlBackups] = useState<string[]>(initial?.urlBackups || []);
-  const [lanBackups, setLanBackups] = useState<string[]>(initial?.lanBackups || []);
+  // v1.51.14：高级字段不再可编辑，仅用于图标预览（编辑态沿用既有值）
+  const previewZoom = initial?.iconZoom ?? 100;
+  const previewTitleColor = initial?.titleColor || "#0F172A";
 
   const src = useMemo(() => resolveNavIconSrc(icon, iconMap), [icon, iconMap]);
   const cached = useMemo(() => {
@@ -114,19 +111,6 @@ export function NavAppModal({
     if (hit) setIcon(hit);
   };
 
-  const addBackup = (which: "url" | "lan") => {
-    if (which === "url") setUrlBackups((p) => [...p, ""]);
-    else setLanBackups((p) => [...p, ""]);
-  };
-  const setBackup = (which: "url" | "lan", i: number, val: string) => {
-    if (which === "url") setUrlBackups((p) => p.map((x, idx) => (idx === i ? val : x)));
-    else setLanBackups((p) => p.map((x, idx) => (idx === i ? val : x)));
-  };
-  const removeBackup = (which: "url" | "lan", i: number) => {
-    if (which === "url") setUrlBackups((p) => p.filter((_, idx) => idx !== i));
-    else setLanBackups((p) => p.filter((_, idx) => idx !== i));
-  };
-
   const canSave = name.trim().length > 0 && url.trim().length > 0 && !!groupId;
   const confirm = () => {
     if (!canSave || !groupId) return;
@@ -139,14 +123,15 @@ export function NavAppModal({
       remark: remark.trim(),
       kind: selfHosted ? "self" : "ext",
       url: url.trim(),
-      titleColor,
-      urlBackups: urlBackups.map((x) => x.trim()).filter(Boolean),
+      // v1.51.14：高级字段原样透传，编辑已有项目不丢数据
+      titleColor: initial?.titleColor || "#0F172A",
+      urlBackups: initial?.urlBackups || [],
     };
     if (selfHosted) {
       app.lanUrl = lanUrl.trim();
-      app.lanBackups = lanBackups.map((x) => x.trim()).filter(Boolean);
-      app.isPublic = isPublic;
-      app.iconZoom = iconZoom;
+      app.lanBackups = initial?.lanBackups || [];
+      app.isPublic = initial?.isPublic ?? false;
+      app.iconZoom = initial?.iconZoom ?? 100;
     }
     onSave(groupId, app);
   };
@@ -229,9 +214,9 @@ export function NavAppModal({
             <div className="flex items-start gap-3">
               <div className="w-14 h-14 rounded-xl bg-white border border-slate-200 flex items-center justify-center overflow-hidden flex-shrink-0">
                 {src ? (
-                  <img src={src} alt="" className="object-contain" style={{ width: `${iconZoom}%`, height: `${iconZoom}%` }} draggable={false} />
+                  <img src={src} alt="" className="object-contain" style={{ width: `${previewZoom}%`, height: `${previewZoom}%` }} draggable={false} />
                 ) : (
-                  <span className="text-xl font-bold" style={{ color: titleColor }}>
+                  <span className="text-xl font-bold" style={{ color: previewTitleColor }}>
                     {(name || "?").slice(0, 1).toUpperCase()}
                   </span>
                 )}
@@ -291,60 +276,6 @@ export function NavAppModal({
               placeholder="仅自己备忘，鼠标悬停卡片时显示"
             />
           </Field>
-
-          {/* 更多设置：保留 v1.51.7 已实现能力，不占主表单 */}
-          <div className="rounded-xl border border-slate-100">
-            <button
-              type="button"
-              onClick={() => setShowMore((v) => !v)}
-              className="w-full flex items-center gap-1 px-3 py-2 text-[12px] text-slate-500 hover:bg-slate-50"
-            >
-              <ChevronDown size={13} className={`transition-transform ${showMore ? "rotate-180" : ""}`} />
-              更多设置（标题颜色 / 备用地址 / 公开 / 图标缩放）
-            </button>
-            {showMore && (
-              <div className="px-3 pb-3 pt-1 space-y-3 border-t border-slate-100">
-                <Field label="标题颜色">
-                  <div className="flex items-center gap-2">
-                    <input type="color" value={titleColor} onChange={(e) => setTitleColor(e.target.value)}
-                      className="w-9 h-9 rounded-lg border border-slate-200 bg-white cursor-pointer p-0.5" />
-                    <input className={inputCls + " flex-1"} value={titleColor} onChange={(e) => setTitleColor(e.target.value)} placeholder="#0F172A" />
-                  </div>
-                </Field>
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] text-slate-500 w-10">缩放</span>
-                  <input type="range" min={50} max={200} value={iconZoom} onChange={(e) => setIconZoom(Number(e.target.value))} className="flex-1 accent-fuchsia-500" />
-                  <span className="text-[11px] text-slate-500 w-10 text-right">{iconZoom}%</span>
-                </div>
-                <label className="flex items-center gap-2 cursor-pointer select-none">
-                  <input type="checkbox" checked={isPublic} onChange={(e) => setIsPublic(e.target.checked)} className="w-3.5 h-3.5 accent-fuchsia-600" />
-                  <span className="text-[12px] text-slate-600">公开（预留：匿名可见）</span>
-                </label>
-                <div>
-                  <p className="text-[11px] text-slate-500 mb-1">外网备用地址（按序回退）</p>
-                  {urlBackups.map((b, i) => (
-                    <div key={i} className="flex items-center gap-2 mb-1">
-                      <input className={inputCls + " flex-1"} value={b} onChange={(e) => setBackup("url", i, e.target.value)} placeholder="https://备用地址" />
-                      <button onClick={() => removeBackup("url", i)} className="p-1 text-slate-400 hover:text-red-600" title="删除"><X size={14} /></button>
-                    </div>
-                  ))}
-                  <button onClick={() => addBackup("url")} className="text-[12px] text-fuchsia-600 hover:text-fuchsia-700">＋外网备用地址</button>
-                </div>
-                {selfHosted && (
-                  <div>
-                    <p className="text-[11px] text-slate-500 mb-1">内网备用地址（按序回退）</p>
-                    {lanBackups.map((b, i) => (
-                      <div key={i} className="flex items-center gap-2 mb-1">
-                        <input className={inputCls + " flex-1"} value={b} onChange={(e) => setBackup("lan", i, e.target.value)} placeholder="http://192.168.1.x:8080" />
-                        <button onClick={() => removeBackup("lan", i)} className="p-1 text-slate-400 hover:text-red-600" title="删除"><X size={14} /></button>
-                      </div>
-                    ))}
-                    <button onClick={() => addBackup("lan")} className="text-[12px] text-fuchsia-600 hover:text-fuchsia-700">＋内网备用地址</button>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
         </div>
 
         <div className="flex items-center gap-2 px-5 py-3 border-t border-slate-100">
