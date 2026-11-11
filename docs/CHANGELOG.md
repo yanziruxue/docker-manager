@@ -16,6 +16,35 @@
 
 ---
 
+## v1.51.5 — 2026-11-11（**main 分支 · 已构建 · 已推 Gitea**）
+
+### 缘起
+用户要求安装时「配置服务运行账户」这一步提供两个明确选项：① 创建新用户（提示输入用户名并创建）；② 列出已有用户（往下选）。旧逻辑仅在无候选用户时才允许创建，有候选时仅有「列入候选 + 直接输入用户名」的隐含创建路径，不够直观。
+
+### 改动（tag `v1.51.5`，Gitea `main` + tag 双 ref 同指）
+- **`deploy/linux/install.sh`**：「配置服务运行账户」段重构为**交互菜单二选一**：
+  - 抽离 `create_new_user()`（输入用户名 → 校验 → `useradd --create-home` 创建；已存在则复用；拒绝 root / 非法名）。
+  - 抽离 `pick_existing_user()`（列出 UID 1000–65533 且非 nologin 的真实登录用户供编号选择，或直接输入用户名；无候选时明确提示改用「创建」）。
+  - 主流程弹出菜单：`1) 创建新用户` / `2) 选择已有用户`，非法输入循环提示。
+  - 保留候选用户扫描与后续「必须是已存在的非 root 系统用户」校验段（两条路径都收敛到这里二次确认）。非交互（`APP_RUN_AS_USER` 指定 / CI / dpkg postinst）行为不变。
+  - `usage()` 补充服务运行账户菜单说明。
+- **`deploy/linux/make-package.py`**：移除 latest 别名生成（不再 `shutil.copyfile` 覆盖 `dockermanagementyanzi-linux-x64.zip`），改为仅生成版本化 zip（铁律：latest 别名固定为 main v1.50.36，绝不覆盖）。
+- **`package.json`** version `1.51.4` → `1.51.5`。
+
+### 验证（硬证据）
+- `bash -n install.sh` 语法校验通过。
+- SEA 四步构建 + 三处 SHA-256 逐字节一致 `d273009c448a1f836402be80e798047afa21f48202972aa61a427fc27048e07f`（postject = zip 内 = deb 内）；ELF `7f454c46` / e_machine=62 / 130550976 B。
+- 包内 install.sh 已确认含新菜单文本 `请选择服务运行账户的来源` / `create_new_user` / `pick_existing_user`。
+- latest 别名 `dockermanagementyanzi-linux-x64.zip` 保持 main v1.50.36（43102847 B）**未动**。
+- 本次仅改 shell / 打包脚本，未触 TS / 前端，`test:gates` 相关锚点不受影响（零相关改动）。
+
+### 交付物
+- `build-upload/dockermanagementyanzi-linux-x64-v1.51.5.zip`（41.1 MB / 43112909 B）
+- `build-upload/dockermanagementyanzi_1.51.5_amd64.deb`（40.8 MB / 42828522 B）
+
+### 下一步
+- 等用户真机验收菜单交互；GitHub 仍不推（Gitea-only 约定）。
+
 ## v1.51.4 — 2026-11-11（**main 分支 · 已构建 · 已推 Gitea**）
 
 - **已完成**：导航页可显隐 + 页面显示开关，导航作为 main 内「默认隐藏的可选功能扩展」：

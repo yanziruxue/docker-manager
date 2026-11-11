@@ -62,7 +62,14 @@ usage() {
 
 环境变量:
   APP_INSTALL_DIR=<绝对路径>   指定安装目录（非交互场景用；默认 /opt/dockermanagementyanzi）
-  APP_RUN_AS_USER=<系统用户>   指定服务运行账户（非交互场景用）
+  APP_RUN_AS_USER=<系统用户>   指定服务运行账户（非交互场景用；须已存在且非 root）
+
+服务运行账户:
+  交互执行时先弹出菜单，二选一：
+    1) 创建新用户 —— 输入用户名自动创建（小写字母/下划线开头，≤32 字符，拒绝 root）
+    2) 选择已有用户 —— 列出本机真实登录用户（UID 1000-65533 且非 nologin）供编号选择，
+       也可直接输入用户名。无候选用户时菜单会提示改用「1) 创建」。
+  非交互场景（CI / 自动化）用 APP_RUN_AS_USER 指定，必须是已存在的非 root 系统用户。
 
 安装目录:
   交互执行时会提示输入，回车即用默认 /opt/dockermanagementyanzi。
@@ -418,23 +425,21 @@ fi
 # 系统用户才放行；明确拒绝 root。
 title "配置服务运行账户"
 
-# 列出候选系统用户：UID 1000-65533 的普通账户。
-# ★ v1.42.2：**只列真实登录用户**（shell 非 nologin/false），系统服务账户
-#   （libvirt-qemu / wsdd2 等 Dynamic User 账户）一律隐藏、不参与编号 ——
-#   它们本就不该作为服务运行账户，列出来只会诱导误选。
-#   仍需用这类账户时可直接输入用户名（下方"序号或用户名"两条路都保留）。
+# ★ v1.51.5：交互菜单二选一 —— ① 创建新用户  ② 从已有系统用户列表选择。
+#   无论本机是否已有登录用户，都显式提供「创建」入口（旧逻辑仅在没有候选时才会创建）。
+#   非交互（自动化 / CI）环境用 APP_RUN_AS_USER 指定，必须是已存在的非 root 系统用户。
+
+# 列出候选系统用户：UID 1000-65533 且 shell 非 nologin/false 的真实登录用户。
+# ★ v1.42.2：**只列真实登录用户**，系统服务账户（libvirt-qemu / wsdd2 等）一律隐藏 ——
+#   它们本就不该作为服务运行账户，列出来只会诱导误选。仍需用这类账户时可直接输入用户名。
 CANDIDATE_USERS=""
 if command -v getent >/dev/null 2>&1; then
   CANDIDATE_USERS="$(getent passwd | awk -F: '$3 >= 1000 && $3 < 65534 && $7 != "" && $7 !~ /(nologin|false)$/ { print $1 }' 2>/dev/null || true)"
 elif [ -r /etc/passwd ]; then
   CANDIDATE_USERS="$(awk -F: '$3 >= 1000 && $3 < 65534 && $7 != "" && $7 !~ /(nologin|false)$/ { print $1 }' /etc/passwd 2>/dev/null || true)"
 fi
-# 参与「序号 → 用户名」映射的就是候选列表本身（服务账户已隐藏，不进映射）
-CANDIDATE_ALL="$CANDIDATE_USERS"
 
-# 取 GECOS 描述：只取**第一个逗号前的全名**。
-# ★ GECOS 格式为 fullname,room,workphone,homephone,other，空字段会留成
-#   "Libvirt Qemu,,," 这种尾随逗号串，直接打印就是脏输出。
+# 取 GECOS 描述：只取**第一个逗号前的全名**（避免 "Libvirt Qemu,,," 尾随逗号串）。
 user_desc() {
   local u="$1" gecos=""
   if command -v getent >/dev/null 2>&1; then
@@ -448,65 +453,88 @@ user_desc() {
   printf '%s' "$gecos"
 }
 
-# 非交互（自动化 / CI）环境可用 APP_RUN_AS_USER 指定；否则交互提示输入。
+# 方式一：创建新用户（输入用户名 → 校验 → useradd 创建；已存在则直接复用）。
+# ★ v1.43.22 校验规则：小写字母/下划线开头，仅含小写字母/数字/下划线/连字符，≤32 字符
+#   （与 Debian 默认 NAME_REGEX 对齐）；拒绝 root 与已存在用户复用。
+create_new_user() {
+  local USERADD_BIN NEW_USER
+  log "将创建一个新的系统用户作为服务运行账户"
+  USERADD_BIN="$(command -v useradd || true)"
+  while true; do
+    read -r -p "请输入要创建的用户名: " NEW_USER
+    NEW_USER="$(printf '%s' "$NEW_USER" | tr -d '[:space:]')"
+    if [ -z "$NEW_USER" ]; then
+      warn "用户名不能为空"
+      continue
+    fi
+    if [ "$NEW_USER" = "root" ]; then
+      warn "服务账户不能是 root（丧失全部权限隔离，且与镜像功能拒绝 root 的设计冲突）"
+      continue
+    fi
+    if ! printf '%s' "$NEW_USER" | grep -qE '^[a-z_][a-z0-9_-]{0,31}$'; then
+      warn "用户名不合法（小写字母/下划线开头，仅含小写字母/数字/下划线/连字符，≤32 字符）"
+      continue
+    fi
+    if getent passwd "$NEW_USER" >/dev/null 2>&1; then
+      log "用户 '${NEW_USER}' 已存在，直接使用"
+      APP_RUN_AS_USER="$NEW_USER"
+      return 0
+    fi
+    if [ -z "$USERADD_BIN" ]; then
+      warn "系统缺少 useradd，无法自动创建用户（精简系统请先安装依赖包：apt-get update && apt-get install -y passwd）"
+      continue
+    fi
+    if "$USERADD_BIN" --create-home --shell /bin/bash "$NEW_USER" >/dev/null 2>&1; then
+      log "已创建系统用户 '${NEW_USER}'（主组同名，shell /bin/bash，家目录 /home/${NEW_USER}）"
+      APP_RUN_AS_USER="$NEW_USER"
+      return 0
+    fi
+    warn "创建用户 '${NEW_USER}' 失败，请换一个用户名重试"
+  done
+}
+
+# 方式二：从已有用户列表选择（编号或直接输入用户名）。无候选时明确提示改用「创建」。
+pick_existing_user() {
+  if [ -n "$CANDIDATE_USERS" ]; then
+    log "可用系统用户（输入序号或直接输入用户名）:"
+    i=1
+    while IFS= read -r cand; do
+      [ -n "$cand" ] || continue
+      cdesc="$(user_desc "$cand")"
+      log "  ${i}) ${cand}$( [ -n "$cdesc" ] && printf '（%s）' "$cdesc" )"
+      i=$((i + 1))
+    done <<< "$CANDIDATE_USERS"
+    read -r -p "请输入服务运行账户（序号或用户名，须为已存在的非 root 系统用户）: " pick
+    # 纯数字 → 按序号取对应用户名；否则视为直接输入的用户名
+    if printf '%s' "$pick" | grep -qE '^[0-9]+$'; then
+      sel="$(printf '%s\n' "$CANDIDATE_USERS" | sed -n "${pick}p")"
+      APP_RUN_AS_USER="${sel:-}"
+      [ -n "$APP_RUN_AS_USER" ] || err "序号 ${pick} 超出候选范围（共 $(printf '%s\n' "$CANDIDATE_USERS" | grep -c .) 个用户）"
+    else
+      APP_RUN_AS_USER="$pick"
+    fi
+  else
+    warn "未检测到可用的登录系统用户（UID 1000-65533 且非 nologin）"
+    warn "请重新运行本脚本并选择「1) 创建新用户」"
+    err "没有可选择的已有用户"
+  fi
+}
+
+# 主流程：交互菜单二选一；非交互环境用 APP_RUN_AS_USER 指定。
 if [ -z "${APP_RUN_AS_USER:-}" ]; then
   if [ -t 0 ]; then
-    if [ -n "$CANDIDATE_ALL" ]; then
-      log "可用系统用户（输入序号或直接输入用户名）:"
-      i=1
-      while IFS= read -r cand; do
-        [ -n "$cand" ] || continue
-        cdesc="$(user_desc "$cand")"
-        log "  ${i}) ${cand}$( [ -n "$cdesc" ] && printf '（%s）' "$cdesc" )"
-        i=$((i + 1))
-      done <<< "$CANDIDATE_USERS"
-      read -r -p "请输入服务运行账户（序号或用户名，须为已存在的非 root 系统用户）: " pick
-      # 纯数字 → 按序号取对应用户名；否则视为直接输入的用户名
-      if printf '%s' "$pick" | grep -qE '^[0-9]+$'; then
-        sel="$(printf '%s\n' "$CANDIDATE_ALL" | sed -n "${pick}p")"
-        APP_RUN_AS_USER="${sel:-}"
-        [ -n "$APP_RUN_AS_USER" ] || err "序号 ${pick} 超出候选范围（共 $(printf '%s\n' "$CANDIDATE_ALL" | grep -c .) 个用户）"
-      else
-        APP_RUN_AS_USER="$pick"
-      fi
-    else
-      # ★ v1.43.22：无候选用户时不再要求「已存在的用户」，改为输入用户名后**自动创建**。
-      #   校验规则：小写字母/下划线开头，仅含小写字母/数字/下划线/连字符，≤32 字符（与 Debian
-      #   默认 NAME_REGEX 对齐，避免 useradd 因大写/特殊字符被拒）；拒绝 root 与已存在用户复用。
-      log "未检测到可用的登录系统用户（UID 1000-65533 且非 nologin），将自动创建服务账户"
-      USERADD_BIN="$(command -v useradd || true)"
-      while true; do
-        read -r -p "请输入要创建的用户名: " NEW_USER
-        NEW_USER="$(printf '%s' "$NEW_USER" | tr -d '[:space:]')"
-        if [ -z "$NEW_USER" ]; then
-          warn "用户名不能为空"
-          continue
-        fi
-        if [ "$NEW_USER" = "root" ]; then
-          warn "服务账户不能是 root（丧失全部权限隔离，且与镜像功能拒绝 root 的设计冲突）"
-          continue
-        fi
-        if ! printf '%s' "$NEW_USER" | grep -qE '^[a-z_][a-z0-9_-]{0,31}$'; then
-          warn "用户名不合法（小写字母/下划线开头，仅含小写字母/数字/下划线/连字符，≤32 字符）"
-          continue
-        fi
-        if getent passwd "$NEW_USER" >/dev/null 2>&1; then
-          log "用户 '${NEW_USER}' 已存在，直接使用"
-          APP_RUN_AS_USER="$NEW_USER"
-          break
-        fi
-        if [ -z "$USERADD_BIN" ]; then
-          warn "系统缺少 useradd，无法自动创建用户（精简系统请先安装依赖包：apt-get update && apt-get install -y passwd）"
-          continue
-        fi
-        if "$USERADD_BIN" --create-home --shell /bin/bash "$NEW_USER" >/dev/null 2>&1; then
-          log "已创建系统用户 '${NEW_USER}'（主组同名，shell /bin/bash，家目录 /home/${NEW_USER}）"
-          APP_RUN_AS_USER="$NEW_USER"
-          break
-        fi
-        warn "创建用户 '${NEW_USER}' 失败，请换一个用户名重试"
-      done
-    fi
+    while true; do
+      echo ""
+      echo -e "${BLUE}请选择服务运行账户的来源：${NC}"
+      echo "  1) 创建新用户"
+      echo "  2) 选择已有用户"
+      read -r -p "请输入选项 [1/2]: " MODE
+      case "$MODE" in
+        1) create_new_user; break ;;
+        2) pick_existing_user; break ;;
+        *) warn "请输入 1 或 2" ;;
+      esac
+    done
   else
     err "非交互环境：请用 APP_RUN_AS_USER=<系统用户> 指定服务运行账户（须已存在且非 root）"
   fi

@@ -4,8 +4,10 @@
 
 用法: python make-package.py
 产物: build-upload/dockermanagementyanzi-linux-x64-v<VERSION>.zip   （版本化，发布用）
-      build-upload/dockermanagementyanzi-linux-x64.zip             （latest 别名，同字节）
       zip 顶层含 dockermanagementyanzi/ 文件夹，unzip 到 /opt 即得安装目录
+
+⚠️ latest 别名（dockermanagementyanzi-linux-x64.zip）固定为 main v1.50.36，
+   本脚本自 v1.51.x 起**不再生成/覆盖**该别名（铁律：latest 绝不覆盖）。
 
 zip 内通过 ZipInfo.external_attr 高 16 位写入 Unix 权限位，
 Linux 上 unzip / bsdtar 解压后可执行位会被正确恢复。
@@ -15,7 +17,6 @@ Linux 上 unzip / bsdtar 解压后可执行位会被正确恢复。
 import os
 import time
 import json
-import shutil
 import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -31,7 +32,6 @@ SRC_BIN = os.path.join(HERE, APP)
 OUT_DIR = os.path.join(ROOT, "build-upload")
 os.makedirs(OUT_DIR, exist_ok=True)
 OUT = os.path.join(OUT_DIR, f"{APP}-linux-x64-v{VERSION}.zip")
-ALIAS = os.path.join(OUT_DIR, f"{APP}-linux-x64.zip")  # latest 别名（同字节）
 PREFIX = f"{APP}/"  # zip 内顶层文件夹
 
 FILES = [
@@ -61,10 +61,7 @@ def main():
 
     size = os.path.getsize(OUT)
     print(f"\n完成: {OUT} ({size/1024/1024:.1f} MB)")
-
-    # 生成 latest 别名（同字节，便于 OTA / 下载站识别最新版）
-    shutil.copyfile(OUT, ALIAS)
-    print(f"别名: {ALIAS} ({os.path.getsize(ALIAS)/1024/1024:.1f} MB)")
+    print("注: latest 别名（dockermanagementyanzi-linux-x64.zip）固定为 main v1.50.36，本脚本不再覆盖。")
 
     # 验证权限位
     print("\n=== 验证 zip 内权限位 ===")
