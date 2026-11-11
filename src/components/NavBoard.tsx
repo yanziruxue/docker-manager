@@ -4,9 +4,10 @@
  * 图标解析优先级：完整 URL（http(s)/data:/api/）原样 > 自定义图标库按名匹配 > 首字母色块。
  * 自包含：自行拉取 /api/custom-icons 与 /api/network-zone（失败分别回落空映射 / intranet）。
  * v1.51.7：支持分组级卡片布局/大小/间距/图标大小（参照 FlatNas）与 ext 外链直开、self 备用地址回退。
+ * v1.51.11：移除分组标题行齿轮（管理入口），卡片 hover 显示「✎」直达项目编辑弹窗。
  */
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, Pencil } from "lucide-react";
 import type { NavAppItem, NavCardStyle, NavGroup, NavIconShape, NavNetworkMode } from "../types";
 import { getNetworkZoneApi, listCustomIconsApi } from "../api";
 import { resolveNavAppUrl, type WebuiZone, type WebuiZoneMode } from "../webui-url";
@@ -183,14 +184,15 @@ function AppCard({
 export function NavBoard({
   group,
   iconMap,
-  onOpenEditor,
   onAddApp,
+  onEditApp,
   navNetworkMode,
 }: {
   group: NavGroup;
   iconMap: Record<string, string>;
-  onOpenEditor: () => void;
   onAddApp: () => void;
+  /** 编辑单个项目（v1.51.11）：由 NavPage 打开独立 NavAppModal */
+  onEditApp: (app: NavAppItem) => void;
   /** 内外网默认访问模式（v1.51.8，由导航页「页面设置」下传）：覆盖单卡自动判定 */
   navNetworkMode?: NavNetworkMode;
 }) {
@@ -220,7 +222,7 @@ export function NavBoard({
 
   return (
     <div>
-      {/* 分组标题行：白色标题 + 圆形「＋」「⚙」按钮（FlatNas 风格） */}
+      {/* 分组标题行：白色标题 + 圆形「＋」按钮（FlatNas 风格）；齿轮管理入口 v1.51.11 移除 */}
       <div className="flex items-center justify-between mb-5">
         <h2 className="text-xl font-bold text-white drop-shadow-sm">{group.name}</h2>
         <div className="flex items-center gap-2">
@@ -230,13 +232,6 @@ export function NavBoard({
             title="为该分组添加入口"
           >
             <PlusIcon />
-          </button>
-          <button
-            onClick={onOpenEditor}
-            className="w-9 h-9 rounded-full bg-white/85 text-fuchsia-600 flex items-center justify-center shadow-sm hover:bg-white hover:scale-105 transition-all"
-            title="管理分组"
-          >
-            <GearIcon />
           </button>
         </div>
       </div>
@@ -248,7 +243,7 @@ export function NavBoard({
       ) : (
         <div className="flex gap-3 overflow-x-auto pb-3 snap-x" style={{ gap: gridGap }}>
           {apps.map((a, i) => (
-            <div key={a.id} className="snap-start">
+            <div key={a.id} className="snap-start relative group/card">
               <AppCard
                 app={a}
                 iconMap={iconMap}
@@ -259,6 +254,15 @@ export function NavBoard({
                 cardStyle={cardStyle}
                 iconShape={iconShape}
               />
+              {/* 编辑按钮是卡片 <button> 的兄弟节点，绝不嵌套（保留 disabled={!url} 语义） */}
+              <button
+                type="button"
+                onClick={() => onEditApp(a)}
+                title={`编辑「${a.name}」`}
+                className="absolute top-1.5 left-1.5 z-10 w-6 h-6 rounded-full bg-white/90 text-fuchsia-600 flex items-center justify-center shadow-sm opacity-0 group-hover/card:opacity-100 focus:opacity-100 transition-opacity"
+              >
+                <Pencil size={12} />
+              </button>
             </div>
           ))}
         </div>
@@ -288,14 +292,6 @@ function PlusIcon({ className = "" }: { className?: string }) {
   return (
     <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={className}>
       <line x1={12} y1={5} x2={12} y2={19} /><line x1={5} y1={12} x2={19} y2={12} />
-    </svg>
-  );
-}
-function GearIcon() {
-  return (
-    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-      <circle cx={12} cy={12} r={3} />
-      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
     </svg>
   );
 }

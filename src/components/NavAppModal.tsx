@@ -6,10 +6,10 @@
  * - 「描述」写 description（卡片副标题）；「备注」写 remark（hover 提示），两者语义分离且旧数据回落兼容。
  * - 图标区支持从 Docker 容器自动带出图标与内外网链接、自定义图标库智能匹配、图片 URL / 图标库名称直填。
  * - v1.51.7 的标题颜色 / 内外网备用地址 / 公开 / 图标缩放收进「更多设置」折叠，数据与能力均不丢失。
- * 保存通过 onSave(groupId, app) 回调交给 NavEditor 整体落盘。
+ * 保存经 onSave(groupId, app) 由 NavPage 直接落盘；编辑态可经 onDelete(appId) 删除项目（v1.51.11）。
  */
 import { useMemo, useState } from "react";
-import { Check, ChevronDown, Globe, X, Zap } from "lucide-react";
+import { Check, ChevronDown, Globe, Trash2, X, Zap } from "lucide-react";
 import type { Container, NavAppItem, NavGroup } from "../types";
 import { resolveNavIconSrc, useNavIconMap } from "./NavBoard";
 
@@ -38,6 +38,7 @@ export function NavAppModal({
   initial,
   initialGroupId,
   onSave,
+  onDelete,
   onClose,
 }: {
   groups: NavGroup[];
@@ -47,6 +48,8 @@ export function NavAppModal({
   /** 新增时默认归属的分组 id（通常为当前分组） */
   initialGroupId?: string;
   onSave: (groupId: string, app: NavAppItem) => void;
+  /** 编辑态删除项目（v1.51.11）：由 NavPage 从所有分组移除同 id 条目并落盘 */
+  onDelete?: (appId: string) => void;
   onClose: () => void;
 }) {
   const iconMap = useNavIconMap();
@@ -344,7 +347,22 @@ export function NavAppModal({
           </div>
         </div>
 
-        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-slate-100">
+        <div className="flex items-center gap-2 px-5 py-3 border-t border-slate-100">
+          {editing && onDelete && (
+            <button
+              type="button"
+              onClick={() => {
+                if (!initial) return;
+                if (!window.confirm(`确定删除项目「${initial.name}」？`)) return;
+                onDelete(initial.id);
+              }}
+              className="flex items-center gap-1 px-3 py-1.5 text-sm text-red-600 border border-red-200 rounded-lg hover:bg-red-50"
+              title="删除该项目"
+            >
+              <Trash2 size={13} /> 删除项目
+            </button>
+          )}
+          <div className="flex-1" />
           <button onClick={onClose} className="px-4 py-1.5 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">
             取消
           </button>

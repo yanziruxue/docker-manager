@@ -1,33 +1,43 @@
 /**
  * 导航页（v1.51.0，label 分支）：独立一级页面（顶部导航「导航」项，位于「仪表盘」左侧），
- * 承载原 Dashboard 内的「分组标签条 + 应用卡片墙 + 管理弹窗」。
- * 与原 Dashboard 分页解耦：不再是仪表盘的一个分页，而是顶部导航里的一个独立入口。
- * 每个分组是一个标签（FlatNas 风格），点击切换该分组的卡片墙；「管理分组」打开 NavEditor；
- * 「页面设置」打开 NavPageSettingsModal（整页外观/环境，v1.51.8）；
- * 「分组设置」打开 NavGroupSettingsModal（分组级卡片外观，v1.51.9）。
+ * 承载「分组标签条 + 应用卡片墙 + 三个独立弹窗」。与原 Dashboard 分页解耦。
+ * 每个分组是一个标签（FlatNas 风格），点击切换该分组的卡片墙。
+ * v1.51.11：移除「管理导航」（NavEditor）弹窗与全部入口，职责三分：
+ *  - 「页面设置」→ NavPageSettingsModal（整页外观/环境，v1.51.8）；
+ *  - 「分组设置」→ NavGroupSettingsModal（分组级卡片外观 + 分组新建/删除，v1.51.9 / v1.51.11）；
+ *  - 「＋添加项目」/ 卡片 hover ✎ → NavAppModal（项目新增/编辑/删除，直接落盘）。
  * 图标解析 / 内外网分区复用 NavBoard（独立拉取 /api/custom-icons 与 /api/network-zone）。
  */
 import React, { useState, useEffect, useCallback } from "react";
-import { Compass, LayoutGrid, Settings2, SlidersHorizontal } from "lucide-react";
+import { Compass, LayoutGrid, Plus, SlidersHorizontal } from "lucide-react";
 import { NavBoard, useNavIconMap } from "../components/NavBoard";
-import { NavEditor } from "../components/NavEditor";
+import { NavAppModal } from "../components/NavAppModal";
 import { NavGroupSettingsModal } from "../components/NavGroupSettingsModal";
 import { NavPageSettingsModal } from "../components/NavPageSettingsModal";
 import { WeatherEffect } from "../components/WeatherEffect";
-import type { Container, NavGroup, NavPageSettings, NavNetworkMode, NavTheme } from "../types";
+import type { Container, NavAppItem, NavGroup, NavPageSettings, NavNetworkMode, NavTheme } from "../types";
 
 interface NavPageProps {
   /** 导航分组（v1.51.0）：标签条 + 应用卡片墙；空 = 提示新建 */
   navGroups: NavGroup[];
-  /** 导航分组整体落盘（管理弹窗保存回调） */
+  /** 导航分组整体落盘（独立 /api/nav-groups 通道，不污染 main settings） */
   onSaveNavGroups: (groups: NavGroup[]) => void;
-  /** Docker 一键聚合用：当前引擎容器列表 */
+  /** 引用 Docker 容器图标用：当前引擎容器列表 */
   containers: Container[];
   /** 导航页「页面设置」（整页外观/环境，v1.51.8） */
   navPageSettings: NavPageSettings;
   /** 导航页「页面设置」落盘回调 */
   onSaveNavPageSettings: (s: NavPageSettings) => void;
 }
+
+/** 项目弹窗状态：initial=null 为新增，否则为编辑；groupId 为新增时默认归属分组 */
+interface AppModalState {
+  open: boolean;
+  initial: NavAppItem | null;
+  groupId?: string;
+}
+
+const APP_MODAL_CLOSED: AppModalState = { open: false, initial: null };
 
 export function NavPage({ navGroups, onSaveNavGroups, containers, navPageSettings, onSaveNavPageSettings }: NavPageProps) {
   const groups = navGroups || [];
@@ -40,29 +50,40 @@ export function NavPage({ navGroups, onSaveNavGroups, containers, navPageSetting
     }
     return groups[0]?.id || "";
   });
-  const [navEditing, setNavEditing] = useState(false);
-  const [navEditAdd, setNavEditAdd] = useState(false);
+  const [appModal, setAppModal] = useState<AppModalState>(APP_MODAL_CLOSED);
   const [navPageSettingsOpen, setNavPageSettingsOpen] = useState(false);
   const [navGroupSettingsOpen, setNavGroupSettingsOpen] = useState(false);
   const navIconMap = useNavIconMap();
-  // 打开分组管理弹窗：默认进入当前选中分组（不自动追加入口）
-  const openEditor = useCallback(() => {
-    setNavEditAdd(false);
-    setNavEditing(true);
-  }, []);
-  // 「＋」：打开管理弹窗并自动给当前分组追加一个空白入口
-  const addAppToActive = useCallback(() => {
-    setNavEditAdd(true);
-    setNavEditing(true);
-  }, []);
   // 打开页面设置弹窗（整页外观/环境）
   const openPageSettings = useCallback(() => setNavPageSettingsOpen(true), []);
-  // 打开分组设置弹窗（当前选中分组的卡片外观，v1.51.9）
+  // 打开分组设置弹窗（分组外观 + 分组新建/删除）
   const openGroupSettings = useCallback(() => setNavGroupSettingsOpen(true), []);
 
   // 选中的分组被删除 / 列表变空时回落到第一个（保持始终有有效选中项）
   const effectiveTab = groups.some((g) => g.id === navTab) ? navTab : groups[0]?.id || "";
   const activeNavGroup = groups.find((g) => g.id === effectiveTab) || null;
+
+  // v1.51.11：项目 CRUD 直接对 groups 做不可变更新并落盘，不再经 NavEditor 中转
+  const openAddApp = () => setAppModal({ open: true, initial: null, groupId: effectiveTab });
+  const openEditApp = (app: NavAppItem) => setAppModal({ open: true, initial: app, groupId: effectiveTab });
+  // 保留 NavEditor 时代的跨分组移动语义：编辑时切换分组，旧分组必须移除同 id 条目
+  const handleSaveApp = (groupId: string, app: NavAppItem) => {
+    const next = groups.map((g) => {
+      const apps = g.apps || [];
+      if (g.id === groupId) {
+        const exists = apps.some((a) => a.id === app.id);
+        return { ...g, apps: exists ? apps.map((a) => (a.id === app.id ? app : a)) : [...apps, app] };
+      }
+      return { ...g, apps: apps.filter((a) => a.id !== app.id) };
+    });
+    onSaveNavGroups(next);
+    setAppModal(APP_MODAL_CLOSED);
+  };
+  // 编辑态删除项目：从所有分组移除同 id 条目并落盘
+  const handleDeleteApp = (appId: string) => {
+    onSaveNavGroups(groups.map((g) => ({ ...g, apps: (g.apps || []).filter((a) => a.id !== appId) })));
+    setAppModal(APP_MODAL_CLOSED);
+  };
 
   // 进入页面 / 切换分组时把当前选中分组写回 URL（仅 replace，不新增历史），支持深链回看
   useEffect(() => {
@@ -110,7 +131,7 @@ export function NavPage({ navGroups, onSaveNavGroups, containers, navPageSetting
       {/* 环境天气效果（纯前端 canvas，置于内容之下、背景之上） */}
       <WeatherEffect weather={settings.weather || "none"} />
 
-      {/* 分组标签条 + 页面设置 / 分组设置 / 管理分组 */}
+      {/* 分组标签条 + 页面设置 / 分组设置 / 添加项目（v1.51.11） */}
       <div className="flex items-center gap-2 mb-5 flex-wrap relative">
         {groups.length === 0 && (
           <span className="text-[13px] text-white/80 px-1">还没有分组</span>
@@ -142,16 +163,17 @@ export function NavPage({ navGroups, onSaveNavGroups, containers, navPageSetting
           <button
             onClick={openGroupSettings}
             className="flex items-center gap-1 px-3.5 py-1.5 rounded-full text-[13px] font-medium text-rose-600 bg-white/75 backdrop-blur-sm shadow-sm hover:bg-white transition-colors"
-            title="分组设置（分组名称 / 卡片布局 / 间距 / 大小 / 图标大小 / 卡片样式 / 图标形状）"
+            title="分组设置（新建/删除/改名分组 / 卡片布局 / 间距 / 大小 / 图标大小 / 卡片样式 / 图标形状）"
           >
             <LayoutGrid size={13} /> 分组设置
           </button>
           <button
-            onClick={openEditor}
-            className="flex items-center gap-1 px-3.5 py-1.5 rounded-full text-[13px] font-medium text-rose-600 bg-white/75 backdrop-blur-sm shadow-sm hover:bg-white transition-colors"
-            title="管理导航分组与入口"
+            onClick={openAddApp}
+            disabled={groups.length === 0}
+            className="flex items-center gap-1 px-3.5 py-1.5 rounded-full text-[13px] font-medium text-white bg-fuchsia-600/90 backdrop-blur-sm shadow-sm hover:bg-fuchsia-600 disabled:opacity-40 transition-colors"
+            title={groups.length === 0 ? "请先到「分组设置」新建一个分组" : "添加新项目（可引用 Docker 容器图标）"}
           >
-            <Settings2 size={13} /> 管理分组
+            <Plus size={13} /> 添加项目
           </button>
         </div>
       </div>
@@ -160,16 +182,16 @@ export function NavPage({ navGroups, onSaveNavGroups, containers, navPageSetting
         <NavBoard
           group={activeNavGroup}
           iconMap={navIconMap}
-          onOpenEditor={openEditor}
-          onAddApp={addAppToActive}
+          onAddApp={openAddApp}
+          onEditApp={openEditApp}
           navNetworkMode={navNetworkMode}
         />
       ) : (
         <div className="flex flex-col items-center justify-center py-20 rounded-2xl border border-white/40 bg-white/30 backdrop-blur-sm text-white">
           <Compass size={36} className="mb-3 opacity-90" />
-          <p className="text-sm">还没有导航分组，点右上角「管理分组」新建一个分组并添加入口</p>
+          <p className="text-sm">还没有导航分组，点右上角「分组设置」新建一个分组</p>
           <button
-            onClick={openEditor}
+            onClick={openGroupSettings}
             className="mt-4 px-4 py-2 text-sm text-white bg-rose-500 rounded-full hover:bg-rose-600 shadow-md transition-colors"
           >
             新建分组
@@ -177,21 +199,16 @@ export function NavPage({ navGroups, onSaveNavGroups, containers, navPageSetting
         </div>
       )}
 
-      {/* 导航分组管理弹窗 */}
-      {navEditing && (
-        <NavEditor
+      {/* 添加 / 编辑项目弹窗（v1.51.11：不再经 NavEditor，直接落盘） */}
+      {appModal.open && (
+        <NavAppModal
           groups={groups}
           containers={containers}
-          initialGroupId={effectiveTab}
-          autoAddApp={navEditAdd}
-          onSave={(next) => {
-            onSaveNavGroups(next);
-            setNavEditing(false);
-            setNavEditAdd(false);
-            // 当前选中的分组被删时回落第一个
-            if (effectiveTab && !next.some((g) => g.id === effectiveTab)) setNavTab(next[0]?.id || "");
-          }}
-          onClose={() => { setNavEditing(false); setNavEditAdd(false); }}
+          initial={appModal.initial}
+          initialGroupId={appModal.groupId || effectiveTab}
+          onSave={handleSaveApp}
+          onDelete={handleDeleteApp}
+          onClose={() => setAppModal(APP_MODAL_CLOSED)}
         />
       )}
 
@@ -207,7 +224,7 @@ export function NavPage({ navGroups, onSaveNavGroups, containers, navPageSetting
         />
       )}
 
-      {/* 导航「分组设置」弹窗（v1.51.9）：作用于分组卡片外观，与「页面设置」解耦 */}
+      {/* 导航「分组设置」弹窗（v1.51.11 起接管分组新建/删除） */}
       {navGroupSettingsOpen && (
         <NavGroupSettingsModal
           groups={groups}
@@ -215,6 +232,8 @@ export function NavPage({ navGroups, onSaveNavGroups, containers, navPageSetting
           onSave={(next) => {
             onSaveNavGroups(next);
             setNavGroupSettingsOpen(false);
+            // 当前选中的分组被删时回落第一个（原 NavEditor 保存时的回落语义）
+            if (effectiveTab && !next.some((g) => g.id === effectiveTab)) setNavTab(next[0]?.id || "");
           }}
           onClose={() => setNavGroupSettingsOpen(false)}
         />

@@ -1,17 +1,19 @@
 #!/usr/bin/env node
 /**
- * 门禁：导航仪表盘（v1.51.0 引入，v1.51.2 解耦至独立通道，label 分支）
+ * 门禁：导航仪表盘（v1.51.0 引入，v1.51.2 解耦至独立通道，v1.51.11 移除管理弹窗）
  *  - 真模块断言：编译运行 src/webui-url.ts 的 resolveNavAppUrl / normalizeNavLanUrl，
  *    覆盖内外网优先级链、`:端口` / `host:端口` / 完整 URL 三种内网写法、auto 分区分派；
  *  - 源码接线断言：导航配置完全收口在独立模块 server/nav-groups.ts（不污染 main settings.json），
- *    独立路由 GET/PUT /api/nav-groups、NavPage 标签条与内容区切换、
- *    NavEditor 分组/应用 CRUD 与 Docker 聚合入口、App 走独立 API 落盘回调；
- *  - 负向自检：注入「内网缺 lanUrl 不回落 url」回归 → 重载模块应检出差异 → 还原 → 复核全绿。
+ *    独立路由 GET/PUT /api/nav-groups、NavPage 标签条与内容区切换；
+ *    v1.51.11 起 NavEditor 弹窗已删除，项目 CRUD 由 NavPage + NavAppModal 直接落盘、
+ *    分组新建/删除由 NavGroupSettingsModal 接管、卡片 hover ✎ 由 NavBoard.onEditApp 直达；
+ *  - 负向自检①：注入「内网缺 lanUrl 不回落 url」回归 → 重载模块应检出差异 → 还原 → 复核全绿；
+ *  - 负向自检②：注入「<NavEditor」回归 → 重跑本门禁应 exit 1 → 还原 → 字节级一致。
  * 用法：node scripts/check-nav.mjs（退出码非 0 = 有回归）
  */
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -33,7 +35,7 @@ function read(rel) {
 
 console.log("== ① 真模块断言（src/webui-url.ts 编译运行） ==");
 // 用 esbuild 把 TS 编译成 CJS 临时文件再 require（与 check-webui-zone 同思路；
-// 若 check-webui-zone 已有现成 loader 则直接复用其产物模式——这里独立编译保证自包含）
+// 独立编译保证自包含，负向注入后重编即编译被破坏的版本）
 const { execFileSync } = await import("node:child_process");
 const tmpDir = fs.mkdtempSync(path.join(ROOT, ".gate-nav-"));
 const jsFile = path.join(tmpDir, "webui-url.cjs");
@@ -72,19 +74,36 @@ const navPage = read("src/pages/NavPage.tsx");
 ok("NavPage 接收 navGroups/onSaveNavGroups", navPage.includes("navGroups") && navPage.includes("onSaveNavGroups"));
 ok("NavPage 顶部标签条渲染分组按钮", navPage.includes("groups.map((g) => (") && navPage.includes("setNavTab(g.id)"));
 ok("选中分组渲染 NavBoard、无分组提示空状态", navPage.includes("<NavBoard") && navPage.includes("还没有导航分组"));
-ok("导航管理弹窗挂载", navPage.includes("<NavEditor"));
+ok("★ NavPage 不再挂载/导入 NavEditor 弹窗",
+  !navPage.includes("<NavEditor") && !navPage.includes('from "../components/NavEditor"'));
+ok("★ NavEditor.tsx 文件已删除", !fs.existsSync(path.join(ROOT, "src/components/NavEditor.tsx")));
+ok("★ NavPage 无管理弹窗状态与入口", !navPage.includes("navEditing") && !navPage.includes("openEditor"));
+ok("★ 顶栏三按钮（页面设置 / 分组设置 / 添加项目）",
+  navPage.includes("页面设置") && navPage.includes("分组设置") && navPage.includes("添加项目") && !navPage.includes("管理分组"));
+ok("★ 独立挂载 NavAppModal 并接线项目 CRUD",
+  navPage.includes("<NavAppModal") && navPage.includes("handleSaveApp") && navPage.includes("onDelete={handleDeleteApp}"));
+ok("★ 项目保存保留跨分组移动语义（旧分组移除同 id）", navPage.includes("a.id !== app.id"));
+ok("★ 分组被删后选中项回落第一个", navPage.includes("!next.some((g) => g.id === effectiveTab)"));
 
 const board = read("src/components/NavBoard.tsx");
 ok("NavBoard 走 resolveNavAppUrl 解析地址", board.includes("resolveNavAppUrl"));
 ok("NavBoard 拉取 /api/network-zone 分区", board.includes("getNetworkZoneApi"));
 ok("NavBoard 图标三级解析（URL/图标库/首字母）", board.includes("resolveNavIconSrc"));
 ok("无地址卡片禁用打开", board.includes("disabled={!url}"));
+ok("★ NavBoard 卡片 hover 编辑入口 onEditApp",
+  board.includes("onEditApp") && board.includes("group-hover/card:opacity-100"));
+ok("★ NavBoard 不再有齿轮管理入口", !board.includes("onOpenEditor") && !board.includes("GearIcon"));
 
-const editor = read("src/components/NavEditor.tsx");
-ok("NavEditor 分组 CRUD（新增/删除/排序）", editor.includes("addGroup") && editor.includes("removeGroup") && editor.includes("moveGroup"));
-ok("NavEditor 应用编辑（内外网地址/图标/底色/备注）", editor.includes("lanUrl") && editor.includes("iconColor") && editor.includes("remark"));
-ok("NavEditor Docker 一键聚合", editor.includes("DockerImport") && editor.includes("从容器生成"));
-ok("聚合入口内网地址自动取 WebUI 端口", editor.includes("webuiPort ? `:${c.webuiPort}`"));
+const appModal = read("src/components/NavAppModal.tsx");
+ok("★ NavAppModal 编辑态支持删除项目", appModal.includes("onDelete") && appModal.includes("删除项目"));
+ok("NavAppModal 单表单字段（自托管/内网/外网/备注）",
+  appModal.includes("自托管") && appModal.includes("内网链接") && appModal.includes("外网链接") && appModal.includes("备注"));
+ok("NavAppModal 注释不再引用 NavEditor", !appModal.includes("NavEditor"));
+
+const gs = read("src/components/NavGroupSettingsModal.tsx");
+ok("★ 分组设置接管分组新建/删除", gs.includes("addGroup") && gs.includes("removeGroup"));
+ok("★ 分组设置空态可新建且允许删到 0 组", gs.includes("新建分组") && gs.includes("draft.every"));
+ok("★ 分组设置不再引导到管理分组", !gs.includes("请先到「管理分组」"));
 
 const appSrc = read("src/App.tsx");
 ok("App 提供 handleSaveNavGroups 并透传 NavPage", appSrc.includes("handleSaveNavGroups") && appSrc.includes("<NavPage"));
@@ -128,6 +147,28 @@ if (BROKEN === ORIGINAL) {
   const restored = buildAndLoad();
   ok("还原后解析器恢复全绿", restored.resolveNavAppUrl({ url: "https://w", lanUrl: "" }, "intranet", "intranet", loc) === "https://w");
   ok("还原字节级一致", read(TARGET) === ORIGINAL);
+}
+
+console.log("== ④ 负向自检（注入 <NavEditor 回归 → 重跑本门禁应 exit 1） ==");
+// 进程级负向自检：父进程注入回归文本，子进程跳过 ④（NAV_GATE_NEGATIVE_CHILD=1）只跑 ①②③，
+// 若 ② 的新断言确实生效，子进程必因「NavPage 不再挂载/导入 NavEditor」FAIL 而 exit 1。
+if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
+  const NAV_PAGE_REL = "src/pages/NavPage.tsx";
+  const origNavPage = read(NAV_PAGE_REL);
+  fs.writeFileSync(path.join(ROOT, NAV_PAGE_REL), origNavPage + "\n{/* <NavEditor /> */}\n", "utf8");
+  let childFailed = false;
+  try {
+    execFileSync(process.execPath, [fileURLToPath(import.meta.url)], {
+      stdio: "pipe",
+      env: { ...process.env, NAV_GATE_NEGATIVE_CHILD: "1" },
+    });
+  } catch (e) {
+    childFailed = e.status === 1;
+  } finally {
+    fs.writeFileSync(path.join(ROOT, NAV_PAGE_REL), origNavPage, "utf8");
+  }
+  ok("注入 <NavEditor 回归被检出（子进程 exit 1）", childFailed);
+  ok("还原 NavPage 字节级一致", read(NAV_PAGE_REL) === origNavPage);
 }
 
 // 清理临时目录

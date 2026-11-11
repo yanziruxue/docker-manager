@@ -2,13 +2,19 @@
  * 导航页「分组设置」弹窗（v1.51.9）：作用于单个分组的卡片外观，与「页面设置」（整页外观/环境）解耦。
  * 参照 FlatNas「分组设置详情」：分组名称 / 卡片布局 / 卡片间距 / 卡片大小 / 图标大小 / 卡片样式 / 图标形状。
  * 顶部「分组」下拉可切换要设置的分组；保存经 onSave(groups) 整体落盘（服务端 normalizeNavGroups 白名单兜底）。
+ * v1.51.11：移除「管理导航」弹窗后，本弹窗接管分组的新建 / 删除（空态可直接新建，允许删到 0 组）。
  */
 import { useState } from "react";
-import { RotateCcw, X } from "lucide-react";
+import { Plus, RotateCcw, Trash2, X } from "lucide-react";
 import type { NavCardStyle, NavGroup, NavIconShape } from "../types";
 
 const inputCls =
   "w-full px-2.5 py-1.5 text-[13px] border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-500/30 focus:border-rose-400 bg-white text-slate-700";
+
+/** 随机 id（与项目弹窗同风格：时间戳 36 进制 + 随机尾） */
+function genId(): string {
+  return `n${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+}
 
 /** 卡片样式预设（参照 FlatNas 卡片外观：背景色/透明度/背景显示状态/圆角） */
 const CARD_STYLE_OPTIONS: { value: NavCardStyle; label: string }[] = [
@@ -127,7 +133,30 @@ export function NavGroupSettingsModal({
   const patch = (p: Partial<NavGroup>) =>
     setDraft((prev) => prev.map((g) => (g.id === selectedId ? { ...g, ...p } : g)));
 
-  const canSave = !!active && !!active.name.trim();
+  // v1.51.11：分组新建 / 删除（原「管理导航」弹窗能力迁移）
+  const addGroup = () => {
+    const g: NavGroup = {
+      id: genId(),
+      name: `分组 ${draft.length + 1}`,
+      apps: [],
+      ...DEFAULT_APPEARANCE,
+    };
+    setDraft((prev) => [...prev, g]);
+    setSelectedId(g.id);
+  };
+  const removeGroup = () => {
+    if (!active) return;
+    const count = active.apps?.length || 0;
+    if (!window.confirm(`确定删除分组「${active.name}」？该分组下的 ${count} 个入口也会一并删除。`)) return;
+    const idx = draft.findIndex((g) => g.id === selectedId);
+    const next = draft.filter((g) => g.id !== selectedId);
+    setDraft(next);
+    // 删除后选中相邻分组；删到 0 组时置空（导航页会自动回落）
+    setSelectedId(next[Math.min(idx, next.length - 1)]?.id || "");
+  };
+
+  // 允许删到 0 组（空数组 every=true），但禁止保存空名分组
+  const canSave = draft.every((g) => g.name.trim().length > 0);
 
   return (
     <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
@@ -138,6 +167,14 @@ export function NavGroupSettingsModal({
         <div className="flex items-center gap-2 px-5 py-3.5 border-b border-slate-100">
           <h3 className="text-base font-semibold text-slate-800">分组设置</h3>
           <div className="flex-1" />
+          <button
+            type="button"
+            onClick={addGroup}
+            className="flex items-center gap-1 px-2.5 py-1 text-[12px] text-rose-600 border border-rose-200 rounded-lg hover:bg-rose-50"
+            title="新建一个导航分组"
+          >
+            <Plus size={12} /> 新建分组
+          </button>
           {draft.length > 0 && (
             <div className="flex items-center gap-1.5">
               <span className="text-[11px] text-slate-400">分组</span>
@@ -159,9 +196,16 @@ export function NavGroupSettingsModal({
 
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {!active ? (
-            <p className="text-[13px] text-slate-400 py-8 text-center">
-              还没有分组，请先到「管理分组」新建一个分组
-            </p>
+            <div className="flex flex-col items-center justify-center gap-3 py-8">
+              <p className="text-[13px] text-slate-400 text-center">还没有分组，点「新建分组」开始配置导航页</p>
+              <button
+                type="button"
+                onClick={addGroup}
+                className="flex items-center gap-1 px-3 py-1.5 text-[12px] text-rose-600 border border-rose-200 rounded-lg hover:bg-rose-50"
+              >
+                <Plus size={13} /> 新建分组
+              </button>
+            </div>
           ) : (
             <>
               {/* 分组名称 */}
@@ -248,14 +292,24 @@ export function NavGroupSettingsModal({
 
         <div className="flex items-center gap-2 px-5 py-3 border-t border-slate-100">
           {active && (
-            <button
-              type="button"
-              onClick={() => patch(DEFAULT_APPEARANCE)}
-              className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-slate-500 border border-slate-200 rounded-lg hover:bg-slate-50"
-              title="仅恢复当前分组的外观设置，不影响名称与入口"
-            >
-              <RotateCcw size={12} /> 恢复默认
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => patch(DEFAULT_APPEARANCE)}
+                className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-slate-500 border border-slate-200 rounded-lg hover:bg-slate-50"
+                title="仅恢复当前分组的外观设置，不影响名称与入口"
+              >
+                <RotateCcw size={12} /> 恢复默认
+              </button>
+              <button
+                type="button"
+                onClick={removeGroup}
+                className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-red-600 border border-red-200 rounded-lg hover:bg-red-50"
+                title="删除当前分组及其全部入口"
+              >
+                <Trash2 size={12} /> 删除分组
+              </button>
+            </>
           )}
           <div className="flex-1" />
           <button

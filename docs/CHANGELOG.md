@@ -16,6 +16,34 @@
 
 ---
 
+## v1.51.11 — 2026-11-11（**main 分支 · 已构建 · 已推 Gitea**）
+
+### 改动
+- **移除「管理导航」（`NavEditor`）弹窗及全部入口**（用户已确认「移除整个管理弹窗」）：删除 `src/components/NavEditor.tsx`；`src/pages/NavPage.tsx` 去掉 import / `navEditing`·`navEditAdd` state / 挂载 / 顶栏「管理分组」按钮 / 空态走旧弹窗的入口。导航页职责正式三分：**页面设置**（整页外观/环境）、**分组设置**（单分组外观 + 分组新建/删除）、**＋添加项目 / 卡片 ✎**（项目新增/编辑/删除）。
+- **项目 CRUD 改为顶栏独立直达、直接落盘**：`NavPage` 新增 `AppModalState` 与 `openAddApp`/`openEditApp`/`handleSaveApp`/`handleDeleteApp`，保存时直接对 `groups` 做不可变更新并调 `onSaveNavGroups`（独立 `/api/nav-groups` 通道），不再经弹窗暂存草稿。**保留 v1.51.0 起的跨分组移动语义**：编辑时切换分组，旧分组必须移除同 id 条目，否则出现重复卡片。
+- **`NavAppModal.tsx`**：新增可选 `onDelete(appId)`，编辑态底部显示「删除项目」（`window.confirm` 确认后由 `NavPage` 从所有分组移除并落盘）；注释去掉 `NavEditor` 引用。
+- **`NavGroupSettingsModal.tsx`** 接管分组 CRUD：新增 `addGroup()` / `removeGroup()`（删除带确认、提示将被一并删除的入口数）、顶部与空态均可「新建分组」、底部「删除分组」；`canSave` 改为 `draft.every(g => g.name.trim())` ⇒ **允许删到 0 组**但禁止保存空名分组；删到空后 `NavPage` 的 `onSave` 回落 `setNavTab`（原 `NavEditor` 保存时的回落语义迁移至此）。
+- **`NavBoard.tsx`**：删除分组标题行齿轮、内联 `GearIcon` 与 `onOpenEditor` prop；新增 `onEditApp(app)`，卡片外层包 `relative group/card`，hover 显示左上角 ✎ 编辑按钮 —— **作为卡片 `<button>` 的兄弟节点**（绝不嵌套，保留 `disabled={!url}` 门禁语义）；引入 lucide `Pencil`。
+- **空态与顶栏**：顶栏改 `页面设置 / 分组设置 / ＋添加项目`（无分组时「添加项目」禁用并提示先建组）；空态文案改为引导「分组设置」，按钮打开该弹窗（可直接新建分组）。
+- **门禁改造** `scripts/check-nav.mjs`：移除 5 条 `NavEditor` 旧断言，新增 11 条 v1.51.11 接线 / 负向断言（弹窗已删、顶栏三按钮、跨分组移动、分组回落、卡片编辑入口、分组 CRUD 等），新增第 **④ 组进程级负向自检**（注入 `<NavEditor` 回归 → 子进程重跑门禁应 `exit 1` → 还原字节级一致）。
+- 版本号 `1.51.10 → 1.51.11`。
+
+### 验证（硬证据）
+- 双 tsc（src / server）0 错；`npm run test:gates` **GATES_EXIT=0**，21 组结果行全部 `FAIL=0`，FAIL 行扫描为空（完整日志 1260 行）；`check-nav` **50 ok / 0 FAIL**（含 ③ 解析器注入回归 + ④ `<NavEditor` 注入回归）。
+- 额外外部注入回归：删除 `NavPage` 的跨分组 filter → `NEG_EXIT=1`，FAIL 精确命中「★ 项目保存保留跨分组移动语义」；还原后 `RESTORE_EXIT=0`、`50 ok / 0 FAIL`、`BYTE_IDENTICAL`。
+- SEA 四步构建（干净 node 基座 124679552 B → postject 注入 130616512 B）+ **三处 SHA-256 逐字节一致** `2bd3fbec149b9d07a34b443b6951df9946345c2816810a38b7480dc31713426c`（postject = zip 内 = deb 内，均 130616512 B，`ALL_MATCH`）。
+- ELF `7f454c46` / e_machine=62；运行时版本精确锚点 `CURRENT_VERSION = true ? "1.51.11" : "0.0.0-dev"` 二进制 1 处、旧版 `1.51.10` 锚点 **0 处**；5 个 dist 文件（`index.html` / `assets/index-BUTNY9tA.js` / `assets/index-CO9-DJab.css` / `docker.png` / `login-banner.svg`）的 base64 在 `bundle.js` 与 SEA 二进制中各命中 1 次，与 `dist` 逐字节一致。
+- 交付包：`dockermanagementyanzi-linux-x64-v1.51.11.zip`（43123279 B）、`dockermanagementyanzi_1.51.11_amd64.deb`（42839946 B）；包成员固定 5 个、0755/0644 权限位正确；latest 别名（固定 main v1.50.36，43102847 B）**未覆盖**。
+
+### 未完成 / 已知限制
+- 随弹窗移除的附加能力（用户已确认接受）：**分组/入口上移下移排序**、**Docker 批量「从容器生成」**；单容器「引用 Docker 容器图标」保留在 `NavAppModal`。
+- 源码级门禁不覆盖真实浏览器交互（hover ✎、`window.confirm`、跨分组编辑）；建议人工冒烟：新建分组 → 添加项目 → hover 编辑换组 → 删除项目 → 删除分组到 0 组 → 空态新建。
+
+### 下一步
+- 等用户验收三入口职责与 CRUD 完整性；GitHub 仍不推（Gitea-only 约定）。
+
+---
+
 ## v1.51.10 — 2026-11-11（**main 分支 · 已构建 · 已推 Gitea**）
 
 ### 改动
