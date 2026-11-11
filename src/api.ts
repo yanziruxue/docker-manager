@@ -30,7 +30,7 @@ const PRE_LOGIN_401_ENDPOINTS = ["/auth/login", "/auth/logout", "/auth/init-stat
 /**
  * 会话失效（401）→ 派发 auth:unauthorized，App 监听后回到登录页。
  *
- * ⚠️ `/auth/me` 与 `/auth/ping` 的 401 **必须**派发：前端「闲时自动退出」依赖 60s 探活
+ * ⚠️ `/auth/me` 与 `/auth/ping` 的 401 **必须**派发：前端「闲时自动退出」依赖定时探活
  * ping 检测到服务端会话过期后登出。历史版本用 `!url.startsWith("/auth/")` 把整个
  * /auth/ 前缀排除在派发之外，ping 的 401 被静默吞掉 ⇒ 会话过期后用户停在页面上
  * 登不出去（v1.43.11 修复：改为仅排除上面的预登录端点）。
@@ -136,15 +136,20 @@ export function logout(): Promise<void> {
   return request<void>("/auth/logout", { method: "POST" });
 }
 
-/** 当前登录用户 */
-export function getMe(): Promise<AuthUser> {
-  return request<AuthUser>("/auth/me");
+/** /auth/me 额外下发当前「会话超时（分钟）」，供前端按设置值自适应节流与探活 */
+export interface SessionUser extends AuthUser {
+  sessionTimeout?: number;
+}
+
+/** 当前登录用户（同时滑动续期会话与 Cookie，并带回 sessionTimeout） */
+export function getMe(): Promise<SessionUser> {
+  return request<SessionUser>("/auth/me");
 }
 
 /**
- * 探活心跳（只读、不续期）。用于前端低频（60s）探测：
+ * 探活心跳（只读、不续期）。低频探测（间隔按会话超时自适应）：
  * 人离开页面开着时，会话真过期后服务端返回 401，经全局 401 兜底（auth:unauthorized）回到登录页；
- * 该接口不参与滑动续期，不会维持会话（续期由 /auth/me 与业务请求负责）。
+ * 该接口不参与滑动续期，不会维持会话（**续期仅由 /auth/me 负责**，业务请求 / 后台轮询一律只读校验）。
  */
 export function ping(): Promise<void> {
   return request<void>("/auth/ping");

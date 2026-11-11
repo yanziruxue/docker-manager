@@ -16,6 +16,32 @@
 
 ---
 
+## v1.51.10 — 2026-11-11（**main 分支 · 已构建 · 已推 Gitea**）
+
+### 改动
+- **修复「页面无操作后按设置的会话超时退出」的 P0 缺陷**：`createSession` 下发的 Cookie `maxAge = TTL` 只在登录时设置一次，而 `renewSession` 只滑动服务端 `expiresAt`、不重发 Cookie ⇒ 浏览器在「登录后满一个 TTL」就删掉 Cookie，**即使用户一直在操作也会被登出**，空闲超时实际退化成「从登录起算的绝对超时」。`server/auth.ts` 新增 `refreshSessionCookie()`（复用抽出的 `sessionCookieOptions()`），`GET /api/auth/me` 续期成功后重发 Cookie，使浏览器 `maxAge` 与服务端 `expiresAt` **同步滑动**。
+- **时间精度按设置值自适应**：`GET /api/auth/me` 响应新增 `sessionTimeout`（分钟，由 `auth.ts` 导出的 `getSessionTimeoutMinutes()` 提供）；`src/api.ts` 新增 `SessionUser extends AuthUser`，`getMe()` 返回该类型；`src/App.tsx` 新增 `sessionTtlMs` state 并驱动心跳：活动续期节流 = `clamp(TTL/4, 5s, 30s)`、探活间隔 = `clamp(TTL/6, 5s, 60s)`（原固定 30s / 60s 在超时设为 1 分钟时误差过大）。修改设置后下一次真实活动即按新值重算间隔。
+- **保持服务端权威、不引入前端本地计时**：唯一登出条件仍是服务端 401（`/auth/ping` 探活或任意业务接口）；`/auth/ping` 仍走 `peekSessionUser` 只读校验，业务请求 / Dashboard 3s 轮询 / WS 握手仍走 `getSessionUser` 只读校验，**绝不续期**（历史回归①）；401 派发白名单仍不含 `/auth/me`、`/auth/ping`（历史回归②）。
+- **文档**：修正 `src/api.ts` 中「续期由 /auth/me 与业务请求负责」「60s 探活」两处过时注释；修正 `server/auth.ts` 头部「会话创建时固定初始 expiresAt」的歧义表述。
+- **新增门禁** `scripts/check-session-idle.mjs`（`npm run test:sessionidle`，已并入 `test:gates`）：27 条断言覆盖 Cookie 滑动接线 / ping 与只读校验绝不续期 / 401 白名单 / 前端按 TTL 自适应 / 禁止前端本地计时主动登出；已做**两轮注入回归负向自检**（删 Cookie 重发、探活误走 `renewSession` 均 exit 1，还原后 27 PASS / 0 FAIL，源码字节级还原）。
+- 版本号 `1.51.9 → 1.51.10`。
+
+### 验证（硬证据）
+- 双 tsc（src / server）0 错；`npm run test:gates` 全绿（含新增 sessionidle 门禁，退出码 0）。
+- 门禁负向自检：回归①/② 均被捕获 `exit=1`，还原后 `PASS=27 FAIL=0`。
+- SEA 四步构建（干净 node 基座 `/tmp/sea-build/node-v22.22.2-linux-x64/bin/node` 124679552 B → postject 注入后 130616512 B）+ **三处 SHA-256 逐字节一致** `47a94437da556a73c62b9f0748d43003346692af801de009e4998c9ce35587e1`（postject = zip 内 = deb 内，均 130616512 B，`ALL_MATCH`）。
+- ELF `7f454c46` / e_machine=62；运行时版本精确锚点 `CURRENT_VERSION = true ? "1.51.10" : "0.0.0-dev"`：bundle.js 1 处 / SEA 二进制 1 处，旧版 `1.51.9` 锚点两者均 0 处；嵌入前端 base64 与 `dist/index.html`、`dist/assets/index-*.js|css` 逐字节一致（`ALL_EMBEDDED_MATCH`）。
+- 交付包：`dockermanagementyanzi-linux-x64-v1.51.10.zip`（43126296 B）、`dockermanagementyanzi_1.51.10_amd64.deb`（42841788 B）；包成员固定 5 个、0755/0644 权限位正确；latest 别名（固定 main v1.50.36）**未覆盖**。
+
+### 未完成 / 已知限制
+- 修改「会话超时」后**新登录会话立即生效**；当前会话在下一次真实用户活动（`renewSession` 用新 TTL 滑动）时按新值计时，未改动设置的即时生效语义。
+- 源码级门禁不覆盖真实浏览器计时；建议人工冒烟两个场景：设置 1 分钟后挂机 → 约 1 分钟 + 探活间隔内自动退出；设置 1 分钟后持续操作 → 不退出。
+
+### 下一步
+- 等用户验收自动退出行为；GitHub 仍不推。
+
+---
+
 ## v1.51.9 — 2026-11-11（**main 分支 · 已构建 · 已推 Gitea**）
 
 ### 改动

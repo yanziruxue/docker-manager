@@ -144,6 +144,12 @@ export default function App() {
   const [loginNotice, setLoginNotice] = useState<string | undefined>(undefined);
   /** 安装时选定的服务运行账户（非空 ⇒ 初始设置页锁定用户名不可改，v1.40.6） */
   const [lockedUsername, setLockedUsername] = useState<string>("");
+  /**
+   * 当前「会话超时（毫秒）」：由 /auth/me 下发的 sessionTimeout（分钟）驱动。
+   * 用于把活动续期节流与探活间隔按设置值自适应 —— 超时设成 1 分钟时若仍固定 30s 节流 + 60s 探活，
+   * 实际退出时间会明显偏离设置值。服务端 expiresAt 仍是唯一权威，前端不据此主动登出。
+   */
+  const [sessionTtlMs, setSessionTtlMs] = useState(30 * 60 * 1000);
 
   // 启动检测：并发判断「是否已初始化」与「当前是否已登录」
   useEffect(() => {
@@ -155,6 +161,10 @@ export default function App() {
           getMe().catch(() => null),
         ]);
         if (cancelled) return;
+        // /auth/me 会滑动续期并下发当前会话超时；据此自适应节流与探活（老账号走 reinit 时同样适用）
+        if (meRes?.sessionTimeout) {
+          setSessionTtlMs(Math.max(60_000, Math.round(meRes.sessionTimeout * 60_000)));
+        }
         // 老凭据版本升级后：必须重走一遍「用户名 + 密码 + 找回码」设置。
         // 已有会话说明此前已用旧凭据登录过，可直接进入重设表单；否则先回登录页。
         if (init.needsReinit) {
@@ -201,27 +211,41 @@ export default function App() {
   }, []);
 
   // 会话心跳：服务端为「空闲超时（仅真实活动续期）」—— 续期只发生在真实用户活动触发的 /api/auth/me
-  // （活动节流 getMe，服务端 renewSession 滑动）；业务请求 / 后台数据轮询 / WS 握手经 requireAuth →
-  // getSessionUser 只做只读校验、不续期，因此页面后台轮询不会维持会话，空闲满 TTL 仍能过期。
+  // （活动节流 getMe，服务端 renewSession 滑动 expiresAt 并重发 Cookie 同步 maxAge）；业务请求 /
+  // 后台数据轮询 / WS 握手经 requireAuth → getSessionUser 只做只读校验、不续期，
+  // 因此页面后台轮询不会维持会话，空闲满 TTL 仍能过期。
   // 前端策略（**纯服务端权威，杜绝误踢**）：
-  //  - 监听真实用户活动（mousemove/keydown/pointerdown/wheel/touchstart），活动时节流发 /api/auth/me 续期；
-  //  - 低频（60s）探活 /api/auth/ping（只读、不续期）：会话真过期时服务端返回 401，
+  //  - 监听真实用户活动（mousemove/keydown/pointerdown/wheel/touchstart），按 TTL 自适应节流发 /api/auth/me 续期；
+  //  - 按 TTL 自适应间隔探活 /api/auth/ping（只读、不续期）：会话真过期时服务端返回 401，
   //    经全局 401 兜底（auth:unauthorized）回到登录页 —— 人离开页面开着也能自动登出；
   //  - **不再用前端本地计时主动登出**：前端无法可靠感知服务端是否仍在续期，本地计时误判会导致
-  //    「正在操作却被踢」（服务端因业务请求持续续期，但前端 lastActivity 已陈旧）。
-  //  唯一登出触发条件 = 服务端 401（任意业务接口或 ping 探活）。
+  //    「正在操作却被踢」。唯一登出触发条件 = 服务端 401（任意业务接口或 ping 探活）。
+  //  节流 / 探活按「设置的会话超时」自适应：续期节流 = clamp(TTL/4, 5s, 30s)、
+  //  探活 = clamp(TTL/6, 5s, 60s)。TTL 很短（如 1 分钟）时固定 30s/60s 会让退出时间明显偏离设置值。
   useEffect(() => {
     if (authState !== "authed") return;
     let stopped = false;
     const lastRenew = { t: 0 }; // 最近一次活动续期请求时刻（节流用）
+    // 服务端最小 TTL = 1 分钟；这里同步兜底，避免异常值把定时器压到 0
+    const ttl = Math.max(60_000, sessionTtlMs);
+    const renewThrottleMs = Math.min(30_000, Math.max(5_000, Math.floor(ttl / 4)));
+    const pingIntervalMs = Math.min(60_000, Math.max(5_000, Math.floor(ttl / 6)));
     const markActivity = () => {
       const now = Date.now();
-      // 真实活动 → 触发续期（节流到 30s/次，避免 mousemove 高频发请求）
-      if (now - lastRenew.t > 30000) {
+      // 真实活动 → 触发续期（节流，避免 mousemove 高频发请求）
+      if (now - lastRenew.t > renewThrottleMs) {
         lastRenew.t = now;
-        getMe().catch(() => {
-          /* 续期失败忽略；若会话已过期（401）由 notifyUnauthorized 全局派发 auth:unauthorized 登出 */
-        });
+        getMe()
+          .then((u) => {
+            // 设置页改了「会话超时」后，下一次真实活动即按新值重算节流 / 探活间隔
+            if (u?.sessionTimeout) {
+              const next = Math.max(60_000, Math.round(u.sessionTimeout * 60_000));
+              setSessionTtlMs((prev) => (prev === next ? prev : next));
+            }
+          })
+          .catch(() => {
+            /* 续期失败忽略；若会话已过期（401）由 notifyUnauthorized 全局派发 auth:unauthorized 登出 */
+          });
       }
     };
     const events: (keyof WindowEventMap)[] = [
@@ -239,13 +263,13 @@ export default function App() {
       ping().catch(() => {
         /* 401 由全局 auth:unauthorized 兜底处理，这里忽略 */
       });
-    }, 60 * 1000);
+    }, pingIntervalMs);
     return () => {
       stopped = true;
       clearInterval(pingId);
       events.forEach((ev) => window.removeEventListener(ev, markActivity));
     };
-  }, [authState]);
+  }, [authState, sessionTtlMs]);
 
   const handleAuthDone = (user: AuthUser) => {
     setLoginNotice(undefined);

@@ -12,11 +12,13 @@ import { dataPath } from "./paths.js";
  *   并持久化到 <data>/sessions.json —— 服务重启（含 OTA 重启）从落盘快照恢复。
  * - Cookie httpOnly + sameSite=lax，降低 XSS 窃取与 CSRF 风险。
  * - TTL 取自 settings.user.sessionTimeout（分钟），默认 30。
- * - **空闲超时（仅真实用户活动续期）**：会话创建时固定初始 expiresAt = 创建时间 + TTL。
+ * - **空闲超时（仅真实用户活动续期）**：expiresAt 初始为「创建时间 + TTL」。
  *   **只有前端在真实用户活动（mousemove/keydown 等）时调用的 `renewSession`（对应 /api/auth/me）
  *   才会把 expiresAt 滑动刷新为「当前时间 + TTL」**；`getSessionUser`（requireAuth / 业务请求 /
  *   后台数据轮询 / WS 握手）一律**只读校验、不续期**。这样即便页面开着、Dashboard 每 3s 轮询，
- *   只要用户无操作满 TTL 仍会过期 → 空闲自动登出生效；而真实操作期间因活动节流每 ≤30s 续期，不会误踢。
+ *   只要用户无操作满 TTL 仍会过期 → 空闲自动登出生效；而真实操作期间因活动节流续期，不会误踢。
+ *   Cookie 的 maxAge 必须随 expiresAt 一起滑动（refreshSessionCookie），否则浏览器会在
+ *   「登录后满一个 TTL」时删掉 Cookie，持续操作的用户也会被登出 ⇒ 退化成绝对超时（v1.51.10 修复）。
  *   落盘按 5s 节流，重启最多丢失 5s 的滑动量。
  */
 
@@ -58,6 +60,11 @@ function sessionTtlMs(): number {
 export function invalidateSessionTtlCache(): void {
   ttlCacheMs = 0;
   ttlCacheAt = 0;
+}
+
+/** 当前会话超时（分钟）：下发给前端，使其按设置值自适应「活动续期节流 / 探活间隔」 */
+export function getSessionTimeoutMinutes(): number {
+  return Math.round(sessionTtlMs() / 60000);
 }
 
 // ---------- 持久化（跨重启按原到期时间恢复） ----------
@@ -221,18 +228,35 @@ export function peekSessionUser(req: CookieCarrier): { id: string; username: str
   return { id: user.id, username: user.username, role: user.role };
 }
 
-/** 创建会话并下发 Cookie（expiresAt 与 Cookie maxAge 均为绝对到期时间） */
+/** 会话 Cookie 选项：maxAge 与服务端 expiresAt 同为 TTL，二者必须同步滑动 */
+function sessionCookieOptions(ttlMs: number) {
+  return {
+    httpOnly: true,
+    sameSite: "lax" as const,
+    maxAge: ttlMs,
+    path: "/",
+  };
+}
+
+/** 创建会话并下发 Cookie（expiresAt 与 Cookie maxAge 均为「当前时间 + TTL」） */
 export function createSession(res: Response, userId: string): void {
   const token = crypto.randomBytes(32).toString("hex");
   const ttl = sessionTtlMs();
   sessions.set(tokenHash(token), { userId, expiresAt: Date.now() + ttl });
-  res.cookie(SESSION_COOKIE, token, {
-    httpOnly: true,
-    sameSite: "lax",
-    maxAge: ttl,
-    path: "/",
-  });
+  res.cookie(SESSION_COOKIE, token, sessionCookieOptions(ttl));
   persistSessions();
+}
+
+/**
+ * 滑动续期成功后**重发 Cookie**，使浏览器端 maxAge 与服务端 expiresAt 同步刷新。
+ * ★ 不重发的后果：Cookie 在「登录后满一个 TTL」时被浏览器删除，即便用户一直在操作，
+ *   下一次请求也会因无 Cookie 而 401 ⇒ 空闲超时退化为「从登录起算的绝对超时」（v1.51.10 修复）。
+ * 仅在已确认会话有效后调用（/api/auth/me）；过期会话绝不重发。
+ */
+export function refreshSessionCookie(req: CookieCarrier, res: Response): void {
+  const raw = parseCookies(req)[SESSION_COOKIE];
+  if (!raw) return;
+  res.cookie(SESSION_COOKIE, raw, sessionCookieOptions(sessionTtlMs()));
 }
 
 /** 销毁会话（登出） */

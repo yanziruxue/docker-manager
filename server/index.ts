@@ -149,7 +149,7 @@ import {
   validateContact,
   type ContactType,
 } from "./users.js";
-import { createSession, getSessionUser, renewSession, peekSessionUser, destroySession, requireAuth, invalidateSessionTtlCache, destroySessionsForUser } from "./auth.js";
+import { createSession, getSessionUser, renewSession, peekSessionUser, destroySession, requireAuth, invalidateSessionTtlCache, destroySessionsForUser, refreshSessionCookie, getSessionTimeoutMinutes } from "./auth.js";
 import { runFixPermsCli, runPermissionCheckCli, expectedUid } from "./perms-cli.js";
 import { scanPermIssues, formatIssue, currentUser, fixCommandLine } from "./perms.js";
 import { checkServiceUnit, describeServiceUnitGap } from "./unit-status.js";
@@ -414,7 +414,11 @@ app.get("/api/auth/me", (req, res) => {
     res.status(401).json({ success: false, error: "未登录" });
     return;
   }
-  res.json({ success: true, data: user });
+  // 同步滑动 Cookie 的 maxAge：不重发则浏览器会在「登录后满一个 TTL」时删掉 Cookie，
+  // 持续操作的用户也会被登出 ⇒ 空闲超时退化为绝对超时（v1.51.10 修复）。
+  refreshSessionCookie(req, res);
+  // 下发当前「会话超时（分钟）」，前端据此自适应活动续期节流与探活间隔；过期会话不会走到这里。
+  res.json({ success: true, data: { ...user, sessionTimeout: getSessionTimeoutMinutes() } });
 });
 
 // 探活心跳（只读、不续期）：人离开页面开着时，会话真过期返回 401，前端据此登出；
