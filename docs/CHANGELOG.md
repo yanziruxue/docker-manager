@@ -16,6 +16,27 @@
 
 ---
 
+## v1.51.6 — 2026-11-11（**main 分支 · 已构建 · 已推 Gitea**）
+
+### 缘起
+导航页 UX 微调：① 顶右「管理」按钮改名「页面设置」（标题语义不变，仍是管理导航分组与入口）；② 明确分组标题行分工——「＋」= 添加入口、「＋」右侧齿轮 = 管理分组（语义本就如此，保留）；③ 去掉分组无入口时的白色遮罩框（保留轻提示文案）。
+
+### 改动（tag `v1.51.6`）
+- **`src/pages/NavPage.tsx`**：顶右按钮文案 `管理` → `页面设置`，`title` 改为「页面设置（管理导航分组与入口）」。
+- **`src/components/NavBoard.tsx`**：分组无入口空态去掉白色遮罩（`bg-white/30` + `border` + `backdrop-blur-sm`），改为渐变背景上的纯文本轻提示「该分组还没有入口，点上方「＋」添加」（保留小号 ＋ 图标引导）。＋/齿轮 tooltip 不变（`为该分组添加入口` / `管理分组`）。
+
+### 验证（硬证据）
+- 双 tsc（src/server）0 错；SEA 四步构建 + 三处 SHA-256 逐字节一致 `238cbb17a3afd990e6b0e277c05e6f65695b16831793cda366eafe85434ecba4`（postject = zip 内 = deb 内）；ELF `7f454c46`/e_machine=62/130550976 B。
+- 嵌入前端 base64 解码后与 `dist/assets/index-*.js` **逐字节一致**（SHA `6f4f0c71…`）；解码内容含 `页面设置`/`还没有分组`/`还没有入口`/`点上方「＋」添加`/`为该分组添加入口`/`管理分组`，旧遮罩文案 `点上方「＋」或「⚙」添加` 已消失。
+- latest 别名 `dockermanagementyanzi-linux-x64.zip` 仍保持 main v1.50.36（43102847 B）**未动**。
+
+### 交付物
+- `build-upload/dockermanagementyanzi-linux-x64-v1.51.6.zip`（41.1 MB）
+- `build-upload/dockermanagementyanzi_1.51.6_amd64.deb`（40.8 MB）
+
+### 下一步
+- 等用户验收导航页文案/空态；继续在 main 分支迭代；GitHub 仍不推（Gitea-only 约定）。
+
 ## v1.51.5 — 2026-11-11（**main 分支 · 已构建 · 已推 Gitea**）
 
 ### 缘起

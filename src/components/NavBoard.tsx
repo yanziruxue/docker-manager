@@ -114,9 +114,9 @@ export function NavBoard({
         </div>
       </div>
       {apps.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 rounded-2xl border border-white/40 bg-white/30 backdrop-blur-sm text-white/90">
-          <Plus size={28} className="mb-2 opacity-90" />
-          <p className="text-sm">该分组还没有入口，点上方「＋」或「⚙」添加</p>
+        <div className="flex flex-col items-center justify-center py-12 text-white/85">
+          <Plus size={26} className="mb-2 opacity-80" />
+          <p className="text-sm">该分组还没有入口，点上方「＋」添加</p>
         </div>
       ) : (
         <div className="flex gap-3 overflow-x-auto pb-3 snap-x">

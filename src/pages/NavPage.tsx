@@ -84,9 +84,9 @@ export function NavPage({ navGroups, onSaveNavGroups, containers }: NavPageProps
         <button
           onClick={openEditor}
           className="ml-auto flex items-center gap-1 px-3.5 py-1.5 rounded-full text-[13px] font-medium text-rose-600 bg-white/75 backdrop-blur-sm shadow-sm hover:bg-white transition-colors"
-          title="管理导航分组与入口"
+          title="页面设置（管理导航分组与入口）"
         >
-          <Settings2 size={13} /> 管理
+          <Settings2 size={13} /> 页面设置
         </button>
       </div>
 
