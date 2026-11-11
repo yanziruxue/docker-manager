@@ -201,6 +201,12 @@ const DEFAULT_SETTINGS = {
      */
     iconDir: "",
     /**
+     * 页面显示控制（v1.51.4）：被隐藏的一级页面 key 列表；顶栏不渲染、不可作登录默认页。
+     * 默认 `["navigation"]` —— 导航页作为可选功能扩展默认隐藏，保持 main 默认体验不变。
+     * settings 固定不可隐藏；归一化时仅保留 PageKey 合法键并去重。
+     */
+    hiddenPages: ["navigation"],
+    /**
      * 内外网自动切换（v1.50.36，设置中心 → 页面设置）：内网网段 CIDR **原始串**，
      * 逗号 / 分号 / 回车分隔（如 192.168.24.0/24）。留空 = 默认网段集
      * （RFC1918 三段 + 回环 + 链路本地 + IPv6 私网，见 server/network-zone.ts）。
@@ -253,6 +259,21 @@ const DEFAULT_SETTINGS = {
 function normalizeComposeInsert(v: any): string {
   if (v === "end" || v === "cursor" || v === "environment" || v === "volumes") return v;
   return "services";
+}
+
+/** 页面显示控制（v1.51.4）：仅保留 PageKey 合法键、去重；settings 固定不隐藏 */
+const VALID_PAGE_KEYS = new Set([
+  "navigation", "dashboard", "containers", "stacks", "images",
+  "volumes", "networks", "notifications", "settings",
+]);
+function normalizeHiddenPages(v: any): string[] {
+  if (!Array.isArray(v)) return [...DEFAULT_SETTINGS.modal.hiddenPages];
+  const out: string[] = [];
+  for (const x of v) {
+    const k = String(x ?? "");
+    if (VALID_PAGE_KEYS.has(k) && k !== "settings" && !out.includes(k)) out.push(k);
+  }
+  return out;
 }
 
 export function getSettings(): any {
@@ -342,6 +363,8 @@ export function getSettings(): any {
         modal: {
           ...DEFAULT_SETTINGS.modal,
           ...(parsed?.modal || {}),
+          // 页面显示控制（v1.51.4）：保留合法 key、去重、排除 settings
+          hiddenPages: normalizeHiddenPages(parsed?.modal?.hiddenPages),
           // 引擎切换超时（秒）：钳制 5~300，非法/缺失回落默认 30
           engineSwitchTimeout: (() => {
             const n = Number(parsed?.modal?.engineSwitchTimeout);

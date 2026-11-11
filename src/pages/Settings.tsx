@@ -55,13 +55,37 @@ import {
   Smartphone,
   FolderOpen,
 } from "lucide-react";
-import type { SystemSettings, DockerEngine, UpdateInfo, UpdateState, ResourceTag, ComposeTemplate, AppInfo, LogListResult, LogTailResult, NetInterfaceOption, NotifyRuntimeStatus } from "../types";
+import type { SystemSettings, DockerEngine, UpdateInfo, UpdateState, ResourceTag, ComposeTemplate, AppInfo, LogListResult, LogTailResult, NetInterfaceOption, NotifyRuntimeStatus, PageKey } from "../types";
 // 值导入（不是 type）：密钥「清除」哨兵值
 import { SECRET_CLEAR, LOG_CHANNEL_LABELS } from "../types";
 import { Card, FormField, Input, Select, Toggle, IconButton } from "../components/UI";
 import { PasswordInput } from "../components/PasswordInput";
 import { ActivityPanel } from "../components/ActivityPanel";
 import type { SchedulerStatus } from "../types";
+
+/** 页面显示控制（v1.51.4）：可隐藏的一级页面（设置中心固定可见，不在此列） */
+const PAGE_VISIBILITY: { key: PageKey; label: string }[] = [
+  { key: "navigation", label: "导航" },
+  { key: "dashboard", label: "仪表盘" },
+  { key: "containers", label: "容器管理" },
+  { key: "stacks", label: "堆栈管理" },
+  { key: "images", label: "镜像管理" },
+  { key: "volumes", label: "数据卷管理" },
+  { key: "networks", label: "网络管理" },
+  { key: "notifications", label: "通知中心" },
+];
+
+/** 默认显示页面下拉选项（登录后落地页） */
+const DEFAULT_PAGE_OPTIONS: { value: string; label: string }[] = [
+  { value: "dashboard", label: "仪表盘" },
+  { value: "containers", label: "容器管理" },
+  { value: "stacks", label: "堆栈管理" },
+  { value: "images", label: "镜像管理" },
+  { value: "volumes", label: "数据卷管理" },
+  { value: "networks", label: "网络管理" },
+  { value: "notifications", label: "通知中心" },
+  { value: "settings", label: "设置中心" },
+];
 import { COMPOSE_INSERT_OPTIONS, normalizeInsert } from "../lib/compose-template";
 import {
   changeMyPassword,
@@ -278,6 +302,8 @@ function getDefaultSettings(): SystemSettings {
       intranetCidrs: "",
       // 堆栈管理页「图标」列双击打开编辑堆栈弹窗（v1.50.24，默认开）
       doubleClickIconEditStack: true,
+      // 页面显示控制（v1.51.4）：默认仅隐藏「导航」页，保持 main 默认体验不变
+      hiddenPages: ["navigation"],
     },
     compose: {
       templates: [
@@ -2212,6 +2238,9 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
     // section 只会取 docker / notifications 等对象段；defaultsVersion 等标量段不参与
     setData({ ...data, [section]: { ...(data as Record<string, any>)[section], [field]: value } });
   };
+
+  /** 页面显示控制（v1.51.4）：当前被隐藏的一级页面 key 列表（设置中心固定可见，不在其中） */
+  const hiddenPages: PageKey[] = data.modal?.hiddenPages || [];
 
   // 应用设置里的加速源列表：现仅作为「拉取时改写镜像名」与旧接口的输入，
   // 编辑入口已改为下面的 daemon.json 编辑器（保存时自动同步回此列表）
@@ -4236,24 +4265,44 @@ docker-compose version</code>
               <p className="text-sm text-slate-500">配置登录后默认显示的页面，以及操作结果弹窗的自动关闭行为、容器详情的展示形式</p>
             </div>
 
+            <Card title="页面显示" icon={<Eye size={16} />}>
+              <p className="text-sm text-slate-500 mb-3">
+                勾选＝在顶部导航显示该页面；取消勾选＝隐藏。导航页默认隐藏（作为可选功能扩展，保持 main 默认体验不变）。
+                设置中心固定显示，确保随时可改回。修改后点页面底部「保存设置」生效。
+              </p>
+              <div className="space-y-1">
+                {PAGE_VISIBILITY.map((p) => {
+                  const visible = !(hiddenPages || []).includes(p.key);
+                  return (
+                    <div key={p.key} className="flex items-center justify-between py-1.5 border-b border-slate-100 last:border-0">
+                      <span className="text-sm text-slate-700">{p.label}</span>
+                      <Toggle
+                        active={visible}
+                        onChange={(val) => {
+                          const cur = data.modal?.hiddenPages || [];
+                          const next = val
+                            ? cur.filter((k) => k !== p.key)
+                            : cur.includes(p.key) ? cur : [...cur, p.key];
+                          update("modal", "hiddenPages", next);
+                        }}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+
             <Card title="默认显示页面" icon={<LayoutDashboard size={16} />}>
               <FormField
                 label="登录后默认显示的页面"
-                hint="每次登录（或刷新网页）后自动进入该页面；选「仪表盘」即沿用原有默认行为。修改后立即生效，下次登录起应用。"
+                hint="每次登录（或刷新网页）后自动进入该页面；选「仪表盘」即沿用原有默认行为。已在「页面显示」中隐藏的页面不会出现在选项中。修改后立即生效，下次登录起应用。"
               >
                 <Select
                   value={data.modal?.defaultPage ?? "dashboard"}
                   onChange={(v) => update("modal", "defaultPage", v)}
-                  options={[
-                    { value: "dashboard", label: "仪表盘" },
-                    { value: "containers", label: "容器管理" },
-                    { value: "stacks", label: "堆栈管理" },
-                    { value: "images", label: "镜像管理" },
-                    { value: "volumes", label: "数据卷管理" },
-                    { value: "networks", label: "网络管理" },
-                    { value: "notifications", label: "通知中心" },
-                    { value: "settings", label: "设置中心" },
-                  ]}
+                  options={DEFAULT_PAGE_OPTIONS.filter(
+                    (o) => o.value === (data.modal?.defaultPage ?? "dashboard") || !hiddenPages.includes(o.value as PageKey),
+                  )}
                 />
               </FormField>
             </Card>

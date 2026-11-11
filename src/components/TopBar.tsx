@@ -36,6 +36,8 @@ interface TopBarProps {
   updateAvailable?: boolean;
   /** 应用版本号（原侧边栏左下角迁此） */
   appVersion?: string;
+  /** 被隐藏的一级页面 key 列表（v1.51.4，设置中心-页面设置 控制）；顶栏不渲染这些页签 */
+  hiddenPages?: PageKey[];
 }
 
 /** 顶部导航项（v1.47.0 自 Sidebar 迁入） */
@@ -55,6 +57,7 @@ export function TopBar({
   activePage, onRefresh, refreshing = false, onNavigate,
   unreadCount = 0, actions, user, onLogout, stats,
   engineName, engineStatus, dockerVersion, updateAvailable = false, appVersion = "",
+  hiddenPages = [],
 }: TopBarProps) {
   // 引擎状态（原侧边栏左下角迁入左上角，精简为状态点 + 悬浮 title）
   const isConnected = engineStatus === "connected";
@@ -113,7 +116,10 @@ export function TopBar({
 
       {/* 顶部导航（v1.47.0 自左侧边栏迁入：宽屏图标+文字，<1280px 只显图标悬浮可见） */}
       <nav className="flex items-center gap-1 min-w-0 flex-1 overflow-x-auto py-1">
-        {navItems.map((item) => {
+        {navItems
+          // 页面显示控制（v1.51.4）：被隐藏的页签不渲染；设置中心固定可见（确保可随时改回）
+          .filter((item) => item.key === "settings" || !hiddenPages.includes(item.key))
+          .map((item) => {
           const badge = badgeFor(item.key);
           return (
             <button

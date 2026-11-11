@@ -74,6 +74,15 @@ const VALID_PAGES: PageKey[] = [
   "volumes", "networks", "notifications", "settings",
 ];
 
+/** 页面显示控制（v1.51.4）：取第一个可见（非隐藏、非 settings）页面作为回落页 */
+const PAGE_FALLBACK_ORDER: PageKey[] = [
+  "dashboard", "containers", "stacks", "images", "volumes", "networks", "notifications", "navigation",
+];
+function firstVisiblePage(hidden: PageKey[]): PageKey {
+  const v = PAGE_FALLBACK_ORDER.find((p) => p !== "settings" && !hidden.includes(p));
+  return v ?? "settings";
+}
+
 /** 会话级页面记忆（v1.50.7）：刷新后保持刷新前页面；新开标签/新会话不携带，仍走默认页 */
 const PAGE_STORAGE_KEY = "dmgr.page";
 function readStoredPage(): PageKey | null {
@@ -315,11 +324,16 @@ export default function App() {
         // 仅全新会话（新开标签、无记录）才落到设置里的默认页面。
         const stored = readStoredPage();
         const dp = settingsData?.modal?.defaultPage;
-        if (stored) {
-          setPage(stored);
-        } else if (dp && VALID_PAGES.includes(dp as PageKey)) {
-          setPage(dp as PageKey);
-        }
+        // 页面显示控制（v1.51.4）：隐藏页不可作为恢复/默认落地页，回落第一个可见页
+        const hidden = (settingsData?.modal?.hiddenPages || []) as PageKey[];
+        const isVisible = (p: PageKey | null): p is PageKey =>
+          !!p && p !== "settings" && !hidden.includes(p);
+        const storedSafe = isVisible(stored) ? stored : null;
+        const dpSafe =
+          dp && VALID_PAGES.includes(dp as PageKey) && isVisible(dp as PageKey)
+            ? (dp as PageKey)
+            : null;
+        setPage(storedSafe ?? dpSafe ?? firstVisiblePage(hidden));
         // 自动检查更新：覆盖「网页刷新 / 后端启动 / 每 6 小时」三触发条件
         // 挂载即查一次（启动/页面加载）；之后每 6 小时周期轮询（长开页面也能及时发现更新）
         if (settingsData?.update?.autoCheck) {
@@ -358,6 +372,14 @@ export default function App() {
       if (updateTimer) clearInterval(updateTimer);
     };
   }, [authState]);
+
+  // 页面显示控制（v1.51.4）：用户在「页面设置」隐藏了当前所在页时，自动跳转第一个可见页
+  useEffect(() => {
+    const hidden = settings?.modal?.hiddenPages || [];
+    if (page !== "settings" && hidden.includes(page)) {
+      setPage(firstVisiblePage(hidden));
+    }
+  }, [settings, page]);
 
   // 活跃引擎变化时拉取数据
   // ★ v1.46.0：返回「切换成功」布尔值（以容器列表请求是否成功为判据），
@@ -904,6 +926,7 @@ export default function App() {
         dockerVersion={activeEngine?.dockerVersion}
         updateAvailable={appUpdateAvailable}
         appVersion={runtimeVersion}
+        hiddenPages={settings?.modal?.hiddenPages || []}
         onRefresh={() => activeEngineId && loadEngineData(activeEngineId)}
         refreshing={dataLoading}
         unreadCount={unreadCount}

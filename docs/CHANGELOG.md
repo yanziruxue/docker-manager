@@ -16,7 +16,21 @@
 
 ---
 
-## v1.51.3 — 2026-11-11（**label 分支 · 已构建 · 已推 Gitea**）
+## v1.51.4 — 2026-11-11（**main 分支 · 已构建 · 已推 Gitea**）
+
+- **已完成**：导航页可显隐 + 页面显示开关，导航作为 main 内「默认隐藏的可选功能扩展」：
+  - `src/types.ts` `ModalConfig` 新增 `hiddenPages: PageKey[]`；`server/settings.ts` 默认 `["navigation"]` + `normalizeHiddenPages`（仅保留 PageKey 合法键、去重、排除 settings）；`src/pages/Settings.tsx` 默认设置同步。
+  - `src/components/TopBar.tsx` 新增 `hiddenPages` prop，顶栏过滤隐藏页签（**设置中心固定可见**）。
+  - `src/pages/Settings.tsx` 设置中心 → 页面设置 新增「页面显示」卡片，列出 导航/仪表盘/容器管理/堆栈管理/镜像管理/数据卷管理/网络管理/通知中心 开关；「默认显示页面」下拉过滤已隐藏页。
+  - `src/App.tsx` 守卫：登录恢复/深链落地页若被隐藏则回落第一个可见页；当前页被隐藏时自动跳转。
+  - 分支策略：合并 `label → main`（快进，零冲突），导航功能全部进入 main；删除 label 分支（本地+Gitea）；后续主推 main，导航作为 main 功能扩展。
+- **未完成 / 已知限制**：无。
+- **下一步**：导航页视觉/交互细节后续按验收反馈微调；继续在 main 分支迭代。
+- **验证**：双 tsc 0 错；`npm run test:gates` 全绿（含 check-nav 38 ok/0 FAIL）；服务端 `getSettings` 默认 `["navigation"]`、非法/重复/`settings` 键已过滤（tsx 隔离验证）；SEA 四步构建 + 三处 SHA-256 逐字节一致 `45e8ab9c…`（postject=zip=deb），ELF `7f454c46`；latest 别名保持 main v1.50.36 未动。
+
+## v1.51.3 — 2026-11-11（**已合并入 main v1.51.4**）
+
+> v1.51.0–v1.51.3 的导航功能原为 label 分支开发，已于 v1.51.4 快进合并进 main。
 
 - **已完成**：导航页（NavPage）按 FlatNas 风格重做视觉布局，与截图对齐：
   - 页面铺**粉紫渐变背景**（`bg-gradient-to-br from-rose-200 via-fuchsia-200 to-indigo-300`），`min-h-full` 填满内容区；

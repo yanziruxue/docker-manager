@@ -750,6 +750,13 @@ export interface ModalConfig {
    * 可选字段：旧 settings.json 无此键时回落为空串。
    */
   iconDir?: string;
+  /**
+   * 页面显示控制（v1.51.4）：被隐藏的一级页面 key 列表；顶栏不渲染这些页签，
+   * 且不能作为登录默认页。合法值见 PageKey；非法/未知 key 在服务端归一化时丢弃。
+   * 默认 `["navigation"]` —— 导航页作为「可选功能扩展」默认隐藏，保持 main 默认体验不变。
+   * 设置中心（settings）固定不可隐藏，确保随时可改回。
+   */
+  hiddenPages: PageKey[];
 }
 
 /** 列可见性默认配置 */
