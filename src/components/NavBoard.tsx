@@ -5,9 +5,9 @@
  * 自包含：自行拉取 /api/custom-icons 与 /api/network-zone（失败分别回落空映射 / intranet）。
  * v1.51.7：支持分组级卡片布局/大小/间距/图标大小（参照 FlatNas）与 ext 外链直开、self 备用地址回退。
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { ExternalLink } from "lucide-react";
-import type { NavAppItem, NavGroup, NavNetworkMode } from "../types";
+import type { NavAppItem, NavCardStyle, NavGroup, NavIconShape, NavNetworkMode } from "../types";
 import { getNetworkZoneApi, listCustomIconsApi } from "../api";
 import { resolveNavAppUrl, type WebuiZone, type WebuiZoneMode } from "../webui-url";
 import type { CustomIconsPayload } from "../custom-icons";
@@ -46,6 +46,29 @@ function resolveCardUrl(
   return backups[0] || "";
 }
 
+/** 卡片样式预设（v1.51.9，参照 FlatNas 卡片外观）：背景/描边/阴影/透明度 */
+const CARD_STYLE_CLS: Record<NavCardStyle, string> = {
+  solid: "bg-white/95 border border-white shadow-sm hover:shadow-lg hover:-translate-y-0.5",
+  glass: "bg-white/25 backdrop-blur-md border border-white/40 shadow-sm hover:bg-white/35",
+  flat: "bg-white/70 border-0 shadow-none hover:bg-white/85",
+  outline: "bg-transparent border border-white/70 shadow-none hover:bg-white/10",
+  transparent: "bg-transparent border-0 shadow-none hover:bg-white/10",
+};
+
+/** 图标形状（v1.51.9，与 FlatNas iconShape 枚举对齐）：仅作用于背景层，图标本体不被裁切 */
+const ICON_SHAPE_STYLE: Record<NavIconShape, CSSProperties> = {
+  rounded: { borderRadius: 12 },
+  circle: { borderRadius: "50%" },
+  square: { borderRadius: 2 },
+  leaf: { borderRadius: "50% 12% 50% 12%" },
+  diamond: { clipPath: "polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)" },
+  pentagon: { clipPath: "polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%)" },
+  hexagon: { clipPath: "polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)" },
+  octagon: { clipPath: "polygon(30% 0%, 70% 0%, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0% 70%, 0% 30%)" },
+  none: {},
+  hidden: {},
+};
+
 function AppCard({
   app,
   iconMap,
@@ -53,6 +76,8 @@ function AppCard({
   layout,
   cardSize,
   iconSize,
+  cardStyle,
+  iconShape,
 }: {
   app: NavAppItem;
   iconMap: Record<string, string>;
@@ -63,6 +88,10 @@ function AppCard({
   cardSize: number;
   /** 图标尺寸 px */
   iconSize: number;
+  /** 分组卡片样式预设 */
+  cardStyle: NavCardStyle;
+  /** 分组图标形状 */
+  iconShape: NavIconShape;
 }) {
   const src = resolveNavIconSrc(app.icon, iconMap);
   const open = () => {
@@ -72,33 +101,56 @@ function AppCard({
   const titleColor = app.titleColor || "#334155";
   const box = iconSize;
   const inner = Math.round(iconSize * 0.74);
+  // 描述（v1.51.9）：新数据用 description（卡片副标题）；旧数据无该字段时回落 remark；备注仅作 hover 提示
+  const subtitle = app.description !== undefined ? app.description : app.remark || "";
+  const tip = url ? `打开 ${url}${app.remark ? `（${app.remark}）` : ""}` : "未配置地址";
+  const styleCls = CARD_STYLE_CLS[cardStyle] || CARD_STYLE_CLS.solid;
+  const shapeHidden = iconShape === "hidden";
+  // 默认 rounded 且已有图标时保持透明（与 v1.51.8 视觉一致）；其他形状给淡底让轮廓可见
+  const shapeBg =
+    shapeHidden || iconShape === "none"
+      ? undefined
+      : iconShape === "rounded"
+        ? app.iconColor && !src
+          ? app.iconColor
+          : undefined
+        : app.iconColor || "rgba(255,255,255,0.75)";
+
+  const iconBlock = shapeHidden ? null : (
+    <span
+      className="relative flex items-center justify-center flex-shrink-0"
+      style={{ width: box, height: box }}
+    >
+      {shapeBg && (
+        <span
+          className="absolute inset-0"
+          style={{ background: shapeBg, ...(ICON_SHAPE_STYLE[iconShape] || {}) }}
+          aria-hidden="true"
+        />
+      )}
+      {src ? (
+        <img src={src} alt={app.name} style={{ width: inner, height: inner }} className="relative object-contain" draggable={false} />
+      ) : (
+        <span className="relative font-bold text-white" style={{ fontSize: Math.round(iconSize * 0.4) }}>
+          {(app.name || "?").slice(0, 1).toUpperCase()}
+        </span>
+      )}
+    </span>
+  );
 
   if (layout === "horizontal") {
     return (
       <button
         onClick={open}
         disabled={!url}
-        title={url ? `打开 ${url}${app.remark ? `（${app.remark}）` : ""}` : "未配置地址"}
-        className="group relative flex items-center gap-3 px-4 py-3 rounded-2xl bg-white/95 border border-white shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
+        title={tip}
+        className={`group relative flex items-center gap-3 px-4 py-3 rounded-2xl ${styleCls} transition-all disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0`}
         style={{ width: cardSize + 56 }}
       >
-        <span
-          className="flex items-center justify-center overflow-hidden flex-shrink-0 rounded-xl"
-          style={{ width: box, height: box, background: app.iconColor && !src ? app.iconColor : undefined }}
-        >
-          {src ? (
-            <img src={src} alt={app.name} style={{ width: inner, height: inner }} className="object-contain" draggable={false} />
-          ) : (
-            <span className="font-bold text-white" style={{ fontSize: Math.round(iconSize * 0.4) }}>
-              {(app.name || "?").slice(0, 1).toUpperCase()}
-            </span>
-          )}
-        </span>
+        {iconBlock}
         <div className="min-w-0 flex-1">
           <div className="text-[13px] font-medium truncate" style={{ color: titleColor }}>{app.name}</div>
-          {app.remark && (
-            <div className="text-[11px] text-slate-400 truncate whitespace-pre-line">{app.remark}</div>
-          )}
+          {subtitle && <div className="text-[11px] text-slate-400 truncate whitespace-pre-line">{subtitle}</div>}
         </div>
         {url && (
           <ExternalLink size={12} className="absolute top-2 right-2 text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -111,26 +163,13 @@ function AppCard({
     <button
       onClick={open}
       disabled={!url}
-      title={url ? `打开 ${url}${app.remark ? `（${app.remark}）` : ""}` : "未配置地址"}
-      className="group relative flex flex-col items-center gap-2 p-4 rounded-2xl bg-white/95 border border-white shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
+      title={tip}
+      className={`group relative flex flex-col items-center gap-2 p-4 rounded-2xl ${styleCls} transition-all disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0`}
       style={{ width: cardSize }}
     >
-      <span
-        className="flex items-center justify-center overflow-hidden flex-shrink-0 rounded-xl"
-        style={{ width: box, height: box, background: app.iconColor && !src ? app.iconColor : undefined }}
-      >
-        {src ? (
-          <img src={src} alt={app.name} style={{ width: inner, height: inner }} className="object-contain" draggable={false} />
-        ) : (
-          <span className="font-bold text-white" style={{ fontSize: Math.round(iconSize * 0.4) }}>
-            {(app.name || "?").slice(0, 1).toUpperCase()}
-          </span>
-        )}
-      </span>
+      {iconBlock}
       <span className="text-[13px] font-medium truncate w-full text-center" style={{ color: titleColor }}>{app.name}</span>
-      {app.remark && layout === "vertical" && (
-        <span className="text-[11px] text-slate-400 truncate w-full text-center -mt-1.5">{app.remark}</span>
-      )}
+      {subtitle && <span className="text-[11px] text-slate-400 truncate w-full text-center -mt-1.5">{subtitle}</span>}
       {url && (
         <ExternalLink
           size={12}
@@ -173,6 +212,9 @@ export function NavBoard({
   const cardSize = group.cardSize || 120;
   const gridGap = group.gridGap ?? 16;
   const iconSize = group.iconSize || 48;
+  // v1.51.9：分组卡片样式 / 图标形状（参照 FlatNas），缺省回落与 v1.51.8 视觉一致
+  const cardStyle: NavCardStyle = group.cardStyle || "solid";
+  const iconShape: NavIconShape = group.iconShape || "rounded";
   const loc = { protocol: window.location.protocol, hostname: window.location.hostname };
   const urls = useMemo(() => apps.map((a) => resolveCardUrl(a, mode, zone, loc)), [apps, mode, zone, loc.protocol, loc.hostname]);
 
@@ -207,7 +249,16 @@ export function NavBoard({
         <div className="flex gap-3 overflow-x-auto pb-3 snap-x" style={{ gap: gridGap }}>
           {apps.map((a, i) => (
             <div key={a.id} className="snap-start">
-              <AppCard app={a} iconMap={iconMap} url={urls[i]} layout={layout} cardSize={cardSize} iconSize={iconSize} />
+              <AppCard
+                app={a}
+                iconMap={iconMap}
+                url={urls[i]}
+                layout={layout}
+                cardSize={cardSize}
+                iconSize={iconSize}
+                cardStyle={cardStyle}
+                iconShape={iconShape}
+              />
             </div>
           ))}
         </div>

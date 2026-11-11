@@ -878,6 +878,21 @@ export interface SystemSettings {
 /** 导航应用类型（v1.51.7）：self=自托管（含内外网地址/备用/公开，走内外网分区）；ext=非自托管（外链，直接打开） */
 export type NavAppKind = "self" | "ext";
 
+/** 卡片样式预设（v1.51.9，参照 FlatNas 分组设置「卡片外观」：背景色/透明度/显示状态/圆角） */
+export type NavCardStyle = "solid" | "glass" | "flat" | "outline" | "transparent";
+/** 图标形状（v1.51.9，参照 FlatNas iconShape 枚举全量） */
+export type NavIconShape =
+  | "rounded"
+  | "circle"
+  | "square"
+  | "leaf"
+  | "diamond"
+  | "pentagon"
+  | "hexagon"
+  | "octagon"
+  | "none"
+  | "hidden";
+
 /** 导航应用卡片（v1.51.0）：url = 外网/统一地址；lanUrl = 内网地址（支持 `:端口` / `host:端口` 简写）。
  * v1.51.7 扩展 kind / titleColor / 备用地址 / 公开 / 图标缩放，全部可选且向后兼容。 */
 export interface NavAppItem {
@@ -889,7 +904,10 @@ export interface NavAppItem {
   iconColor?: string;
   url?: string;
   lanUrl?: string;
+  /** 备注（v1.51.9 起语义收窄为 hover 提示；卡片副标题改用 description，缺省回落本字段） */
   remark?: string;
+  /** 描述（v1.51.9）：卡片上显示的副标题文字；水平布局按行显示 */
+  description?: string;
   /** 类型：self=自托管（默认，v1.51.7 起）；ext=非自托管外链（点击直接打开 url） */
   kind?: NavAppKind;
   /** 标题颜色（卡片名称文字色，Hex；v1.51.7） */
@@ -919,6 +937,10 @@ export interface NavGroup {
   gridGap?: number;
   /** 图标尺寸 px（v1.51.7，参照 FlatNas iconSize，默认 48） */
   iconSize?: number;
+  /** 卡片样式预设（v1.51.9，参照 FlatNas）：默认 solid=白底实色卡片 */
+  cardStyle?: NavCardStyle;
+  /** 图标形状（v1.51.9，参照 FlatNas iconShape）：默认 rounded=圆角矩形 */
+  iconShape?: NavIconShape;
 }
 
 export interface NavConfig {

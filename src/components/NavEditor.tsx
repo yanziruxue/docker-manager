@@ -1,7 +1,7 @@
 /**
  * 导航仪表盘管理弹窗（v1.51.0，label 分支）：
  * - 分组：新增 / 改名 / 删除 / 上移下移；
- * - 分组卡片设置（v1.51.7，参照 FlatNas）：布局（垂直/水平）、卡片大小、卡片间距、图标大小；
+ * - 分组外观设置（布局/间距/大小/卡片样式/图标形状）自 v1.51.9 起收口到导航页顶栏「分组设置」弹窗；
  * - 应用：新增 / 编辑（经 NavAppModal，区分自托管/非自托管）/ 删除 / 上移下移；
  * - Docker 一键聚合：勾选容器（优先有 WebUI/端口的）批量生成为当前分组的应用卡片。
  * 保存通过 onSave(groups) 整体落盘（服务端 normalizeNavGroups 兜底校验）。
@@ -195,7 +195,17 @@ export function NavEditor({
     setDraft((prev) => prev.map((g, i) => (i === activeIdx ? { ...g, ...patch } : g)));
   };
   const addGroup = () => {
-    const g: NavGroup = { id: genId(), name: `分组 ${draft.length + 1}`, apps: [], cardLayout: "vertical", cardSize: 120, gridGap: 16, iconSize: 48 };
+    const g: NavGroup = {
+      id: genId(),
+      name: `分组 ${draft.length + 1}`,
+      apps: [],
+      cardLayout: "vertical",
+      cardSize: 120,
+      gridGap: 16,
+      iconSize: 48,
+      cardStyle: "solid",
+      iconShape: "rounded",
+    };
     setDraft((prev) => [...prev, g]);
     setActiveIdx(draft.length);
   };
@@ -294,52 +304,10 @@ export function NavEditor({
                   placeholder="分组名称"
                 />
 
-                {/* 卡片设置（v1.51.7，参照 FlatNas） */}
-                <div className="rounded-xl border border-slate-100 bg-slate-50/60 p-3 space-y-3">
-                  <p className="text-xs font-medium text-slate-600">卡片设置（参照 FlatNas）</p>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[12px] text-slate-500 w-16">布局</span>
-                    <div className="flex gap-1">
-                      {(["vertical", "horizontal"] as const).map((lay) => (
-                        <button
-                          key={lay}
-                          onClick={() => updateActive({ cardLayout: lay })}
-                          className={`px-2.5 py-1 text-[12px] rounded-md border ${
-                            (active.cardLayout || "vertical") === lay
-                              ? "bg-blue-50 text-blue-600 border-blue-300"
-                              : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"
-                          }`}
-                        >
-                          {lay === "vertical" ? "垂直" : "水平"}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <SliderRow
-                    label="卡片大小"
-                    value={active.cardSize ?? 120}
-                    min={60}
-                    max={240}
-                    unit="px"
-                    onChange={(v) => updateActive({ cardSize: v })}
-                  />
-                  <SliderRow
-                    label="卡片间距"
-                    value={active.gridGap ?? 16}
-                    min={0}
-                    max={60}
-                    unit="px"
-                    onChange={(v) => updateActive({ gridGap: v })}
-                  />
-                  <SliderRow
-                    label="图标大小"
-                    value={active.iconSize ?? 48}
-                    min={16}
-                    max={96}
-                    unit="px"
-                    onChange={(v) => updateActive({ iconSize: v })}
-                  />
-                </div>
+                {/* 分组外观已收口到导航页顶栏「分组设置」弹窗（v1.51.9），此处仅留指引避免两处重复配置 */}
+                <p className="text-[11px] text-slate-400">
+                  分组外观（卡片布局 / 间距 / 大小 / 样式 / 图标形状）请到导航页顶栏「分组设置」调整
+                </p>
 
                 <div className="flex items-center gap-2">
                   <button
@@ -419,37 +387,6 @@ export function NavEditor({
           onClose={() => setAppModal({ open: false, initial: null })}
         />
       )}
-    </div>
-  );
-}
-
-function SliderRow({
-  label,
-  value,
-  min,
-  max,
-  unit,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  unit: string;
-  onChange: (v: number) => void;
-}) {
-  return (
-    <div className="flex items-center gap-2">
-      <span className="text-[12px] text-slate-500 w-16">{label}</span>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="flex-1 accent-blue-500"
-      />
-      <span className="text-[11px] text-slate-500 w-12 text-right">{value}{unit}</span>
     </div>
   );
 }

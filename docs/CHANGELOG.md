@@ -16,6 +16,30 @@
 
 ---
 
+## v1.51.9 — 2026-11-11（**main 分支 · 已构建 · 已推 Gitea**）
+
+### 改动
+- **「添加项目」弹窗重构为单一 9 项表单**（按用户清单）：分组（下拉切换）/ 名称 / 描述 / ☐自托管 / 内网链接（仅勾选自托管时显示）/ 外网链接 / 图标（可引用 Docker 容器图标）/ 备注。`src/components/NavAppModal.tsx` 去掉旧版「自托管 / 非自托管」双 tab；`description`（卡片副标题）与 `remark`（hover 备注）语义分离，旧数据无 `description` 时自动回落 `remark`。v1.51.7 的标题颜色 / 内外网备用地址 / 公开 / 图标缩放收进「更多设置」折叠，数据与能力均不丢失。
+- **新增「分组设置」独立弹窗** `src/components/NavGroupSettingsModal.tsx`：分组下拉切换 + 分组名称 + 卡片布局（垂直/水平）+ 卡片间距 + 卡片大小 + 图标大小 + **卡片样式**（实色/玻璃/扁平/描边/透明，参照 FlatNas 卡片外观）+ **图标形状**（圆角矩形/圆形/方形/叶形/菱形/五边形/六边形/八边形/无形状/不使用图标，与 FlatNas `iconShape` 枚举全量对齐）+ 恢复默认。
+- **职责三分**：顶栏「页面设置」（整页外观/环境，v1.51.8）/「分组设置」（分组卡片外观，v1.51.9）/「管理分组」（分组与入口增删改排序）；`NavEditor.tsx` 内嵌卡片设置区块移除，避免两处重复配置。
+- **`src/components/NavBoard.tsx`**：按 `cardStyle` 切换卡片背景/描边/阴影/透明度；`iconShape` 仅作用于图标背景层（多边形用 clip-path，不裁切图标本体）；默认 `solid`/`rounded` 与 v1.51.8 视觉一致。
+- **类型 / 服务端**：`src/types.ts` 新增 `NavCardStyle`/`NavIconShape`/`NavAppItem.description`/`NavGroup.cardStyle|iconShape`（全可选）；`server/nav-groups.ts` 新增 `pick()` 枚举白名单钳制（非法值回落 `solid`/`rounded`），旧 `nav-groups.json` 缺字段零改动兼容。
+- 版本号 `1.51.8 → 1.51.9`。
+
+### 验证（硬证据）
+- 双 tsc（src / server）0 错；`npm run test:gates` 全绿（18 脚本全部 `FAIL=0` + check-nav `38 ok / 0 FAIL`，退出码 0）。
+- SEA 四步构建 + 三处 SHA-256 逐字节一致 `c03ce8ab00dff8427f89400b647d9d93e7859d5fbd4ac902712da311c41e1f37`（postject = zip 内 = deb 内，均 130616512 B）；ELF `7f454c46` / e_machine=62。
+- 运行时版本精确锚点 `CURRENT_VERSION = true ? "1.51.9" : "0.0.0-dev"`：bundle.js 1 处 / SEA 二进制 1 处；旧版 `1.51.8` 锚点两者均 0 处（历史代码注释中的 1.51.4/1.51.7 已按独有锚点排除假红）。
+- 嵌入前端 base64 与 `dist/index.html`、`dist/assets/index-*.js|css` 逐字节一致（`ALL_EMBEDDED_MATCH`）。
+- 交付包：`dockermanagementyanzi-linux-x64-v1.51.9.zip`（41.1 MB）、`dockermanagementyanzi_1.51.9_amd64.deb`（40.9 MB）；包成员固定 5 个、0755/0644 权限位正确；latest 别名（固定 main v1.50.36）**未覆盖**。
+
+### 未完成 / 已知限制
+- 「卡片样式」为 5 种预设，暂未开放 FlatNas 分组级自定义背景图 / 遮罩浓度 / 圆角数值；环境天气仍为纯前端粒子，不接真实天气 API。
+- 图标形状选「不使用图标」时卡片仅显示文字，水平布局下仍可正常点击。
+
+### 下一步
+- 等用户验收：添加项目 9 项字段顺序、自托管勾选联动、Docker 容器图标引用、分组设置 7 项与卡片样式/图标形状观感；GitHub 仍不推（Gitea-only 约定）。
+
 ## v1.51.8 — 2026-11-11（**main 分支 · 已构建 · 已推 Gitea**）
 
 ### 改动

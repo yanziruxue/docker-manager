@@ -17,6 +17,13 @@ import { configPath } from "./paths.js";
 const NAV_GROUPS_FILE = configPath("nav-groups.json");
 const SETTINGS_FILE = configPath("settings.json");
 
+/** v1.51.9 分组外观枚举白名单（参照 FlatNas）；非法值一律回落默认，避免前端注入任意字符串 */
+const CARD_STYLES = ["solid", "glass", "flat", "outline", "transparent"] as const;
+const ICON_SHAPES = [
+  "rounded", "circle", "square", "leaf", "diamond",
+  "pentagon", "hexagon", "octagon", "none", "hidden",
+] as const;
+
 /**
  * 导航分组归一化：宽容解析用户 / 旧版数据——
  * 字段全做 trim + 长度钳制、非法条目丢弃、id 缺失补生成；整体条目数设上限防配置膨胀。
@@ -31,6 +38,11 @@ function normalizeNavGroups(v: any): Array<Record<string, unknown>> {
     const n = typeof x === "number" && isFinite(x) ? x : NaN;
     if (isNaN(n)) return dflt;
     return Math.min(max, Math.max(min, Math.round(n)));
+  };
+  /** 枚举白名单：只接受合法值，其余回落默认（含旧数据缺字段） */
+  const pick = <T extends string>(x: unknown, allowed: readonly T[], dflt: T): T => {
+    const s = String(x ?? "");
+    return allowed.includes(s as T) ? (s as T) : dflt;
   };
   const out: Array<Record<string, unknown>> = [];
   for (const g of v.slice(0, 50)) {
@@ -52,6 +64,7 @@ function normalizeNavGroups(v: any): Array<Record<string, unknown>> {
         url: str(an.url, 500),
         lanUrl: str(an.lanUrl, 300),
         remark: str(an.remark, 200),
+        description: str(an.description, 200),
         // v1.51.7：类型 + 卡片增强字段（全部可选，缺省回落）
         kind: an.kind === "ext" ? "ext" : "self",
         titleColor: str(an.titleColor, 32),
@@ -72,6 +85,9 @@ function normalizeNavGroups(v: any): Array<Record<string, unknown>> {
       cardSize: num((g as any).cardSize, 60, 240, 120),
       gridGap: num((g as any).gridGap, 0, 60, 16),
       iconSize: num((g as any).iconSize, 16, 96, 48),
+      // v1.51.9：卡片样式 / 图标形状（参照 FlatNas），白名单回落
+      cardStyle: pick((g as any).cardStyle, CARD_STYLES, "solid"),
+      iconShape: pick((g as any).iconShape, ICON_SHAPES, "rounded"),
     });
   }
   return out;

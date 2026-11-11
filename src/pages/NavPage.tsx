@@ -3,13 +3,15 @@
  * 承载原 Dashboard 内的「分组标签条 + 应用卡片墙 + 管理弹窗」。
  * 与原 Dashboard 分页解耦：不再是仪表盘的一个分页，而是顶部导航里的一个独立入口。
  * 每个分组是一个标签（FlatNas 风格），点击切换该分组的卡片墙；「管理分组」打开 NavEditor；
- * 「页面设置」打开 NavPageSettingsModal（整页外观/环境，v1.51.8）。
+ * 「页面设置」打开 NavPageSettingsModal（整页外观/环境，v1.51.8）；
+ * 「分组设置」打开 NavGroupSettingsModal（分组级卡片外观，v1.51.9）。
  * 图标解析 / 内外网分区复用 NavBoard（独立拉取 /api/custom-icons 与 /api/network-zone）。
  */
 import React, { useState, useEffect, useCallback } from "react";
-import { Compass, Settings2, SlidersHorizontal } from "lucide-react";
+import { Compass, LayoutGrid, Settings2, SlidersHorizontal } from "lucide-react";
 import { NavBoard, useNavIconMap } from "../components/NavBoard";
 import { NavEditor } from "../components/NavEditor";
+import { NavGroupSettingsModal } from "../components/NavGroupSettingsModal";
 import { NavPageSettingsModal } from "../components/NavPageSettingsModal";
 import { WeatherEffect } from "../components/WeatherEffect";
 import type { Container, NavGroup, NavPageSettings, NavNetworkMode, NavTheme } from "../types";
@@ -41,6 +43,7 @@ export function NavPage({ navGroups, onSaveNavGroups, containers, navPageSetting
   const [navEditing, setNavEditing] = useState(false);
   const [navEditAdd, setNavEditAdd] = useState(false);
   const [navPageSettingsOpen, setNavPageSettingsOpen] = useState(false);
+  const [navGroupSettingsOpen, setNavGroupSettingsOpen] = useState(false);
   const navIconMap = useNavIconMap();
   // 打开分组管理弹窗：默认进入当前选中分组（不自动追加入口）
   const openEditor = useCallback(() => {
@@ -54,6 +57,8 @@ export function NavPage({ navGroups, onSaveNavGroups, containers, navPageSetting
   }, []);
   // 打开页面设置弹窗（整页外观/环境）
   const openPageSettings = useCallback(() => setNavPageSettingsOpen(true), []);
+  // 打开分组设置弹窗（当前选中分组的卡片外观，v1.51.9）
+  const openGroupSettings = useCallback(() => setNavGroupSettingsOpen(true), []);
 
   // 选中的分组被删除 / 列表变空时回落到第一个（保持始终有有效选中项）
   const effectiveTab = groups.some((g) => g.id === navTab) ? navTab : groups[0]?.id || "";
@@ -105,7 +110,7 @@ export function NavPage({ navGroups, onSaveNavGroups, containers, navPageSetting
       {/* 环境天气效果（纯前端 canvas，置于内容之下、背景之上） */}
       <WeatherEffect weather={settings.weather || "none"} />
 
-      {/* 分组标签条 + 页面设置 / 管理分组 */}
+      {/* 分组标签条 + 页面设置 / 分组设置 / 管理分组 */}
       <div className="flex items-center gap-2 mb-5 flex-wrap relative">
         {groups.length === 0 && (
           <span className="text-[13px] text-white/80 px-1">还没有分组</span>
@@ -133,6 +138,13 @@ export function NavPage({ navGroups, onSaveNavGroups, containers, navPageSetting
             title="页面设置（背景图片 / 环境天气 / 内外网默认模式 / 白昼模式）"
           >
             <SlidersHorizontal size={13} /> 页面设置
+          </button>
+          <button
+            onClick={openGroupSettings}
+            className="flex items-center gap-1 px-3.5 py-1.5 rounded-full text-[13px] font-medium text-rose-600 bg-white/75 backdrop-blur-sm shadow-sm hover:bg-white transition-colors"
+            title="分组设置（分组名称 / 卡片布局 / 间距 / 大小 / 图标大小 / 卡片样式 / 图标形状）"
+          >
+            <LayoutGrid size={13} /> 分组设置
           </button>
           <button
             onClick={openEditor}
@@ -192,6 +204,19 @@ export function NavPage({ navGroups, onSaveNavGroups, containers, navPageSetting
             setNavPageSettingsOpen(false);
           }}
           onClose={() => setNavPageSettingsOpen(false)}
+        />
+      )}
+
+      {/* 导航「分组设置」弹窗（v1.51.9）：作用于分组卡片外观，与「页面设置」解耦 */}
+      {navGroupSettingsOpen && (
+        <NavGroupSettingsModal
+          groups={groups}
+          initialGroupId={effectiveTab}
+          onSave={(next) => {
+            onSaveNavGroups(next);
+            setNavGroupSettingsOpen(false);
+          }}
+          onClose={() => setNavGroupSettingsOpen(false)}
         />
       )}
     </div>
