@@ -177,16 +177,38 @@ function DockerImport({
 export function NavEditor({
   groups,
   containers,
+  initialGroupId,
+  autoAddApp,
   onSave,
   onClose,
 }: {
   groups: NavGroup[];
   containers: Container[];
+  /** 打开时聚焦的分组 id（导航页当前选中分组）；缺省回落第一个 */
+  initialGroupId?: string;
+  /** true = 打开时自动给聚焦分组追加一个空白入口（导航页「＋」触发） */
+  autoAddApp?: boolean;
   onSave: (groups: NavGroup[]) => void;
   onClose: () => void;
 }) {
-  const [draft, setDraft] = useState<NavGroup[]>(() => groups.map((g) => ({ ...g, apps: [...(g.apps || [])] })));
-  const [activeIdx, setActiveIdx] = useState(0);
+  const [draft, setDraft] = useState<NavGroup[]>(() => {
+    const base = groups.map((g) => ({ ...g, apps: [...(g.apps || [])] }));
+    if (autoAddApp) {
+      const i = base.findIndex((g) => g.id === initialGroupId);
+      const idx = i >= 0 ? i : 0;
+      if (base[idx]) {
+        base[idx] = {
+          ...base[idx],
+          apps: [...base[idx].apps, { id: genId(), name: "新入口", icon: "", iconColor: "#3B82F6", url: "", lanUrl: "", remark: "" }],
+        };
+      }
+    }
+    return base;
+  });
+  const [activeIdx, setActiveIdx] = useState(() => {
+    const i = groups.findIndex((g) => g.id === initialGroupId);
+    return i >= 0 ? i : 0;
+  });
   const [importing, setImporting] = useState(false);
   const active = draft[activeIdx];
 

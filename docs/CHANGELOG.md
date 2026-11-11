@@ -16,6 +16,18 @@
 
 ---
 
+## v1.51.3 — 2026-11-11（**label 分支 · 已构建 · 已推 Gitea**）
+
+- **已完成**：导航页（NavPage）按 FlatNas 风格重做视觉布局，与截图对齐：
+  - 页面铺**粉紫渐变背景**（`bg-gradient-to-br from-rose-200 via-fuchsia-200 to-indigo-300`），`min-h-full` 填满内容区；
+  - 顶部**分组标签条**改为浅色胶囊（选中=白底紫字描边阴影，未选=半透明白底），末尾红色「管理」链接（`ml-auto` 顶到右端）；
+  - 分组标题行改为**白色加粗标题 + 两个圆形按钮**：「＋」直接给当前分组追加入口、「⚙」聚焦当前分组打开管理弹窗（均落在渐变上）；
+  - 卡片墙由自动换行网格改为**横向滚动单行白卡**（`overflow-x-auto` + 固定 `w-[120px]` 卡片），悬浮上浮 + 阴影。
+  - 涉及文件：`src/pages/NavPage.tsx`（渐变容器/胶囊标签/管理链接/空状态；`onAddApp`/`openEditor` 回调）、`src/components/NavBoard.tsx`（白色标题 + 圆形＋/齿轮 + 横向卡片墙）、`src/components/NavEditor.tsx`（新增 `initialGroupId`/`autoAddApp` 入参，打开即聚焦指定分组、可选自动追加入口）。
+  - 验证：`npx tsc` 0 错；`npm run test:gates` 全绿（含 check-nav 38 ok）；SEA 四步构建 + 三处 SHA 逐字节一致 `d20af1f3…`（postject=zip=deb）+ ELF `7f454c46`；latest 别名保持 main v1.50.36 未动。
+- **未完成 / 已知限制**：无（纯前端视觉重做，无后端协议变更）。
+- **下一步**：用户验收渐变配色/卡片墙横向滚动手感；后续可加分组拖拽排序或卡片网格密度切换。
+
 ## v1.51.2 — 2026-11-11（**label 分支 · 已构建 · 已推 Gitea**）
 
 ### 导航配置从 main settings 解耦（独立通道，遵循 main 主支完整性铁律）

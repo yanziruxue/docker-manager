@@ -44,7 +44,7 @@ function AppCard({
       onClick={open}
       disabled={!url}
       title={url ? `打开 ${url}${app.remark ? `（${app.remark}）` : ""}` : "未配置地址"}
-      className="group relative flex flex-col items-center gap-2 p-4 rounded-xl bg-white border border-slate-200 hover:border-blue-400 hover:shadow-md transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+      className="group relative flex flex-col items-center gap-2 p-4 rounded-2xl bg-white/95 border border-white shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed w-[120px] flex-shrink-0"
     >
       <span
         className="w-12 h-12 rounded-xl flex items-center justify-center overflow-hidden flex-shrink-0"
@@ -72,10 +72,12 @@ export function NavBoard({
   group,
   iconMap,
   onOpenEditor,
+  onAddApp,
 }: {
   group: NavGroup;
   iconMap: Record<string, string>;
   onOpenEditor: () => void;
+  onAddApp: () => void;
 }) {
   const [zone, setZone] = useState<WebuiZone>("intranet");
   useEffect(() => {
@@ -91,27 +93,37 @@ export function NavBoard({
   const mode: WebuiZoneMode = "auto";
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
+      {/* 分组标题行：白色标题 + 圆形「＋」「⚙」按钮（FlatNas 风格） */}
+      <div className="flex items-center justify-between mb-5">
+        <h2 className="text-xl font-bold text-white drop-shadow-sm">{group.name}</h2>
         <div className="flex items-center gap-2">
-          <h2 className="text-lg font-semibold text-slate-800">{group.name}</h2>
-          <span className="text-xs text-slate-400">{apps.length} 个入口</span>
+          <button
+            onClick={onAddApp}
+            className="w-9 h-9 rounded-full bg-white/85 text-fuchsia-600 flex items-center justify-center shadow-sm hover:bg-white hover:scale-105 transition-all"
+            title="为该分组添加入口"
+          >
+            <Plus size={16} />
+          </button>
+          <button
+            onClick={onOpenEditor}
+            className="w-9 h-9 rounded-full bg-white/85 text-fuchsia-600 flex items-center justify-center shadow-sm hover:bg-white hover:scale-105 transition-all"
+            title="管理分组"
+          >
+            <Settings2 size={16} />
+          </button>
         </div>
-        <button
-          onClick={onOpenEditor}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-[13px] text-slate-500 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
-        >
-          <Settings2 size={14} /> 管理导航
-        </button>
       </div>
       {apps.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 rounded-xl border border-dashed border-slate-300 text-slate-400">
-          <Plus size={28} className="mb-2" />
-          <p className="text-sm">该分组还没有入口，点右上角「管理导航」添加</p>
+        <div className="flex flex-col items-center justify-center py-16 rounded-2xl border border-white/40 bg-white/30 backdrop-blur-sm text-white/90">
+          <Plus size={28} className="mb-2 opacity-90" />
+          <p className="text-sm">该分组还没有入口，点上方「＋」或「⚙」添加</p>
         </div>
       ) : (
-        <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))" }}>
+        <div className="flex gap-3 overflow-x-auto pb-3 snap-x">
           {apps.map((a) => (
-            <AppCard key={a.id} app={a} iconMap={iconMap} mode={mode} zone={zone} />
+            <div key={a.id} className="snap-start">
+              <AppCard app={a} iconMap={iconMap} mode={mode} zone={zone} />
+            </div>
           ))}
         </div>
       )}
