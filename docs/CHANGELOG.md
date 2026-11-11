@@ -16,6 +16,30 @@
 
 ---
 
+## v1.51.13 — 2026-11-11（**main 分支 · 已构建 · 已推 Gitea**）
+
+### 改动
+- **「添加新项目」收敛为单一入口**：删除 `NavPage` 顶栏「页面设置」右边的「＋添加项目」胶囊按钮（连同 `disabled={groups.length === 0}` 分支与提示文案），**只保留 `NavBoard` 分组标题行的「＋」圆形按钮**。顶栏最终只剩「页面设置」一个按钮；分组设置 = 标题行「＋」右边的齿轮扳手，添加项目 = 标题行「＋」，职责不重叠。
+- `src/pages/NavPage.tsx`：移除 `Plus` import；`openAddApp` 仍通过 `onAddApp={openAddApp}` 下传给 `NavBoard`（项目新增/编辑/删除与直接落盘链路完全不变）；顶部注释与标签条注释标注 v1.51.13 单入口语义。
+- **门禁改造** `scripts/check-nav.mjs`：② 顶栏断言改为「操作区仅『页面设置』」（额外禁止顶栏出现「添加项目」文字），新增「添加新项目唯一入口 = NavBoard 标题行「＋」」断言（同时要求 `onAddApp={openAddApp}` 接线存在、`添加项目</button>` / `<Plus size=` 零出现）；④ 进程级负向自检由 3 例扩为 **4 例**，新增「注入顶栏『添加项目』文字按钮回归」必须被检出。
+- 版本号 `1.51.12 → 1.51.13`。
+
+### 验证（硬证据）
+- 双 tsc（src / server）0 错；`npm run test:gates` **GATES_EXIT=0**（pipefail 实跑），22 行结果全部 `FAIL=0`，FAIL 行扫描为空（完整日志 1270 行）；`check-nav` **60 ok / 0 FAIL**。
+- 负向自检：③ 解析器注入回归 + ④ 四例进程级注入回归（`<NavEditor` / 顶栏分组设置文字按钮 / 齿轮接线缺失 / 顶栏添加项目按钮）全部被检出（子进程 `exit 1`），还原后 `60 ok / 0 FAIL` 且 4 处源码字节级一致。
+- SEA 四步构建（干净 node 基座 124679552 B → postject 注入 130616512 B，未虚增）+ **三处 SHA-256 逐字节一致** `fdcc493d3ea7cf3dfa83230652874ad196f1b2007e79409261b3b5ba196a9ab6`（postject = zip 内 = deb 内，均 130616512 B，`ALL_MATCH`）。
+- ELF `7f454c46` / e_machine=62；运行时版本精确锚点 `CURRENT_VERSION = true ? "1.51.13" : "0.0.0-dev"` 二进制 1 处、旧版 `1.51.12` 锚点 **0 处**；5 个 dist 文件（`index.html` / `assets/index-BakZv2G0.js` / `assets/index-DDP1b4Am.css` / `docker.png` / `login-banner.svg`）的 base64 在 `bundle.js` 与 SEA 二进制中各命中 1 次，与 `dist` 逐字节一致。
+- 交付包：`dockermanagementyanzi-linux-x64-v1.51.13.zip`（43122797 B）、`dockermanagementyanzi_1.51.13_amd64.deb`（42839504 B）；包成员固定 5 个、0755/0644 权限位正确；latest 别名（固定 main v1.50.36，43102847 B）**未覆盖**。
+
+### 未完成 / 已知限制
+- 无分组时 `NavBoard` 不渲染 ⇒ 没有「＋」入口；但原本顶栏按钮在 0 组时就是 `disabled`，实际能力不变，仍由空态「新建分组」按钮先建组。刻意不额外增加入口，遵循用户「保留一个入口」的要求。
+- 源码级门禁不覆盖真实点击；建议人工冒烟：顶栏只见「页面设置」→ 点标题行「＋」添加项目 → 点齿轮改分组设置 → hover ✎ 编辑/删除。
+
+### 下一步
+- 等用户验收单入口布局；GitHub 仍不推（Gitea-only 约定）。
+
+---
+
 ## v1.51.12 — 2026-11-11（**main 分支 · 已构建 · 已推 Gitea**）
 
 ### 改动

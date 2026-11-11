@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
  * 门禁：导航仪表盘（v1.51.0 引入，v1.51.2 解耦至独立通道，v1.51.11 移除管理弹窗，
- *   v1.51.12 顶栏删除分组设置文字按钮、入口改为标题行「＋」右边齿轮扳手）
+ *   v1.51.12 顶栏删除分组设置文字按钮、入口改为标题行「＋」右边齿轮扳手；
+ *   v1.51.13 删除顶栏「＋添加项目」，添加新项目唯一入口 = 标题行「＋」）
  *  - 真模块断言：编译运行 src/webui-url.ts 的 resolveNavAppUrl / normalizeNavLanUrl，
  *    覆盖内外网优先级链、`:端口` / `host:端口` / 完整 URL 三种内网写法、auto 分区分派；
  *  - 源码接线断言：导航配置完全收口在独立模块 server/nav-groups.ts（不污染 main settings.json），
@@ -9,7 +10,7 @@
  *    v1.51.11 起 NavEditor 弹窗已删除，项目 CRUD 由 NavPage + NavAppModal 直接落盘、
  *    分组新建/删除由 NavGroupSettingsModal 接管、卡片 hover ✎ 由 NavBoard.onEditApp 直达；
  *  - 负向自检①：注入「内网缺 lanUrl 不回落 url」回归 → 重载模块应检出差异 → 还原 → 复核全绿；
- *  - 负向自检②：进程级注入 3 类回归（<NavEditor / 顶栏分组设置文字按钮 / 齿轮接线缺失）
+ *  - 负向自检②：进程级注入 4 类回归（<NavEditor / 顶栏分组设置文字按钮 / 齿轮接线缺失 / 顶栏添加项目按钮）
  *    → 重跑本门禁应 exit 1 → 还原 → 字节级一致。
  * 用法：node scripts/check-nav.mjs（退出码非 0 = 有回归）
  */
@@ -82,11 +83,12 @@ ok("★ NavEditor.tsx 文件已删除", !fs.existsSync(path.join(ROOT, "src/comp
 ok("★ NavPage 无管理弹窗状态与入口", !navPage.includes("navEditing") && !navPage.includes("openEditor"));
 // v1.51.12：顶栏只保留「页面设置 / 添加项目」；分组设置唯一入口改为标题行「＋」右边的齿轮扳手
 const topbarActions = (navPage.split('<div className="ml-auto flex items-center gap-2">')[1] || "").split("</div>")[0] || "";
-ok("★ 顶栏操作区仅「页面设置 / 添加项目」（无管理分组、无分组设置文字按钮）",
-  topbarActions.includes("页面设置") && topbarActions.includes("添加项目") &&
-  !topbarActions.includes("管理分组") && !topbarActions.includes("分组设置"));
-ok("★ NavPage 不再渲染顶栏分组设置文字按钮（LayoutGrid 已移除）",
-  !navPage.includes("<LayoutGrid") && !navPage.includes("分组设置</button>"));
+ok("★ 顶栏操作区仅「页面设置」（无管理分组、无分组设置/添加项目文字按钮，v1.51.13）",
+  topbarActions.includes("页面设置") &&
+  !topbarActions.includes("管理分组") && !topbarActions.includes("分组设置") && !topbarActions.includes("添加项目"));
+ok("★ NavPage 不再渲染顶栏分组设置/添加项目文字按钮（LayoutGrid / Plus 已移除）",
+  !navPage.includes("<LayoutGrid") && !navPage.includes("分组设置</button>") &&
+  !navPage.includes("<Plus size=") && !navPage.includes("添加项目</button>"));
 ok("★ NavPage 把分组设置打开器下传给 NavBoard（齿轮入口接线）",
   navPage.includes("onOpenGroupSettings={openGroupSettings}") && navPage.includes("openGroupSettings"));
 ok("★ 独立挂载 NavAppModal 并接线项目 CRUD",
@@ -105,6 +107,9 @@ ok("★ NavBoard 不再有旧管理弹窗齿轮入口", !board.includes("onOpenE
 ok("★ NavBoard「＋」右边齿轮扳手 = 分组设置唯一入口（顺序锁定）",
   board.includes("onOpenGroupSettings") && board.includes("<Settings") && board.includes("分组设置") &&
   board.indexOf("onClick={onAddApp}") < board.indexOf("onClick={onOpenGroupSettings}"));
+ok("★ 添加新项目唯一入口 = NavBoard 标题行「＋」（顶栏不再有添加按钮，v1.51.13）",
+  board.includes("onClick={onAddApp}") && navPage.includes("onAddApp={openAddApp}") &&
+  !navPage.includes("添加项目</button>") && !navPage.includes("<Plus size="));
 
 const appModal = read("src/components/NavAppModal.tsx");
 ok("★ NavAppModal 编辑态支持删除项目", appModal.includes("onDelete") && appModal.includes("删除项目"));
@@ -161,8 +166,8 @@ if (BROKEN === ORIGINAL) {
   ok("还原字节级一致", read(TARGET) === ORIGINAL);
 }
 
-console.log("== ④ 负向自检（进程级注入 3 类回归 → 重跑本门禁应 exit 1） ==");
-// 父进程注入回归文本，子进程跳过 ④（NAV_GATE_NEGATIVE_CHILD=1）只跑 ①②③，
+console.log("== ④ 负向自检（进程级注入 4 类回归 → 重跑本门禁应 exit 1） ==");
+// 父进程注入 4 类回归文本，子进程跳过 ④（NAV_GATE_NEGATIVE_CHILD=1）只跑 ①②③，
 // 若 ② 的对应断言确实生效，子进程必因 FAIL 而 exit 1。
 if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
   const NAV_PAGE_REL = "src/pages/NavPage.tsx";
@@ -181,6 +186,13 @@ if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
     {
       name: "注入齿轮入口接线缺失回归",
       inject: (s) => s.replace("onOpenGroupSettings={openGroupSettings}", ""),
+    },
+    {
+      name: "注入顶栏「添加项目」文字按钮回归",
+      inject: (s) => s.replace(
+        '<div className="ml-auto flex items-center gap-2">',
+        '<div className="ml-auto flex items-center gap-2"><button>添加项目</button>',
+      ),
     },
   ];
   for (const c of cases) {
