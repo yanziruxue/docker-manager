@@ -6,10 +6,11 @@
  *  - 「页面设置」→ NavPageSettingsModal（整页外观/环境，v1.51.8）；
  *  - 「分组设置」→ NavGroupSettingsModal（分组级卡片外观 + 分组新建/删除，v1.51.9 / v1.51.11）；
  *  - 「＋添加项目」/ 卡片 hover ✎ → NavAppModal（项目新增/编辑/删除，直接落盘）。
+ * v1.51.12：顶栏只留「页面设置 / 添加项目」，「分组设置」唯一入口改为标题行「＋」右边的齿轮扳手。
  * 图标解析 / 内外网分区复用 NavBoard（独立拉取 /api/custom-icons 与 /api/network-zone）。
  */
 import React, { useState, useEffect, useCallback } from "react";
-import { Compass, LayoutGrid, Plus, SlidersHorizontal } from "lucide-react";
+import { Compass, Plus, SlidersHorizontal } from "lucide-react";
 import { NavBoard, useNavIconMap } from "../components/NavBoard";
 import { NavAppModal } from "../components/NavAppModal";
 import { NavGroupSettingsModal } from "../components/NavGroupSettingsModal";
@@ -56,7 +57,7 @@ export function NavPage({ navGroups, onSaveNavGroups, containers, navPageSetting
   const navIconMap = useNavIconMap();
   // 打开页面设置弹窗（整页外观/环境）
   const openPageSettings = useCallback(() => setNavPageSettingsOpen(true), []);
-  // 打开分组设置弹窗（分组外观 + 分组新建/删除）
+  // 打开分组设置弹窗（分组外观 + 分组新建/删除）；v1.51.12 起由标题行齿轮扳手触发
   const openGroupSettings = useCallback(() => setNavGroupSettingsOpen(true), []);
 
   // 选中的分组被删除 / 列表变空时回落到第一个（保持始终有有效选中项）
@@ -131,7 +132,7 @@ export function NavPage({ navGroups, onSaveNavGroups, containers, navPageSetting
       {/* 环境天气效果（纯前端 canvas，置于内容之下、背景之上） */}
       <WeatherEffect weather={settings.weather || "none"} />
 
-      {/* 分组标签条 + 页面设置 / 分组设置 / 添加项目（v1.51.11） */}
+      {/* 分组标签条 + 页面设置 / 添加项目（分组设置入口在标题行齿轮，v1.51.12） */}
       <div className="flex items-center gap-2 mb-5 flex-wrap relative">
         {groups.length === 0 && (
           <span className="text-[13px] text-white/80 px-1">还没有分组</span>
@@ -161,17 +162,10 @@ export function NavPage({ navGroups, onSaveNavGroups, containers, navPageSetting
             <SlidersHorizontal size={13} /> 页面设置
           </button>
           <button
-            onClick={openGroupSettings}
-            className="flex items-center gap-1 px-3.5 py-1.5 rounded-full text-[13px] font-medium text-rose-600 bg-white/75 backdrop-blur-sm shadow-sm hover:bg-white transition-colors"
-            title="分组设置（新建/删除/改名分组 / 卡片布局 / 间距 / 大小 / 图标大小 / 卡片样式 / 图标形状）"
-          >
-            <LayoutGrid size={13} /> 分组设置
-          </button>
-          <button
             onClick={openAddApp}
             disabled={groups.length === 0}
             className="flex items-center gap-1 px-3.5 py-1.5 rounded-full text-[13px] font-medium text-white bg-fuchsia-600/90 backdrop-blur-sm shadow-sm hover:bg-fuchsia-600 disabled:opacity-40 transition-colors"
-            title={groups.length === 0 ? "请先到「分组设置」新建一个分组" : "添加新项目（可引用 Docker 容器图标）"}
+            title={groups.length === 0 ? "请先用标题行右侧的齿轮新建一个分组" : "添加新项目（可引用 Docker 容器图标）"}
           >
             <Plus size={13} /> 添加项目
           </button>
@@ -184,12 +178,13 @@ export function NavPage({ navGroups, onSaveNavGroups, containers, navPageSetting
           iconMap={navIconMap}
           onAddApp={openAddApp}
           onEditApp={openEditApp}
+          onOpenGroupSettings={openGroupSettings}
           navNetworkMode={navNetworkMode}
         />
       ) : (
         <div className="flex flex-col items-center justify-center py-20 rounded-2xl border border-white/40 bg-white/30 backdrop-blur-sm text-white">
           <Compass size={36} className="mb-3 opacity-90" />
-          <p className="text-sm">还没有导航分组，点右上角「分组设置」新建一个分组</p>
+          <p className="text-sm">还没有导航分组，点下方「新建分组」按钮开始</p>
           <button
             onClick={openGroupSettings}
             className="mt-4 px-4 py-2 text-sm text-white bg-rose-500 rounded-full hover:bg-rose-600 shadow-md transition-colors"
@@ -224,7 +219,7 @@ export function NavPage({ navGroups, onSaveNavGroups, containers, navPageSetting
         />
       )}
 
-      {/* 导航「分组设置」弹窗（v1.51.11 起接管分组新建/删除） */}
+      {/* 导航「分组设置」弹窗（v1.51.11 起接管分组新建/删除；v1.51.12 起由标题行齿轮打开） */}
       {navGroupSettingsOpen && (
         <NavGroupSettingsModal
           groups={groups}

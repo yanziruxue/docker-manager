@@ -16,6 +16,32 @@
 
 ---
 
+## v1.51.12 — 2026-11-11（**main 分支 · 已构建 · 已推 Gitea**）
+
+### 改动
+- **按用户截图纠正「分组设置」入口**：v1.51.11 在移除「管理导航」弹窗时把分组标题行「＋」右边的齿轮也一并删掉，改成了顶栏「分组设置」文字按钮；本次**删除顶栏「分组设置」文字按钮**，把「分组设置」唯一入口改为 **`NavBoard` 分组标题行「＋」右边的齿轮扳手**（lucide `Settings`，与「＋」同排、`w-9 h-9` 圆形白底紫色图标）。顶栏最终只留 `页面设置 / ＋添加项目`，「管理分组」保持零存在。
+- **`src/components/NavBoard.tsx`**：新增 `onOpenGroupSettings: () => void` prop；标题行「＋」按钮右侧新增齿轮扳手按钮（`title` 说明分组新建/删除/改名与卡片布局等能力），按钮顺序锁定「＋」在前、齿轮在后；头部注释标注 v1.51.12 语义，import 增加 `Settings`。旧 `onOpenEditor` / `GearIcon`（指向已删除的管理弹窗）保持零存在。
+- **`src/pages/NavPage.tsx`**：移除顶栏「分组设置」文字按钮与 `LayoutGrid` import；`openGroupSettings` 通过 `onOpenGroupSettings={openGroupSettings}` 下传给 `NavBoard`；无分组时「添加项目」禁用态提示改为「请先用标题行右侧的齿轮新建一个分组」；空态文案改为「点下方「新建分组」按钮开始」（按钮仍打开同一个分组设置弹窗）。
+- **门禁改造** `scripts/check-nav.mjs`：② 组「顶栏三按钮」断言改为「顶栏操作区仅页面设置 / 添加项目（无管理分组、无分组设置文字按钮）」，新增顶栏按钮移除断言、齿轮接线断言、`NavBoard` 齿轮扳手顺序断言（`onClick={onAddApp}` 必须早于 `onClick={onOpenGroupSettings}`）；④ 组进程级负向自检由 1 例扩为 **3 例**（`<NavEditor` 回归 / 顶栏「分组设置」文字按钮回归 / 齿轮接线缺失回归），每例均验证子进程 `exit 1` 且还原字节级一致。
+- 版本号 `1.51.11 → 1.51.12`。
+
+### 验证（硬证据）
+- 双 tsc（src / server）0 错；`npm run test:gates` **GATES_EXIT=0**（pipefail 实跑），22 行结果全部 `FAIL=0`，FAIL 行扫描为空（完整日志 1267 行）；`check-nav` **57 ok / 0 FAIL**。
+- 负向自检：③ 解析器注入回归 + ④ 三例进程级注入回归全部被检出（子进程 `exit 1`），还原后 `57 ok / 0 FAIL` 且 3 处源码字节级一致；锚点失效直接判 FAIL。
+- SEA 四步构建（干净 node 基座 `/tmp/sea-build/node-v22.22.2-linux-x64/bin/node` 124679552 B → postject 注入 130616512 B，未虚增）+ **三处 SHA-256 逐字节一致** `dcf6d7f9d8b4448e6e2caa90c74e4225113a753233532bfe62e913093c69183e`（postject = zip 内 = deb 内，均 130616512 B，`ALL_MATCH`）。
+- ELF `7f454c46` / e_machine=62；运行时版本精确锚点 `CURRENT_VERSION = true ? "1.51.12" : "0.0.0-dev"` 二进制 1 处、旧版 `1.51.11` 锚点 **0 处**；5 个 dist 文件（`index.html` / `assets/index-i-4jYLhz.js` / `assets/index-CO9-DJab.css` / `docker.png` / `login-banner.svg`）的 base64 在 `bundle.js` 与 SEA 二进制中各命中 1 次，与 `dist` 逐字节一致。
+- 交付包：`dockermanagementyanzi-linux-x64-v1.51.12.zip`（43123254 B）、`dockermanagementyanzi_1.51.12_amd64.deb`（42839530 B）；包成员固定 5 个、0755/0644 权限位正确；latest 别名（固定 main v1.50.36，43102847 B）**未覆盖**。
+
+### 未完成 / 已知限制
+- 无分组时 `NavBoard` 不渲染 ⇒ 齿轮入口不存在，此时「分组设置」只能从空态「新建分组」按钮进入（打开同一弹窗）；这是刻意保留的兜底，不是入口丢失。
+- 源码级门禁不覆盖真实点击 / hover；建议人工冒烟：顶栏只见「页面设置 / 添加项目」→ 点标题行齿轮打开分组设置 → 新建分组 / 改名 / 删除 → 点「＋」添加项目 → hover ✎ 编辑。
+- v1.51.11 已确认接受的能力缩减仍然有效（分组/入口排序、Docker 批量「从容器生成」已移除；单容器图标引用保留）。
+
+### 下一步
+- 等用户验收齿轮入口与顶栏布局；GitHub 仍不推（Gitea-only 约定）。
+
+---
+
 ## v1.51.11 — 2026-11-11（**main 分支 · 已构建 · 已推 Gitea**）
 
 ### 改动

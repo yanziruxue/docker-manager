@@ -4,10 +4,11 @@
  * 图标解析优先级：完整 URL（http(s)/data:/api/）原样 > 自定义图标库按名匹配 > 首字母色块。
  * 自包含：自行拉取 /api/custom-icons 与 /api/network-zone（失败分别回落空映射 / intranet）。
  * v1.51.7：支持分组级卡片布局/大小/间距/图标大小（参照 FlatNas）与 ext 外链直开、self 备用地址回退。
- * v1.51.11：移除分组标题行齿轮（管理入口），卡片 hover 显示「✎」直达项目编辑弹窗。
+ * v1.51.11：卡片 hover 显示「✎」直达项目编辑弹窗（旧管理弹窗齿轮入口一并移除）。
+ * v1.51.12：分组标题行「＋」右边恢复齿轮扳手，作为「分组设置」唯一入口（不再指向已删除的管理弹窗）。
  */
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import { ExternalLink, Pencil } from "lucide-react";
+import { ExternalLink, Pencil, Settings } from "lucide-react";
 import type { NavAppItem, NavCardStyle, NavGroup, NavIconShape, NavNetworkMode } from "../types";
 import { getNetworkZoneApi, listCustomIconsApi } from "../api";
 import { resolveNavAppUrl, type WebuiZone, type WebuiZoneMode } from "../webui-url";
@@ -186,6 +187,7 @@ export function NavBoard({
   iconMap,
   onAddApp,
   onEditApp,
+  onOpenGroupSettings,
   navNetworkMode,
 }: {
   group: NavGroup;
@@ -193,6 +195,8 @@ export function NavBoard({
   onAddApp: () => void;
   /** 编辑单个项目（v1.51.11）：由 NavPage 打开独立 NavAppModal */
   onEditApp: (app: NavAppItem) => void;
+  /** 打开「分组设置」弹窗（v1.51.12）：标题行「＋」右边的齿轮扳手入口 */
+  onOpenGroupSettings: () => void;
   /** 内外网默认访问模式（v1.51.8，由导航页「页面设置」下传）：覆盖单卡自动判定 */
   navNetworkMode?: NavNetworkMode;
 }) {
@@ -222,7 +226,7 @@ export function NavBoard({
 
   return (
     <div>
-      {/* 分组标题行：白色标题 + 圆形「＋」按钮（FlatNas 风格）；齿轮管理入口 v1.51.11 移除 */}
+      {/* 分组标题行：白色标题 + 圆形「＋」与其右侧「齿轮扳手」（FlatNas 风格，v1.51.12 齿轮 = 分组设置入口） */}
       <div className="flex items-center justify-between mb-5">
         <h2 className="text-xl font-bold text-white drop-shadow-sm">{group.name}</h2>
         <div className="flex items-center gap-2">
@@ -232,6 +236,13 @@ export function NavBoard({
             title="为该分组添加入口"
           >
             <PlusIcon />
+          </button>
+          <button
+            onClick={onOpenGroupSettings}
+            className="w-9 h-9 rounded-full bg-white/85 text-fuchsia-600 flex items-center justify-center shadow-sm hover:bg-white hover:scale-105 transition-all"
+            title="分组设置（新建/删除/改名分组、卡片布局/间距/大小/图标大小/样式/形状）"
+          >
+            <Settings size={17} />
           </button>
         </div>
       </div>

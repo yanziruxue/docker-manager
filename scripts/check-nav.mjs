@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * 门禁：导航仪表盘（v1.51.0 引入，v1.51.2 解耦至独立通道，v1.51.11 移除管理弹窗）
+ * 门禁：导航仪表盘（v1.51.0 引入，v1.51.2 解耦至独立通道，v1.51.11 移除管理弹窗，
+ *   v1.51.12 顶栏删除分组设置文字按钮、入口改为标题行「＋」右边齿轮扳手）
  *  - 真模块断言：编译运行 src/webui-url.ts 的 resolveNavAppUrl / normalizeNavLanUrl，
  *    覆盖内外网优先级链、`:端口` / `host:端口` / 完整 URL 三种内网写法、auto 分区分派；
  *  - 源码接线断言：导航配置完全收口在独立模块 server/nav-groups.ts（不污染 main settings.json），
@@ -8,7 +9,8 @@
  *    v1.51.11 起 NavEditor 弹窗已删除，项目 CRUD 由 NavPage + NavAppModal 直接落盘、
  *    分组新建/删除由 NavGroupSettingsModal 接管、卡片 hover ✎ 由 NavBoard.onEditApp 直达；
  *  - 负向自检①：注入「内网缺 lanUrl 不回落 url」回归 → 重载模块应检出差异 → 还原 → 复核全绿；
- *  - 负向自检②：注入「<NavEditor」回归 → 重跑本门禁应 exit 1 → 还原 → 字节级一致。
+ *  - 负向自检②：进程级注入 3 类回归（<NavEditor / 顶栏分组设置文字按钮 / 齿轮接线缺失）
+ *    → 重跑本门禁应 exit 1 → 还原 → 字节级一致。
  * 用法：node scripts/check-nav.mjs（退出码非 0 = 有回归）
  */
 import fs from "node:fs";
@@ -78,8 +80,15 @@ ok("★ NavPage 不再挂载/导入 NavEditor 弹窗",
   !navPage.includes("<NavEditor") && !navPage.includes('from "../components/NavEditor"'));
 ok("★ NavEditor.tsx 文件已删除", !fs.existsSync(path.join(ROOT, "src/components/NavEditor.tsx")));
 ok("★ NavPage 无管理弹窗状态与入口", !navPage.includes("navEditing") && !navPage.includes("openEditor"));
-ok("★ 顶栏三按钮（页面设置 / 分组设置 / 添加项目）",
-  navPage.includes("页面设置") && navPage.includes("分组设置") && navPage.includes("添加项目") && !navPage.includes("管理分组"));
+// v1.51.12：顶栏只保留「页面设置 / 添加项目」；分组设置唯一入口改为标题行「＋」右边的齿轮扳手
+const topbarActions = (navPage.split('<div className="ml-auto flex items-center gap-2">')[1] || "").split("</div>")[0] || "";
+ok("★ 顶栏操作区仅「页面设置 / 添加项目」（无管理分组、无分组设置文字按钮）",
+  topbarActions.includes("页面设置") && topbarActions.includes("添加项目") &&
+  !topbarActions.includes("管理分组") && !topbarActions.includes("分组设置"));
+ok("★ NavPage 不再渲染顶栏分组设置文字按钮（LayoutGrid 已移除）",
+  !navPage.includes("<LayoutGrid") && !navPage.includes("分组设置</button>"));
+ok("★ NavPage 把分组设置打开器下传给 NavBoard（齿轮入口接线）",
+  navPage.includes("onOpenGroupSettings={openGroupSettings}") && navPage.includes("openGroupSettings"));
 ok("★ 独立挂载 NavAppModal 并接线项目 CRUD",
   navPage.includes("<NavAppModal") && navPage.includes("handleSaveApp") && navPage.includes("onDelete={handleDeleteApp}"));
 ok("★ 项目保存保留跨分组移动语义（旧分组移除同 id）", navPage.includes("a.id !== app.id"));
@@ -92,7 +101,10 @@ ok("NavBoard 图标三级解析（URL/图标库/首字母）", board.includes("r
 ok("无地址卡片禁用打开", board.includes("disabled={!url}"));
 ok("★ NavBoard 卡片 hover 编辑入口 onEditApp",
   board.includes("onEditApp") && board.includes("group-hover/card:opacity-100"));
-ok("★ NavBoard 不再有齿轮管理入口", !board.includes("onOpenEditor") && !board.includes("GearIcon"));
+ok("★ NavBoard 不再有旧管理弹窗齿轮入口", !board.includes("onOpenEditor") && !board.includes("GearIcon"));
+ok("★ NavBoard「＋」右边齿轮扳手 = 分组设置唯一入口（顺序锁定）",
+  board.includes("onOpenGroupSettings") && board.includes("<Settings") && board.includes("分组设置") &&
+  board.indexOf("onClick={onAddApp}") < board.indexOf("onClick={onOpenGroupSettings}"));
 
 const appModal = read("src/components/NavAppModal.tsx");
 ok("★ NavAppModal 编辑态支持删除项目", appModal.includes("onDelete") && appModal.includes("删除项目"));
@@ -149,26 +161,51 @@ if (BROKEN === ORIGINAL) {
   ok("还原字节级一致", read(TARGET) === ORIGINAL);
 }
 
-console.log("== ④ 负向自检（注入 <NavEditor 回归 → 重跑本门禁应 exit 1） ==");
-// 进程级负向自检：父进程注入回归文本，子进程跳过 ④（NAV_GATE_NEGATIVE_CHILD=1）只跑 ①②③，
-// 若 ② 的新断言确实生效，子进程必因「NavPage 不再挂载/导入 NavEditor」FAIL 而 exit 1。
+console.log("== ④ 负向自检（进程级注入 3 类回归 → 重跑本门禁应 exit 1） ==");
+// 父进程注入回归文本，子进程跳过 ④（NAV_GATE_NEGATIVE_CHILD=1）只跑 ①②③，
+// 若 ② 的对应断言确实生效，子进程必因 FAIL 而 exit 1。
 if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
   const NAV_PAGE_REL = "src/pages/NavPage.tsx";
-  const origNavPage = read(NAV_PAGE_REL);
-  fs.writeFileSync(path.join(ROOT, NAV_PAGE_REL), origNavPage + "\n{/* <NavEditor /> */}\n", "utf8");
-  let childFailed = false;
-  try {
-    execFileSync(process.execPath, [fileURLToPath(import.meta.url)], {
-      stdio: "pipe",
-      env: { ...process.env, NAV_GATE_NEGATIVE_CHILD: "1" },
-    });
-  } catch (e) {
-    childFailed = e.status === 1;
-  } finally {
-    fs.writeFileSync(path.join(ROOT, NAV_PAGE_REL), origNavPage, "utf8");
+  const cases = [
+    {
+      name: "注入 <NavEditor 回归",
+      inject: (s) => s + "\n{/* <NavEditor /> */}\n",
+    },
+    {
+      name: "注入顶栏「分组设置」文字按钮回归",
+      inject: (s) => s.replace(
+        '<div className="ml-auto flex items-center gap-2">',
+        '<div className="ml-auto flex items-center gap-2"><button>分组设置</button>',
+      ),
+    },
+    {
+      name: "注入齿轮入口接线缺失回归",
+      inject: (s) => s.replace("onOpenGroupSettings={openGroupSettings}", ""),
+    },
+  ];
+  for (const c of cases) {
+    const orig = read(NAV_PAGE_REL);
+    const mutated = c.inject(orig);
+    if (mutated === orig) {
+      failCount++;
+      console.log(`  FAIL  负向自检锚点失效（${c.name}，请更新门禁）`);
+      continue;
+    }
+    fs.writeFileSync(path.join(ROOT, NAV_PAGE_REL), mutated, "utf8");
+    let childFailed = false;
+    try {
+      execFileSync(process.execPath, [fileURLToPath(import.meta.url)], {
+        stdio: "pipe",
+        env: { ...process.env, NAV_GATE_NEGATIVE_CHILD: "1" },
+      });
+    } catch (e) {
+      childFailed = e.status === 1;
+    } finally {
+      fs.writeFileSync(path.join(ROOT, NAV_PAGE_REL), orig, "utf8");
+    }
+    ok(`${c.name}被检出（子进程 exit 1）`, childFailed);
+    ok(`${c.name}还原字节级一致`, read(NAV_PAGE_REL) === orig);
   }
-  ok("注入 <NavEditor 回归被检出（子进程 exit 1）", childFailed);
-  ok("还原 NavPage 字节级一致", read(NAV_PAGE_REL) === origNavPage);
 }
 
 // 清理临时目录
