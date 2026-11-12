@@ -16,6 +16,34 @@
 
 ---
 
+## v1.51.19 — 2026-11-12（**main 分支 · 已构建 · 已推 Gitea**）
+
+### 改动（导航页 v1.51.18 后续，7 项）
+- **A. 容器列表已添加项灰显**：`src/components/NavAppModal.tsx` 新增 `existingNames`（跨全分组、编辑态排除自身、小写）；容器名命中则按钮 `disabled` + `opacity-40` + `title="该容器已添加"`。
+- **B. 名称全局唯一**：跨所有分组重名（排除自身）即 `canSave=false` + 名称框红字「所有分组内项目名不可重复」。
+- **C. 卡片 hover 提示改为「名称 / 描述」**：`src/components/NavBoard.tsx` `AppCard.title` 由「打开 URL（备注）」改为 `${name}\n${description}`，去掉链接与备注；长名称被 `truncate` 截断时悬浮显示完整名+描述（同时满足第 7 点）。
+- **D. 删自托管下方描述**：`NavAppModal.tsx` 删除「勾选后可配置内网链接…不勾选则点击直接打开外网链接」整段 sub-text，仅留「自托管」标签。
+- **E. 分组标签条最右新增「全部」tab**：`src/pages/NavPage.tsx` 新增虚拟分组 `__all__`（合并全部分组 `apps`），点击合并显示全部分组的项目。
+- **F. 编辑态拖拽**：仅 `editMode` 下卡片 `draggable`；拖到分组 tab=移到该组末尾；拖到卡片=插入该卡之前（可跨组）；落盘走既有 `onSaveNavGroups`，原生 HTML5 DnD，不引新依赖。
+- **约束**：保持「✎ 是卡片 button 兄弟节点」「图标区仅一个 IconAutoComplete」铁律；改动文件名/语义见工作记忆。
+- 版本号 `1.51.18 → 1.51.19`。
+
+### 验证（硬证据）
+- 双 tsc（根 `src` / `server/tsconfig.json`）**0 错**；`npm run test:gates` **27 PASS / 0 FAIL**；`scripts/check-nav.mjs` **108 ok / 0 FAIL**（16 例负向全部 `exit 1` 检出并字节级还原）。
+- SEA 四步构建 + 硬核验：ELF `7f454c46` ✓、`e_machine=62` ✓、版本锚点 `1.51.19` ✓（无 `1.51.18` 残留）、体积 125MB ✓。
+- 产物：`build-upload/dockermanagementyanzi-linux-x64-v1.51.19.zip`（41.1MB）+ `dockermanagementyanzi_1.51.19_amd64.deb`（41MB）。
+- 注：真实拖拽手势 / 长名称 tooltip / 「全部」视图排版需人工 UI 冒烟（源码门禁不覆盖真实交互）。
+
+### 已完成
+- 导航页 7 项需求全部落地 + 门禁 + SEA 出包。
+
+### 未完成 / 已知限制
+- 拖拽为重排/跨组移动，未做落点占位动画（仅 tab 拖拽时 `ring` 高亮提示）。
+- 「全部」视图用默认卡片布局（各分组自身 `cardLayout` 不套用），属合并总览的简化呈现。
+
+### 下一步
+- 人工 UI 验收拖拽与 tooltip；若需「全部」视图套用分组级布局再迭代。
+
 ## v1.51.18 — 2026-11-12（**main 分支 · 已构建 · 已推 Gitea**）
 
 ### 改动

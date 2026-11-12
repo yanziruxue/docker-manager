@@ -80,6 +80,11 @@ function AppCard({
   iconSize,
   cardStyle,
   iconShape,
+  groupForDnd,
+  draggableCard,
+  onCardDragStart,
+  onCardDragEnd,
+  onCardDrop,
 }: {
   app: NavAppItem;
   iconMap: Record<string, string>;
@@ -94,6 +99,13 @@ function AppCard({
   cardStyle: NavCardStyle;
   /** 分组图标形状 */
   iconShape: NavIconShape;
+  /** 拖拽归属分组 id（全部视图下为真实分组，由 resolveGroupOf 解析） */
+  groupForDnd?: string;
+  /** 编辑态可拖拽（v1.51.19） */
+  draggableCard?: boolean;
+  onCardDragStart?: (appId: string, groupId: string) => void;
+  onCardDragEnd?: () => void;
+  onCardDrop?: (appId: string, groupId: string) => void;
 }) {
   const src = resolveNavIconSrc(app.icon, iconMap);
   const open = () => {
@@ -103,9 +115,10 @@ function AppCard({
   const titleColor = app.titleColor || "#334155";
   const box = iconSize;
   const inner = Math.round(iconSize * 0.74);
-  // 描述（v1.51.9）：新数据用 description（卡片副标题）；旧数据无该字段时回落 remark；备注仅作 hover 提示
+  // 描述（v1.51.9）：新数据用 description（卡片副标题）；旧数据无该字段时回落 remark
   const subtitle = app.description !== undefined ? app.description : app.remark || "";
-  const tip = url ? `打开 ${url}${app.remark ? `（${app.remark}）` : ""}` : "未配置地址";
+  // 悬浮提示：第一行名称、第二行描述（长名称被截断时悬浮显示完整名+描述）；不再显示链接与备注（v1.51.19）
+  const hoverTitle = `${app.name}${app.description ? "\n" + app.description : ""}`;
   const styleCls = CARD_STYLE_CLS[cardStyle] || CARD_STYLE_CLS.solid;
   const shapeHidden = iconShape === "hidden";
   // 默认 rounded 且已有图标时保持透明（与 v1.51.8 视觉一致）；其他形状给淡底让轮廓可见
@@ -145,7 +158,10 @@ function AppCard({
       <button
         onClick={open}
         disabled={!url}
-        title={tip}
+        title={hoverTitle}
+        draggable={draggableCard}
+        onDragStart={(e) => { if (onCardDragStart) { e.stopPropagation(); onCardDragStart(app.id, groupForDnd || ""); } }}
+        onDragEnd={() => onCardDragEnd?.()}
         className={`group relative flex items-center gap-3 px-4 py-3 rounded-2xl ${styleCls} transition-all disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0`}
         style={{ width: cardSize + 56 }}
       >
@@ -162,11 +178,14 @@ function AppCard({
   }
 
   return (
-    <button
-      onClick={open}
-      disabled={!url}
-      title={tip}
-      className={`group relative flex flex-col items-center gap-2 p-4 rounded-2xl ${styleCls} transition-all disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0`}
+      <button
+        onClick={open}
+        disabled={!url}
+        title={hoverTitle}
+        draggable={draggableCard}
+        onDragStart={(e) => { if (onCardDragStart) { e.stopPropagation(); onCardDragStart(app.id, groupForDnd || ""); } }}
+        onDragEnd={() => onCardDragEnd?.()}
+        className={`group relative flex flex-col items-center gap-2 p-4 rounded-2xl ${styleCls} transition-all disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0`}
       style={{ width: cardSize }}
     >
       {iconBlock}
@@ -190,6 +209,10 @@ export function NavBoard({
   onEditApp,
   onOpenGroupSettings,
   navNetworkMode,
+  resolveGroupOf,
+  onCardDragStart,
+  onCardDragEnd,
+  onCardDrop,
 }: {
   group: NavGroup;
   iconMap: Record<string, string>;
@@ -202,6 +225,14 @@ export function NavBoard({
   onOpenGroupSettings: () => void;
   /** 内外网默认访问模式（v1.51.8，由导航页「页面设置」下传）：覆盖单卡自动判定 */
   navNetworkMode?: NavNetworkMode;
+  /** 「全部」视图下，按 appId 解析其真实归属分组（v1.51.19） */
+  resolveGroupOf?: (appId: string) => string | undefined;
+  /** 编辑态拖拽：卡片开始拖动（v1.51.19） */
+  onCardDragStart?: (appId: string, groupId: string) => void;
+  /** 编辑态拖拽：卡片拖动结束（v1.51.19） */
+  onCardDragEnd?: () => void;
+  /** 编辑态拖拽：卡片落到另一卡片前（v1.51.19） */
+  onCardDrop?: (appId: string, groupId: string) => void;
 }) {
   const [zone, setZone] = useState<WebuiZone>("intranet");
   useEffect(() => {
@@ -256,8 +287,16 @@ export function NavBoard({
         </div>
       ) : (
         <div className="flex gap-3 overflow-x-auto pb-3 snap-x" style={{ gap: gridGap }}>
-          {apps.map((a, i) => (
-            <div key={a.id} className="snap-start relative group/card">
+          {apps.map((a, i) => {
+            // 全部视图下卡片归属真实分组（由 resolveGroupOf 解析），用于拖拽跨组
+            const cardGroupId = resolveGroupOf?.(a.id) || group.id;
+            return (
+            <div
+              key={a.id}
+              className="snap-start relative group/card"
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => { e.preventDefault(); onCardDrop?.(a.id, cardGroupId); }}
+            >
               <AppCard
                 app={a}
                 iconMap={iconMap}
@@ -267,6 +306,11 @@ export function NavBoard({
                 iconSize={iconSize}
                 cardStyle={cardStyle}
                 iconShape={iconShape}
+                groupForDnd={cardGroupId}
+                draggableCard={!!editMode && !!onCardDragStart}
+                onCardDragStart={onCardDragStart}
+                onCardDragEnd={onCardDragEnd}
+                onCardDrop={onCardDrop}
               />
               {/* 编辑按钮是卡片 <button> 的兄弟节点，绝不嵌套（保留 disabled={!url} 语义）。
                   v1.51.18：仅 editMode 态渲染，且常显（opacity-100）以提示可编辑。 */}
@@ -281,7 +325,8 @@ export function NavBoard({
                 </button>
               )}
             </div>
-          ))}
+          );
+        })}
         </div>
       )}
     </div>

@@ -60,6 +60,8 @@ export function NavPage({ navGroups, onSaveNavGroups, containers, navPageSetting
   // v1.51.18：编辑模式开关。默认关闭（每次刷新回落关闭）；开启后卡片 ✎ 编辑入口才可见，
   // 仅用于「编辑已添加的项目」，不制约「＋ 添加项目」「齿轮 分组设置」（两者始终可用）。
   const [editMode, setEditMode] = useState(false);
+  // v1.51.19：编辑态拖拽状态（被拖拽项目的 id 与来源分组）
+  const [drag, setDrag] = useState<{ appId: string; fromGroupId: string } | null>(null);
   const navIconMap = useNavIconMap();
   // 打开页面设置弹窗（整页外观/环境）
   const openPageSettings = useCallback(() => setNavPageSettingsOpen(true), []);
@@ -67,8 +69,11 @@ export function NavPage({ navGroups, onSaveNavGroups, containers, navPageSetting
   const openGroupSettings = useCallback(() => setNavGroupSettingsOpen(true), []);
 
   // 选中的分组被删除 / 列表变空时回落到第一个（保持始终有有效选中项）
-  const effectiveTab = groups.some((g) => g.id === navTab) ? navTab : groups[0]?.id || "";
-  const activeNavGroup = groups.find((g) => g.id === effectiveTab) || null;
+  const isAll = navTab === "__all__";
+  const effectiveTab = !isAll && !groups.some((g) => g.id === navTab) ? groups[0]?.id || "" : navTab;
+  // 「全部」虚拟分组：合并全部分组的项目（v1.51.19）
+  const allGroup: NavGroup = { id: "__all__", name: "全部", apps: groups.flatMap((g) => g.apps || []) };
+  const activeNavGroup = isAll ? allGroup : groups.find((g) => g.id === effectiveTab) || null;
 
   // v1.51.11：项目 CRUD 直接对 groups 做不可变更新并落盘，不再经 NavEditor 中转
   const openAddApp = () => setAppModal({ open: true, initial: null, groupId: effectiveTab });
@@ -90,6 +95,48 @@ export function NavPage({ navGroups, onSaveNavGroups, containers, navPageSetting
   const handleDeleteApp = (appId: string) => {
     onSaveNavGroups(groups.map((g) => ({ ...g, apps: (g.apps || []).filter((a) => a.id !== appId) })));
     setAppModal(APP_MODAL_CLOSED);
+  };
+
+  // v1.51.19：编辑态拖拽——移动项目到其他分组（拖到分组 tab=末尾追加）或排序（拖到卡片前=插入该位置）。
+  // 先跨全分组移除被拖项目，再插入目标分组（beforeAppId 之前，缺省末尾），自然兼容同组重排。
+  const moveApp = (appId: string, fromGroupId: string, toGroupId: string, beforeAppId?: string) => {
+    let app: NavAppItem | undefined;
+    const stripped = groups.map((g) => {
+      const apps = g.apps || [];
+      const idx = apps.findIndex((a) => a.id === appId);
+      if (idx >= 0) {
+        app = apps[idx];
+        return { ...g, apps: apps.filter((a) => a.id !== appId) };
+      }
+      return g;
+    });
+    if (!app) return;
+    const next = stripped.map((g) => {
+      if (g.id === toGroupId) {
+        const apps = [...(g.apps || [])];
+        let insertAt = apps.length;
+        if (beforeAppId) {
+          const bi = apps.findIndex((a) => a.id === beforeAppId);
+          if (bi >= 0) insertAt = bi;
+        }
+        apps.splice(insertAt, 0, app as NavAppItem);
+        return { ...g, apps };
+      }
+      return g;
+    });
+    onSaveNavGroups(next);
+  };
+  const onCardDragStart = (appId: string, fromGroupId: string) => setDrag({ appId, fromGroupId });
+  const onCardDragEnd = () => setDrag(null);
+  const onCardDrop = (targetAppId: string, targetGroupId: string) => {
+    if (!drag) return;
+    moveApp(drag.appId, drag.fromGroupId, targetGroupId, targetAppId);
+    setDrag(null);
+  };
+  // 「全部」视图下按 appId 解析真实归属分组（拖拽跨组用）
+  const resolveGroupOf = (appId: string): string | undefined => {
+    for (const g of groups) if ((g.apps || []).some((a) => a.id === appId)) return g.id;
+    return undefined;
   };
 
   // 进入页面 / 切换分组时把当前选中分组写回 URL（仅 replace，不新增历史），支持深链回看
@@ -147,11 +194,23 @@ export function NavPage({ navGroups, onSaveNavGroups, containers, navPageSetting
           <button
             key={g.id}
             onClick={() => setNavTab(g.id)}
+            onDragOver={editMode ? (e) => e.preventDefault() : undefined}
+            onDrop={
+              editMode
+                ? (e) => {
+                    e.preventDefault();
+                    if (drag) {
+                      moveApp(drag.appId, drag.fromGroupId, g.id);
+                      setDrag(null);
+                    }
+                  }
+                : undefined
+            }
             className={`px-4 py-1.5 rounded-full text-[13px] backdrop-blur-sm transition-all ${
               g.id === effectiveTab
                 ? "bg-white text-fuchsia-600 font-semibold shadow-md"
                 : "bg-white/60 text-slate-600 hover:bg-white/85"
-            }`}
+            } ${drag ? "ring-2 ring-fuchsia-400/70" : ""}`}
           >
             {g.name}
             <span className={`ml-1.5 text-[11px] ${g.id === effectiveTab ? "text-fuchsia-400" : "text-slate-400"}`}>
@@ -159,6 +218,19 @@ export function NavPage({ navGroups, onSaveNavGroups, containers, navPageSetting
             </span>
           </button>
         ))}
+        {/* 全部：合并显示全部分组的项目（v1.51.19） */}
+        <button
+          key="__all__"
+          onClick={() => setNavTab("__all__")}
+          className={`px-4 py-1.5 rounded-full text-[13px] backdrop-blur-sm transition-all ${
+            isAll
+              ? "bg-white text-fuchsia-600 font-semibold shadow-md"
+              : "bg-white/60 text-slate-600 hover:bg-white/85"
+          }`}
+          title="显示全部分组的项目"
+        >
+          全部
+        </button>
         <div className="ml-auto flex items-center gap-2">
           <button
             onClick={() => setEditMode((v) => !v)}
@@ -190,6 +262,10 @@ export function NavPage({ navGroups, onSaveNavGroups, containers, navPageSetting
           onEditApp={openEditApp}
           onOpenGroupSettings={openGroupSettings}
           navNetworkMode={navNetworkMode}
+          resolveGroupOf={isAll ? resolveGroupOf : undefined}
+          onCardDragStart={onCardDragStart}
+          onCardDragEnd={onCardDragEnd}
+          onCardDrop={onCardDrop}
         />
       ) : (
         <div className="flex flex-col items-center justify-center py-20 rounded-2xl border border-white/40 bg-white/30 backdrop-blur-sm text-white">

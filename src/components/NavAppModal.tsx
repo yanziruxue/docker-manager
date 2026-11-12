@@ -89,6 +89,18 @@ export function NavAppModal({
       });
   }, [containers, containerQuery]);
 
+  /** 已有项目名集合（跨全部分组，小写；编辑态排除自身），用于容器灰显与重名校验 */
+  const existingNames = useMemo(() => {
+    const s = new Set<string>();
+    for (const g of groups) {
+      for (const a of g.apps || []) {
+        if (initial && a.id === initial.id) continue;
+        if (a.name) s.add(a.name.trim().toLowerCase());
+      }
+    }
+    return s;
+  }, [groups, initial]);
+
   /** 选择容器 → 一次填入 4 个字段；端口优先 LABELS WebUI 端口，回退真实宿主端口映射 */
   const applyContainerPreset = (c: Container) => {
     setName(c.name);
@@ -100,7 +112,9 @@ export function NavAppModal({
     setContainerQuery("");
   };
 
-  const canSave = name.trim().length > 0 && url.trim().length > 0 && !!groupId;
+  // 名称全局唯一（跨所有分组不可重复，编辑态排除自身）
+  const nameTaken = name.trim().length > 0 && existingNames.has(name.trim().toLowerCase());
+  const canSave = name.trim().length > 0 && url.trim().length > 0 && !!groupId && !nameTaken;
   const confirm = () => {
     if (!canSave || !groupId) return;
     const app: NavAppItem = {
@@ -155,7 +169,13 @@ export function NavAppModal({
         <div className="flex-1 overflow-y-auto p-5 space-y-3">
           {/* 名称 */}
           <Field label="名称" required>
-            <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="例如：我的博客" />
+            <input
+              className={inputCls + (nameTaken ? " border-rose-300 focus:ring-rose-500/30 focus:border-rose-400" : "")}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="例如：我的博客"
+            />
+            {nameTaken && <span className="block text-[11px] text-rose-500 mt-1">所有分组内项目名不可重复</span>}
           </Field>
 
           {/* 描述（卡片副标题） */}
@@ -183,9 +203,6 @@ export function NavAppModal({
               />
               <label htmlFor="nav-self-hosted" className="flex-1 text-[13px] text-slate-700 leading-5 cursor-pointer select-none">
                 自托管
-                <span className="block text-[11px] text-slate-400 leading-4">
-                  勾选后可配置内网链接，访问时按内外网自动切换；不勾选则点击直接打开外网链接
-                </span>
               </label>
               {selfHosted && (
                 <button
@@ -214,13 +231,20 @@ export function NavAppModal({
                   )}
                   {containerOptions.map((c) => {
                     const port = c.webuiPort || c.ports?.find((p) => p.host)?.host || "";
+                    // 该容器名已作为项目存在（跨全分组）→ 灰显禁用，提示已添加
+                    const isAdded = existingNames.has(c.name.trim().toLowerCase());
                     return (
                       <button
                         key={c.id}
                         type="button"
+                        disabled={isAdded}
                         onClick={() => applyContainerPreset(c)}
-                        className="w-full flex items-center gap-2 px-2 py-1.5 text-left rounded-md hover:bg-fuchsia-50 border border-transparent hover:border-fuchsia-100"
-                        title="自动填入名称 / 内网端口 / 外网链接 / 图标"
+                        className={`w-full flex items-center gap-2 px-2 py-1.5 text-left rounded-md border transition-colors ${
+                          isAdded
+                            ? "opacity-40 cursor-not-allowed border-transparent bg-slate-100"
+                            : "hover:bg-fuchsia-50 border-transparent hover:border-fuchsia-100"
+                        }`}
+                        title={isAdded ? "该容器已添加" : "自动填入名称 / 内网端口 / 外网链接 / 图标"}
                       >
                         <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${c.status === "running" ? "bg-emerald-500" : "bg-slate-300"}`} />
                         <span className="flex-1 min-w-0 truncate text-[12px] text-slate-700">{c.name}</span>
