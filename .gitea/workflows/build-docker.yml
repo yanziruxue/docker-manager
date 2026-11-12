@@ -3,21 +3,24 @@ name: build-docker-image
 # ============================================================
 # Docker 镜像构建工作流（Gitea Actions）
 #
-# 触发规则（用户确认 2026-11-12）：
-#   - 打 tag (v*) 推送            → 构建镜像并推送 Gitea 内置容器镜像库
+# 触发规则（用户确认 2026-11-12 二次拍板）：
+#   - 打 tag (v*) 推送            → 自动构建并推送 Gitea 内置容器镜像库
 #                                   192.168.24.10:8024/yanzi/dockermanagementyanzi  (:版本 + :latest)
-#   - 手动触发 workflow_dispatch  → 默认 target=ghcr，构建镜像并推送
-#                                   ghcr.io/yanzirue/dockermanagementyanzi      (:版本 + :latest)
-#                                   （手动亦可选 target=gitea 推回 Gitea 镜像库）
+#   - 手动触发 workflow_dispatch  → 构建并推送 ghcr.io/yanzirue/dockermanagementyanzi
+#                                   （可用 version 输入手动指定镜像版本号，留空 = 取 package.json）
 #
 # 前置硬条件：Gitea Actions runner 必须已安装 Docker 守护进程
 #   （docker build 需要；若 runner 无 docker，须改用 docker:dind 服务容器 privileged）。
 #
-# 所需仓库秘密（Gitea 后台 Settings → Secrets）：
+# 所需仓库秘密（Gitea 后台 Settings → Actions → Secrets）：
 #   - DOCKER_USER / DOCKER_TOKEN （推 Gitea 镜像库；token 须含 包写(packages:write) 权限。
 #                                  注：GITEA_/GITHUB_ 前缀为 Actions 自动注入 token 的保留名，
 #                                  自建 Secret 禁用该前缀，故用 DOCKER_ 前缀）
-#   - GHCR_PAT                  （推 ghcr.io；GitHub PAT 须含 write:packages 权限）
+#   - GHCR_PAT                  （推 ghcr.io 的登录凭证：GitHub **classic** PAT，
+#                                  勾选 write:packages + read:packages；
+#                                  生成入口 GitHub → Settings → Developer settings →
+#                                  Personal access tokens (classic) → Generate new token）
+#   - GHCR_USER                 （可选：ghcr 登录用户名，默认 yanzirue）
 # ============================================================
 
 on:
@@ -26,14 +29,11 @@ on:
       - 'v*'
   workflow_dispatch:
     inputs:
-      target:
-        description: "推送目标镜像库（仅手动触发时生效）"
-        required: true
-        type: choice
-        options:
-          - ghcr
-          - gitea
-        default: ghcr
+      version:
+        description: "ghcr 镜像版本号（如 v1.52.1；留空 = 取 package.json 版本）"
+        required: false
+        type: string
+        default: ""
 
 defaults:
   run:
@@ -60,9 +60,11 @@ jobs:
       - name: 计算版本与镜像名
         id: meta
         run: |
-          # tag 事件用 tag 名（如 v1.51.18）；手动触发用 package.json 版本（如 v1.51.18）
+          # tag 事件用 tag 名（如 v1.51.18）；手动触发优先用 version 输入，留空回落 package.json 版本
           if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
             VERSION="${GITHUB_REF_NAME}"
+          elif [ -n "${{ inputs.version }}" ]; then
+            VERSION="${{ inputs.version }}"
           else
             VERSION="v$(node -p "require('./package.json').version")"
           fi
@@ -83,8 +85,8 @@ jobs:
             --build-arg APT_MIRROR=mirrors.aliyun.com \
             .
 
-      - name: 推送 Gitea 容器镜像库
-        if: github.event_name == 'push' || inputs.target == 'gitea'
+      - name: 推送 Gitea 容器镜像库（仅 tag 自动触发）
+        if: github.event_name == 'push'
         env:
           DOCKER_USER: ${{ secrets.DOCKER_USER }}
           DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
@@ -93,11 +95,12 @@ jobs:
           docker push "${{ steps.meta.outputs.gitea_image }}:${{ steps.meta.outputs.version }}"
           docker push "${{ steps.meta.outputs.gitea_image }}:latest"
 
-      - name: 推送 ghcr.io
-        if: github.event_name == 'workflow_dispatch' && inputs.target == 'ghcr'
+      - name: 推送 ghcr.io（仅手动触发）
+        if: github.event_name == 'workflow_dispatch'
         env:
+          GHCR_USER: ${{ secrets.GHCR_USER }}
           GHCR_PAT: ${{ secrets.GHCR_PAT }}
         run: |
-          echo "${GHCR_PAT}" | docker login ghcr.io -u yanzirue --password-stdin
+          echo "${GHCR_PAT}" | docker login ghcr.io -u "${GHCR_USER:-yanzirue}" --password-stdin
           docker push "${{ steps.meta.outputs.ghcr_image }}:${{ steps.meta.outputs.version }}"
           docker push "${{ steps.meta.outputs.ghcr_image }}:latest"
