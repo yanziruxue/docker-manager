@@ -16,6 +16,35 @@
 
 ---
 
+## v1.51.17 — 2026-11-12（**main 分支 · 已构建 · 已推 Gitea**）
+
+### 改动
+- **修复导航页「页面设置 → 本地上传背景图」在 3.34 MB jpg 上报「响应解析失败」**。根因：`POST /api/nav-assets` 沿用了图标上传的 `express.raw({ limit: "2mb" })`，超限触发 body-parser `PayloadTooLargeError`(HTTP 413)；服务端没有错误中间件，Express 默认返回 **HTML 错误页**，前端 `res.json()` 解析失败后兜底成「响应解析失败」。jpg 格式本身无问题（`image/jpeg → .jpg` 映射正常，`image/*` 命中 raw 解析）。
+- `server/index.ts`：新增 `NAV_ASSET_MAX_BYTES = 20 * 1024 * 1024`，`/api/nav-assets` 上限 **2MB → 20MB**（仅背景图；图标上传仍 2MB 不动）；新增**局部错误中间件** `app.use("/api/nav-assets", ...)`，把 `entity.too.large` / 其它 body 错误统一转成 `{ success:false, error:"背景图过大，请上传 ≤20MB 的图片" }` JSON；写入前校验 `Buffer.isBuffer(body) && body.length`，避免 Content-Type 未命中时把空对象写盘。★ 错误中间件**独立注册**（不塞进 `app.post` 的 handlers），否则 `app.post` 重载丢失上下文类型、双 tsc 报 TS7006。
+- `src/api.ts`：`uploadNavAssetApi` 非 JSON 响应兜底改为「背景图上传失败（HTTP ${res.status}，服务端未返回 JSON）」，不再笼统说「响应解析失败」；服务端已返回中文 JSON 时直接透传。
+- `src/components/NavPageSettingsModal.tsx`：新增与服务端一致的 `NAV_ASSET_MAX_BYTES`；上传前预校验体积与非图片类型并给中文提示；本地上传按钮下增加「支持 jpg / png / webp / gif / svg / ico，单张 ≤20MB」说明。
+- **门禁** `scripts/check-nav.mjs`：② 新增 6 条源码断言（20MB 上限 / 超限 JSON 中间件 / Buffer 校验 / 兜底带 HTTP 状态码 / 前端预校验 / ≤20MB 提示）；④ 进程级负向自检 9 → **13 例**（新增「上限回退 2mb」「错误中间件缺失」「兜底文案回退」「前端预校验缺失」，跨 `server/index.ts` / `src/api.ts` / `NavPageSettingsModal.tsx` 注入），全部子进程 `exit 1` → 还原字节级一致。**82 → 96 断言**。
+- 版本号 `1.51.16 → 1.51.17`。
+
+### 验证（硬证据）
+- 双 tsc（根 `src` / `server/tsconfig.json`）**0 错**；`npm run test:gates` **GATES_EXIT=0**（完整链 1306 行，22 组结果行全部 `FAIL=0`）；`check-nav` **96 ok / 0 FAIL**。
+- ⚠️ 门禁链**首次**运行时 `check-restart-wait` 出现 1 例时序 flaky（`PASS=17 FAIL=1`，「仍在持续探测」`calls=7`）；单独复跑该脚本 `PASS=18 FAIL=0`，完整链重跑全绿。**本次未改任何 restart / App 更新相关代码**，判定为依赖真实定时器的既有 flaky，非本次回归。
+- **真实 HTTP 机制验证**（同一中间件链，127.0.0.1 临时端口，未启动完整服务/未写任何配置文件）：3.34 MB `image/jpeg` → **HTTP 200 `application/json`**、`bytes=3502244`；21 MB → **HTTP 413 `application/json`**、`{"success":false,"error":"背景图过大，请上传 ≤20MB 的图片"}`。对照修复前：413 返回 HTML → 前端解析失败。
+- SEA 四步构建（干净 Linux node 基座 124679552 B → postject 注入 **130616512 B**，未虚增）+ **三处 SHA-256 逐字节一致** `d7dd90e2866b9ac259ea3dac5bba37fe3d8e379d4d2cb2b2c603bef561c0131c`（postject = zip 内 = deb 内，均 130616512 B，`ALL_MATCH`）。
+- ELF `7f454c46` / e_machine=62；运行时版本精确锚点 `CURRENT_VERSION = true ? "1.51.17" : "0.0.0-dev"` 二进制 **1 处**、旧版 `1.51.16` 锚点 **0 处**；5 个 dist 文件（`index.html` / `assets/index-C8uTD6oQ.js` / `assets/index-BKohibmh.css` / `docker.png` / `login-banner.svg`）base64 在 `bundle.js` 与 SEA 二进制中各命中 1 次，与 `dist` 逐字节一致。
+- 交付包：`dockermanagementyanzi-linux-x64-v1.51.17.zip`（43122443 B）、`dockermanagementyanzi_1.51.17_amd64.deb`（42838872 B）；包成员固定 5 个、0755/0644 权限位正确；latest 别名（固定 main v1.50.36）**未覆盖**。
+
+### 未完成 / 已知限制
+- Linux SEA 二进制在本机（Windows）不可运行，**未在完整服务上做真实点击冒烟**；源码级门禁 + HTTP 机制验证不覆盖 UI 真实点击。建议人工验收：页面设置 → 本地上传 3.34 MB jpg → 预览出现 → 保存后导航页背景生效。
+- 20MB 是单请求 body 缓冲上限，低内存 NAS 上并发上传多张大图时内存峰值会升高；如需更保守可下调 `NAV_ASSET_MAX_BYTES`（**前后端两处常量必须同步**）。
+- 前端体积预校验依赖浏览器给出的 `file.type`；个别系统给空 type 时跳过类型校验，由服务端 `image/*` 解析兜底。
+- `nav-assets` 目录中的历史背景文件不会自动删除，多次上传会累积（当前无清理入口）。
+
+### 下一步
+- 等用户验收 3.34 MB jpg 上传；GitHub 仍不推（Gitea-only 约定）。
+
+---
+
 ## v1.51.16 — 2026-11-12（**main 分支 · 已构建 · 已推 Gitea**）
 
 ### 改动

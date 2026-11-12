@@ -1307,7 +1307,11 @@ export async function uploadNavAssetApi(blob: Blob, filename: string): Promise<{
     credentials: "include",
     body: blob,
   });
-  const json = await res.json().catch(() => ({ success: false, error: "响应解析失败" }));
+  // ★ 非 JSON 响应（如服务端异常 HTML 错误页）不能笼统报「响应解析失败」，附 HTTP 状态码便于定位
+  const json = await res.json().catch(() => ({
+    success: false,
+    error: `背景图上传失败（HTTP ${res.status}，服务端未返回 JSON）`,
+  }));
   if (!res.ok || !json.success) throw new ApiError(json.error || "背景图上传失败");
   if (res.status === 401) notifyUnauthorized("/nav-assets");
   return json.data as { url: string };

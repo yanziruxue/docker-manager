@@ -11,6 +11,9 @@ import { uploadNavAssetApi } from "../api";
 const inputCls =
   "w-full px-2.5 py-1.5 text-[13px] border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-500/30 focus:border-rose-400 bg-white text-slate-700";
 
+/** 背景图体积上限（与服务端 NAV_ASSET_MAX_BYTES 保持一致） */
+const NAV_ASSET_MAX_BYTES = 20 * 1024 * 1024;
+
 const WEATHER_OPTIONS: { value: NavWeather; label: string }[] = [
   { value: "none", label: "无" },
   { value: "rain", label: "雨天" },
@@ -88,6 +91,13 @@ export function NavPageSettingsModal({
     setUploading(true);
     setUploadErr("");
     try {
+      // ★ 上传前先挡下超限/非图片文件，避免服务端 413 后才报错（且提示更明确）
+      if (file.size > NAV_ASSET_MAX_BYTES) {
+        throw new Error(`图片过大（${(file.size / 1024 / 1024).toFixed(2)} MB），请上传 ≤20MB 的图片`);
+      }
+      if (file.type && !file.type.startsWith("image/")) {
+        throw new Error("请选择图片文件（jpg/png/webp/gif/svg/ico）");
+      }
       const { url } = await uploadNavAssetApi(file, file.name);
       patch({ bgImage: url });
     } catch (err: any) {
@@ -141,6 +151,7 @@ export function NavPageSettingsModal({
               )}
               <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onPickFile} />
             </div>
+            <p className="text-[11px] text-slate-400">支持 jpg / png / webp / gif / svg / ico，单张 ≤20MB</p>
             {uploadErr && <p className="text-[11px] text-red-500">{uploadErr}</p>}
             {draft.bgImage && (
               <div className="mt-1">

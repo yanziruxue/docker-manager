@@ -2064,24 +2064,44 @@ app.put("/api/nav-page-settings", (req, res) => {
 // ============ 导航页背景资源上传（v1.51.8，独立 nav-assets 目录） ============
 
 const NAV_ASSETS_DIR = configPath("nav-assets");
+/** 背景图体积上限 20MB（与前端 NavPageSettingsModal 保持一致；图标上传仍为 2MB） */
+const NAV_ASSET_MAX_BYTES = 20 * 1024 * 1024;
 try { mkdirSync(NAV_ASSETS_DIR, { recursive: true }); } catch { /* 目录创建失败：上传时再报错 */ }
 
 /** 上传导航页背景图（本地图片）→ 保存进 nav-assets 目录，返回可访问 URL */
-app.post("/api/nav-assets", express.raw({ type: "image/*", limit: "2mb" }), (req, res) => {
-  try {
-    mkdirSync(NAV_ASSETS_DIR, { recursive: true });
-    const rawName = req.get("X-Filename") ? decodeURIComponent(req.get("X-Filename") as string) : "";
-    const contentType = req.get("Content-Type") || "image/png";
-    let filename = rawName ? sanitizeIconFilename(rawName, ICON_CT_EXT[contentType] || ".png") : "";
-    if (!filename || !ICON_FILE_RE.test(filename)) {
-      filename = `bg-${Date.now()}${ICON_CT_EXT[contentType] || ".png"}`;
+app.post(
+  "/api/nav-assets",
+  express.raw({ type: "image/*", limit: NAV_ASSET_MAX_BYTES }),
+  (req, res) => {
+    try {
+      const body = req.body as Buffer;
+      if (!Buffer.isBuffer(body) || !body.length) {
+        res.status(400).json({ success: false, error: "请选择图片文件（jpg/png/webp/gif/svg/ico）" });
+        return;
+      }
+      mkdirSync(NAV_ASSETS_DIR, { recursive: true });
+      const rawName = req.get("X-Filename") ? decodeURIComponent(req.get("X-Filename") as string) : "";
+      const contentType = req.get("Content-Type") || "image/png";
+      let filename = rawName ? sanitizeIconFilename(rawName, ICON_CT_EXT[contentType] || ".png") : "";
+      if (!filename || !ICON_FILE_RE.test(filename)) {
+        filename = `bg-${Date.now()}${ICON_CT_EXT[contentType] || ".png"}`;
+      }
+      filename = dedupeIconFilename(NAV_ASSETS_DIR, filename);
+      writeFileSync(path.join(NAV_ASSETS_DIR, filename), body);
+      res.json({ success: true, data: { url: `/api/nav-assets/${encodeURIComponent(filename)}` } });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || "背景图上传失败" });
     }
-    filename = dedupeIconFilename(NAV_ASSETS_DIR, filename);
-    writeFileSync(path.join(NAV_ASSETS_DIR, filename), req.body as Buffer);
-    res.json({ success: true, data: { url: `/api/nav-assets/${encodeURIComponent(filename)}` } });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err?.message || "背景图上传失败" });
-  }
+  },
+);
+
+/** 局部错误中间件：body-parser 超限(413)等错误默认返回 HTML 错误页，前端 res.json() 会解析失败，统一转成 JSON */
+app.use("/api/nav-assets", (err: any, _req: any, res: any, _next: any) => {
+  const tooLarge = err?.status === 413 || err?.type === "entity.too.large";
+  res.status(tooLarge ? 413 : 400).json({
+    success: false,
+    error: tooLarge ? "背景图过大，请上传 ≤20MB 的图片" : `背景图上传失败：${err?.message || "请求体无效"}`,
+  });
 });
 
 /** 提供 nav-assets 背景图静态文件 */

@@ -5,7 +5,8 @@
  *   v1.51.13 删除顶栏「＋添加项目」，添加新项目唯一入口 = 标题行「＋」；
  *   v1.51.14 弹窗移除底部高级字段折叠区，高级值从 initial 透传不丢数据；
  *   v1.51.15 项目弹窗图标统一改用堆栈 IconAutoComplete，移除智能匹配等自研图标功能；
- *   v1.51.16 勾选自托管后新增「容器列表」按钮，选容器一次填入名称/内网端口/外网链接/图标）
+ *   v1.51.16 勾选自托管后新增「容器列表」按钮，选容器一次填入名称/内网端口/外网链接/图标；
+ *   v1.51.17 背景图上传上限提到 20MB、超限返回 JSON、前端预校验与友好兜底）
  *  - 真模块断言：编译运行 src/webui-url.ts 的 resolveNavAppUrl / normalizeNavLanUrl，
  *    覆盖内外网优先级链、`:端口` / `host:端口` / 完整 URL 三种内网写法、auto 分区分派；
  *  - 源码接线断言：导航配置完全收口在独立模块 server/nav-groups.ts（不污染 main settings.json），
@@ -13,9 +14,10 @@
  *    v1.51.11 起 NavEditor 弹窗已删除，项目 CRUD 由 NavPage + NavAppModal 直接落盘、
  *    分组新建/删除由 NavGroupSettingsModal 接管、卡片 hover ✎ 由 NavBoard.onEditApp 直达；
  *  - 负向自检①：注入「内网缺 lanUrl 不回落 url」回归 → 重载模块应检出差异 → 还原 → 复核全绿；
- *  - 负向自检②：进程级注入 9 类回归（<NavEditor / 顶栏分组设置文字按钮 / 齿轮接线缺失 /
+ *  - 负向自检②：进程级注入 13 类回归（<NavEditor / 顶栏分组设置文字按钮 / 齿轮接线缺失 /
  *    顶栏添加项目按钮 / 高级字段折叠区 / 智能匹配 / 全局图库被 engineId 阻挡 /
- *    容器列表接线缺失 / 容器四字段映射缺失），
+ *    容器列表接线缺失 / 容器四字段映射缺失 / 背景图上限回退 2mb / 超限 JSON 中间件缺失 /
+ *    上传兜底文案回退 / 前端体积预校验缺失），
  *    支持跨文件注入 NavPage.tsx、NavAppModal.tsx 与 IconAutoComplete.tsx
  *    → 重跑本门禁应 exit 1 → 还原 → 字节级一致。
  * 用法：node scripts/check-nav.mjs（退出码非 0 = 有回归）
@@ -192,6 +194,26 @@ const indexSrc = read("server/index.ts");
 ok("服务端注册 GET /api/nav-groups", indexSrc.includes('app.get("/api/nav-groups"'));
 ok("服务端注册 PUT /api/nav-groups", indexSrc.includes('app.put("/api/nav-groups"'));
 
+// v1.51.17：导航背景图上传（20MB 上限 + 超限返回 JSON + 前端预校验 / 友好兜底）
+const navSettingsModal = read("src/components/NavPageSettingsModal.tsx");
+const navApiSrc = read("src/api.ts");
+const uploadFn = navApiSrc.split("export async function uploadNavAssetApi")[1]?.split("\n}")[0] || "";
+ok("★ 背景图上传上限 20MB（不再复用图标 2mb 限制）",
+  indexSrc.includes("const NAV_ASSET_MAX_BYTES = 20 * 1024 * 1024") &&
+  indexSrc.includes('express.raw({ type: "image/*", limit: NAV_ASSET_MAX_BYTES })'));
+ok("★ 背景图超限返回 JSON 而非 HTML 错误页（局部错误中间件）",
+  indexSrc.includes('app.use("/api/nav-assets"') && indexSrc.includes("entity.too.large") &&
+  indexSrc.includes("背景图过大，请上传 ≤20MB 的图片"));
+ok("★ 背景图写入前校验非空 Buffer", indexSrc.includes("Buffer.isBuffer(body)"));
+ok("★ 上传 API 非 JSON 兜底附 HTTP 状态码（不再笼统报响应解析失败）",
+  uploadFn.includes("HTTP ${res.status}") && !uploadFn.includes('"响应解析失败"'));
+ok("★ 页面设置上传前预校验体积与图片类型",
+  navSettingsModal.includes("const NAV_ASSET_MAX_BYTES = 20 * 1024 * 1024") &&
+  navSettingsModal.includes("file.size > NAV_ASSET_MAX_BYTES") &&
+  navSettingsModal.includes('file.type.startsWith("image/")'));
+ok("★ 页面设置显示 ≤20MB 提示且超限给中文错误",
+  navSettingsModal.includes("≤20MB") && navSettingsModal.includes("图片过大"));
+
 const typesSrc = read("src/types.ts");
 ok("类型 NavGroup/NavAppItem/NavConfig 已定义", typesSrc.includes("interface NavGroup") && typesSrc.includes("interface NavAppItem") && typesSrc.includes("NavConfig"));
 ok("SystemSettings 已移除 nav 字段", !typesSrc.includes("nav: NavConfig"));
@@ -218,8 +240,8 @@ if (BROKEN === ORIGINAL) {
   ok("还原字节级一致", read(TARGET) === ORIGINAL);
 }
 
-console.log("== ④ 负向自检（进程级注入 9 类回归 → 重跑本门禁应 exit 1） ==");
-// 父进程注入 9 类回归文本，子进程跳过 ④（NAV_GATE_NEGATIVE_CHILD=1）只跑 ①②③，
+console.log("== ④ 负向自检（进程级注入 13 类回归 → 重跑本门禁应 exit 1） ==");
+// 父进程注入 13 类回归文本，子进程跳过 ④（NAV_GATE_NEGATIVE_CHILD=1）只跑 ①②③，
 // 若 ② 的对应断言确实生效，子进程必因 FAIL 而 exit 1。
 if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
   const NAV_PAGE_REL = "src/pages/NavPage.tsx";
@@ -272,6 +294,26 @@ if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
       name: "注入容器四字段映射缺失回归",
       rel: "src/components/NavAppModal.tsx",
       inject: (s) => s.replace("setName(c.name)", "setName(name)"),
+    },
+    {
+      name: "注入背景图上限回退 2mb 回归",
+      rel: "server/index.ts",
+      inject: (s) => s.replace("limit: NAV_ASSET_MAX_BYTES", 'limit: "2mb"'),
+    },
+    {
+      name: "注入超限 HTML 错误页回归（删除局部错误中间件）",
+      rel: "server/index.ts",
+      inject: (s) => s.replace('app.use("/api/nav-assets"', 'app.use("/api/nav-assets-disabled"'),
+    },
+    {
+      name: "注入上传兜底文案回退回归",
+      rel: "src/api.ts",
+      inject: (s) => s.replace("背景图上传失败（HTTP ${res.status}，服务端未返回 JSON）", "响应解析失败"),
+    },
+    {
+      name: "注入前端体积预校验缺失回归",
+      rel: "src/components/NavPageSettingsModal.tsx",
+      inject: (s) => s.replace("if (file.size > NAV_ASSET_MAX_BYTES) {", "if (false) {"),
     },
   ];
   for (const c of cases) {
