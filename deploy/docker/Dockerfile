@@ -56,8 +56,14 @@ RUN set -eux; \
 # ---------- Stage 2: 运行镜像 ----------
 FROM debian:bookworm-slim AS runtime
 
+# apt 源镜像（构建提速）：默认官方源保持可移植；CI 经 --build-arg 传国内镜像
+# （与 npm 用 npmmirror 同理，内网/国内 runner 到国内镜像更快；不可达时回退 --build-arg APT_MIRROR=deb.debian.org）
+ARG APT_MIRROR=deb.debian.org
+
 # docker CLI + compose 插件 + SSH(远程引擎) + glibc 运行时库（SEA 二进制为 glibc 构建）
-RUN apt-get update \
+# 注：app 经 spawnSync 调用 `docker` CLI 执行 pull / compose（server/docker.ts），故必须装 docker.io
+RUN sed -i "s|deb.debian.org|${APT_MIRROR}|g; s|security.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list \
+    && apt-get update \
     && apt-get install -y --no-install-recommends \
          docker.io \
          openssh-client \

@@ -79,6 +79,7 @@ jobs:
             -t "${{ steps.meta.outputs.ghcr_image }}:${{ steps.meta.outputs.version }}" \
             -t "${{ steps.meta.outputs.ghcr_image }}:latest" \
             --build-arg NPM_REGISTRY=https://registry.npmmirror.com \
+            --build-arg APT_MIRROR=mirrors.aliyun.com \
             .
 
       - name: 推送 Gitea 容器镜像库
