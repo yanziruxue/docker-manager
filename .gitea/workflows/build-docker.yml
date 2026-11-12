@@ -1,0 +1,101 @@
+name: build-docker-image
+
+# ============================================================
+# Docker 镜像构建工作流（Gitea Actions）
+#
+# 触发规则（用户确认 2026-11-12）：
+#   - 打 tag (v*) 推送            → 构建镜像并推送 Gitea 内置容器镜像库
+#                                   192.168.24.10:8024/yanzi/dockermanagementyanzi  (:版本 + :latest)
+#   - 手动触发 workflow_dispatch  → 默认 target=ghcr，构建镜像并推送
+#                                   ghcr.io/yanzirue/dockermanagementyanzi      (:版本 + :latest)
+#                                   （手动亦可选 target=gitea 推回 Gitea 镜像库）
+#
+# 前置硬条件：Gitea Actions runner 必须已安装 Docker 守护进程
+#   （docker build 需要；若 runner 无 docker，须改用 docker:dind 服务容器 privileged）。
+#
+# 所需仓库秘密（Gitea 后台 Settings → Secrets）：
+#   - GITEA_USER  / GITEA_TOKEN   （推 Gitea 镜像库；token 须含 包写(packages:write) 权限，
+#                                  现有 build.yml 已用 GITEA_TOKEN 发 Releases，补 GITEA_USER 即可）
+#   - GHCR_PAT                  （推 ghcr.io；GitHub PAT 须含 write:packages 权限）
+# ============================================================
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "推送目标镜像库（仅手动触发时生效）"
+        required: true
+        type: choice
+        options:
+          - ghcr
+          - gitea
+        default: ghcr
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  NODE_OPTIONS: ""          # 清空，避免 SafeDelete 垫片干扰（镜像内构建不走本机 shim，保留以与 build.yml 一致）
+
+jobs:
+  docker:
+    runs-on: [linux]
+    steps:
+      - name: Checkout
+        uses: https://gitea.com/actions/checkout@v4
+        # ── 内网若不通 gitea.com，改用同实例 actions 或下方手动 clone（仓库匿名可读）──
+        # run: |
+        #   git clone --depth 1 "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" _src
+        #   shopt -s dotglob && mv _src/* . && rm -rf _src
+
+      - name: Docker 环境自检（runner 须已安装 Docker 守护进程）
+        run: |
+          docker version || { echo "❌ 未检测到 Docker 守护进程，请使用装有 docker 的 runner（或改用 docker:dind 服务容器）"; exit 1; }
+
+      - name: 计算版本与镜像名
+        id: meta
+        run: |
+          # tag 事件用 tag 名（如 v1.51.18）；手动触发用 package.json 版本（如 v1.51.18）
+          if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+            VERSION="${GITHUB_REF_NAME}"
+          else
+            VERSION="v$(node -p "require('./package.json').version")"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "gitea_image=192.168.24.10:8024/yanzi/dockermanagementyanzi" >> "$GITHUB_OUTPUT"
+          echo "ghcr_image=ghcr.io/yanzirue/dockermanagementyanzi" >> "$GITHUB_OUTPUT"
+          echo "✅ VERSION=${VERSION}"
+
+      - name: 构建镜像（多阶段：vite → SEA 单文件二进制 → debian 运行镜像）
+        run: |
+          docker build \
+            -f deploy/docker/Dockerfile \
+            -t "${{ steps.meta.outputs.gitea_image }}:${{ steps.meta.outputs.version }}" \
+            -t "${{ steps.meta.outputs.gitea_image }}:latest" \
+            -t "${{ steps.meta.outputs.ghcr_image }}:${{ steps.meta.outputs.version }}" \
+            -t "${{ steps.meta.outputs.ghcr_image }}:latest" \
+            --build-arg NPM_REGISTRY=https://registry.npmmirror.com \
+            .
+
+      - name: 推送 Gitea 容器镜像库
+        if: github.event_name == 'push' || inputs.target == 'gitea'
+        env:
+          GITEA_USER: ${{ secrets.GITEA_USER }}
+          GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+        run: |
+          echo "${GITEA_TOKEN}" | docker login 192.168.24.10:8024 -u "${GITEA_USER}" --password-stdin
+          docker push "${{ steps.meta.outputs.gitea_image }}:${{ steps.meta.outputs.version }}"
+          docker push "${{ steps.meta.outputs.gitea_image }}:latest"
+
+      - name: 推送 ghcr.io
+        if: github.event_name == 'workflow_dispatch' && inputs.target == 'ghcr'
+        env:
+          GHCR_PAT: ${{ secrets.GHCR_PAT }}
+        run: |
+          echo "${GHCR_PAT}" | docker login ghcr.io -u yanzirue --password-stdin
+          docker push "${{ steps.meta.outputs.ghcr_image }}:${{ steps.meta.outputs.version }}"
+          docker push "${{ steps.meta.outputs.ghcr_image }}:latest"
