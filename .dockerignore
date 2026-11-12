@@ -10,7 +10,15 @@ build-upload
 *.log
 *.zip
 *.tar.gz
-deploy
+# deploy：保留 deploy/docker(极小) 与 deploy/linux/dockermanagementyanzi.service
+# （build-binary.mjs 须读取该 unit 模板嵌入二进制，绝不能排除）；
+# 仅排除 deploy/linux 下的巨型构建产物，避免 docker 上下文膨胀（261MB→数百KB）
+deploy/linux/dockermanagementyanzi
+deploy/linux/dockermanageryanzi-sea
+deploy/linux/bundle.js
+deploy/linux/sea-prep.blob
+deploy/linux/*.deb
+deploy/linux/*.rpm
 server/engines.json
 server/settings.json
 server/active_engine.json
