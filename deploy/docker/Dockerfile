@@ -62,7 +62,16 @@ ARG APT_MIRROR=deb.debian.org
 
 # docker CLI + compose 插件 + SSH(远程引擎) + glibc 运行时库（SEA 二进制为 glibc 构建）
 # 注：app 经 spawnSync 调用 `docker` CLI 执行 pull / compose（server/docker.ts），故必须装 docker.io
-RUN sed -i "s|deb.debian.org|${APT_MIRROR}|g; s|security.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list \
+# Debian 12 用 DEB822 格式(/etc/apt/sources.list.d/debian.sources)，旧版用 /etc/apt/sources.list；
+# 两者都可能存在，循环处理。仅当镜像≠官方源时才替换 security 主机（官方源不托管 /debian-security）。
+RUN MIRROR="${APT_MIRROR}"; \
+    for f in /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources; do \
+      [ -f "$f" ] || continue; \
+      sed -i "s|deb.debian.org|${MIRROR}|g" "$f"; \
+      if [ "$MIRROR" != "deb.debian.org" ]; then \
+        sed -i "s|security.debian.org|${MIRROR}|g" "$f"; \
+      fi; \
+    done \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
          docker.io \
