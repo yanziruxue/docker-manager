@@ -51,7 +51,7 @@ cat > "$SEA_CFG" <<'EOF'
   "output": "PLACEHOLDER_BLOB",
   "disableExperimentalSEAWarning": true,
   "useSnapshot": false,
-  "useCodeCache": true
+  "useCodeCache": false
 }
 EOF
 sed -i "s|PLACEHOLDER_BUNDLE|$BUNDLE|" "$SEA_CFG"

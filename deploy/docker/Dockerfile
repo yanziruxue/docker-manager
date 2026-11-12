@@ -40,7 +40,7 @@ RUN set -eux; \
       '  "output": "/build/sea-prep.blob",' \
       '  "disableExperimentalSEAWarning": true,' \
       '  "useSnapshot": false,' \
-      '  "useCodeCache": true' \
+      '  "useCodeCache": false' \
       '}' > /build/sea-config.json; \
     node --experimental-sea-config /build/sea-config.json; \
     mkdir -p /out; \
@@ -48,7 +48,8 @@ RUN set -eux; \
     npm i --no-save --no-audit --no-fund --registry=${NPM_REGISTRY} postject; \
     ./node_modules/.bin/postject /out/dockermanagementyanzi \
       NODE_SEA_BLOB /build/sea-prep.blob \
-      --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2; \
+      --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2 \
+      --overwrite; \
     chmod 755 /out/dockermanagementyanzi; \
     ls -lh /out/dockermanagementyanzi
 
