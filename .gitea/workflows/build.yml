@@ -15,7 +15,7 @@ env:
 
 jobs:
   build:
-    runs-on: [linux]
+    runs-on: [ubuntu-latest]
     steps:
       - name: Checkout
         uses: https://gitea.com/actions/checkout@v4
