@@ -16,6 +16,32 @@
 
 ---
 
+## v1.51.18 — 2026-11-12（**main 分支 · 已构建 · 已推 Gitea**）
+
+### 改动
+- **导航页顶栏「页面设置」左侧新增「编辑」切换按钮，进入编辑模式才能编辑已添加的项目**。
+- `src/pages/NavPage.tsx`：新增 `editMode` 状态（默认 `false`，每次刷新回落关闭，不持久化）；顶栏 `<div className="ml-auto flex ...">` 内「页面设置」**左侧**加「编辑 / 退出编辑」toggle 按钮（激活态 `bg-fuchsia-600` 高亮、文案随态切换）；`editMode` 通过 `editMode={editMode}` 下传给 `NavBoard`。
+- `src/components/NavBoard.tsx`：新增 `editMode?: boolean` prop；卡片 ✎ 编辑按钮改为**仅当 `editMode` 时渲染**，且常显 `opacity-100`（不再仅 hover 才显）。浏览态下卡片点击仍按原行为「打开链接」（`window.open`），编辑态不阻断点击。
+- **范围确认**（用户拍板）：仅锁死「已添加项目的编辑（✎）」；「＋ 添加项目」「齿轮 分组设置」**始终可用**，不随 editMode 收起。
+- **门禁** `scripts/check-nav.mjs`：② 新增 6 条源码断言（editMode 状态 / 顶栏编辑按钮在页面设置左侧 / editMode 下传 / NavBoard 接收 prop / ✎ 仅编辑态渲染且常显 / ＋与齿轮不随 editMode 收起）；④ 进程级负向自检 13 → **16 例**（新增「编辑按钮缺失」「NavBoard 不接收 editMode prop」「卡片 ✎ 非编辑态即可见」，跨 `NavPage.tsx` / `NavBoard.tsx` 注入）。另：旧断言「卡片 hover 编辑入口 `group-hover/card:opacity-100`」因本版改为 editMode 门控已失效，同步更新为新行为断言。**96 → 108 断言**。
+- 版本号 `1.51.17 → 1.51.18`。
+
+### 验证（硬证据）
+- 双 tsc（根 `src` / `server/tsconfig.json`）**0 错**；`check-nav` **108 ok / 0 FAIL**（13 类历史负向 + 3 类新增注入全部 `exit 1` 检出并字节级还原）。
+- SEA 四步构建 + 硬核验待下方发布段补充。
+
+### 已完成
+- 编辑模式开关 + 卡片 ✎ 门控 + 顶栏按钮布局 + 门禁覆盖。
+
+### 未完成 / 已知限制
+- 编辑模式未持久化（刷新回落关闭），符合「进入编辑模式才能编辑」语义；源码门禁不覆盖真实点击，需人工 UI 验收。
+- `editMode` 仅前端状态，服务端无对应接口（纯展示控制，无需后端）。
+
+### 下一步
+- 无（待人工在 Linux SEA 二进制实测：点「编辑」→ 卡片 ✎ 浮现 → 编辑项目 → 退出编辑后 ✎ 消失）。
+
+---
+
 ## v1.51.17 — 2026-11-12（**main 分支 · 已构建 · 已推 Gitea**）
 
 ### 改动

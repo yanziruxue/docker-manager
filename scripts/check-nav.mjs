@@ -6,7 +6,8 @@
  *   v1.51.14 弹窗移除底部高级字段折叠区，高级值从 initial 透传不丢数据；
  *   v1.51.15 项目弹窗图标统一改用堆栈 IconAutoComplete，移除智能匹配等自研图标功能；
  *   v1.51.16 勾选自托管后新增「容器列表」按钮，选容器一次填入名称/内网端口/外网链接/图标；
- *   v1.51.17 背景图上传上限提到 20MB、超限返回 JSON、前端预校验与友好兜底）
+ *   v1.51.17 背景图上传上限提到 20MB、超限返回 JSON、前端预校验与友好兜底；
+ *   v1.51.18 顶栏「页面设置」左侧新增「编辑」切换按钮，仅编辑态渲染卡片 ✎ 编辑入口，浏览态隐藏）
  *  - 真模块断言：编译运行 src/webui-url.ts 的 resolveNavAppUrl / normalizeNavLanUrl，
  *    覆盖内外网优先级链、`:端口` / `host:端口` / 完整 URL 三种内网写法、auto 分区分派；
  *  - 源码接线断言：导航配置完全收口在独立模块 server/nav-groups.ts（不污染 main settings.json），
@@ -17,8 +18,9 @@
  *  - 负向自检②：进程级注入 13 类回归（<NavEditor / 顶栏分组设置文字按钮 / 齿轮接线缺失 /
  *    顶栏添加项目按钮 / 高级字段折叠区 / 智能匹配 / 全局图库被 engineId 阻挡 /
  *    容器列表接线缺失 / 容器四字段映射缺失 / 背景图上限回退 2mb / 超限 JSON 中间件缺失 /
- *    上传兜底文案回退 / 前端体积预校验缺失），
- *    支持跨文件注入 NavPage.tsx、NavAppModal.tsx 与 IconAutoComplete.tsx
+ *    上传兜底文案回退 / 前端体积预校验缺失 / 编辑按钮缺失 / editMode 未下传 NavBoard /
+ *    卡片 ✎ 非编辑态即可见），
+ *    支持跨文件注入 NavPage.tsx、NavAppModal.tsx、NavBoard.tsx 与 IconAutoComplete.tsx
  *    → 重跑本门禁应 exit 1 → 还原 → 字节级一致。
  * 用法：node scripts/check-nav.mjs（退出码非 0 = 有回归）
  */
@@ -109,8 +111,8 @@ ok("NavBoard 走 resolveNavAppUrl 解析地址", board.includes("resolveNavAppUr
 ok("NavBoard 拉取 /api/network-zone 分区", board.includes("getNetworkZoneApi"));
 ok("NavBoard 图标三级解析（URL/图标库/首字母）", board.includes("resolveNavIconSrc"));
 ok("无地址卡片禁用打开", board.includes("disabled={!url}"));
-ok("★ NavBoard 卡片 hover 编辑入口 onEditApp",
-  board.includes("onEditApp") && board.includes("group-hover/card:opacity-100"));
+ok("★ NavBoard 卡片编辑入口 onEditApp（v1.51.18：仅 editMode 渲染，不再 hover 才显）",
+  board.includes("onEditApp") && board.includes("{editMode && (") && board.includes('title={`编辑「${a.name}」`}'));
 ok("★ NavBoard 不再有旧管理弹窗齿轮入口", !board.includes("onOpenEditor") && !board.includes("GearIcon"));
 ok("★ NavBoard「＋」右边齿轮扳手 = 分组设置唯一入口（顺序锁定）",
   board.includes("onOpenGroupSettings") && board.includes("<Settings") && board.includes("分组设置") &&
@@ -214,6 +216,22 @@ ok("★ 页面设置上传前预校验体积与图片类型",
 ok("★ 页面设置显示 ≤20MB 提示且超限给中文错误",
   navSettingsModal.includes("≤20MB") && navSettingsModal.includes("图片过大"));
 
+// v1.51.18：顶栏「编辑」按钮（页面设置左侧）+ 仅编辑态渲染卡片 ✎ 编辑入口，浏览态隐藏
+ok("★ NavPage 新增 editMode 状态（默认关闭，刷新回落关闭）", navPage.includes("const [editMode, setEditMode] = useState(false)"));
+ok("★ NavPage 顶栏「编辑」按钮在「页面设置」左侧且不引入其它文字按钮",
+  topbarActions.includes("编辑") &&
+  topbarActions.indexOf("编辑") < topbarActions.indexOf("页面设置") &&
+  !topbarActions.includes("管理分组") && !topbarActions.includes("分组设置") && !topbarActions.includes("添加项目"));
+ok("★ editMode 下传给 NavBoard", navPage.includes("editMode={editMode}"));
+ok("★ NavBoard 接收 editMode prop", board.includes("editMode?: boolean"));
+ok("★ 卡片 ✎ 编辑入口仅在 editMode 渲染且常显（浏览态隐藏，非 hover 才显）",
+  board.includes("{editMode && (") &&
+  board.includes('title={`编辑「${a.name}」`}') &&
+  board.includes("opacity-100") &&
+  !board.includes("group-hover/card:opacity-100"));
+ok("★ 「＋ 添加项目」「齿轮 分组设置」不随 editMode 收起（始终可用）",
+  board.includes("onClick={onAddApp}") && board.includes("onClick={onOpenGroupSettings}"));
+
 const typesSrc = read("src/types.ts");
 ok("类型 NavGroup/NavAppItem/NavConfig 已定义", typesSrc.includes("interface NavGroup") && typesSrc.includes("interface NavAppItem") && typesSrc.includes("NavConfig"));
 ok("SystemSettings 已移除 nav 字段", !typesSrc.includes("nav: NavConfig"));
@@ -240,7 +258,7 @@ if (BROKEN === ORIGINAL) {
   ok("还原字节级一致", read(TARGET) === ORIGINAL);
 }
 
-console.log("== ④ 负向自检（进程级注入 13 类回归 → 重跑本门禁应 exit 1） ==");
+console.log("== ④ 负向自检（进程级注入 16 类回归 → 重跑本门禁应 exit 1） ==");
 // 父进程注入 13 类回归文本，子进程跳过 ④（NAV_GATE_NEGATIVE_CHILD=1）只跑 ①②③，
 // 若 ② 的对应断言确实生效，子进程必因 FAIL 而 exit 1。
 if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
@@ -314,6 +332,20 @@ if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
       name: "注入前端体积预校验缺失回归",
       rel: "src/components/NavPageSettingsModal.tsx",
       inject: (s) => s.replace("if (file.size > NAV_ASSET_MAX_BYTES) {", "if (false) {"),
+    },
+    {
+      name: "注入编辑按钮缺失回归（移除 editMode 下传）",
+      inject: (s) => s.replace("editMode={editMode}", ""),
+    },
+    {
+      name: "注入 NavBoard 不接收 editMode prop 回归",
+      rel: "src/components/NavBoard.tsx",
+      inject: (s) => s.replace("editMode?: boolean;", "editModeProp?: boolean;"),
+    },
+    {
+      name: "注入卡片 ✎ 非编辑态即可见回归（移除 editMode 门控）",
+      rel: "src/components/NavBoard.tsx",
+      inject: (s) => s.replace("{editMode && (", ""),
     },
   ];
   for (const c of cases) {

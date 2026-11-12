@@ -185,6 +185,7 @@ function AppCard({
 export function NavBoard({
   group,
   iconMap,
+  editMode,
   onAddApp,
   onEditApp,
   onOpenGroupSettings,
@@ -192,6 +193,8 @@ export function NavBoard({
 }: {
   group: NavGroup;
   iconMap: Record<string, string>;
+  /** 编辑模式（v1.51.18，由导航页「编辑」按钮切换）：仅此态下渲染卡片 ✎ 编辑入口 */
+  editMode?: boolean;
   onAddApp: () => void;
   /** 编辑单个项目（v1.51.11）：由 NavPage 打开独立 NavAppModal */
   onEditApp: (app: NavAppItem) => void;
@@ -265,15 +268,18 @@ export function NavBoard({
                 cardStyle={cardStyle}
                 iconShape={iconShape}
               />
-              {/* 编辑按钮是卡片 <button> 的兄弟节点，绝不嵌套（保留 disabled={!url} 语义） */}
-              <button
-                type="button"
-                onClick={() => onEditApp(a)}
-                title={`编辑「${a.name}」`}
-                className="absolute top-1.5 left-1.5 z-10 w-6 h-6 rounded-full bg-white/90 text-fuchsia-600 flex items-center justify-center shadow-sm opacity-0 group-hover/card:opacity-100 focus:opacity-100 transition-opacity"
-              >
-                <Pencil size={12} />
-              </button>
+              {/* 编辑按钮是卡片 <button> 的兄弟节点，绝不嵌套（保留 disabled={!url} 语义）。
+                  v1.51.18：仅 editMode 态渲染，且常显（opacity-100）以提示可编辑。 */}
+              {editMode && (
+                <button
+                  type="button"
+                  onClick={() => onEditApp(a)}
+                  title={`编辑「${a.name}」`}
+                  className="absolute top-1.5 left-1.5 z-10 w-6 h-6 rounded-full bg-white/90 text-fuchsia-600 flex items-center justify-center shadow-sm opacity-100 transition-opacity"
+                >
+                  <Pencil size={12} />
+                </button>
+              )}
             </div>
           ))}
         </div>

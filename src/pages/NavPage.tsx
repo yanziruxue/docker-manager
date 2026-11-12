@@ -13,7 +13,7 @@
  * 图标解析 / 内外网分区复用 NavBoard（独立拉取 /api/custom-icons 与 /api/network-zone）。
  */
 import React, { useState, useEffect, useCallback } from "react";
-import { Compass, SlidersHorizontal } from "lucide-react";
+import { Compass, Pencil, SlidersHorizontal } from "lucide-react";
 import { NavBoard, useNavIconMap } from "../components/NavBoard";
 import { NavAppModal } from "../components/NavAppModal";
 import { NavGroupSettingsModal } from "../components/NavGroupSettingsModal";
@@ -57,6 +57,9 @@ export function NavPage({ navGroups, onSaveNavGroups, containers, navPageSetting
   const [appModal, setAppModal] = useState<AppModalState>(APP_MODAL_CLOSED);
   const [navPageSettingsOpen, setNavPageSettingsOpen] = useState(false);
   const [navGroupSettingsOpen, setNavGroupSettingsOpen] = useState(false);
+  // v1.51.18：编辑模式开关。默认关闭（每次刷新回落关闭）；开启后卡片 ✎ 编辑入口才可见，
+  // 仅用于「编辑已添加的项目」，不制约「＋ 添加项目」「齿轮 分组设置」（两者始终可用）。
+  const [editMode, setEditMode] = useState(false);
   const navIconMap = useNavIconMap();
   // 打开页面设置弹窗（整页外观/环境）
   const openPageSettings = useCallback(() => setNavPageSettingsOpen(true), []);
@@ -158,6 +161,17 @@ export function NavPage({ navGroups, onSaveNavGroups, containers, navPageSetting
         ))}
         <div className="ml-auto flex items-center gap-2">
           <button
+            onClick={() => setEditMode((v) => !v)}
+            className={`flex items-center gap-1 px-3.5 py-1.5 rounded-full text-[13px] font-medium shadow-sm backdrop-blur-sm transition-colors ${
+              editMode
+                ? "text-white bg-fuchsia-600 hover:bg-fuchsia-700"
+                : "text-slate-600 bg-white/75 hover:bg-white"
+            }`}
+            title={editMode ? "退出编辑模式" : "进入编辑模式（开启后可编辑已添加的项目）"}
+          >
+            <Pencil size={13} /> {editMode ? "退出编辑" : "编辑"}
+          </button>
+          <button
             onClick={openPageSettings}
             className="flex items-center gap-1 px-3.5 py-1.5 rounded-full text-[13px] font-medium text-rose-600 bg-white/75 backdrop-blur-sm shadow-sm hover:bg-white transition-colors"
             title="页面设置（背景图片 / 环境天气 / 内外网默认模式 / 白昼模式）"
@@ -171,6 +185,7 @@ export function NavPage({ navGroups, onSaveNavGroups, containers, navPageSetting
         <NavBoard
           group={activeNavGroup}
           iconMap={navIconMap}
+          editMode={editMode}
           onAddApp={openAddApp}
           onEditApp={openEditApp}
           onOpenGroupSettings={openGroupSettings}
