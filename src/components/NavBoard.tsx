@@ -5,10 +5,10 @@
  * 自包含：自行拉取 /api/custom-icons 与 /api/network-zone（失败分别回落空映射 / intranet）。
  * v1.51.7：支持分组级卡片布局/大小/间距/图标大小（参照 FlatNas）与 ext 外链直开、self 备用地址回退。
  * v1.51.11：卡片 hover 显示「✎」直达项目编辑弹窗（旧管理弹窗齿轮入口一并移除）。
- * v1.51.12：分组标题行「＋」右边恢复齿轮扳手，作为「分组设置」唯一入口（不再指向已删除的管理弹窗）。
+ * v1.52.1：分组标题行不再渲染 ＋/齿轮（入口收敛至导航页顶栏图标条），本组件仅渲染分组与卡片。
  */
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import { ExternalLink, Pencil, Settings } from "lucide-react";
+import { ExternalLink, Pencil } from "lucide-react";
 import type { NavAppItem, NavCardStyle, NavGroup, NavIconShape, NavNetworkMode } from "../types";
 import { getNetworkZoneApi, listCustomIconsApi } from "../api";
 import { resolveNavAppUrl, type WebuiZone, type WebuiZoneMode } from "../webui-url";
@@ -206,9 +206,7 @@ export function NavBoard({
   zoneTag,
   iconMap,
   editMode,
-  onAddApp,
   onEditApp,
-  onOpenGroupSettings,
   navNetworkMode,
   resolveGroupOf,
   onCardDragStart,
@@ -221,12 +219,8 @@ export function NavBoard({
   iconMap: Record<string, string>;
   /** 编辑模式（v1.51.18，由导航页「编辑」按钮切换）：仅此态下渲染卡片 ✎ 编辑入口 */
   editMode?: boolean;
-  /** 添加项目到本分组（v1.52.0：携带 group.id，由导航页定位归属分组） */
-  onAddApp: (groupId: string) => void;
   /** 编辑单个项目（v1.51.11）：由 NavPage 打开独立 NavAppModal */
   onEditApp: (app: NavAppItem) => void;
-  /** 打开「分组设置」弹窗（v1.52.0：携带 group.id，由导航页定位父分区与分组） */
-  onOpenGroupSettings: (groupId: string) => void;
   /** 内外网默认访问模式（v1.51.8，由导航页「页面设置」下传）：覆盖单卡自动判定 */
   navNetworkMode?: NavNetworkMode;
   /** 「全部」视图下，按 appId 解析其真实归属分组（v1.51.19） */
@@ -264,33 +258,17 @@ export function NavBoard({
 
   return (
     <div>
-      {/* 分组标题行：白色标题 + 圆形「＋」与其右侧「齿轮扳手」（FlatNas 风格，v1.51.12 齿轮 = 分组设置入口） */}
+      {/* 分组标题行（v1.52.1：仅标题，＋/齿轮已收敛至导航页顶栏图标条） */}
       <div className="flex items-center justify-between mb-5">
         <h2 className="text-xl font-bold text-white drop-shadow-sm flex items-baseline gap-2">
           {group.name}
           {zoneTag && <span className="text-[12px] font-normal text-white/60">· {zoneTag}</span>}
         </h2>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => onAddApp(group.id)}
-            className="w-9 h-9 rounded-full bg-white/85 text-fuchsia-600 flex items-center justify-center shadow-sm hover:bg-white hover:scale-105 transition-all"
-            title="为该分组添加入口"
-          >
-            <PlusIcon />
-          </button>
-          <button
-            onClick={() => onOpenGroupSettings(group.id)}
-            className="w-9 h-9 rounded-full bg-white/85 text-fuchsia-600 flex items-center justify-center shadow-sm hover:bg-white hover:scale-105 transition-all"
-            title="分组设置（新建/删除/改名分区与分组、卡片布局/间距/大小/图标大小/样式/形状）"
-          >
-            <Settings size={17} />
-          </button>
-        </div>
       </div>
       {apps.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-12 text-white/85">
           <PlusIcon className="mb-2 opacity-80" />
-          <p className="text-sm">该分组还没有入口，点上方「＋」添加</p>
+          <p className="text-sm">该分组还没有入口，点顶栏「＋」添加</p>
         </div>
       ) : (
         <div className="flex gap-3 overflow-x-auto pb-3 snap-x" style={{ gap: gridGap }}>

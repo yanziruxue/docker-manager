@@ -91,16 +91,22 @@ ok("★ NavPage 不再挂载/导入 NavEditor 弹窗",
   !navPage.includes("<NavEditor") && !navPage.includes('from "../components/NavEditor"'));
 ok("★ NavEditor.tsx 文件已删除", !fs.existsSync(path.join(ROOT, "src/components/NavEditor.tsx")));
 ok("★ NavPage 无管理弹窗状态与入口", !navPage.includes("navEditing") && !navPage.includes("openEditor"));
-// v1.51.12：分组设置唯一入口 = 标题行「＋」右边齿轮扳手；v1.51.13 起顶栏仅剩「页面设置」
+// v1.52.1：入口收敛顶栏图标条「编辑 | ＋添加项目 | ⚙分区/分组设置 | 页面设置」，分组行不再带 ＋/齿轮
 const topbarActions = (navPage.split('<div className="ml-auto flex items-center gap-2">')[1] || "").split("</div>")[0] || "";
-ok("★ 顶栏操作区仅「页面设置」（无管理分组、无分组设置/添加项目文字按钮，v1.51.13）",
-  topbarActions.includes("页面设置") &&
-  !topbarActions.includes("管理分组") && !topbarActions.includes("分组设置") && !topbarActions.includes("添加项目"));
-ok("★ NavPage 不再渲染顶栏分组设置/添加项目文字按钮（LayoutGrid / Plus 已移除）",
+ok("★ 顶栏四入口顺序锁定：编辑 → ＋添加项目 → ⚙分区与分组设置 → 页面设置",
+  topbarActions.includes("编辑") && topbarActions.includes("添加项目") &&
+  topbarActions.includes("分区与分组设置") && topbarActions.includes("页面设置") &&
+  topbarActions.indexOf("编辑") < topbarActions.indexOf("添加项目") &&
+  topbarActions.indexOf("添加项目") < topbarActions.indexOf("分区与分组设置") &&
+  topbarActions.indexOf("分区与分组设置") < topbarActions.indexOf("页面设置"));
+ok("★ 顶栏不渲染文字版分组设置/添加项目按钮（图标 + title 即可）",
   !navPage.includes("<LayoutGrid") && !navPage.includes("分组设置</button>") &&
-  !navPage.includes("<Plus size=") && !navPage.includes("添加项目</button>"));
-ok("★ NavPage 把分组设置打开器下传给 NavBoard（齿轮入口接线）",
-  navPage.includes("onOpenGroupSettings={openGroupSettings}") && navPage.includes("openGroupSettings"));
+  !navPage.includes("添加项目</button>"));
+ok("★ 顶栏「＋添加项目」默认归属当前分区首分组（全部视图=首个有分组的分区）",
+  navPage.includes("openAddApp(defaultAddGroupId() || \"\")") && navPage.includes("defaultAddGroupId"));
+ok("★ 顶栏齿轮打开分区/分组设置并定位当前分区",
+  navPage.includes("openGroupSettings(undefined, isAll ? undefined : effectiveTab)") &&
+  navPage.includes("initialZoneId={groupSettings.initialZoneId}"));
 ok("★ 独立挂载 NavAppModal 并接线项目 CRUD",
   navPage.includes("<NavAppModal") && navPage.includes("handleSaveApp") && navPage.includes("onDelete={handleDeleteApp}"));
 ok("★ 项目保存保留跨分组移动语义（旧分组移除同 id）", navPage.includes("a.id !== app.id"));
@@ -114,12 +120,9 @@ ok("无地址卡片禁用打开", board.includes("disabled={!url}"));
 ok("★ NavBoard 卡片编辑入口 onEditApp（v1.51.18：仅 editMode 渲染，不再 hover 才显）",
   board.includes("onEditApp") && board.includes("{editMode && (") && board.includes('title={`编辑「${a.name}」`}'));
 ok("★ NavBoard 不再有旧管理弹窗齿轮入口", !board.includes("onOpenEditor") && !board.includes("GearIcon"));
-ok("★ NavBoard「＋」右边齿轮扳手 = 分组设置唯一入口（顺序锁定）",
-  board.includes("onOpenGroupSettings") && board.includes("<Settings") && board.includes("分组设置") &&
-  board.indexOf("onAddApp(group.id)") < board.indexOf("onOpenGroupSettings(group.id)"));
-ok("★ 添加新项目唯一入口 = NavBoard 标题行「＋」（顶栏不再有添加按钮，v1.51.13）",
-  board.includes("onAddApp(group.id)") && navPage.includes("onAddApp={openAddApp}") &&
-  !navPage.includes("添加项目</button>") && !navPage.includes("<Plus size="));
+ok("★ NavBoard 分组标题行不再渲染 ＋/齿轮（入口收敛顶栏，v1.52.1）",
+  !board.includes("onOpenGroupSettings") && !board.includes("onAddApp") &&
+  !board.includes('title="为该分组添加入口"') && !board.includes("分组设置"));
 
 const appModal = read("src/components/NavAppModal.tsx");
 ok("★ NavAppModal 编辑态支持删除项目", appModal.includes("onDelete") && appModal.includes("删除项目"));
@@ -218,10 +221,9 @@ ok("★ 页面设置显示 ≤20MB 提示且超限给中文错误",
 
 // v1.51.18：顶栏「编辑」按钮（页面设置左侧）+ 仅编辑态渲染卡片 ✎ 编辑入口，浏览态隐藏
 ok("★ NavPage 新增 editMode 状态（默认关闭，刷新回落关闭）", navPage.includes("const [editMode, setEditMode] = useState(false)"));
-ok("★ NavPage 顶栏「编辑」按钮在「页面设置」左侧且不引入其它文字按钮",
-  topbarActions.includes("编辑") &&
-  topbarActions.indexOf("编辑") < topbarActions.indexOf("页面设置") &&
-  !topbarActions.includes("管理分组") && !topbarActions.includes("分组设置") && !topbarActions.includes("添加项目"));
+ok("★ 顶栏「编辑」在「页面设置」左侧且无其它文字按钮（图标条已含 ＋/⚙）",
+  topbarActions.includes("编辑") && topbarActions.indexOf("编辑") < topbarActions.indexOf("页面设置") &&
+  !topbarActions.includes("管理分组"));
 ok("★ editMode 下传给 NavBoard", navPage.includes("editMode={editMode}"));
 ok("★ NavBoard 接收 editMode prop", board.includes("editMode?: boolean"));
 ok("★ 卡片 ✎ 编辑入口仅在 editMode 渲染且常显（浏览态隐藏，非 hover 才显）",
@@ -229,8 +231,9 @@ ok("★ 卡片 ✎ 编辑入口仅在 editMode 渲染且常显（浏览态隐藏
   board.includes('title={`编辑「${a.name}」`}') &&
   board.includes("opacity-100") &&
   !board.includes("group-hover/card:opacity-100"));
-ok("★ 「＋ 添加项目」「齿轮 分组设置」不随 editMode 收起（始终可用）",
-  board.includes("onAddApp(group.id)") && board.includes("onOpenGroupSettings(group.id)"));
+ok("★ 顶栏「＋添加项目」「⚙分区设置」不随 editMode 收起（始终可用）",
+  topbarActions.includes("openAddApp(defaultAddGroupId() || \"\")") &&
+  topbarActions.includes("openGroupSettings(undefined, isAll ? undefined : effectiveTab)"));
 
 const typesSrc = read("src/types.ts");
 ok("类型 NavZone/NavGroup/NavAppItem/NavConfig 已定义", typesSrc.includes("interface NavZone") && typesSrc.includes("interface NavGroup") && typesSrc.includes("interface NavAppItem") && typesSrc.includes("NavConfig"));
@@ -285,8 +288,8 @@ if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
       ),
     },
     {
-      name: "注入齿轮入口接线缺失回归",
-      inject: (s) => s.replace("onOpenGroupSettings={openGroupSettings}", ""),
+      name: "注入齿轮定位当前分区缺失回归",
+      inject: (s) => s.replace("initialZoneId={groupSettings.initialZoneId}", ""),
     },
     {
       name: "注入顶栏「添加项目」文字按钮回归",

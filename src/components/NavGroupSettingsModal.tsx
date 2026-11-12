@@ -113,6 +113,7 @@ function SliderRow({
 export function NavGroupSettingsModal({
   zones,
   initialGroupId,
+  initialZoneId,
   onSave,
   onClose,
 }: {
@@ -120,24 +121,29 @@ export function NavGroupSettingsModal({
   zones: NavZone[];
   /** 默认聚焦的分组（由某分组齿轮打开时传入，自动定位其父分区） */
   initialGroupId?: string;
+  /** 默认选中的分区（v1.52.1：顶栏齿轮 = 设置当前分区；无 initialGroupId 时生效） */
+  initialZoneId?: string;
   onSave: (zones: NavZone[]) => void;
   onClose: () => void;
 }) {
   const [draft, setDraft] = useState<NavZone[]>(() =>
     (zones || []).map((z) => ({ ...z, groups: (z.groups || []).map((g) => ({ ...g, apps: [...(g.apps || [])] })) })),
   );
-  // 由 initialGroupId 解析父分区
-  const [selectedZoneId, setSelectedZoneId] = useState<string>(() => {
+  // 由 initialGroupId 解析父分区；否则回落 initialZoneId；再回落首个分区
+  const resolveInitialZoneId = (): string => {
     if (initialGroupId && (zones || []).some((z) => (z.groups || []).some((g) => g.id === initialGroupId))) {
       return (zones || []).find((z) => (z.groups || []).some((g) => g.id === initialGroupId))!.id;
     }
+    if (initialZoneId && (zones || []).some((z) => z.id === initialZoneId)) return initialZoneId;
     return (zones || [])[0]?.id || "";
-  });
+  };
+  const [selectedZoneId, setSelectedZoneId] = useState<string>(resolveInitialZoneId);
   const [selectedGroupId, setSelectedGroupId] = useState<string>(() => {
     if (initialGroupId && (zones || []).some((z) => (z.groups || []).some((g) => g.id === initialGroupId))) {
       return initialGroupId;
     }
-    return (zones || [])[0]?.groups?.[0]?.id || "";
+    const z = (zones || []).find((zz) => zz.id === resolveInitialZoneId());
+    return z?.groups?.[0]?.id || "";
   });
 
   const activeZone = draft.find((z) => z.id === selectedZoneId) || null;

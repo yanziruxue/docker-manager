@@ -4,11 +4,12 @@
  *  - 选中分区下逐「分组」渲染为区块（分组标题 + ＋ + ⚙ + 卡片墙）；
  *  - 「全部」标签合并所有分区的全部分组；
  *  - 编辑态卡片可拖拽：跨分组 / 跨分区移动 + 排序（group id 全局唯一，天然支持）。
- * v1.51.11：移除「管理导航」(NavEditor)，职责三分：页面设置 / 分组设置 / ＋添加项目·卡片 ✎。
- * v1.51.12/13：顶栏仅「页面设置 / 编辑（v1.51.18）」；分组设置唯一入口 = 分组标题行齿轮（v1.52.0 升级为分区+分组管理）。
+ * v1.51.11：移除「管理导航」(NavEditor)，项目 CRUD 直达。
+ * v1.52.1：入口全部收敛顶栏图标条「编辑 | ＋添加项目 | ⚙分区/分组设置 | 页面设置」；
+ *          分组标题行不再渲染 ＋/齿轮；顶栏齿轮 = 设置当前分区（弹窗自动定位）。
  */
 import React, { useState, useEffect, useCallback } from "react";
-import { Compass, Pencil, SlidersHorizontal } from "lucide-react";
+import { Compass, Pencil, Plus, Settings, SlidersHorizontal } from "lucide-react";
 import { NavBoard, useNavIconMap } from "../components/NavBoard";
 import { NavAppModal } from "../components/NavAppModal";
 import { NavGroupSettingsModal } from "../components/NavGroupSettingsModal";
@@ -41,6 +42,8 @@ const APP_MODAL_CLOSED: AppModalState = { open: false, initial: null };
 interface GroupSettingsState {
   open: boolean;
   initialGroupId?: string;
+  /** 打开时定位的分区（v1.52.1：顶栏齿轮 = 设置当前分区，弹窗自动选中它） */
+  initialZoneId?: string;
 }
 
 export function NavPage({ navZones, onSaveNavZones, containers, navPageSettings, onSaveNavPageSettings }: NavPageProps) {
@@ -64,8 +67,11 @@ export function NavPage({ navZones, onSaveNavZones, containers, navPageSettings,
   const navIconMap = useNavIconMap();
   // 打开页面设置弹窗（整页外观/环境）
   const openPageSettings = useCallback(() => setNavPageSettingsOpen(true), []);
-  // 打开分区/分组设置弹窗（v1.52.0：管理分区与分组；可聚焦到某分组）
-  const openGroupSettings = useCallback((groupId?: string) => setGroupSettings({ open: true, initialGroupId: groupId }), []);
+  // 打开分区/分组设置弹窗（v1.52.0：管理分区与分组；可聚焦到某分组；v1.52.1 支持定位某分区）
+  const openGroupSettings = useCallback(
+    (groupId?: string, zoneId?: string) => setGroupSettings({ open: true, initialGroupId: groupId, initialZoneId: zoneId }),
+    [],
+  );
 
   const isAll = navTab === "__all__";
   const effectiveTab = !isAll && zones.some((z) => z.id === navTab) ? navTab : zones[0]?.id || "";
@@ -78,6 +84,11 @@ export function NavPage({ navZones, onSaveNavZones, containers, navPageSettings,
 
   // v1.51.11：项目 CRUD 直接对 zones 做不可变更新并落盘，不再经 NavEditor 中转
   const openAddApp = (groupId: string) => setAppModal({ open: true, initial: null, groupId });
+  // v1.52.1：顶栏「＋添加项目」默认归属分组 = 当前分区首分组；「全部」视图 = 首个有分组的分区首分组
+  const defaultAddGroupId = (): string | undefined => {
+    if (isAll) return zones.find((z) => (z.groups || []).length > 0)?.groups[0]?.id;
+    return activeZone?.groups[0]?.id;
+  };
   const openEditApp = (app: NavAppItem) => setAppModal({ open: true, initial: app, groupId: undefined });
   // 编辑时切换分组，旧分组必须移除同 id 条目（保留 NavEditor 时代的跨分组移动语义）
   const handleSaveApp = (groupId: string, app: NavAppItem) => {
@@ -208,7 +219,7 @@ export function NavPage({ navZones, onSaveNavZones, containers, navPageSettings,
       {/* 环境天气效果（纯前端 canvas，置于内容之下、背景之上） */}
       <WeatherEffect weather={settings.weather || "none"} />
 
-      {/* 分区标签条 + 页面设置（分组设置=分组标题行齿轮、添加项目=分组标题行＋） */}
+      {/* 分区标签条 + 顶栏图标条（v1.52.1：编辑 | ＋添加项目 | ⚙分区/分组设置 | 页面设置） */}
       <div className="flex items-center gap-2 mb-5 flex-wrap relative">
         {zones.length === 0 && (
           <span className="text-[13px] text-white/80 px-1">还没有导航分区</span>
@@ -262,6 +273,7 @@ export function NavPage({ navZones, onSaveNavZones, containers, navPageSettings,
           全部
         </button>
         <div className="ml-auto flex items-center gap-2">
+          {/* v1.52.1：入口收敛为顶栏图标条（四入口顺序锁定见 check-nav），分组行不再带 ＋/齿轮 */}
           <button
             onClick={() => setEditMode((v) => !v)}
             className={`flex items-center gap-1 px-3.5 py-1.5 rounded-full text-[13px] font-medium shadow-sm backdrop-blur-sm transition-colors ${
@@ -274,11 +286,26 @@ export function NavPage({ navZones, onSaveNavZones, containers, navPageSettings,
             <Pencil size={13} /> {editMode ? "退出编辑" : "编辑"}
           </button>
           <button
+            onClick={() => openAddApp(defaultAddGroupId() || "")}
+            disabled={!defaultAddGroupId()}
+            className="w-8 h-8 rounded-full bg-white/85 text-fuchsia-600 flex items-center justify-center shadow-sm backdrop-blur-sm hover:bg-white hover:scale-105 transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100"
+            title="添加项目（默认加入当前分区首个分组，可在弹窗中改选分组）"
+          >
+            <Plus size={15} />
+          </button>
+          <button
+            onClick={() => openGroupSettings(undefined, isAll ? undefined : effectiveTab)}
+            className="w-8 h-8 rounded-full bg-white/85 text-fuchsia-600 flex items-center justify-center shadow-sm backdrop-blur-sm hover:bg-white hover:scale-105 transition-all"
+            title="分区与分组设置（管理当前分区的分区/分组：新建/改名/删除与卡片外观）"
+          >
+            <Settings size={15} />
+          </button>
+          <button
             onClick={openPageSettings}
-            className="flex items-center gap-1 px-3.5 py-1.5 rounded-full text-[13px] font-medium text-rose-600 bg-white/75 backdrop-blur-sm shadow-sm hover:bg-white transition-colors"
+            className="w-8 h-8 rounded-full bg-white/85 text-rose-600 flex items-center justify-center shadow-sm backdrop-blur-sm hover:bg-white hover:scale-105 transition-all"
             title="页面设置（背景图片 / 环境天气 / 内外网默认模式 / 白昼模式）"
           >
-            <SlidersHorizontal size={13} /> 页面设置
+            <SlidersHorizontal size={15} />
           </button>
         </div>
       </div>
@@ -304,9 +331,7 @@ export function NavPage({ navZones, onSaveNavZones, containers, navPageSettings,
                 zoneTag={isAll ? zoneName : undefined}
                 iconMap={navIconMap}
                 editMode={editMode}
-                onAddApp={openAddApp}
                 onEditApp={openEditApp}
-                onOpenGroupSettings={openGroupSettings}
                 navNetworkMode={navNetworkMode}
                 resolveGroupOf={isAll ? resolveGroupOf : undefined}
                 onCardDragStart={onCardDragStart}
@@ -359,6 +384,7 @@ export function NavPage({ navZones, onSaveNavZones, containers, navPageSettings,
         <NavGroupSettingsModal
           zones={zones}
           initialGroupId={groupSettings.initialGroupId}
+          initialZoneId={groupSettings.initialZoneId}
           onSave={(next) => {
             onSaveNavZones(next);
             setGroupSettings({ open: false });
