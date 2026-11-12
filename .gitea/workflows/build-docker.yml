@@ -14,8 +14,9 @@ name: build-docker-image
 #   （docker build 需要；若 runner 无 docker，须改用 docker:dind 服务容器 privileged）。
 #
 # 所需仓库秘密（Gitea 后台 Settings → Secrets）：
-#   - GITEA_USER  / GITEA_TOKEN   （推 Gitea 镜像库；token 须含 包写(packages:write) 权限，
-#                                  现有 build.yml 已用 GITEA_TOKEN 发 Releases，补 GITEA_USER 即可）
+#   - DOCKER_USER / DOCKER_TOKEN （推 Gitea 镜像库；token 须含 包写(packages:write) 权限。
+#                                  注：GITEA_/GITHUB_ 前缀为 Actions 自动注入 token 的保留名，
+#                                  自建 Secret 禁用该前缀，故用 DOCKER_ 前缀）
 #   - GHCR_PAT                  （推 ghcr.io；GitHub PAT 须含 write:packages 权限）
 # ============================================================
 
@@ -85,10 +86,10 @@ jobs:
       - name: 推送 Gitea 容器镜像库
         if: github.event_name == 'push' || inputs.target == 'gitea'
         env:
-          GITEA_USER: ${{ secrets.GITEA_USER }}
-          GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+          DOCKER_USER: ${{ secrets.DOCKER_USER }}
+          DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
         run: |
-          echo "${GITEA_TOKEN}" | docker login 192.168.24.10:8024 -u "${GITEA_USER}" --password-stdin
+          echo "${DOCKER_TOKEN}" | docker login 192.168.24.10:8024 -u "${DOCKER_USER}" --password-stdin
           docker push "${{ steps.meta.outputs.gitea_image }}:${{ steps.meta.outputs.version }}"
           docker push "${{ steps.meta.outputs.gitea_image }}:latest"
 
