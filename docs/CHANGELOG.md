@@ -16,6 +16,33 @@
 
 ---
 
+## v1.51.15 — 2026-11-12（**main 分支 · 已构建 · 已推 Gitea**）
+
+### 改动
+- **导航页图标统一改用「堆栈图标的逻辑」**（`IconAutoComplete`：聚焦/输入按名称实时过滤图库、下拉点选直接写入图标 URL），移除导航弹窗自研的整套图标功能：智能匹配按钮、已缓存/未缓存徽标、引用 Docker 容器图标下拉、图标预览框、按名查 `iconMap` 的 `resolveNavIconSrc` 预览链。图标区收敛为**一个输入框**。
+- `src/components/NavAppModal.tsx`：删除 `smartMatch` / `cached` / `sortedContainers` / `fillFromContainer` / `previewZoom` / `previewTitleColor`、`useNavIconMap` 与 `resolveNavIconSrc` import、`Zap`/`Check` import、`containers` prop；`onChange={(val) => setIcon(val)}` + `onPick={(urlValue) => setIcon(urlValue)}` 接线。主表单其余字段与 `confirm()` 的高级字段透传**完全不动**。
+- **⭐ 全局图库可达性修复** `src/components/IconAutoComplete.tsx`：原 `engineId ? listCustomIconsApi() : Promise.resolve(null)` 会让没有 engine 上下文的导航页拿到「图标库为空」；改为**无条件拉取** `listCustomIconsApi().catch(() => null)`（`listStackIconsApi` 仍仅 `engineId && stackName` 时拉）。`/api/custom-icons` 本就是全局路由；堆栈页传了 engineId，行为不变。空态文案按是否有堆栈上下文条件化。
+- `src/pages/NavPage.tsx` / `src/App.tsx`：图标不再引用 Docker 容器，`containers` 链路从 `NavPageProps`、函数签名、`<NavAppModal>` 与 `<NavPage>` 挂载处一并移除（`App` 其它页面仍照常使用 `containers`）。
+- **门禁改造** `scripts/check-nav.mjs`：② 新增 4 条断言（IconAutoComplete 接线 / 自研图标功能代码体零残留 / 全局图库无条件拉取 / NavPage 不再传 containers），断言只扫**代码体**（剥离文件头块注释，避免「移除了什么」的说明文字假红）并附锚点断言；④ 进程级负向自检 5 → **7 例**（新增「注入智能匹配」「注入 engineId 阻挡」，后者经 `rel` 注入 `IconAutoComplete.tsx`）。
+- 版本号 `1.51.14 → 1.51.15`。
+
+### 验证（硬证据）
+- 双 tsc（src / server）0 错；`check-custom-icons` **PASS=66 FAIL=0**（共享组件改动未让旧门禁假红）；`npm run test:gates` **GATES_EXIT=0**（pipefail 实跑），22 行结果全部 `FAIL=0`，FAIL 行扫描为空（完整日志 1285 行）；`check-nav` **74 ok / 0 FAIL**。
+- 负向自检：③ 解析器注入回归 + ④ 七例进程级注入回归（`<NavEditor` / 顶栏分组设置文字按钮 / 齿轮接线缺失 / 顶栏添加项目按钮 / 底部高级字段折叠区 / 智能匹配 / engineId 阻挡）全部被检出（子进程 `exit 1`），还原后 `74 ok / 0 FAIL` 且 7 处源码字节级一致。
+- SEA 四步构建（干净 node 基座 → postject 注入 130616512 B，未虚增）+ **三处 SHA-256 逐字节一致** `31e329cecf23bc03b69ca95de127943d64cb0cb2fa771a05807c4845c5c83d13`（postject = zip 内 = deb 内，均 130616512 B，`ALL_MATCH`）。
+- ELF `7f454c46` / e_machine=62；运行时版本精确锚点 `CURRENT_VERSION = true ? "1.51.15" : "0.0.0-dev"` 二进制 1 处、旧版 `1.51.14` 锚点 **0 处**；5 个 dist 文件（`index.html` / `assets/index-v8pxfHxt.js` / `assets/index-DWFgfp_P.css` / `docker.png` / `login-banner.svg`）的 base64 在 `bundle.js` 与 SEA 二进制中各命中 1 次，与 `dist` 逐字节一致。
+- 交付包：`dockermanagementyanzi-linux-x64-v1.51.15.zip`（43121363 B）、`dockermanagementyanzi_1.51.15_amd64.deb`（42838048 B）；包成员固定 5 个、0755/0644 权限位正确；latest 别名（固定 main v1.50.36，43102847 B）**未覆盖**。
+
+### 未完成 / 已知限制
+- 按用户确认「全换成堆栈输入」：**「引用 Docker 容器图标」能力已移除**（连带其自动带出名称 / 外网链接 / `:webuiPort` 内网链接的便捷填充）；卡片与数据链路不受影响，既有 `icon` 值照常渲染。
+- 堆栈页把粘贴的 SVG 源码自动转 data URI 的 `isSvgCode` / `validateSvgCode` / `svgToDataUri` 是 `Stacks.tsx` 内部私有函数，本次**未提取**；导航页图标输入支持「图标名称 / 图片 URL / `data:` URI / 下拉点选写入的 `/api/custom-icons/...` URL」，placeholder 未承诺 SVG 源码。
+- 源码级门禁不覆盖真实点击；建议人工冒烟：点标题行「＋」→ 聚焦图标框出下拉 → 输入名称过滤 → 点选后保存 → 卡片显示图标 → hover ✎ 编辑确认值保留。
+
+### 下一步
+- 等用户验收图标输入体验；GitHub 仍不推（Gitea-only 约定）。
+
+---
+
 ## v1.51.14 — 2026-11-11（**main 分支 · 已构建 · 已推 Gitea**）
 
 ### 改动

@@ -67,7 +67,8 @@ export function IconAutoComplete({
     setLoading(true);
     try {
       const [custom, files] = await Promise.all([
-        engineId ? listCustomIconsApi().catch(() => null) : Promise.resolve(null),
+        // v1.51.15：自定义图标库是全局资源，导航页无 engine 上下文也要能拉到
+        listCustomIconsApi().catch(() => null),
         engineId && stackName
           ? listStackIconsApi(engineId, stackName).catch(() => [] as string[])
           : Promise.resolve([] as string[]),
@@ -126,7 +127,7 @@ export function IconAutoComplete({
             </div>
           ) : entries.length === 0 ? (
             <div className="px-3 py-3 text-xs text-slate-400 text-center">
-              图标库为空：可在「设置中心 → 页面设置」绑定图标文件夹，或上传图标存入本堆栈 icon/ 目录
+              图标库为空：可在「设置中心 → 页面设置」绑定图标文件夹{engineId && stackName ? "，或上传图标存入本堆栈 icon/ 目录" : ""}
             </div>
           ) : filtered.length === 0 ? (
             <div className="px-3 py-3 text-xs text-slate-400 text-center">无匹配图标</div>

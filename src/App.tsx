@@ -991,7 +991,6 @@ export default function App() {
             <NavPage
               navGroups={navGroups}
               onSaveNavGroups={handleSaveNavGroups}
-              containers={containers}
               navPageSettings={navPageSettings}
               onSaveNavPageSettings={handleSaveNavPageSettings}
             />

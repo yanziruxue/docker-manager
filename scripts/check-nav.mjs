@@ -3,7 +3,8 @@
  * 门禁：导航仪表盘（v1.51.0 引入，v1.51.2 解耦至独立通道，v1.51.11 移除管理弹窗，
  *   v1.51.12 顶栏删除分组设置文字按钮、入口改为标题行「＋」右边齿轮扳手；
  *   v1.51.13 删除顶栏「＋添加项目」，添加新项目唯一入口 = 标题行「＋」；
- *   v1.51.14 弹窗移除底部高级字段折叠区，高级值从 initial 透传不丢数据）
+ *   v1.51.14 弹窗移除底部高级字段折叠区，高级值从 initial 透传不丢数据；
+ *   v1.51.15 项目弹窗图标统一改用堆栈 IconAutoComplete，移除智能匹配等自研图标功能）
  *  - 真模块断言：编译运行 src/webui-url.ts 的 resolveNavAppUrl / normalizeNavLanUrl，
  *    覆盖内外网优先级链、`:端口` / `host:端口` / 完整 URL 三种内网写法、auto 分区分派；
  *  - 源码接线断言：导航配置完全收口在独立模块 server/nav-groups.ts（不污染 main settings.json），
@@ -11,8 +12,9 @@
  *    v1.51.11 起 NavEditor 弹窗已删除，项目 CRUD 由 NavPage + NavAppModal 直接落盘、
  *    分组新建/删除由 NavGroupSettingsModal 接管、卡片 hover ✎ 由 NavBoard.onEditApp 直达；
  *  - 负向自检①：注入「内网缺 lanUrl 不回落 url」回归 → 重载模块应检出差异 → 还原 → 复核全绿；
- *  - 负向自检②：进程级注入 5 类回归（<NavEditor / 顶栏分组设置文字按钮 / 齿轮接线缺失 /
- *    顶栏添加项目按钮 / 高级字段折叠区），支持跨文件注入 NavPage.tsx 与 NavAppModal.tsx
+ *  - 负向自检②：进程级注入 7 类回归（<NavEditor / 顶栏分组设置文字按钮 / 齿轮接线缺失 /
+ *    顶栏添加项目按钮 / 高级字段折叠区 / 智能匹配 / 全局图库被 engineId 阻挡），
+ *    支持跨文件注入 NavPage.tsx、NavAppModal.tsx 与 IconAutoComplete.tsx
  *    → 重跑本门禁应 exit 1 → 还原 → 字节级一致。
  * 用法：node scripts/check-nav.mjs（退出码非 0 = 有回归）
  */
@@ -132,6 +134,25 @@ ok("★ 高级字段保存时从 initial 透传（编辑已有项目不丢数据
       "initial?.isPublic", "initial?.iconZoom"].every((k) => seg.includes(k));
   })());
 
+// v1.51.15：图标统一改用堆栈 IconAutoComplete，导航页自研匹配功能全部移除
+const iconAuto = read("src/components/IconAutoComplete.tsx");
+ok("★ 导航弹窗图标接入堆栈 IconAutoComplete（输入自动匹配 / 点选写入 URL）",
+  appModal.includes("<IconAutoComplete") && appModal.includes('from "./IconAutoComplete"') &&
+  appModal.includes("onPick={(urlValue) => setIcon(urlValue)}") && appModal.includes("onChange={(val) => setIcon(val)}"));
+// 只检查代码体：文件头注释会写明「移除了什么」，属文档文本，不应触发零残留断言
+const headEnd = appModal.indexOf("*/");
+ok("门禁锚点：NavAppModal 文件头块注释存在", headEnd > 0 && headEnd < 2000);
+const appModalCode = headEnd > 0 ? appModal.slice(headEnd + 2) : appModal;
+ok("★ 导航弹窗自研图标功能零残留（智能匹配/已缓存/Docker 引用/预览框）",
+  !["smartMatch", "智能匹配", "已缓存", "未缓存", "引用 Docker 容器图标",
+    "fillFromContainer", "useNavIconMap", "resolveNavIconSrc", "previewZoom", "cached"].some((k) => appModalCode.includes(k)));
+ok("★ IconAutoComplete 无条件拉取全局自定义图标库（导航页无 engine 上下文）",
+  iconAuto.includes("listCustomIconsApi().catch(() => null)") &&
+  !iconAuto.includes("engineId ? listCustomIconsApi") &&
+  iconAuto.includes("listStackIconsApi"));
+ok("★ NavPage 不再向项目弹窗传 containers（图标不再引用 Docker 容器）",
+  !navPage.includes("containers={containers}") && !navPage.includes("Container[]"));
+
 const gs = read("src/components/NavGroupSettingsModal.tsx");
 ok("★ 分组设置接管分组新建/删除", gs.includes("addGroup") && gs.includes("removeGroup"));
 ok("★ 分组设置空态可新建且允许删到 0 组", gs.includes("新建分组") && gs.includes("draft.every"));
@@ -181,8 +202,8 @@ if (BROKEN === ORIGINAL) {
   ok("还原字节级一致", read(TARGET) === ORIGINAL);
 }
 
-console.log("== ④ 负向自检（进程级注入 5 类回归 → 重跑本门禁应 exit 1） ==");
-// 父进程注入 5 类回归文本，子进程跳过 ④（NAV_GATE_NEGATIVE_CHILD=1）只跑 ①②③，
+console.log("== ④ 负向自检（进程级注入 7 类回归 → 重跑本门禁应 exit 1） ==");
+// 父进程注入 7 类回归文本，子进程跳过 ④（NAV_GATE_NEGATIVE_CHILD=1）只跑 ①②③，
 // 若 ② 的对应断言确实生效，子进程必因 FAIL 而 exit 1。
 if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
   const NAV_PAGE_REL = "src/pages/NavPage.tsx";
@@ -213,6 +234,19 @@ if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
       name: "注入底部高级字段折叠区回归",
       rel: "src/components/NavAppModal.tsx",
       inject: (s) => s + "\n{/* 更多设置 */}\n",
+    },
+    {
+      name: "注入智能匹配按钮回归",
+      rel: "src/components/NavAppModal.tsx",
+      inject: (s) => s + "\n{/* 智能匹配 */}\n",
+    },
+    {
+      name: "注入全局图库被 engineId 阻挡回归",
+      rel: "src/components/IconAutoComplete.tsx",
+      inject: (s) => s.replace(
+        "listCustomIconsApi().catch(() => null),",
+        "engineId ? listCustomIconsApi().catch(() => null) : Promise.resolve(null),",
+      ),
     },
   ];
   for (const c of cases) {

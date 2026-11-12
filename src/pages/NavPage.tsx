@@ -8,6 +8,7 @@
  *  - 「＋添加项目」/ 卡片 hover ✎ → NavAppModal（项目新增/编辑/删除，直接落盘）。
  * v1.51.12：顶栏只留「页面设置 / 添加项目」，「分组设置」唯一入口改为标题行「＋」右边的齿轮扳手。
  * v1.51.13：「添加新项目」只保留标题行「＋」圆形按钮一个入口，顶栏「＋添加项目」胶囊按钮删除。
+ * v1.51.15：项目弹窗图标改用堆栈 IconAutoComplete，NavPage 不再需要 containers 列表。
  * 图标解析 / 内外网分区复用 NavBoard（独立拉取 /api/custom-icons 与 /api/network-zone）。
  */
 import React, { useState, useEffect, useCallback } from "react";
@@ -17,15 +18,13 @@ import { NavAppModal } from "../components/NavAppModal";
 import { NavGroupSettingsModal } from "../components/NavGroupSettingsModal";
 import { NavPageSettingsModal } from "../components/NavPageSettingsModal";
 import { WeatherEffect } from "../components/WeatherEffect";
-import type { Container, NavAppItem, NavGroup, NavPageSettings, NavNetworkMode, NavTheme } from "../types";
+import type { NavAppItem, NavGroup, NavPageSettings, NavNetworkMode, NavTheme } from "../types";
 
 interface NavPageProps {
   /** 导航分组（v1.51.0）：标签条 + 应用卡片墙；空 = 提示新建 */
   navGroups: NavGroup[];
   /** 导航分组整体落盘（独立 /api/nav-groups 通道，不污染 main settings） */
   onSaveNavGroups: (groups: NavGroup[]) => void;
-  /** 引用 Docker 容器图标用：当前引擎容器列表 */
-  containers: Container[];
   /** 导航页「页面设置」（整页外观/环境，v1.51.8） */
   navPageSettings: NavPageSettings;
   /** 导航页「页面设置」落盘回调 */
@@ -41,7 +40,7 @@ interface AppModalState {
 
 const APP_MODAL_CLOSED: AppModalState = { open: false, initial: null };
 
-export function NavPage({ navGroups, onSaveNavGroups, containers, navPageSettings, onSaveNavPageSettings }: NavPageProps) {
+export function NavPage({ navGroups, onSaveNavGroups, navPageSettings, onSaveNavPageSettings }: NavPageProps) {
   const groups = navGroups || [];
   const settings = navPageSettings || {};
   const [navTab, setNavTab] = useState<string>(() => {
@@ -191,7 +190,6 @@ export function NavPage({ navGroups, onSaveNavGroups, containers, navPageSetting
       {appModal.open && (
         <NavAppModal
           groups={groups}
-          containers={containers}
           initial={appModal.initial}
           initialGroupId={appModal.groupId || effectiveTab}
           onSave={handleSaveApp}
