@@ -1,16 +1,11 @@
 /**
- * 导航页（v1.51.0，label 分支）：独立一级页面（顶部导航「导航」项，位于「仪表盘」左侧），
- * 承载「分组标签条 + 应用卡片墙 + 三个独立弹窗」。与原 Dashboard 分页解耦。
- * 每个分组是一个标签（FlatNas 风格），点击切换该分组的卡片墙。
- * v1.51.11：移除「管理导航」（NavEditor）弹窗与全部入口，职责三分：
- *  - 「页面设置」→ NavPageSettingsModal（整页外观/环境，v1.51.8）；
- *  - 「分组设置」→ NavGroupSettingsModal（分组级卡片外观 + 分组新建/删除，v1.51.9 / v1.51.11）；
- *  - 「＋添加项目」/ 卡片 hover ✎ → NavAppModal（项目新增/编辑/删除，直接落盘）。
- * v1.51.12：顶栏只留「页面设置 / 添加项目」，「分组设置」唯一入口改为标题行「＋」右边的齿轮扳手。
- * v1.51.13：「添加新项目」只保留标题行「＋」圆形按钮一个入口，顶栏「＋添加项目」胶囊按钮删除。
- * v1.51.15：项目弹窗图标改用堆栈 IconAutoComplete。
- * v1.51.16：项目弹窗「容器列表」需要全局容器数据（含已停止的容器），NavPage 恢复下传 containers。
- * 图标解析 / 内外网分区复用 NavBoard（独立拉取 /api/custom-icons 与 /api/network-zone）。
+ * 导航页（v1.52.0 升级为三级结构：分区 → 分组 → 卡片）：
+ *  - 顶部分区标签条（FNOS / 在线应用 / 管理平台…），选中分区高亮并放大、分区名仅作标签不另起大标题；
+ *  - 选中分区下逐「分组」渲染为区块（分组标题 + ＋ + ⚙ + 卡片墙）；
+ *  - 「全部」标签合并所有分区的全部分组；
+ *  - 编辑态卡片可拖拽：跨分组 / 跨分区移动 + 排序（group id 全局唯一，天然支持）。
+ * v1.51.11：移除「管理导航」(NavEditor)，职责三分：页面设置 / 分组设置 / ＋添加项目·卡片 ✎。
+ * v1.51.12/13：顶栏仅「页面设置 / 编辑（v1.51.18）」；分组设置唯一入口 = 分组标题行齿轮（v1.52.0 升级为分区+分组管理）。
  */
 import React, { useState, useEffect, useCallback } from "react";
 import { Compass, Pencil, SlidersHorizontal } from "lucide-react";
@@ -19,13 +14,13 @@ import { NavAppModal } from "../components/NavAppModal";
 import { NavGroupSettingsModal } from "../components/NavGroupSettingsModal";
 import { NavPageSettingsModal } from "../components/NavPageSettingsModal";
 import { WeatherEffect } from "../components/WeatherEffect";
-import type { Container, NavAppItem, NavGroup, NavPageSettings, NavNetworkMode, NavTheme } from "../types";
+import type { Container, NavAppItem, NavGroup, NavZone, NavPageSettings, NavNetworkMode, NavTheme } from "../types";
 
 interface NavPageProps {
-  /** 导航分组（v1.51.0）：标签条 + 应用卡片墙；空 = 提示新建 */
-  navGroups: NavGroup[];
-  /** 导航分组整体落盘（独立 /api/nav-groups 通道，不污染 main settings） */
-  onSaveNavGroups: (groups: NavGroup[]) => void;
+  /** 导航分区（v1.52.0：分区 → 分组 → 卡片三级结构） */
+  navZones: NavZone[];
+  /** 导航分区整体落盘（独立 /api/nav-groups 通道，不污染 main settings） */
+  onSaveNavZones: (zones: NavZone[]) => void;
   /** 全局容器列表（v1.51.16：项目弹窗「容器列表」一次填入 4 字段，含已停止的容器） */
   containers: Container[];
   /** 导航页「页面设置」（整页外观/环境，v1.51.8） */
@@ -42,89 +37,105 @@ interface AppModalState {
 }
 
 const APP_MODAL_CLOSED: AppModalState = { open: false, initial: null };
+/** 分区下「添加分组」后用于聚焦到新建分组的占位（由分组设置弹窗承接） */
+interface GroupSettingsState {
+  open: boolean;
+  initialGroupId?: string;
+}
 
-export function NavPage({ navGroups, onSaveNavGroups, containers, navPageSettings, onSaveNavPageSettings }: NavPageProps) {
-  const groups = navGroups || [];
+export function NavPage({ navZones, onSaveNavZones, containers, navPageSettings, onSaveNavPageSettings }: NavPageProps) {
+  const zones = navZones || [];
   const settings = navPageSettings || {};
   const [navTab, setNavTab] = useState<string>(() => {
     if (typeof window !== "undefined") {
       const t = new URLSearchParams(window.location.search).get("navTab");
-      // 仅接受真实存在的分组 id（不再有「__dashboard」回填项）
-      if (t && groups.some((g) => g.id === t)) return t;
+      // 仅接受真实存在的分区 id（旧链接指向 group id 时回落首个分区）
+      if (t && zones.some((z) => z.id === t)) return t;
     }
-    return groups[0]?.id || "";
+    return zones[0]?.id || "";
   });
   const [appModal, setAppModal] = useState<AppModalState>(APP_MODAL_CLOSED);
   const [navPageSettingsOpen, setNavPageSettingsOpen] = useState(false);
-  const [navGroupSettingsOpen, setNavGroupSettingsOpen] = useState(false);
-  // v1.51.18：编辑模式开关。默认关闭（每次刷新回落关闭）；开启后卡片 ✎ 编辑入口才可见，
-  // 仅用于「编辑已添加的项目」，不制约「＋ 添加项目」「齿轮 分组设置」（两者始终可用）。
+  const [groupSettings, setGroupSettings] = useState<GroupSettingsState>({ open: false });
+  // v1.51.18：编辑模式开关。默认关闭；开启后卡片 ✎ 编辑入口才可见（不制约 ＋ / 齿轮，两者始终可用）。
   const [editMode, setEditMode] = useState(false);
   // v1.51.19：编辑态拖拽状态（被拖拽项目的 id 与来源分组）
   const [drag, setDrag] = useState<{ appId: string; fromGroupId: string } | null>(null);
   const navIconMap = useNavIconMap();
   // 打开页面设置弹窗（整页外观/环境）
   const openPageSettings = useCallback(() => setNavPageSettingsOpen(true), []);
-  // 打开分组设置弹窗（分组外观 + 分组新建/删除）；v1.51.12 起由标题行齿轮扳手触发
-  const openGroupSettings = useCallback(() => setNavGroupSettingsOpen(true), []);
+  // 打开分区/分组设置弹窗（v1.52.0：管理分区与分组；可聚焦到某分组）
+  const openGroupSettings = useCallback((groupId?: string) => setGroupSettings({ open: true, initialGroupId: groupId }), []);
 
-  // 选中的分组被删除 / 列表变空时回落到第一个（保持始终有有效选中项）
   const isAll = navTab === "__all__";
-  const effectiveTab = !isAll && !groups.some((g) => g.id === navTab) ? groups[0]?.id || "" : navTab;
-  // 「全部」虚拟分组：合并全部分组的项目（v1.51.19）
-  const allGroup: NavGroup = { id: "__all__", name: "全部", apps: groups.flatMap((g) => g.apps || []) };
-  const activeNavGroup = isAll ? allGroup : groups.find((g) => g.id === effectiveTab) || null;
+  const effectiveTab = !isAll && zones.some((z) => z.id === navTab) ? navTab : zones[0]?.id || "";
+  const activeZone = isAll ? null : zones.find((z) => z.id === effectiveTab) || null;
 
-  // v1.51.11：项目 CRUD 直接对 groups 做不可变更新并落盘，不再经 NavEditor 中转
-  const openAddApp = () => setAppModal({ open: true, initial: null, groupId: effectiveTab });
-  const openEditApp = (app: NavAppItem) => setAppModal({ open: true, initial: app, groupId: effectiveTab });
-  // 保留 NavEditor 时代的跨分组移动语义：编辑时切换分组，旧分组必须移除同 id 条目
+  // 渲染分区：全部视图合并所有分区；否则取当前分区的分组
+  const sections: { zoneName: string; group: NavGroup }[] = isAll
+    ? zones.flatMap((z) => (z.groups || []).map((g) => ({ zoneName: z.name, group: g })))
+    : (activeZone ? activeZone.groups.map((g) => ({ zoneName: activeZone.name, group: g })) : []);
+
+  // v1.51.11：项目 CRUD 直接对 zones 做不可变更新并落盘，不再经 NavEditor 中转
+  const openAddApp = (groupId: string) => setAppModal({ open: true, initial: null, groupId });
+  const openEditApp = (app: NavAppItem) => setAppModal({ open: true, initial: app, groupId: undefined });
+  // 编辑时切换分组，旧分组必须移除同 id 条目（保留 NavEditor 时代的跨分组移动语义）
   const handleSaveApp = (groupId: string, app: NavAppItem) => {
-    const next = groups.map((g) => {
-      const apps = g.apps || [];
-      if (g.id === groupId) {
-        const exists = apps.some((a) => a.id === app.id);
-        return { ...g, apps: exists ? apps.map((a) => (a.id === app.id ? app : a)) : [...apps, app] };
-      }
-      return { ...g, apps: apps.filter((a) => a.id !== app.id) };
-    });
-    onSaveNavGroups(next);
+    const next = zones.map((z) => ({
+      ...z,
+      groups: z.groups.map((g) => {
+        if (g.id === groupId) {
+          const apps = g.apps || [];
+          const exists = apps.some((a) => a.id === app.id);
+          return { ...g, apps: exists ? apps.map((a) => (a.id === app.id ? app : a)) : [...apps, app] };
+        }
+        return { ...g, apps: (g.apps || []).filter((a) => a.id !== app.id) };
+      }),
+    }));
+    onSaveNavZones(next);
     setAppModal(APP_MODAL_CLOSED);
   };
-  // 编辑态删除项目：从所有分组移除同 id 条目并落盘
+  // 编辑态删除项目：从所有分区/分组移除同 id 条目并落盘
   const handleDeleteApp = (appId: string) => {
-    onSaveNavGroups(groups.map((g) => ({ ...g, apps: (g.apps || []).filter((a) => a.id !== appId) })));
+    onSaveNavZones(
+      zones.map((z) => ({ ...z, groups: z.groups.map((g) => ({ ...g, apps: (g.apps || []).filter((a) => a.id !== appId) })) })),
+    );
     setAppModal(APP_MODAL_CLOSED);
   };
 
-  // v1.51.19：编辑态拖拽——移动项目到其他分组（拖到分组 tab=末尾追加）或排序（拖到卡片前=插入该位置）。
-  // 先跨全分组移除被拖项目，再插入目标分组（beforeAppId 之前，缺省末尾），自然兼容同组重排。
+  // v1.51.19：编辑态拖拽——移动项目到其他分组（拖到分区 tab=移到该分区首分组；拖到卡片=插到该卡前）。
   const moveApp = (appId: string, fromGroupId: string, toGroupId: string, beforeAppId?: string) => {
     let app: NavAppItem | undefined;
-    const stripped = groups.map((g) => {
-      const apps = g.apps || [];
-      const idx = apps.findIndex((a) => a.id === appId);
-      if (idx >= 0) {
-        app = apps[idx];
-        return { ...g, apps: apps.filter((a) => a.id !== appId) };
-      }
-      return g;
-    });
-    if (!app) return;
-    const next = stripped.map((g) => {
-      if (g.id === toGroupId) {
-        const apps = [...(g.apps || [])];
-        let insertAt = apps.length;
-        if (beforeAppId) {
-          const bi = apps.findIndex((a) => a.id === beforeAppId);
-          if (bi >= 0) insertAt = bi;
+    const stripped = zones.map((z) => ({
+      ...z,
+      groups: z.groups.map((g) => {
+        const apps = g.apps || [];
+        const idx = apps.findIndex((a) => a.id === appId);
+        if (idx >= 0) {
+          app = apps[idx];
+          return { ...g, apps: apps.filter((a) => a.id !== appId) };
         }
-        apps.splice(insertAt, 0, app as NavAppItem);
-        return { ...g, apps };
-      }
-      return g;
-    });
-    onSaveNavGroups(next);
+        return g;
+      }),
+    }));
+    if (!app) return;
+    const next = stripped.map((z) => ({
+      ...z,
+      groups: z.groups.map((g) => {
+        if (g.id === toGroupId) {
+          const apps = [...(g.apps || [])];
+          let insertAt = apps.length;
+          if (beforeAppId) {
+            const bi = apps.findIndex((a) => a.id === beforeAppId);
+            if (bi >= 0) insertAt = bi;
+          }
+          apps.splice(insertAt, 0, app as NavAppItem);
+          return { ...g, apps };
+        }
+        return g;
+      }),
+    }));
+    onSaveNavZones(next);
   };
   const onCardDragStart = (appId: string, fromGroupId: string) => setDrag({ appId, fromGroupId });
   const onCardDragEnd = () => setDrag(null);
@@ -135,11 +146,23 @@ export function NavPage({ navGroups, onSaveNavGroups, containers, navPageSetting
   };
   // 「全部」视图下按 appId 解析真实归属分组（拖拽跨组用）
   const resolveGroupOf = (appId: string): string | undefined => {
-    for (const g of groups) if ((g.apps || []).some((a) => a.id === appId)) return g.id;
+    for (const z of zones) for (const g of z.groups || []) if ((g.apps || []).some((a) => a.id === appId)) return g.id;
     return undefined;
   };
 
-  // 进入页面 / 切换分组时把当前选中分组写回 URL（仅 replace，不新增历史），支持深链回看
+  // 分区下「添加分组」：在指定分区追加一个空分组并打开设置聚焦它
+  const addGroupToZone = (zoneId: string) => {
+    const next = zones.map((z) =>
+      z.id === zoneId
+        ? { ...z, groups: [...z.groups, { id: `n${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`, name: `分组 ${(z.groups.length + 1)}`, apps: [], cardLayout: "vertical" as const, cardSize: 120, gridGap: 16, iconSize: 48, cardStyle: "solid" as const, iconShape: "rounded" as const }] }
+        : z,
+    );
+    onSaveNavZones(next);
+    const newGroup = next.find((z) => z.id === zoneId)?.groups.slice(-1)[0];
+    if (newGroup) openGroupSettings(newGroup.id);
+  };
+
+  // 进入页面 / 切换分区时把当前选中分区写回 URL（支持深链回看）
   useEffect(() => {
     if (typeof window === "undefined" || !effectiveTab) return;
     const url = new URL(window.location.href);
@@ -185,49 +208,56 @@ export function NavPage({ navGroups, onSaveNavGroups, containers, navPageSetting
       {/* 环境天气效果（纯前端 canvas，置于内容之下、背景之上） */}
       <WeatherEffect weather={settings.weather || "none"} />
 
-      {/* 分组标签条 + 页面设置（分组设置=标题行齿轮、添加项目=标题行＋，v1.51.13） */}
+      {/* 分区标签条 + 页面设置（分组设置=分组标题行齿轮、添加项目=分组标题行＋） */}
       <div className="flex items-center gap-2 mb-5 flex-wrap relative">
-        {groups.length === 0 && (
-          <span className="text-[13px] text-white/80 px-1">还没有分组</span>
+        {zones.length === 0 && (
+          <span className="text-[13px] text-white/80 px-1">还没有导航分区</span>
         )}
-        {groups.map((g) => (
-          <button
-            key={g.id}
-            onClick={() => setNavTab(g.id)}
-            onDragOver={editMode ? (e) => e.preventDefault() : undefined}
-            onDrop={
-              editMode
-                ? (e) => {
-                    e.preventDefault();
-                    if (drag) {
-                      moveApp(drag.appId, drag.fromGroupId, g.id);
-                      setDrag(null);
+        {zones.map((z) => {
+          // 角标 = 该分区下应用总数
+          const count = (z.groups || []).reduce((s, g) => s + (g.apps?.length || 0), 0);
+          const active = z.id === effectiveTab;
+          return (
+            <button
+              key={z.id}
+              onClick={() => setNavTab(z.id)}
+              onDragOver={editMode ? (e) => e.preventDefault() : undefined}
+              onDrop={
+                editMode
+                  ? (e) => {
+                      e.preventDefault();
+                      if (drag) {
+                        const firstGroup = z.groups[0];
+                        if (firstGroup) moveApp(drag.appId, drag.fromGroupId, firstGroup.id);
+                        setDrag(null);
+                      }
                     }
-                  }
-                : undefined
-            }
-            className={`px-4 py-1.5 rounded-full text-[13px] backdrop-blur-sm transition-all ${
-              g.id === effectiveTab
-                ? "bg-white text-fuchsia-600 font-semibold shadow-md"
-                : "bg-white/60 text-slate-600 hover:bg-white/85"
-            } ${drag ? "ring-2 ring-fuchsia-400/70" : ""}`}
-          >
-            {g.name}
-            <span className={`ml-1.5 text-[11px] ${g.id === effectiveTab ? "text-fuchsia-400" : "text-slate-400"}`}>
-              {g.apps.length}
-            </span>
-          </button>
-        ))}
-        {/* 全部：合并显示全部分组的项目（v1.51.19） */}
+                  : undefined
+              }
+              // 选中分区：高亮 + 字号放大(~1.5倍) + 轻微 scale；分区名仅作标签，不另起大标题
+              className={`rounded-full backdrop-blur-sm transition-all ${
+                active
+                  ? "bg-white text-fuchsia-600 font-bold shadow-md text-[18px] scale-[1.04] py-2 px-5"
+                  : "bg-white/60 text-slate-600 hover:bg-white/85 text-[13px] py-1.5 px-4"
+              } ${drag ? "ring-2 ring-fuchsia-400/70" : ""}`}
+            >
+              {z.name}
+              <span className={`ml-1.5 text-[11px] ${active ? "text-fuchsia-400" : "text-slate-400"}`}>
+                {count}
+              </span>
+            </button>
+          );
+        })}
+        {/* 全部：合并显示所有分区的分组（v1.51.19） */}
         <button
           key="__all__"
           onClick={() => setNavTab("__all__")}
-          className={`px-4 py-1.5 rounded-full text-[13px] backdrop-blur-sm transition-all ${
+          className={`rounded-full backdrop-blur-sm transition-all ${
             isAll
-              ? "bg-white text-fuchsia-600 font-semibold shadow-md"
-              : "bg-white/60 text-slate-600 hover:bg-white/85"
+              ? "bg-white text-fuchsia-600 font-bold shadow-md text-[18px] scale-[1.04] py-2 px-5"
+              : "bg-white/60 text-slate-600 hover:bg-white/85 text-[13px] py-1.5 px-4"
           }`}
-          title="显示全部分组的项目"
+          title="显示全部分区的分组"
         >
           全部
         </button>
@@ -253,29 +283,48 @@ export function NavPage({ navGroups, onSaveNavGroups, containers, navPageSetting
         </div>
       </div>
 
-      {activeNavGroup ? (
-        <NavBoard
-          group={activeNavGroup}
-          iconMap={navIconMap}
-          editMode={editMode}
-          onAddApp={openAddApp}
-          onEditApp={openEditApp}
-          onOpenGroupSettings={openGroupSettings}
-          navNetworkMode={navNetworkMode}
-          resolveGroupOf={isAll ? resolveGroupOf : undefined}
-          onCardDragStart={onCardDragStart}
-          onCardDragEnd={onCardDragEnd}
-          onCardDrop={onCardDrop}
-        />
+      {activeZone || isAll ? (
+        <div className="space-y-8">
+          {sections.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 rounded-2xl border border-white/40 bg-white/30 backdrop-blur-sm text-white">
+              <Compass size={36} className="mb-3 opacity-90" />
+              <p className="text-sm">{isAll ? "还没有任何导航分组" : `分区「${activeZone?.name}」下还没有分组`}</p>
+              <button
+                onClick={() => (isAll ? openGroupSettings() : addGroupToZone(activeZone!.id))}
+                className="mt-4 px-4 py-2 text-sm text-white bg-rose-500 rounded-full hover:bg-rose-600 shadow-md transition-colors"
+              >
+                {isAll ? "新建分区" : "添加分组"}
+              </button>
+            </div>
+          ) : (
+            sections.map(({ zoneName, group }) => (
+              <NavBoard
+                key={group.id}
+                group={group}
+                zoneTag={isAll ? zoneName : undefined}
+                iconMap={navIconMap}
+                editMode={editMode}
+                onAddApp={openAddApp}
+                onEditApp={openEditApp}
+                onOpenGroupSettings={openGroupSettings}
+                navNetworkMode={navNetworkMode}
+                resolveGroupOf={isAll ? resolveGroupOf : undefined}
+                onCardDragStart={onCardDragStart}
+                onCardDragEnd={onCardDragEnd}
+                onCardDrop={onCardDrop}
+              />
+            ))
+          )}
+        </div>
       ) : (
         <div className="flex flex-col items-center justify-center py-20 rounded-2xl border border-white/40 bg-white/30 backdrop-blur-sm text-white">
           <Compass size={36} className="mb-3 opacity-90" />
-          <p className="text-sm">还没有导航分组，点下方「新建分组」按钮开始</p>
+          <p className="text-sm">还没有导航分区，点下方「新建分区」按钮开始</p>
           <button
-            onClick={openGroupSettings}
+            onClick={() => openGroupSettings()}
             className="mt-4 px-4 py-2 text-sm text-white bg-rose-500 rounded-full hover:bg-rose-600 shadow-md transition-colors"
           >
-            新建分组
+            新建分区
           </button>
         </div>
       )}
@@ -283,10 +332,10 @@ export function NavPage({ navGroups, onSaveNavGroups, containers, navPageSetting
       {/* 添加 / 编辑项目弹窗（v1.51.11：不再经 NavEditor，直接落盘） */}
       {appModal.open && (
         <NavAppModal
-          groups={groups}
+          zones={zones}
           containers={containers}
           initial={appModal.initial}
-          initialGroupId={appModal.groupId || effectiveTab}
+          initialGroupId={appModal.groupId || effectiveTab || undefined}
           onSave={handleSaveApp}
           onDelete={handleDeleteApp}
           onClose={() => setAppModal(APP_MODAL_CLOSED)}
@@ -305,18 +354,18 @@ export function NavPage({ navGroups, onSaveNavGroups, containers, navPageSetting
         />
       )}
 
-      {/* 导航「分组设置」弹窗（v1.51.11 起接管分组新建/删除；v1.51.12 起由标题行齿轮打开） */}
-      {navGroupSettingsOpen && (
+      {/* 导航「分区 / 分组设置」弹窗（v1.52.0：管理分区与分组） */}
+      {groupSettings.open && (
         <NavGroupSettingsModal
-          groups={groups}
-          initialGroupId={effectiveTab}
+          zones={zones}
+          initialGroupId={groupSettings.initialGroupId}
           onSave={(next) => {
-            onSaveNavGroups(next);
-            setNavGroupSettingsOpen(false);
-            // 当前选中的分组被删时回落第一个（原 NavEditor 保存时的回落语义）
-            if (effectiveTab && !next.some((g) => g.id === effectiveTab)) setNavTab(next[0]?.id || "");
+            onSaveNavZones(next);
+            setGroupSettings({ open: false });
+            // 当前选中的分区被删时回落第一个（原保存时的回落语义）
+            if (effectiveTab && !next.some((z) => z.id === effectiveTab)) setNavTab(next[0]?.id || "");
           }}
-          onClose={() => setNavGroupSettingsOpen(false)}
+          onClose={() => setGroupSettings({ open: false })}
         />
       )}
     </div>

@@ -48,7 +48,7 @@ import {
   transformStacks,
   transformActivityLogs,
 } from "./transforms";
-import type { PageKey, Container, DockerImage, DockerVolume, DockerEngine, Stack, SystemSettings, ActivityLog, EngineResourceStats, UpdateInfo, ImageUpdateDetail, ImageUpdateSummaryView, ImageUpdateStatusView, ResourceTag, NavGroup, NavPageSettings } from "./types";
+import type { PageKey, Container, DockerImage, DockerVolume, DockerEngine, Stack, SystemSettings, ActivityLog, EngineResourceStats, UpdateInfo, ImageUpdateDetail, ImageUpdateSummaryView, ImageUpdateStatusView, ResourceTag, NavZone, NavPageSettings } from "./types";
 import { randomTagColor } from "./components/TagPicker";
 import {
   shouldAutoFillIcon,
@@ -116,8 +116,8 @@ export default function App() {
   const [activitiesLoadingMore, setActivitiesLoadingMore] = useState(false);
   const [resourceStats, setResourceStats] = useState<EngineResourceStats | null>(null);
   const [settings, setSettings] = useState<SystemSettings | null>(null);
-  // 导航分组（v1.51.2 label 解耦：独立 state，不借道 settings / SystemSettings）
-  const [navGroups, setNavGroups] = useState<NavGroup[]>([]);
+  // 导航分区（v1.52.0：分区→分组→卡片三级结构；独立 state，不借道 settings / SystemSettings）
+  const [navZones, setNavZones] = useState<NavZone[]>([]);
   // 导航页「页面设置」（v1.51.8：整页外观/环境，独立 state，不借道 settings / SystemSettings）
   const [navPageSettings, setNavPageSettings] = useState<NavPageSettings>({});
   const [dataLoading, setDataLoading] = useState(false);
@@ -347,7 +347,7 @@ export default function App() {
         setEngines(list);
         if (settingsData) setSettings(settingsData);
         if (versionInfo?.version) setRuntimeVersion(versionInfo.version);
-        setNavGroups(navGroupsData || []);
+        setNavZones(navGroupsData || []);
         setNavPageSettings(navPageSettingsData || {});
         // 登录后默认显示页面（v1.42.9）：仅在登录态就绪、settings 已加载时跳转一次。
         // v1.50.7：sessionStorage 已有会话页面记录（刷新/会话内重登）时优先恢复刷新前页面，
@@ -722,11 +722,11 @@ export default function App() {
     }
   }, [activeEngineId, loadEngineData]);
 
-  // 导航分组落盘（v1.51.2 label 解耦）：走独立 /api/nav-groups 通道，绝不污染 main settings
-  const handleSaveNavGroups = useCallback(
-    (groups: NavGroup[]) => {
-      void saveNavGroupsApi(groups).then(setNavGroups).catch((err) => {
-        console.error("保存导航分组失败:", err);
+  // 导航分区落盘（v1.52.0：分区→分组→卡片三级结构）：走独立 /api/nav-groups 通道，绝不污染 main settings
+  const handleSaveNavZones = useCallback(
+    (zones: NavZone[]) => {
+      void saveNavGroupsApi(zones).then(setNavZones).catch((err) => {
+        console.error("保存导航分区失败:", err);
       });
     },
     [],
@@ -989,8 +989,8 @@ export default function App() {
           )}
           {page === "navigation" && (
             <NavPage
-              navGroups={navGroups}
-              onSaveNavGroups={handleSaveNavGroups}
+              navZones={navZones}
+              onSaveNavZones={handleSaveNavZones}
               containers={containers}
               navPageSettings={navPageSettings}
               onSaveNavPageSettings={handleSaveNavPageSettings}

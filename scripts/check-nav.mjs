@@ -84,9 +84,9 @@ ok("双空 → 空串（调用方禁用卡片）", mod.resolveNavAppUrl({ url: "
 
 console.log("== ② 源码接线断言 ==");
 const navPage = read("src/pages/NavPage.tsx");
-ok("NavPage 接收 navGroups/onSaveNavGroups", navPage.includes("navGroups") && navPage.includes("onSaveNavGroups"));
-ok("NavPage 顶部标签条渲染分组按钮", navPage.includes("groups.map((g) => (") && navPage.includes("setNavTab(g.id)"));
-ok("选中分组渲染 NavBoard、无分组提示空状态", navPage.includes("<NavBoard") && navPage.includes("还没有导航分组"));
+ok("NavPage 接收 navZones/onSaveNavZones（v1.52.0 分区结构）", navPage.includes("navZones") && navPage.includes("onSaveNavZones"));
+ok("NavPage 顶部分区标签条渲染分区按钮", navPage.includes("zones.map((z) => {") && navPage.includes("setNavTab(z.id)"));
+ok("选中分区渲染 NavBoard、无分区提示空状态", navPage.includes("<NavBoard") && navPage.includes("还没有导航分区"));
 ok("★ NavPage 不再挂载/导入 NavEditor 弹窗",
   !navPage.includes("<NavEditor") && !navPage.includes('from "../components/NavEditor"'));
 ok("★ NavEditor.tsx 文件已删除", !fs.existsSync(path.join(ROOT, "src/components/NavEditor.tsx")));
@@ -104,7 +104,7 @@ ok("★ NavPage 把分组设置打开器下传给 NavBoard（齿轮入口接线�
 ok("★ 独立挂载 NavAppModal 并接线项目 CRUD",
   navPage.includes("<NavAppModal") && navPage.includes("handleSaveApp") && navPage.includes("onDelete={handleDeleteApp}"));
 ok("★ 项目保存保留跨分组移动语义（旧分组移除同 id）", navPage.includes("a.id !== app.id"));
-ok("★ 分组被删后选中项回落第一个", navPage.includes("!next.some((g) => g.id === effectiveTab)"));
+ok("★ 分区被删后选中项回落第一个", navPage.includes("!next.some((z) => z.id === effectiveTab)"));
 
 const board = read("src/components/NavBoard.tsx");
 ok("NavBoard 走 resolveNavAppUrl 解析地址", board.includes("resolveNavAppUrl"));
@@ -116,9 +116,9 @@ ok("★ NavBoard 卡片编辑入口 onEditApp（v1.51.18：仅 editMode 渲染�
 ok("★ NavBoard 不再有旧管理弹窗齿轮入口", !board.includes("onOpenEditor") && !board.includes("GearIcon"));
 ok("★ NavBoard「＋」右边齿轮扳手 = 分组设置唯一入口（顺序锁定）",
   board.includes("onOpenGroupSettings") && board.includes("<Settings") && board.includes("分组设置") &&
-  board.indexOf("onClick={onAddApp}") < board.indexOf("onClick={onOpenGroupSettings}"));
+  board.indexOf("onAddApp(group.id)") < board.indexOf("onOpenGroupSettings(group.id)"));
 ok("★ 添加新项目唯一入口 = NavBoard 标题行「＋」（顶栏不再有添加按钮，v1.51.13）",
-  board.includes("onClick={onAddApp}") && navPage.includes("onAddApp={openAddApp}") &&
+  board.includes("onAddApp(group.id)") && navPage.includes("onAddApp={openAddApp}") &&
   !navPage.includes("添加项目</button>") && !navPage.includes("<Plus size="));
 
 const appModal = read("src/components/NavAppModal.tsx");
@@ -179,12 +179,12 @@ ok("★ 分组设置空态可新建且允许删到 0 组", gs.includes("新建�
 ok("★ 分组设置不再引导到管理分组", !gs.includes("请先到「管理分组」"));
 
 const appSrc = read("src/App.tsx");
-ok("App 提供 handleSaveNavGroups 并透传 NavPage", appSrc.includes("handleSaveNavGroups") && appSrc.includes("<NavPage"));
+ok("App 提供 handleSaveNavZones 并透传 NavPage", appSrc.includes("handleSaveNavZones") && appSrc.includes("<NavPage"));
 ok("App 导航分组走独立通道（fetchNavGroups/saveNavGroupsApi）", appSrc.includes("fetchNavGroups") && appSrc.includes("saveNavGroupsApi"));
 ok("App 不再借道 settings.nav", !appSrc.includes("settings?.nav") && !appSrc.includes("settings?.nav?.groups"));
 
 const navMod = read("server/nav-groups.ts");
-ok("导航分组独立持久化模块存在", navMod.includes("getNavGroups") && navMod.includes("saveNavGroups") && navMod.includes("normalizeNavGroups"));
+ok("导航分区独立持久化模块存在", navMod.includes("getNavGroups") && navMod.includes("saveNavGroups") && navMod.includes("normalizeNavZones"));
 ok("独立模块含一次性迁移（migrateFromSettings）", navMod.includes("migrateFromSettings"));
 ok("独立模块钳制条目上限（50 组 / 200 应用）", navMod.includes("slice(0, 50)") && navMod.includes("slice(0, 200)"));
 
@@ -230,11 +230,20 @@ ok("★ 卡片 ✎ 编辑入口仅在 editMode 渲染且常显（浏览态隐藏
   board.includes("opacity-100") &&
   !board.includes("group-hover/card:opacity-100"));
 ok("★ 「＋ 添加项目」「齿轮 分组设置」不随 editMode 收起（始终可用）",
-  board.includes("onClick={onAddApp}") && board.includes("onClick={onOpenGroupSettings}"));
+  board.includes("onAddApp(group.id)") && board.includes("onOpenGroupSettings(group.id)"));
 
 const typesSrc = read("src/types.ts");
-ok("类型 NavGroup/NavAppItem/NavConfig 已定义", typesSrc.includes("interface NavGroup") && typesSrc.includes("interface NavAppItem") && typesSrc.includes("NavConfig"));
+ok("类型 NavZone/NavGroup/NavAppItem/NavConfig 已定义", typesSrc.includes("interface NavZone") && typesSrc.includes("interface NavGroup") && typesSrc.includes("interface NavAppItem") && typesSrc.includes("NavConfig"));
 ok("SystemSettings 已移除 nav 字段", !typesSrc.includes("nav: NavConfig"));
+
+// v1.52.0：分区 → 分组 → 卡片三级结构
+ok("★ NavPage 分区角标 = 分区下应用总数", navPage.includes("reduce((s, g) => s + (g.apps?.length || 0), 0)"));
+ok("★ 选中分区高亮放大（字号 ~1.5 倍 + 轻微 scale）", navPage.includes("text-[18px]") && navPage.includes("scale-[1.04]"));
+ok("★ 「全部」标签合并所有分区", navPage.includes('"__all__"') && navPage.includes("显示全部分区的分组"));
+ok("★ NavBoard 支持 zoneTag（全部视图标注所属分区）", board.includes("zoneTag") && navPage.includes("zoneTag={isAll ? zoneName : undefined}"));
+ok("★ 分区下内联「添加分组」入口", navPage.includes("addGroupToZone") && navPage.includes("添加分组"));
+ok("★ 分组设置弹窗升级为分区+分组管理（新建/删除分区）", gs.includes("addZone") && gs.includes("removeZone") && gs.includes("新建分区"));
+ok("★ 服务端分区持久化：落盘 { zones } + 旧 {groups} 包裹默认分区迁移", navMod.includes("{ zones }") && navMod.includes("wrapLegacyAsZone") && navMod.includes("默认分区"));
 
 console.log("== ③ 负向自检（注入回归 → 检出 → 还原） ==");
 // 注入「内网缺 lanUrl 不回落 url」回归：应被 ⑤ 号用例检出

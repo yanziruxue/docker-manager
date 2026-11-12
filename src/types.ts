@@ -943,8 +943,17 @@ export interface NavGroup {
   iconShape?: NavIconShape;
 }
 
-export interface NavConfig {
+/** 导航分区（v1.52.0）：导航页顶层结构；分区下含若干「分组」，分组下含应用卡片。 */
+export interface NavZone {
+  id: string;
+  name: string;
+  /** 分区下的分组（沿用旧 NavGroup：含 apps 与卡片外观参数） */
   groups: NavGroup[];
+}
+
+export interface NavConfig {
+  /** v1.52.0 起顶层为分区；旧版 { groups } 由服务端自动包裹为单一默认分区 */
+  zones: NavZone[];
 }
 
 /**

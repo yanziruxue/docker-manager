@@ -13,7 +13,7 @@
  */
 import { useMemo, useState } from "react";
 import { Globe, List, Trash2, X } from "lucide-react";
-import type { Container, NavAppItem, NavGroup } from "../types";
+import type { Container, NavAppItem, NavZone } from "../types";
 import { IconAutoComplete } from "./IconAutoComplete";
 
 function genId(): string {
@@ -36,7 +36,7 @@ const inputCls =
   "w-full px-2.5 py-1.5 text-[13px] border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-fuchsia-500/30 focus:border-fuchsia-400 bg-white text-slate-700";
 
 export function NavAppModal({
-  groups,
+  zones,
   containers,
   initial,
   initialGroupId,
@@ -44,7 +44,8 @@ export function NavAppModal({
   onDelete,
   onClose,
 }: {
-  groups: NavGroup[];
+  /** 导航分区（v1.52.0）：内部展开全部分组用于归属下拉 / 名称唯一 / 容器已添加判定 */
+  zones: NavZone[];
   /** 全局容器列表（含已停止的容器，v1.51.16：用于一次填入 4 个字段） */
   containers: Container[];
   /** 编辑已有项目时传入；null/undefined = 新增 */
@@ -57,6 +58,11 @@ export function NavAppModal({
   onClose: () => void;
 }) {
   const editing = !!initial;
+  // v1.52.0：分区→分组→卡片；把全部分区下的分组展开为扁平列表，复用既有分组级逻辑
+  const groups = useMemo(
+    () => (zones || []).flatMap((z) => z.groups || []),
+    [zones],
+  );
 
   const [groupId, setGroupId] = useState<string>(() => {
     if (initial) {

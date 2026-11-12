@@ -1,12 +1,14 @@
 /**
- * 导航页「分组设置」弹窗（v1.51.9）：作用于单个分组的卡片外观，与「页面设置」（整页外观/环境）解耦。
- * 参照 FlatNas「分组设置详情」：分组名称 / 卡片布局 / 卡片间距 / 卡片大小 / 图标大小 / 卡片样式 / 图标形状。
- * 顶部「分组」下拉可切换要设置的分组；保存经 onSave(groups) 整体落盘（服务端 normalizeNavGroups 白名单兜底）。
- * v1.51.11：移除「管理导航」弹窗后，本弹窗接管分组的新建 / 删除（空态可直接新建，允许删到 0 组）。
+ * 导航页「分区 / 分组设置」弹窗（v1.52.0 升级为三级结构管理）：
+ *  - 顶层管理「分区」（新建 / 改名 / 删除分区）；
+ *  - 在所选分区下管理「分组」（新建 / 改名 / 删除分组 + 分组卡片外观）。
+ * 分组卡片外观参数（布局 / 间距 / 大小 / 图标大小 / 样式 / 形状）参照 FlatNas。
+ * 保存经 onSave(zones) 整体落盘（服务端 normalizeNavZones 白名单兜底）。
+ * v1.51.11 起接管分组的新建 / 删除（允许删到 0 组 / 0 分区）。
  */
 import { useState } from "react";
 import { Plus, RotateCcw, Trash2, X } from "lucide-react";
-import type { NavCardStyle, NavGroup, NavIconShape } from "../types";
+import type { NavCardStyle, NavGroup, NavIconShape, NavZone } from "../types";
 
 const inputCls =
   "w-full px-2.5 py-1.5 text-[13px] border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-500/30 focus:border-rose-400 bg-white text-slate-700";
@@ -109,54 +111,92 @@ function SliderRow({
 }
 
 export function NavGroupSettingsModal({
-  groups,
+  zones,
   initialGroupId,
   onSave,
   onClose,
 }: {
-  groups: NavGroup[];
-  /** 默认聚焦的分组（导航页当前选中分组） */
+  /** 导航分区（v1.52.0）：分区 → 分组 → 卡片三级 */
+  zones: NavZone[];
+  /** 默认聚焦的分组（由某分组齿轮打开时传入，自动定位其父分区） */
   initialGroupId?: string;
-  onSave: (groups: NavGroup[]) => void;
+  onSave: (zones: NavZone[]) => void;
   onClose: () => void;
 }) {
-  const [draft, setDraft] = useState<NavGroup[]>(() =>
-    (groups || []).map((g) => ({ ...g, apps: [...(g.apps || [])] })),
+  const [draft, setDraft] = useState<NavZone[]>(() =>
+    (zones || []).map((z) => ({ ...z, groups: (z.groups || []).map((g) => ({ ...g, apps: [...(g.apps || [])] })) })),
   );
-  const [selectedId, setSelectedId] = useState<string>(() =>
-    initialGroupId && groups.some((g) => g.id === initialGroupId)
-      ? initialGroupId
-      : groups[0]?.id || "",
-  );
-  const active = draft.find((g) => g.id === selectedId) || null;
+  // 由 initialGroupId 解析父分区
+  const [selectedZoneId, setSelectedZoneId] = useState<string>(() => {
+    if (initialGroupId && (zones || []).some((z) => (z.groups || []).some((g) => g.id === initialGroupId))) {
+      return (zones || []).find((z) => (z.groups || []).some((g) => g.id === initialGroupId))!.id;
+    }
+    return (zones || [])[0]?.id || "";
+  });
+  const [selectedGroupId, setSelectedGroupId] = useState<string>(() => {
+    if (initialGroupId && (zones || []).some((z) => (z.groups || []).some((g) => g.id === initialGroupId))) {
+      return initialGroupId;
+    }
+    return (zones || [])[0]?.groups?.[0]?.id || "";
+  });
 
-  const patch = (p: Partial<NavGroup>) =>
-    setDraft((prev) => prev.map((g) => (g.id === selectedId ? { ...g, ...p } : g)));
+  const activeZone = draft.find((z) => z.id === selectedZoneId) || null;
+  const activeGroup = activeZone?.groups.find((g) => g.id === selectedGroupId) || null;
 
-  // v1.51.11：分组新建 / 删除（原「管理导航」弹窗能力迁移）
+  const patchZone = (p: Partial<NavZone>) =>
+    setDraft((prev) => prev.map((z) => (z.id === selectedZoneId ? { ...z, ...p } : z)));
+  const patchGroup = (p: Partial<NavGroup>) =>
+    setDraft((prev) =>
+      prev.map((z) =>
+        z.id === selectedZoneId
+          ? { ...z, groups: z.groups.map((g) => (g.id === selectedGroupId ? { ...g, ...p } : g)) }
+          : z,
+      ),
+    );
+
+  // 分区新建 / 删除
+  const addZone = () => {
+    const z: NavZone = { id: genId(), name: `分区 ${draft.length + 1}`, groups: [] };
+    setDraft((prev) => [...prev, z]);
+    setSelectedZoneId(z.id);
+    setSelectedGroupId("");
+  };
+  const removeZone = () => {
+    if (!activeZone) return;
+    const count = (activeZone.groups || []).reduce((s, g) => s + (g.apps?.length || 0), 0);
+    if (!window.confirm(`确定删除分区「${activeZone.name}」？该分区下的 ${count} 个入口也会一并删除。`)) return;
+    const idx = draft.findIndex((z) => z.id === selectedZoneId);
+    const next = draft.filter((z) => z.id !== selectedZoneId);
+    setDraft(next);
+    const z = next[Math.min(idx, next.length - 1)];
+    setSelectedZoneId(z?.id || "");
+    setSelectedGroupId(z?.groups?.[0]?.id || "");
+  };
+
+  // 分组新建 / 删除（在所选分区下）
   const addGroup = () => {
+    if (!activeZone) return;
     const g: NavGroup = {
       id: genId(),
-      name: `分组 ${draft.length + 1}`,
+      name: `分组 ${(activeZone.groups.length + 1)}`,
       apps: [],
       ...DEFAULT_APPEARANCE,
     };
-    setDraft((prev) => [...prev, g]);
-    setSelectedId(g.id);
+    setDraft((prev) => prev.map((z) => (z.id === selectedZoneId ? { ...z, groups: [...z.groups, g] } : z)));
+    setSelectedGroupId(g.id);
   };
   const removeGroup = () => {
-    if (!active) return;
-    const count = active.apps?.length || 0;
-    if (!window.confirm(`确定删除分组「${active.name}」？该分组下的 ${count} 个入口也会一并删除。`)) return;
-    const idx = draft.findIndex((g) => g.id === selectedId);
-    const next = draft.filter((g) => g.id !== selectedId);
-    setDraft(next);
-    // 删除后选中相邻分组；删到 0 组时置空（导航页会自动回落）
-    setSelectedId(next[Math.min(idx, next.length - 1)]?.id || "");
+    if (!activeZone || !activeGroup) return;
+    const count = activeGroup.apps?.length || 0;
+    if (!window.confirm(`确定删除分组「${activeGroup.name}」？该分组下的 ${count} 个入口也会一并删除。`)) return;
+    const nextGroups = activeZone.groups.filter((g) => g.id !== selectedGroupId);
+    const idx = activeZone.groups.findIndex((g) => g.id === selectedGroupId);
+    setDraft((prev) => prev.map((z) => (z.id === selectedZoneId ? { ...z, groups: nextGroups } : z)));
+    setSelectedGroupId(nextGroups[Math.min(idx, nextGroups.length - 1)]?.id || "");
   };
 
-  // 允许删到 0 组（空数组 every=true），但禁止保存空名分组
-  const canSave = draft.every((g) => g.name.trim().length > 0);
+  // 允许删到 0 分区 / 0 分组；禁止保存空名分区或空名分组
+  const canSave = draft.every((z) => z.name.trim().length > 0 && z.groups.every((g) => g.name.trim().length > 0));
 
   return (
     <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
@@ -165,39 +205,68 @@ export function NavGroupSettingsModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-2 px-5 py-3.5 border-b border-slate-100">
-          <h3 className="text-base font-semibold text-slate-800">分组设置</h3>
+          <h3 className="text-base font-semibold text-slate-800">分区与分组设置</h3>
           <div className="flex-1" />
           <button
             type="button"
-            onClick={addGroup}
+            onClick={addZone}
             className="flex items-center gap-1 px-2.5 py-1 text-[12px] text-rose-600 border border-rose-200 rounded-lg hover:bg-rose-50"
-            title="新建一个导航分组"
+            title="新建一个导航分区"
           >
-            <Plus size={12} /> 新建分组
+            <Plus size={12} /> 新建分区
           </button>
-          {draft.length > 0 && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-[11px] text-slate-400">分组</span>
-              <select
-                value={selectedId}
-                onChange={(e) => setSelectedId(e.target.value)}
-                className="px-2 py-1 text-[12px] border border-slate-200 rounded-lg bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-rose-500/30 max-w-[140px]"
-              >
-                {draft.map((g) => (
-                  <option key={g.id} value={g.id}>{g.name || "未命名"}</option>
-                ))}
-              </select>
-            </div>
-          )}
           <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600">
             <X size={18} />
           </button>
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {!active ? (
-            <div className="flex flex-col items-center justify-center gap-3 py-8">
-              <p className="text-[13px] text-slate-400 text-center">还没有分组，点「新建分组」开始配置导航页</p>
+          {/* 分区选择 */}
+          <section className="rounded-xl border border-slate-100 bg-slate-50/60 p-3">
+            <p className="text-xs font-medium text-slate-600 mb-2">分区（顶部一级标签页）</p>
+            {draft.length === 0 ? (
+              <p className="text-[12px] text-slate-400">还没有分区，点右上角「新建分区」开始</p>
+            ) : (
+              <div className="flex items-center gap-2">
+                <select
+                  value={selectedZoneId}
+                  onChange={(e) => {
+                    setSelectedZoneId(e.target.value);
+                    const z = draft.find((zz) => zz.id === e.target.value);
+                    setSelectedGroupId(z?.groups?.[0]?.id || "");
+                  }}
+                  className="flex-1 px-2 py-1 text-[12px] border border-slate-200 rounded-lg bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-rose-500/30"
+                >
+                  {draft.map((z) => (
+                    <option key={z.id} value={z.id}>{z.name || "未命名"}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={removeZone}
+                  className="flex items-center gap-1 px-2 py-1 text-[11px] text-red-600 border border-red-200 rounded-lg hover:bg-red-50"
+                  title="删除当前分区及其全部入口"
+                >
+                  <Trash2 size={11} /> 删除分区
+                </button>
+              </div>
+            )}
+            {activeZone && (
+              <input
+                className={`${inputCls} mt-2`}
+                value={activeZone.name}
+                onChange={(e) => patchZone({ name: e.target.value })}
+                placeholder="分区名称，如：FNOS"
+              />
+            )}
+          </section>
+
+          {/* 分组选择（在所选分区下） */}
+          <section className="rounded-xl border border-slate-100 bg-slate-50/60 p-3">
+            <p className="text-xs font-medium text-slate-600 mb-2">分组（分区下的卡片区块）</p>
+            {!activeZone ? (
+              <p className="text-[12px] text-slate-400">请先选择或新建一个分区</p>
+            ) : activeZone.groups.length === 0 ? (
               <button
                 type="button"
                 onClick={addGroup}
@@ -205,81 +274,107 @@ export function NavGroupSettingsModal({
               >
                 <Plus size={13} /> 新建分组
               </button>
-            </div>
-          ) : (
+            ) : (
+              <div className="flex items-center gap-2">
+                <select
+                  value={selectedGroupId}
+                  onChange={(e) => setSelectedGroupId(e.target.value)}
+                  className="flex-1 px-2 py-1 text-[12px] border border-slate-200 rounded-lg bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-rose-500/30"
+                >
+                  {activeZone.groups.map((g) => (
+                    <option key={g.id} value={g.id}>{g.name || "未命名"}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={addGroup}
+                  className="flex items-center gap-1 px-2 py-1 text-[11px] text-rose-600 border border-rose-200 rounded-lg hover:bg-rose-50"
+                  title="在当前分区下新建分组"
+                >
+                  <Plus size={11} /> 新建分组
+                </button>
+                <button
+                  type="button"
+                  onClick={removeGroup}
+                  className="flex items-center gap-1 px-2 py-1 text-[11px] text-red-600 border border-red-200 rounded-lg hover:bg-red-50"
+                  title="删除当前分组及其全部入口"
+                >
+                  <Trash2 size={11} /> 删除分组
+                </button>
+              </div>
+            )}
+          </section>
+
+          {/* 分组外观（选中分组时显示） */}
+          {activeGroup && (
             <>
-              {/* 分组名称 */}
               <section className="rounded-xl border border-slate-100 bg-slate-50/60 p-3">
                 <p className="text-xs font-medium text-slate-600 mb-2">分组名称</p>
                 <input
                   className={inputCls}
-                  value={active.name}
-                  onChange={(e) => patch({ name: e.target.value })}
+                  value={activeGroup.name}
+                  onChange={(e) => patchGroup({ name: e.target.value })}
                   placeholder="例如：常用服务"
                 />
               </section>
 
-              {/* 卡片布局 */}
               <section className="rounded-xl border border-slate-100 bg-slate-50/60 p-3">
                 <p className="text-xs font-medium text-slate-600 mb-2">卡片布局</p>
                 <Segmented
-                  value={active.cardLayout || "vertical"}
+                  value={activeGroup.cardLayout || "vertical"}
                   options={[
                     { value: "vertical", label: "垂直" },
                     { value: "horizontal", label: "水平" },
                   ]}
-                  onChange={(v) => patch({ cardLayout: v })}
+                  onChange={(v) => patchGroup({ cardLayout: v })}
                 />
                 <p className="text-[11px] text-slate-400 mt-1.5">垂直=图标在上；水平=图标在左、文字在右</p>
               </section>
 
-              {/* 间距 / 大小 / 图标大小（参照 FlatNas） */}
               <section className="rounded-xl border border-slate-100 bg-slate-50/60 p-3 space-y-2.5">
                 <p className="text-xs font-medium text-slate-600">布局与间距（参照 FlatNas）</p>
                 <SliderRow
                   label="卡片间距"
-                  value={active.gridGap ?? 16}
+                  value={activeGroup.gridGap ?? 16}
                   min={0}
                   max={60}
                   unit="px"
-                  onChange={(v) => patch({ gridGap: v })}
+                  onChange={(v) => patchGroup({ gridGap: v })}
                 />
                 <SliderRow
                   label="卡片大小"
-                  value={active.cardSize ?? 120}
+                  value={activeGroup.cardSize ?? 120}
                   min={60}
                   max={240}
                   unit="px"
-                  onChange={(v) => patch({ cardSize: v })}
+                  onChange={(v) => patchGroup({ cardSize: v })}
                 />
                 <SliderRow
                   label="图标大小"
-                  value={active.iconSize ?? 48}
+                  value={activeGroup.iconSize ?? 48}
                   min={16}
                   max={96}
                   unit="px"
-                  onChange={(v) => patch({ iconSize: v })}
+                  onChange={(v) => patchGroup({ iconSize: v })}
                 />
               </section>
 
-              {/* 卡片样式（参照 FlatNas 卡片外观） */}
               <section className="rounded-xl border border-slate-100 bg-slate-50/60 p-3">
                 <p className="text-xs font-medium text-slate-600 mb-2">卡片样式（参照 FlatNas）</p>
                 <Segmented
-                  value={active.cardStyle || "solid"}
+                  value={activeGroup.cardStyle || "solid"}
                   options={CARD_STYLE_OPTIONS}
-                  onChange={(v) => patch({ cardStyle: v })}
+                  onChange={(v) => patchGroup({ cardStyle: v })}
                 />
                 <p className="text-[11px] text-slate-400 mt-1.5">实色/玻璃/扁平/描边/透明，对应卡片背景与圆角外观</p>
               </section>
 
-              {/* 图标形状（参照 FlatNas iconShape） */}
               <section className="rounded-xl border border-slate-100 bg-slate-50/60 p-3">
                 <p className="text-xs font-medium text-slate-600 mb-2">图标形状（参照 FlatNas）</p>
                 <select
                   className={inputCls}
-                  value={active.iconShape || "rounded"}
-                  onChange={(e) => patch({ iconShape: e.target.value as NavIconShape })}
+                  value={activeGroup.iconShape || "rounded"}
+                  onChange={(e) => patchGroup({ iconShape: e.target.value as NavIconShape })}
                 >
                   {ICON_SHAPE_OPTIONS.map((o) => (
                     <option key={o.value} value={o.value}>{o.label}</option>
@@ -291,11 +386,11 @@ export function NavGroupSettingsModal({
         </div>
 
         <div className="flex items-center gap-2 px-5 py-3 border-t border-slate-100">
-          {active && (
+          {activeGroup && (
             <>
               <button
                 type="button"
-                onClick={() => patch(DEFAULT_APPEARANCE)}
+                onClick={() => patchGroup(DEFAULT_APPEARANCE)}
                 className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-slate-500 border border-slate-200 rounded-lg hover:bg-slate-50"
                 title="仅恢复当前分组的外观设置，不影响名称与入口"
               >

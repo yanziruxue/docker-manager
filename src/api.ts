@@ -1,4 +1,4 @@
-import type { DockerEngine, EngineResourceStats, ResourceSample, SystemSettings, SchedulerStatus, SchedulerLastResult, ImageUpdateSummaryView, DockerNetwork, NetworkCreateOptions, NetInterfaceOption, ContainerFileEntry, AppInfo, LogListResult, LogTailResult, LogPruneResult, LogPackResult, LogPackConfig, LogArchiveInfo, MirrorRuntimeState, NotifyRuntimeStatus, NotifyTestResult, ActivityLog, NavGroup, NavPageSettings } from "./types";
+import type { DockerEngine, EngineResourceStats, ResourceSample, SystemSettings, SchedulerStatus, SchedulerLastResult, ImageUpdateSummaryView, DockerNetwork, NetworkCreateOptions, NetInterfaceOption, ContainerFileEntry, AppInfo, LogListResult, LogTailResult, LogPruneResult, LogPackResult, LogPackConfig, LogArchiveInfo, MirrorRuntimeState, NotifyRuntimeStatus, NotifyTestResult, ActivityLog, NavGroup, NavZone, NavPageSettings } from "./types";
 
 const BASE = "/api";
 
@@ -1263,18 +1263,18 @@ export function saveSettingsApi(settings: SystemSettings): Promise<SystemSetting
   });
 }
 
-// ============ 导航分组 API（独立通道，v1.51.2 label 解耦，不污染 main settings） ============
+// ============ 导航分区 API（独立通道，v1.52.0 升级为分区→分组→卡片三级结构） ============
 
-/** 获取导航分组（含旧 settings.json 一次性迁移） */
-export function fetchNavGroups(): Promise<NavGroup[]> {
-  return request<NavGroup[]>("/nav-groups");
+/** 获取导航分区（含旧 settings.json / 旧 {groups} 一次性迁移为默认分区） */
+export function fetchNavGroups(): Promise<NavZone[]> {
+  return request<NavZone[]>("/nav-groups");
 }
 
-/** 保存导航分组（归一化后落盘，不借道 /settings） */
-export function saveNavGroupsApi(groups: NavGroup[]): Promise<NavGroup[]> {
-  return request<NavGroup[]>("/nav-groups", {
+/** 保存导航分区（归一化后落盘，不借道 /settings） */
+export function saveNavGroupsApi(zones: NavZone[]): Promise<NavZone[]> {
+  return request<NavZone[]>("/nav-groups", {
     method: "PUT",
-    body: JSON.stringify(groups),
+    body: JSON.stringify(zones),
   });
 }
 

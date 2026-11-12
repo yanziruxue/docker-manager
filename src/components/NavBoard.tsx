@@ -203,6 +203,7 @@ function AppCard({
 
 export function NavBoard({
   group,
+  zoneTag,
   iconMap,
   editMode,
   onAddApp,
@@ -215,14 +216,17 @@ export function NavBoard({
   onCardDrop,
 }: {
   group: NavGroup;
+  /** 「全部」视图下显示所属分区名（普通分区视图不传，分区名仅作顶部 tab） */
+  zoneTag?: string;
   iconMap: Record<string, string>;
   /** 编辑模式（v1.51.18，由导航页「编辑」按钮切换）：仅此态下渲染卡片 ✎ 编辑入口 */
   editMode?: boolean;
-  onAddApp: () => void;
+  /** 添加项目到本分组（v1.52.0：携带 group.id，由导航页定位归属分组） */
+  onAddApp: (groupId: string) => void;
   /** 编辑单个项目（v1.51.11）：由 NavPage 打开独立 NavAppModal */
   onEditApp: (app: NavAppItem) => void;
-  /** 打开「分组设置」弹窗（v1.51.12）：标题行「＋」右边的齿轮扳手入口 */
-  onOpenGroupSettings: () => void;
+  /** 打开「分组设置」弹窗（v1.52.0：携带 group.id，由导航页定位父分区与分组） */
+  onOpenGroupSettings: (groupId: string) => void;
   /** 内外网默认访问模式（v1.51.8，由导航页「页面设置」下传）：覆盖单卡自动判定 */
   navNetworkMode?: NavNetworkMode;
   /** 「全部」视图下，按 appId 解析其真实归属分组（v1.51.19） */
@@ -262,19 +266,22 @@ export function NavBoard({
     <div>
       {/* 分组标题行：白色标题 + 圆形「＋」与其右侧「齿轮扳手」（FlatNas 风格，v1.51.12 齿轮 = 分组设置入口） */}
       <div className="flex items-center justify-between mb-5">
-        <h2 className="text-xl font-bold text-white drop-shadow-sm">{group.name}</h2>
+        <h2 className="text-xl font-bold text-white drop-shadow-sm flex items-baseline gap-2">
+          {group.name}
+          {zoneTag && <span className="text-[12px] font-normal text-white/60">· {zoneTag}</span>}
+        </h2>
         <div className="flex items-center gap-2">
           <button
-            onClick={onAddApp}
+            onClick={() => onAddApp(group.id)}
             className="w-9 h-9 rounded-full bg-white/85 text-fuchsia-600 flex items-center justify-center shadow-sm hover:bg-white hover:scale-105 transition-all"
             title="为该分组添加入口"
           >
             <PlusIcon />
           </button>
           <button
-            onClick={onOpenGroupSettings}
+            onClick={() => onOpenGroupSettings(group.id)}
             className="w-9 h-9 rounded-full bg-white/85 text-fuchsia-600 flex items-center justify-center shadow-sm hover:bg-white hover:scale-105 transition-all"
-            title="分组设置（新建/删除/改名分组、卡片布局/间距/大小/图标大小/样式/形状）"
+            title="分组设置（新建/删除/改名分区与分组、卡片布局/间距/大小/图标大小/样式/形状）"
           >
             <Settings size={17} />
           </button>
