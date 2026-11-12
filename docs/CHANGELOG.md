@@ -16,6 +16,33 @@
 
 ---
 
+## v1.51.16 — 2026-11-12（**main 分支 · 已构建 · 已推 Gitea**）
+
+### 改动
+- **「添加新项目」勾选自托管后，右侧新增「容器列表」按钮**：展开全局容器列表（**含已停止的容器**），点选容器后一次填入 4 个字段：容器名称 → 名称、端口 → 内网链接、WebUI 地址 → 外网链接、容器图标 → 图标框。
+- `src/components/NavAppModal.tsx`：自托管行由整行 `<label>` 改为 `<div>` + `<input id="nav-self-hosted">` / `<label htmlFor>`（★ 否则点右侧按钮会连带 toggle checkbox）；新增 `showContainers` / `containerQuery` state、`containerOptions`（运行中 / 有图标优先排序，**不过滤 `status`**，支持名称 / 镜像搜索）、`applyContainerPreset()`。填充规则：`name ← c.name`、`lanUrl ← ":" + (c.webuiPort || c.ports[0].host)`、`url ← c.webuiUrl`、`icon ← c.icon`；选择是显式动作，覆盖这 4 个字段，描述 / 备注 / 分组 / 自托管状态不变。
+- `src/pages/NavPage.tsx` / `src/App.tsx`：恢复 `containers` 链路（`App → NavPage → NavAppModal`）。容器数据来自 `fetchEngineContainers` → `docker.listContainers({ all: true })`，**天然包含停止容器，无需新增接口**；`icon` / `webuiUrl` / `webuiPort` 由堆栈 LABELS 传导 + 自定义图库自动匹配补齐，`ports[].host` 来自 `transformContainers` 的真实端口映射。
+- **不变量**：图标区仍只有**一个 `IconAutoComplete`**（容器按钮位于自托管行，不侵入图标区）；`NavBoard` 渲染层、`types.ts`、`server/*`、`confirm()` 高级字段透传全部未动。
+- **门禁改造** `scripts/check-nav.mjs`：原「NavPage 不传 containers」断言反转为正向接线；新增 5 条断言（App→NavPage→NavAppModal 链路 / 按钮仅在勾选后渲染且位于图标区之前 / 4 字段映射 / 含已停止容器 / 图标区仍唯一）；④ 进程级负向自检 7 → **9 例**（新增「容器列表接线缺失」「容器四字段映射缺失」）。
+- 版本号 `1.51.15 → 1.51.16`。
+
+### 验证（硬证据）
+- 双 tsc（src / server）0 错；`npm run test:gates` **GATES_EXIT=0**（pipefail 实跑），22 行结果全部 `FAIL=0`，FAIL 行扫描为空（完整日志 1292 行）；`check-custom-icons` **PASS=66 FAIL=0**；`check-nav` **82 ok / 0 FAIL**。
+- 负向自检：③ 解析器注入回归 + ④ 九例进程级注入回归（`<NavEditor` / 顶栏分组设置文字按钮 / 齿轮接线缺失 / 顶栏添加项目按钮 / 底部高级字段折叠区 / 智能匹配 / engineId 阻挡 / 容器列表接线缺失 / 容器四字段映射缺失）全部被检出（子进程 `exit 1`），还原后 9 处源码字节级一致。
+- SEA 四步构建（干净 node 基座 → postject 注入 130616512 B，未虚增）+ **三处 SHA-256 逐字节一致** `03d65ce7ba3f5135d9b564c0dc31e4001903db137214a23e0bce92b9981ffabc`（postject = zip 内 = deb 内，均 130616512 B，`ALL_MATCH`）。
+- ELF `7f454c46` / e_machine=62；运行时版本精确锚点 `CURRENT_VERSION = true ? "1.51.16" : "0.0.0-dev"` 二进制 1 处、旧版 `1.51.15` 锚点 **0 处**；5 个 dist 文件（`index.html` / `assets/index-C98tiwb3.js` / `assets/index-BKohibmh.css` / `docker.png` / `login-banner.svg`）base64 在 `bundle.js` 与 SEA 二进制中各命中 1 次，与 `dist` 逐字节一致。
+- 交付包：`dockermanagementyanzi-linux-x64-v1.51.16.zip`（43121863 B）、`dockermanagementyanzi_1.51.16_amd64.deb`（42838336 B）；包成员固定 5 个、0755/0644 权限位正确；latest 别名（固定 main v1.50.36，43102847 B）**未覆盖**。
+
+### 未完成 / 已知限制
+- 多数容器没有堆栈 LABELS 配置的 `webuiUrl` ⇒ 选中后**外网链接可能留空需手填**（内网端口用真实端口映射 `ports[].host` 兜底），列表项显示「需手填外网链接」提示。
+- 容器列表按钮按「填入」语义**覆盖**已有 4 个字段（编辑态误点会覆盖），描述 / 备注 / 分组 / 自托管状态不受影响；如需改成「只补空字段」可调整 `applyContainerPreset`。
+- 源码级门禁不覆盖真实点击；建议人工冒烟：点标题行「＋」→ 勾选自托管 → 点「容器列表」→ 确认已停止容器可见 → 搜索 / 选择 → 4 字段核对 → 保存后卡片渲染。
+
+### 下一步
+- 等用户验收字段映射与覆盖策略；GitHub 仍不推（Gitea-only 约定）。
+
+---
+
 ## v1.51.15 — 2026-11-12（**main 分支 · 已构建 · 已推 Gitea**）
 
 ### 改动

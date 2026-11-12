@@ -4,7 +4,8 @@
  *   v1.51.12 顶栏删除分组设置文字按钮、入口改为标题行「＋」右边齿轮扳手；
  *   v1.51.13 删除顶栏「＋添加项目」，添加新项目唯一入口 = 标题行「＋」；
  *   v1.51.14 弹窗移除底部高级字段折叠区，高级值从 initial 透传不丢数据；
- *   v1.51.15 项目弹窗图标统一改用堆栈 IconAutoComplete，移除智能匹配等自研图标功能）
+ *   v1.51.15 项目弹窗图标统一改用堆栈 IconAutoComplete，移除智能匹配等自研图标功能；
+ *   v1.51.16 勾选自托管后新增「容器列表」按钮，选容器一次填入名称/内网端口/外网链接/图标）
  *  - 真模块断言：编译运行 src/webui-url.ts 的 resolveNavAppUrl / normalizeNavLanUrl，
  *    覆盖内外网优先级链、`:端口` / `host:端口` / 完整 URL 三种内网写法、auto 分区分派；
  *  - 源码接线断言：导航配置完全收口在独立模块 server/nav-groups.ts（不污染 main settings.json），
@@ -12,8 +13,9 @@
  *    v1.51.11 起 NavEditor 弹窗已删除，项目 CRUD 由 NavPage + NavAppModal 直接落盘、
  *    分组新建/删除由 NavGroupSettingsModal 接管、卡片 hover ✎ 由 NavBoard.onEditApp 直达；
  *  - 负向自检①：注入「内网缺 lanUrl 不回落 url」回归 → 重载模块应检出差异 → 还原 → 复核全绿；
- *  - 负向自检②：进程级注入 7 类回归（<NavEditor / 顶栏分组设置文字按钮 / 齿轮接线缺失 /
- *    顶栏添加项目按钮 / 高级字段折叠区 / 智能匹配 / 全局图库被 engineId 阻挡），
+ *  - 负向自检②：进程级注入 9 类回归（<NavEditor / 顶栏分组设置文字按钮 / 齿轮接线缺失 /
+ *    顶栏添加项目按钮 / 高级字段折叠区 / 智能匹配 / 全局图库被 engineId 阻挡 /
+ *    容器列表接线缺失 / 容器四字段映射缺失），
  *    支持跨文件注入 NavPage.tsx、NavAppModal.tsx 与 IconAutoComplete.tsx
  *    → 重跑本门禁应 exit 1 → 还原 → 字节级一致。
  * 用法：node scripts/check-nav.mjs（退出码非 0 = 有回归）
@@ -150,8 +152,22 @@ ok("★ IconAutoComplete 无条件拉取全局自定义图标库（导航页无 
   iconAuto.includes("listCustomIconsApi().catch(() => null)") &&
   !iconAuto.includes("engineId ? listCustomIconsApi") &&
   iconAuto.includes("listStackIconsApi"));
-ok("★ NavPage 不再向项目弹窗传 containers（图标不再引用 Docker 容器）",
-  !navPage.includes("containers={containers}") && !navPage.includes("Container[]"));
+// v1.51.16：容器列表入口在「自托管」行，用于一次填入 4 个字段；图标区仍只有 IconAutoComplete
+// 注意：appSrc 在下方才定义，这里直接 read 避免 TDZ
+ok("★ 容器列表数据链路 App → NavPage → NavAppModal（含已停止的容器）",
+  read("src/App.tsx").includes("containers={containers}") && navPage.includes("containers={containers}") &&
+  navPage.includes("Container[]") && appModalCode.includes("containers: Container[]"));
+ok("★ 「容器列表」按钮仅在勾选自托管后渲染，且位于图标区之前",
+  appModalCode.includes("容器列表") && appModalCode.includes("selfHosted && (") &&
+  appModalCode.indexOf("容器列表") < appModalCode.indexOf("<IconAutoComplete"));
+ok("★ 选择容器一次填入 4 字段（名称/内网端口/外网 WebUI/图标）",
+  appModalCode.includes("setName(c.name)") && appModalCode.includes("setLanUrl(port") &&
+  appModalCode.includes("setUrl(c.webuiUrl") && appModalCode.includes("setIcon(c.icon"));
+ok("★ 容器列表包含已停止容器（排序不排除 stopped，且有状态标识）",
+  appModalCode.includes('c.status === "running" ? 0 : 1') && appModalCode.includes("已停止"));
+ok("★ 图标区仍只有一个 IconAutoComplete（容器按钮不侵入图标区）",
+  (appModalCode.match(/<IconAutoComplete/g) || []).length === 1 &&
+  !appModalCode.includes("引用 Docker 容器图标"));
 
 const gs = read("src/components/NavGroupSettingsModal.tsx");
 ok("★ 分组设置接管分组新建/删除", gs.includes("addGroup") && gs.includes("removeGroup"));
@@ -202,8 +218,8 @@ if (BROKEN === ORIGINAL) {
   ok("还原字节级一致", read(TARGET) === ORIGINAL);
 }
 
-console.log("== ④ 负向自检（进程级注入 7 类回归 → 重跑本门禁应 exit 1） ==");
-// 父进程注入 7 类回归文本，子进程跳过 ④（NAV_GATE_NEGATIVE_CHILD=1）只跑 ①②③，
+console.log("== ④ 负向自检（进程级注入 9 类回归 → 重跑本门禁应 exit 1） ==");
+// 父进程注入 9 类回归文本，子进程跳过 ④（NAV_GATE_NEGATIVE_CHILD=1）只跑 ①②③，
 // 若 ② 的对应断言确实生效，子进程必因 FAIL 而 exit 1。
 if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
   const NAV_PAGE_REL = "src/pages/NavPage.tsx";
@@ -247,6 +263,15 @@ if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
         "listCustomIconsApi().catch(() => null),",
         "engineId ? listCustomIconsApi().catch(() => null) : Promise.resolve(null),",
       ),
+    },
+    {
+      name: "注入容器列表接线缺失回归",
+      inject: (s) => s.replace("containers={containers}", ""),
+    },
+    {
+      name: "注入容器四字段映射缺失回归",
+      rel: "src/components/NavAppModal.tsx",
+      inject: (s) => s.replace("setName(c.name)", "setName(name)"),
     },
   ];
   for (const c of cases) {

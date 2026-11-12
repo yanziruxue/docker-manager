@@ -6,13 +6,14 @@
  * - 「描述」写 description（卡片副标题）；「备注」写 remark（hover 提示），两者语义分离且旧数据回落兼容。
  * - v1.51.14：底部高级字段折叠区已移除，主表单仅保留用户清单内字段；标题颜色 / 链接备链 /
  *   公开标记 / 图标缩放改为保存时从 initial 原样透传，既有数据不丢，表单不再提供编辑入口。
- * - v1.51.15：图标区统一改用堆栈图标逻辑（IconAutoComplete：输入名称自动匹配图库、点选写入 URL），
- *   移除智能匹配 / 已缓存徽标 / 引用 Docker 容器图标 / 图标预览等自研功能。
+ * - v1.51.15：图标区统一改用堆栈图标逻辑（IconAutoComplete：输入名称自动匹配图库、点选写入 URL）。
+ * - v1.51.16：勾选自托管后右侧新增「容器列表」按钮，展开全局容器列表（含已停止的容器），
+ *   选择容器后把名称 / 内网端口 / 外网 WebUI 地址 / 图标一次填入对应字段。
  * 保存经 onSave(groupId, app) 由 NavPage 直接落盘；编辑态可经 onDelete(appId) 删除项目（v1.51.11）。
  */
-import { useState } from "react";
-import { Globe, Trash2, X } from "lucide-react";
-import type { NavAppItem, NavGroup } from "../types";
+import { useMemo, useState } from "react";
+import { Globe, List, Trash2, X } from "lucide-react";
+import type { Container, NavAppItem, NavGroup } from "../types";
 import { IconAutoComplete } from "./IconAutoComplete";
 
 function genId(): string {
@@ -36,6 +37,7 @@ const inputCls =
 
 export function NavAppModal({
   groups,
+  containers,
   initial,
   initialGroupId,
   onSave,
@@ -43,6 +45,8 @@ export function NavAppModal({
   onClose,
 }: {
   groups: NavGroup[];
+  /** 全局容器列表（含已停止的容器，v1.51.16：用于一次填入 4 个字段） */
+  containers: Container[];
   /** 编辑已有项目时传入；null/undefined = 新增 */
   initial?: NavAppItem | null;
   /** 新增时默认归属的分组 id（通常为当前分组） */
@@ -70,6 +74,31 @@ export function NavAppModal({
   const [lanUrl, setLanUrl] = useState(initial?.lanUrl || "");
   const [url, setUrl] = useState(initial?.url || "");
   const [icon, setIcon] = useState(initial?.icon || "");
+  const [showContainers, setShowContainers] = useState(false);
+  const [containerQuery, setContainerQuery] = useState("");
+
+  /** 容器列表（v1.51.16）：不过滤 status，已停止的容器同样可选；运行中 / 有图标优先 */
+  const containerOptions = useMemo(() => {
+    const q = containerQuery.trim().toLowerCase();
+    return [...(containers || [])]
+      .filter((c) => !q || c.name.toLowerCase().includes(q) || (c.image || "").toLowerCase().includes(q))
+      .sort((a, b) => {
+        const run = (c: Container) => (c.status === "running" ? 0 : 1);
+        const ico = (c: Container) => (c.icon ? 0 : 1);
+        return run(a) - run(b) || ico(a) - ico(b) || a.name.localeCompare(b.name);
+      });
+  }, [containers, containerQuery]);
+
+  /** 选择容器 → 一次填入 4 个字段；端口优先 LABELS WebUI 端口，回退真实宿主端口映射 */
+  const applyContainerPreset = (c: Container) => {
+    setName(c.name);
+    const port = c.webuiPort || c.ports?.find((p) => p.host)?.host || "";
+    setLanUrl(port ? `:${port}` : "");
+    setUrl(c.webuiUrl || "");
+    setIcon(c.icon || "");
+    setShowContainers(false);
+    setContainerQuery("");
+  };
 
   const canSave = name.trim().length > 0 && url.trim().length > 0 && !!groupId;
   const confirm = () => {
@@ -139,21 +168,75 @@ export function NavAppModal({
             />
           </Field>
 
-          {/* 自托管开关 */}
-          <label className="flex items-start gap-2 rounded-xl border border-slate-100 bg-slate-50/60 px-3 py-2.5 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={selfHosted}
-              onChange={(e) => setSelfHosted(e.target.checked)}
-              className="mt-0.5 w-4 h-4 accent-fuchsia-600 flex-shrink-0"
-            />
-            <span className="text-[13px] text-slate-700 leading-5">
-              自托管
-              <span className="block text-[11px] text-slate-400 leading-4">
-                勾选后可配置内网链接，访问时按内外网自动切换；不勾选则点击直接打开外网链接
-              </span>
-            </span>
-          </label>
+          {/* 自托管开关 + 容器列表入口（v1.51.16：按钮只在勾选后显示） */}
+          <div className="rounded-xl border border-slate-100 bg-slate-50/60 px-3 py-2.5">
+            <div className="flex items-center gap-2">
+              <input
+                id="nav-self-hosted"
+                type="checkbox"
+                checked={selfHosted}
+                onChange={(e) => {
+                  setSelfHosted(e.target.checked);
+                  if (!e.target.checked) setShowContainers(false);
+                }}
+                className="w-4 h-4 accent-fuchsia-600 flex-shrink-0"
+              />
+              <label htmlFor="nav-self-hosted" className="flex-1 text-[13px] text-slate-700 leading-5 cursor-pointer select-none">
+                自托管
+                <span className="block text-[11px] text-slate-400 leading-4">
+                  勾选后可配置内网链接，访问时按内外网自动切换；不勾选则点击直接打开外网链接
+                </span>
+              </label>
+              {selfHosted && (
+                <button
+                  type="button"
+                  onClick={() => setShowContainers((v) => !v)}
+                  className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium rounded-lg border border-fuchsia-200 bg-white text-fuchsia-600 hover:bg-fuchsia-50 flex-shrink-0"
+                  title="显示容器列表（含已停止的容器），选择后自动填入名称 / 内网端口 / 外网链接 / 图标"
+                >
+                  <List size={12} /> 容器列表
+                </button>
+              )}
+            </div>
+            {selfHosted && showContainers && (
+              <div className="mt-2 rounded-lg border border-slate-200 bg-white p-2">
+                <input
+                  className={inputCls + " text-[12px]"}
+                  value={containerQuery}
+                  onChange={(e) => setContainerQuery(e.target.value)}
+                  placeholder="搜索容器名称 / 镜像"
+                />
+                <div className="mt-1.5 max-h-44 overflow-y-auto space-y-1">
+                  {containerOptions.length === 0 && (
+                    <div className="px-2 py-3 text-center text-[11px] text-slate-400">
+                      没有匹配的容器（引擎未连接或暂无容器）
+                    </div>
+                  )}
+                  {containerOptions.map((c) => {
+                    const port = c.webuiPort || c.ports?.find((p) => p.host)?.host || "";
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => applyContainerPreset(c)}
+                        className="w-full flex items-center gap-2 px-2 py-1.5 text-left rounded-md hover:bg-fuchsia-50 border border-transparent hover:border-fuchsia-100"
+                        title="自动填入名称 / 内网端口 / 外网链接 / 图标"
+                      >
+                        <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${c.status === "running" ? "bg-emerald-500" : "bg-slate-300"}`} />
+                        <span className="flex-1 min-w-0 truncate text-[12px] text-slate-700">{c.name}</span>
+                        {c.status !== "running" && <span className="text-[10px] text-slate-400 flex-shrink-0">已停止</span>}
+                        {port && <span className="text-[10px] text-fuchsia-500 flex-shrink-0">:{port}</span>}
+                        {!c.webuiUrl && <span className="text-[10px] text-amber-500 flex-shrink-0">需手填外网链接</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="mt-1.5 px-1 text-[10px] text-slate-400 leading-4">
+                  含已停止的容器；选中后覆盖名称 / 内网链接 / 外网链接 / 图标，无 WebUI 地址的容器请手填外网链接。
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* 内网链接（仅自托管显示） */}
           {selfHosted && (
