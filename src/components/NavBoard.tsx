@@ -213,6 +213,7 @@ export function NavBoard({
   isFirstGroup,
   iconMap,
   editMode,
+  dragActive,
   onEditApp,
   navNetworkMode,
   resolveGroupOf,
@@ -230,6 +231,8 @@ export function NavBoard({
   iconMap: Record<string, string>;
   /** 编辑模式（v1.51.18，由导航页「编辑」按钮切换）：仅此态下渲染卡片 ✎ 编辑入口 */
   editMode?: boolean;
+  /** 编辑态且正在拖拽卡片（v1.52.8：空分组 / 卡片墙空白处也作为放置目标） */
+  dragActive?: boolean;
   /** 编辑单个项目（v1.51.11）：由 NavPage 打开独立 NavAppModal */
   onEditApp: (app: NavAppItem) => void;
   /** 内外网默认访问模式（v1.51.8，由导航页「页面设置」下传）：覆盖单卡自动判定 */
@@ -273,7 +276,20 @@ export function NavBoard({
   const bottomGap = zoneCfg?.groupCardGapBottom ?? 32;
 
   return (
-    <div style={{ paddingTop: isFirstGroup ? firstGap : 0, paddingBottom: bottomGap }}>
+    <div
+      style={{ paddingTop: isFirstGroup ? firstGap : 0, paddingBottom: bottomGap }}
+      onDragOver={dragActive ? (e) => e.preventDefault() : undefined}
+      onDrop={
+        dragActive
+          ? (e) => {
+              e.preventDefault();
+              // 落在卡片上时由卡片包裹 stopPropagation 处理「插到该卡前」；
+              // 其余位置（空分组占位区 / 卡片墙空白处 / 标题行）统一追加到该分组末尾。
+              onCardDrop?.("", group.id);
+            }
+          : undefined
+      }
+    >
       {/* 分组标题行（v1.52.1：仅标题，＋/齿轮已收敛至导航页顶栏图标条） */}
       <div className="flex items-center justify-between" style={{ marginBottom: titleGap }}>
         <h2 className="text-xl font-bold text-white drop-shadow-sm flex items-baseline gap-2">
@@ -282,9 +298,15 @@ export function NavBoard({
         </h2>
       </div>
       {apps.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-12 text-white/85">
+        <div
+          className={`flex flex-col items-center justify-center py-12 rounded-2xl border-2 border-dashed transition-all ${
+            dragActive
+              ? "border-fuchsia-300 bg-white/25 text-white ring-2 ring-fuchsia-400/70"
+              : "border-transparent text-white/85"
+          }`}
+        >
           <PlusIcon className="mb-2 opacity-80" />
-          <p className="text-sm">该分组还没有入口，点顶栏「＋」添加</p>
+          <p className="text-sm">{dragActive ? "松手放到该分组" : "该分组还没有入口，点顶栏「＋」添加"}</p>
         </div>
       ) : (
         <div className="flex flex-wrap items-start" style={{ gap: gridGap }}>
@@ -296,7 +318,7 @@ export function NavBoard({
               key={a.id}
               className="relative group/card"
               onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => { e.preventDefault(); onCardDrop?.(a.id, cardGroupId); }}
+              onDrop={(e) => { e.preventDefault(); e.stopPropagation(); onCardDrop?.(a.id, cardGroupId); }}
             >
               <AppCard
                 app={a}

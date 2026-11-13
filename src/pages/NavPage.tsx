@@ -76,6 +76,8 @@ export function NavPage({ navZones, onSaveNavZones, containers, navPageSettings,
   const [editMode, setEditMode] = useState(false);
   // v1.51.19：编辑态拖拽状态（被拖拽项目的 id 与来源分组）
   const [drag, setDrag] = useState<{ appId: string; fromGroupId: string } | null>(null);
+  // v1.52.8：仅编辑态且确实有卡片被拖拽时，才开启空分组 / 空白区放置目标
+  const dragActive = editMode && !!drag;
   const navIconMap = useNavIconMap();
   // 打开页面设置弹窗（整页外观/环境）
   const openPageSettings = useCallback(() => setNavPageSettingsOpen(true), []);
@@ -265,7 +267,7 @@ export function NavPage({ navZones, onSaveNavZones, containers, navPageSettings,
                 active
                   ? "bg-white text-fuchsia-600 font-bold shadow-md text-[18px] scale-[1.04] py-2 px-5"
                   : "bg-white/60 text-slate-600 hover:bg-white/85 text-[13px] py-1.5 px-4"
-              } ${drag ? "ring-2 ring-fuchsia-400/70" : ""}`}
+              } ${dragActive ? "ring-2 ring-fuchsia-400/70" : ""}`}
             >
               {z.name}
               <span className={`ml-1.5 text-[11px] ${active ? "text-fuchsia-400" : "text-slate-400"}`}>
@@ -330,7 +332,11 @@ export function NavPage({ navZones, onSaveNavZones, containers, navPageSettings,
           {sections.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 rounded-2xl border border-white/40 bg-white/30 backdrop-blur-sm text-white">
               <Compass size={36} className="mb-3 opacity-90" />
-              <p className="text-sm">{isAll ? "还没有任何导航分组" : `分区「${activeZone?.name}」下还没有分组`}</p>
+              <p className="text-sm">
+                {dragActive && !isAll
+                  ? "该分区还没有分组，请先在分区与分组设置里新建分组后再拖入"
+                  : isAll ? "还没有任何导航分组" : `分区「${activeZone?.name}」下还没有分组`}
+              </p>
               <button
                 onClick={() => (isAll ? openGroupSettings() : addGroupToZone(activeZone!.id))}
                 className="mt-4 px-4 py-2 text-sm text-white bg-rose-500 rounded-full hover:bg-rose-600 shadow-md transition-colors"
@@ -348,6 +354,7 @@ export function NavPage({ navZones, onSaveNavZones, containers, navPageSettings,
                 isFirstGroup={firstInZone}
                 iconMap={navIconMap}
                 editMode={editMode}
+                dragActive={dragActive}
                 onEditApp={openEditApp}
                 navNetworkMode={navNetworkMode}
                 resolveGroupOf={isAll ? resolveGroupOf : undefined}

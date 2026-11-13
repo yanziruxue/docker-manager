@@ -15,7 +15,7 @@
  *    v1.51.11 起 NavEditor 弹窗已删除，项目 CRUD 由 NavPage + NavAppModal 直接落盘、
  *    分组新建/删除由 NavGroupSettingsModal 接管、卡片 hover ✎ 由 NavBoard.onEditApp 直达；
  *  - 负向自检①：注入「内网缺 lanUrl 不回落 url」回归 → 重载模块应检出差异 → 还原 → 复核全绿；
- *  - 负向自检②：进程级注入 29 类回归（<NavEditor / 顶栏分组设置文字按钮 / 齿轮接线缺失 /
+ *  - 负向自检②：进程级注入 31 类回归（<NavEditor / 顶栏分组设置文字按钮 / 齿轮接线缺失 /
  *    顶栏添加项目按钮 / 高级字段折叠区 / 智能匹配 / 全局图库被 engineId 阻挡 /
  *    容器列表接线缺失 / 容器四字段映射缺失 / 背景图上限回退 2mb / 超限 JSON 中间件缺失 /
  *    上传兜底文案回退 / 前端体积预校验缺失 / 编辑按钮缺失 / editMode 未下传 NavBoard /
@@ -123,6 +123,17 @@ ok("★ NavBoard 不再有旧管理弹窗齿轮入口", !board.includes("onOpenE
 ok("★ NavBoard 分组标题行不再渲染 ＋/齿轮（入口收敛顶栏，v1.52.1）",
   !board.includes("onOpenGroupSettings") && !board.includes("onAddApp") &&
   !board.includes('title="为该分组添加入口"') && !board.includes("分组设置"));
+
+// v1.52.8：分区/分组都已建好、组内无项目时也能拖进去
+ok("★ 整个分组容器接管拖放，空分组可追加到末尾",
+  board.includes("onDragOver={dragActive") && board.includes('onCardDrop?.("", group.id)') &&
+  board.includes("松手放到该分组") && board.includes("dragActive?: boolean"));
+ok("★ 卡片落点 stopPropagation（不与容器追加重复搬移）",
+  board.includes("e.stopPropagation(); onCardDrop?.(a.id, cardGroupId);"));
+ok("★ NavPage 编辑态下传 dragActive，0 分组分区给明确引导",
+  navPage.includes("const dragActive = editMode && !!drag;") &&
+  navPage.includes("dragActive={dragActive}") &&
+  navPage.includes("请先在分区与分组设置里新建分组后再拖入"));
 
 const appModal = read("src/components/NavAppModal.tsx");
 ok("★ NavAppModal 编辑态支持删除项目", appModal.includes("onDelete") && appModal.includes("删除项目"));
@@ -366,8 +377,8 @@ if (BROKEN === ORIGINAL) {
   ok("还原字节级一致", read(TARGET) === ORIGINAL);
 }
 
-console.log("== ④ 负向自检（进程级注入 29 类回归 → 重跑本门禁应 exit 1） ==");
-// 父进程注入 29 类回归文本，子进程跳过 ④（NAV_GATE_NEGATIVE_CHILD=1）只跑 ①②③，
+console.log("== ④ 负向自检（进程级注入 31 类回归 → 重跑本门禁应 exit 1） ==");
+// 父进程注入 31 类回归文本，子进程跳过 ④（NAV_GATE_NEGATIVE_CHILD=1）只跑 ①②③，
 // 若 ② 的对应断言确实生效，子进程必因 FAIL 而 exit 1。
 if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
   const NAV_PAGE_REL = "src/pages/NavPage.tsx";
@@ -518,6 +529,16 @@ if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
       name: "注入切换分区不回落分组回归（跨分区残留旧 groupId）",
       rel: "src/components/NavAppModal.tsx",
       inject: (s) => s.replace('setGroupId(z?.groups?.[0]?.id || "");', ""),
+    },
+    {
+      name: "注入空分组拖放缺失回归（容器不再追加到末尾）",
+      rel: "src/components/NavBoard.tsx",
+      inject: (s) => s.replace('onCardDrop?.("", group.id)', 'onCardDrop?.("__no_append__", group.id)'),
+    },
+    {
+      name: "注入卡片落点冒泡重复搬移回归（缺 stopPropagation）",
+      rel: "src/components/NavBoard.tsx",
+      inject: (s) => s.replace("e.stopPropagation(); onCardDrop?.(a.id, cardGroupId);", "onCardDrop?.(a.id, cardGroupId);"),
     },
   ];
   for (const c of cases) {

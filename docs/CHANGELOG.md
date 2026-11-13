@@ -16,6 +16,42 @@
 
 ---
 
+## v1.52.8 — 2026-11-13（**main 分支 · 已构建 · 已推 Gitea**）
+
+### 导航页：空分组 / 卡片墙空白处也能拖入项目
+
+- **问题**：分区、分组都已建好但组内没有项目时，把卡片拖到该区域完全拖不进去。根因是 `NavBoard` 空分组占位 `<div>` 没有任何 `onDragOver`/`onDrop`（HTML5 拖放必须有 `preventDefault` 的放置目标）；拖到有卡片分组的「卡片墙空白处」同样无落点。
+- **实现**：
+  - `src/components/NavBoard.tsx`：新增 `dragActive` prop（编辑态且确实有卡片在拖）；**整个分组容器**接管 `onDragOver`/`onDrop`，空占位区 / 卡片墙空白区 / 标题行统一走 `onCardDrop("", group.id)`，复用 `moveApp` 既有「`beforeAppId` 为空＝追加末尾」语义，未新增回调接口；卡片包裹的 drop 加 `e.stopPropagation()`，保留「插到该卡前」且不重复搬移；空占位区在拖拽态高亮 + 提示「松手放到该分组」。
+  - `src/pages/NavPage.tsx`：计算 `dragActive = editMode && !!drag` 并下传；分区 tab 高亮改用 `dragActive`；0 分组分区的空态区给出「请先新建分组后再拖入」引导（**不自动创建分组**，按用户拍板保持数据结构不变）。
+- **门禁**：`check-nav` 新增 3 条正向断言 + 2 类负向自检（29→31 类），共 **180 ok / 0 FAIL**。
+
+### 发布：Docker 镜像离线分发到 GitHub Releases
+
+- 新增 `scripts/upload-docker-image.mjs`：上传前硬校验 tar（`manifest.json` / `repositories` / 全部 Layers 与 Config 引用齐全，保证 `docker load` 真能导入）；流式上传（469MB 不整块进内存）；Release 强制 `prerelease=true`，用独立 tag `docker-image-v1.52.6` 隔离 `releases/latest`，**不影响应用内 OTA**；上传后端到端核验资产字节数与 `latest` 前后一致。
+- 他人可在 Release 页面手动下载 `dockermanagementyanzi-docker-v1.52.6.tar`，用 `docker load -i` 或 NAS「导入镜像」界面导入。
+
+### 未完成 / 已知限制
+
+- 本次上传的镜像是 **v1.52.6**（用户从 Gitea 镜像库导出后放到 `build-upload`），不是 v1.52.8 代码对应的镜像；如需最新版镜像需重新导出。
+- 本机无 `docker` / `gh` CLI，未做 CI 自动导出；每版镜像需手动导出一次。
+- 0 分组的分区拖入仍不自动建组（仅给引导），按用户确认保持数据结构不变。
+- GitHub 只上传镜像资产与新建 prerelease Release，**源码 / zip / deb 未推 GitHub**（沿用 Gitea-only 发布）。
+
+### 下一步
+
+- 如需让他人拿到与最新版本一致的镜像：在有 Docker 的机器重新 `docker pull` + `docker save` 导出后放入 `build-upload`，重跑 `node scripts/upload-docker-image.mjs`（脚本会覆盖同名资产）。
+- 如需长期自动化，可在 Gitea Actions 里加 `docker save` + 上传步（需 GitHub PAT Secret）。
+
+### 验证
+
+- 双 `tsc` 0 错；`check-nav` **180 ok / 0 FAIL**（31 类负向自检）；`npm run test:gates` 全 22 组 FAIL=0。
+- SEA 硬核验：ELF `7f454c46` / e_machine=62 / 版本 `1.52.8` 嵌入 / 包成员 5 个 / dist JS base64 完整嵌入 / zip=deb=postject 产物 SHA-256 一致。
+- 包：`dockermanagementyanzi-linux-x64-v1.52.8.zip`（43,133,858 B）、`dockermanagementyanzi_1.52.8_amd64.deb`（42,849,046 B）；**zip 内 = deb 内 = postject 产物** 二进制 SHA-256 `2443b9f7faceaac29b3ce8221108da06cc52c1201e0d6b830e00fee5ce6eb155` 字节级一致。
+- 镜像 tar 硬校验：491,524,096 B / 18 个成员 / 5 层引用零缺失 / SHA-256 `a4fd4250c1f7805e0abdcf538a20315a816af602d5d1573f346319e5bfc608cb`。
+
+---
+
 ## v1.52.7 — 2026-11-13（**main 分支 · 已构建 · 已推 Gitea**）
 
 ### 导航页：编辑项目归属改为「分区 → 该分区下的分组」两级
