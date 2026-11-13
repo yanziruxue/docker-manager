@@ -3,11 +3,11 @@ name: build-docker-image
 # ============================================================
 # Docker 镜像构建工作流（Gitea Actions）
 #
-# 触发规则（用户确认 2026-11-12 二次拍板）：
+# 触发规则（2026-11-13 修正：手动 dispatch 恢复 target 选择）：
 #   - 打 tag (v*) 推送            → 自动构建并推送 Gitea 内置容器镜像库
 #                                   192.168.24.10:8024/yanzi/dockermanagementyanzi  (:版本 + :latest)
-#   - 手动触发 workflow_dispatch  → 构建并推送 ghcr.io/yanzirue/dockermanagementyanzi
-#                                   （可用 version 输入手动指定镜像版本号，留空 = 取 package.json）
+#   - 手动触发 workflow_dispatch  → target 可选 ghcr（默认）/ gitea；
+#                                   可用 version 输入手动指定镜像版本号，留空 = 取 package.json
 #
 # 前置硬条件：Gitea Actions runner 必须已安装 Docker 守护进程
 #   （docker build 需要；若 runner 无 docker，须改用 docker:dind 服务容器 privileged）。
@@ -29,8 +29,16 @@ on:
       - 'v*'
   workflow_dispatch:
     inputs:
+      target:
+        description: "推送目标镜像库（仅手动触发时生效）"
+        required: true
+        type: choice
+        options:
+          - ghcr
+          - gitea
+        default: ghcr
       version:
-        description: "ghcr 镜像版本号（如 v1.52.1；留空 = 取 package.json 版本）"
+        description: "镜像版本号（如 v1.52.1；留空 = 取 package.json 版本）"
         required: false
         type: string
         default: ""
@@ -85,8 +93,8 @@ jobs:
             --build-arg APT_MIRROR=mirrors.aliyun.com \
             .
 
-      - name: 推送 Gitea 容器镜像库（仅 tag 自动触发）
-        if: github.event_name == 'push'
+      - name: 推送 Gitea 容器镜像库（tag 自动触发，或手动选 target=gitea）
+        if: github.event_name == 'push' || inputs.target == 'gitea'
         env:
           DOCKER_USER: ${{ secrets.DOCKER_USER }}
           DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
@@ -95,8 +103,8 @@ jobs:
           docker push "${{ steps.meta.outputs.gitea_image }}:${{ steps.meta.outputs.version }}"
           docker push "${{ steps.meta.outputs.gitea_image }}:latest"
 
-      - name: 推送 ghcr.io（仅手动触发）
-        if: github.event_name == 'workflow_dispatch'
+      - name: 推送 ghcr.io（仅手动选 target=ghcr）
+        if: github.event_name == 'workflow_dispatch' && inputs.target == 'ghcr'
         env:
           GHCR_USER: ${{ secrets.GHCR_USER }}
           GHCR_PAT: ${{ secrets.GHCR_PAT }}
