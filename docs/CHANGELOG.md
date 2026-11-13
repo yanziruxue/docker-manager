@@ -28,13 +28,14 @@
 
 ### 发布：Docker 镜像离线分发到 GitHub Releases
 
-- 新增 `scripts/upload-docker-image.mjs`：上传前硬校验 tar（`manifest.json` / `repositories` / 全部 Layers 与 Config 引用齐全，保证 `docker load` 真能导入）；流式上传（469MB 不整块进内存）；Release 强制 `prerelease=true`，用独立 tag `docker-image-v1.52.6` 隔离 `releases/latest`，**不影响应用内 OTA**；上传后端到端核验资产字节数与 `latest` 前后一致。
-- 他人可在 Release 页面手动下载 `dockermanagementyanzi-docker-v1.52.6.tar`，用 `docker load -i` 或 NAS「导入镜像」界面导入。
+- 新增 `scripts/upload-docker-image.mjs`：上传前硬校验 tar（`manifest.json` / `repositories` / 全部 Layers 与 Config 引用齐全，保证 `docker load` 真能导入）；**gzip 压缩后流式上传**（468.75 MiB → 178.55 MiB，压缩率 38.1%，`docker load` 自动解压），并校验 gzip 解压字节数与源 tar 完全一致；Release 强制 `prerelease=true`，用独立 tag `docker-image-v1.52.6` 隔离 `releases/latest`，**不影响应用内 OTA**；已存在 Release 会幂等同步说明；上传后端到端核验资产字节数与 `latest` 前后一致。
+- 他人可在 Release 页面手动下载 `dockermanagementyanzi-docker-v1.52.6.tar.gz`，用 `docker load -i` 或 NAS「导入镜像」界面导入。
 
 ### 未完成 / 已知限制
 
 - 本次上传的镜像是 **v1.52.6**（用户从 Gitea 镜像库导出后放到 `build-upload`），不是 v1.52.8 代码对应的镜像；如需最新版镜像需重新导出。
 - 本机无 `docker` / `gh` CLI，未做 CI 自动导出；每版镜像需手动导出一次。
+- GitHub 国际链路上行较慢：首次未压缩 469MB 上传 7 分钟仍不足 50MB，已主动取消并改走 gzip 压缩重传（超时放宽到 120 分钟）。
 - 0 分组的分区拖入仍不自动建组（仅给引导），按用户确认保持数据结构不变。
 - GitHub 只上传镜像资产与新建 prerelease Release，**源码 / zip / deb 未推 GitHub**（沿用 Gitea-only 发布）。
 
@@ -48,7 +49,7 @@
 - 双 `tsc` 0 错；`check-nav` **180 ok / 0 FAIL**（31 类负向自检）；`npm run test:gates` 全 22 组 FAIL=0。
 - SEA 硬核验：ELF `7f454c46` / e_machine=62 / 版本 `1.52.8` 嵌入 / 包成员 5 个 / dist JS base64 完整嵌入 / zip=deb=postject 产物 SHA-256 一致。
 - 包：`dockermanagementyanzi-linux-x64-v1.52.8.zip`（43,133,858 B）、`dockermanagementyanzi_1.52.8_amd64.deb`（42,849,046 B）；**zip 内 = deb 内 = postject 产物** 二进制 SHA-256 `2443b9f7faceaac29b3ce8221108da06cc52c1201e0d6b830e00fee5ce6eb155` 字节级一致。
-- 镜像 tar 硬校验：491,524,096 B / 18 个成员 / 5 层引用零缺失 / SHA-256 `a4fd4250c1f7805e0abdcf538a20315a816af602d5d1573f346319e5bfc608cb`。
+- 镜像硬校验：源 tar 491,524,096 B / 18 个成员 / 5 层引用零缺失 / SHA-256 `a4fd4250c1f7805e0abdcf538a20315a816af602d5d1573f346319e5bfc608cb`；上传的 gzip 包 187,223,336 B / SHA-256 `213c8db41ce8af253b77fdeb96cd7052240a45944ac624804c8ff75e9676505b`，gzip 解压字节数与源 tar 一致。
 
 ---
 

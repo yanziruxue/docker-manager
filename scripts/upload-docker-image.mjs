@@ -17,6 +17,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import https from "node:https";
+import zlib from "node:zlib";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -139,6 +140,18 @@ function sha256(file) {
   });
 }
 
+/** gzip 完整性：流式解压计数字节，不落盘、不整块进内存 */
+function gunzipByteCount(file) {
+  return new Promise((resolve, reject) => {
+    let n = 0;
+    const gz = zlib.createGunzip();
+    gz.on("data", (c) => (n += c.length));
+    gz.on("error", reject);
+    gz.on("end", () => resolve(n));
+    fs.createReadStream(file).on("error", reject).pipe(gz);
+  });
+}
+
 async function api(method, urlPath, body) {
   const r = await fetch(API + urlPath, {
     method,
@@ -190,16 +203,16 @@ function uploadAsset(releaseId, name, file, size) {
       },
     );
     req.on("error", reject);
-    req.setTimeout(30 * 60 * 1000, () => req.destroy(new Error("上传超时（30 分钟）")));
+    req.setTimeout(120 * 60 * 1000, () => req.destroy(new Error("上传超时（120 分钟）")));
     const rs = fs.createReadStream(file);
     rs.on("error", reject);
     let sent = 0;
-    let nextMark = 50 * 1024 * 1024;
+    let nextMark = 20 * 1024 * 1024;
     rs.on("data", (c) => {
       sent += c.length;
       if (sent >= nextMark) {
         console.log(`  上传进度 ${(sent / 1048576).toFixed(0)} / ${(size / 1048576).toFixed(0)} MiB`);
-        nextMark += 50 * 1024 * 1024;
+        nextMark += 20 * 1024 * 1024;
       }
     });
     rs.pipe(req);
@@ -210,13 +223,24 @@ async function main() {
   if (!TOKEN) throw new Error("缺少 GITHUB_TOKEN（环境变量或项目根 .env）");
   const file = opt("--file", findTar());
   if (!fs.existsSync(file)) throw new Error(`文件不存在: ${file}`);
-  const info = verifyImage(file);
+  // 压缩上传时结构校验仍读未压缩的原 tar（同一份内容），保证 docker load 可导入
+  const verifyFile = opt("--verify-tar", file);
+  if (!fs.existsSync(verifyFile)) throw new Error(`校验源文件不存在: ${verifyFile}`);
+  const info = verifyImage(verifyFile);
+  const uploadSize = fs.statSync(file).size;
+  const isGz = file.endsWith(".gz");
+  if (isGz) {
+    const expanded = await gunzipByteCount(file);
+    if (expanded !== info.size) throw new Error(`gzip 解压后 ${expanded} B != 源 tar ${info.size} B`);
+    console.log("gzip 完整性: ✅ 解压后", expanded, "B 与源 tar 字节数一致");
+  }
   const ver = (info.tags[0].match(/v\d+\.\d+\.\d+/) || path.basename(file).match(/v\d+\.\d+\.\d+/) || ["v-unknown"])[0];
   const tag = opt("--tag", `docker-image-${ver}`);
-  const name = opt("--name", `dockermanagementyanzi-docker-${ver}.tar`);
+  const name = opt("--name", `dockermanagementyanzi-docker-${ver}.tar${isGz ? ".gz" : ""}`);
   console.log("=== 镜像硬校验 ===");
-  console.log("文件:", path.relative(ROOT, file));
-  console.log("字节数:", info.size, `(${(info.size / 1048576).toFixed(2)} MiB)`);
+  console.log("上传文件:", path.relative(ROOT, file));
+  console.log("上传字节数:", uploadSize, `(${(uploadSize / 1048576).toFixed(2)} MiB)`);
+  console.log("结构校验源:", path.relative(ROOT, verifyFile), `(${(info.size / 1048576).toFixed(2)} MiB)`);
   console.log("tar 成员:", info.memberCount, "| RepoTags:", info.tags.join(", "));
   const digest = await sha256(file);
   console.log("SHA-256:", digest);
@@ -235,40 +259,41 @@ async function main() {
   const latestBefore = await api("GET", `/repos/${REPO}/releases/latest`);
   console.log("上传前 releases/latest:", latestBefore.tag_name);
 
+  const body = [
+    `## Docker 镜像（离线手动下载 / 导入）`,
+    ``,
+    `- 镜像版本：**${ver}**（linux/amd64）`,
+    `- 文件：\`${name}\`（${uploadSize.toLocaleString()} B / ${(uploadSize / 1048576).toFixed(2)} MiB）`,
+    `- SHA-256：\`${digest}\``,
+    `- 格式：docker-archive${isGz ? "（gzip 压缩，docker load / NAS 导入界面会自动解压）" : ""}（含 \`manifest.json\` / \`repositories\`，同时兼容 OCI layout）`,
+    ``,
+    `### 1. 下载`,
+    `点击本页 Assets 中的 \`${name}\`，或命令行：`,
+    `\`\`\`bash`,
+    `curl -L -o ${name} \\`,
+    `  https://github.com/${REPO}/releases/download/${tag}/${name}`,
+    `\`\`\``,
+    ``,
+    `### 2. 导入（Docker / Unraid / 飞牛等「导入镜像」界面可直接选该文件；.tar.gz 由 docker load 自动解压）`,
+    `\`\`\`bash`,
+    `docker load -i ${name}`,
+    `# 导入后的镜像名带内网仓库前缀，可按需改成简短名字`,
+    `docker tag ${info.tags[0]} dockermanagementyanzi:${ver}`,
+    `\`\`\``,
+    ``,
+    `### 3. 运行`,
+    `参考仓库 \`deploy/docker/docker-compose.yml\`。程序数据/配置目录需按该文件挂载。`,
+    ``,
+    `> 本 Release 标记为 **prerelease**，不含 OTA 所需的 \`linux-x64*.zip\`，`,
+    `> 因此不会改变 \`releases/latest\`，不影响应用内在线升级。`,
+  ].join("\n");
+
   let release;
   try {
     release = await api("GET", `/repos/${REPO}/releases/tags/${tag}`);
-    console.log(`Release ${tag} 已存在（id=${release.id}）；确保 prerelease=true`);
-    if (!release.prerelease) release = await api("PATCH", `/repos/${REPO}/releases/${release.id}`, { prerelease: true });
+    console.log(`Release ${tag} 已存在（id=${release.id}）；同步资产说明并强制 prerelease=true`);
+    release = await api("PATCH", `/repos/${REPO}/releases/${release.id}`, { body, prerelease: true });
   } catch {
-    const body = [
-      `## Docker 镜像（离线手动下载 / 导入）`,
-      ``,
-      `- 镜像版本：**${ver}**（linux/amd64）`,
-      `- 文件：\`${name}\`（${info.size.toLocaleString()} B / ${(info.size / 1048576).toFixed(2)} MiB）`,
-      `- SHA-256：\`${digest}\``,
-      `- 格式：docker-archive（含 \`manifest.json\` / \`repositories\`，同时兼容 OCI layout）`,
-      ``,
-      `### 1. 下载`,
-      `点击本页 Assets 中的 \`${name}\`，或命令行：`,
-      `\`\`\`bash`,
-      `curl -L -o ${name} \\`,
-      `  https://github.com/${REPO}/releases/download/${tag}/${name}`,
-      `\`\`\``,
-      ``,
-      `### 2. 导入（Docker / Unraid / 飞牛等「导入镜像」界面可直接选该 tar）`,
-      `\`\`\`bash`,
-      `docker load -i ${name}`,
-      `# 导入后的镜像名带内网仓库前缀，可按需改成简短名字`,
-      `docker tag ${info.tags[0]} dockermanagementyanzi:${ver}`,
-      `\`\`\``,
-      ``,
-      `### 3. 运行`,
-      `参考仓库 \`deploy/docker/docker-compose.yml\`。程序数据/配置目录需按该文件挂载。`,
-      ``,
-      `> 本 Release 标记为 **prerelease**，不含 OTA 所需的 \`linux-x64*.zip\`，`,
-      `> 因此不会改变 \`releases/latest\`，不影响应用内在线升级。`,
-    ].join("\n");
     release = await api("POST", `/repos/${REPO}/releases`, {
       tag_name: tag,
       name: `Docker 镜像 ${ver}（手动下载 / 导入）`,
@@ -285,18 +310,18 @@ async function main() {
     console.log(`删除同名旧资产 ${name}（id=${existing.id}）`);
     await api("DELETE", `/repos/${REPO}/releases/assets/${existing.id}`);
   }
-  console.log(`开始上传 ${(info.size / 1048576).toFixed(2)} MiB ...`);
-  const asset = await uploadAsset(release.id, name, file, info.size);
+  console.log(`开始上传 ${(uploadSize / 1048576).toFixed(2)} MiB ...`);
+  const asset = await uploadAsset(release.id, name, file, uploadSize);
   console.log("上传完成：", asset.name || name, "state=", asset.state || "uploaded");
 
   // 端到端核验：资产 size 与本地一致 + latest 未变
   const after = await api("GET", `/repos/${REPO}/releases/tags/${tag}`);
   const got = (after.assets || []).find((a) => a.name === name);
   if (!got) throw new Error("核验失败：Release 中找不到刚上传的资产");
-  if (got.size !== info.size) throw new Error(`核验失败：远端 size=${got.size} != 本地 ${info.size}`);
+  if (got.size !== uploadSize) throw new Error(`核验失败：远端 size=${got.size} != 本地 ${uploadSize}`);
   const latestAfter = await api("GET", `/repos/${REPO}/releases/latest`);
   console.log("=== 端到端核验 ===");
-  console.log("资产 size 一致:", got.size === info.size ? "✅" : "❌", got.size);
+  console.log("资产 size 一致:", got.size === uploadSize ? "✅" : "❌", got.size);
   console.log("资产 state:", got.state);
   console.log("下载地址:", got.browser_download_url);
   console.log("releases/latest 上传前后:", latestBefore.tag_name, "→", latestAfter.tag_name,
