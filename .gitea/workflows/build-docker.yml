@@ -6,7 +6,7 @@ name: build-docker-image
 # 触发规则（2026-11-13 修正：手动 dispatch 恢复 target 选择）：
 #   - 打 tag (v*) 推送            → 自动构建并推送 Gitea 内置容器镜像库
 #                                   192.168.24.10:8024/yanzi/dockermanagementyanzi  (:版本 + :latest)
-#   - 手动触发 workflow_dispatch  → target 可选 ghcr（默认）/ gitea；
+#   - 手动触发 workflow_dispatch  → target 可选 gitea（默认）/ ghcr；
 #                                   可用 version 输入手动指定镜像版本号，留空 = 取 package.json
 #
 # 前置硬条件：Gitea Actions runner 必须已安装 Docker 守护进程
@@ -34,9 +34,9 @@ on:
         required: true
         type: choice
         options:
-          - ghcr
           - gitea
-        default: ghcr
+          - ghcr
+        default: gitea
       version:
         description: "镜像版本号（如 v1.52.1；留空 = 取 package.json 版本）"
         required: false
