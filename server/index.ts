@@ -1065,8 +1065,8 @@ app.put("/api/engines/:id/stacks/:name/settings", async (req, res) => {
 
 /** 图标文件扩展名白名单 */
 const ICON_FILE_RE = /\.(png|jpe?g|gif|svg|webp|ico)$/i;
-/** 上传/下载图标的体积上限（2MB） */
-const ICON_MAX_BYTES = 2 * 1024 * 1024;
+/** 上传/下载图标的体积上限（10MB，v1.52.16 由 2MB 放宽） */
+const ICON_MAX_BYTES = 10 * 1024 * 1024;
 /** Content-Type → 扩展名 */
 const ICON_CT_EXT: Record<string, string> = {
   "image/png": ".png",
@@ -1127,7 +1127,7 @@ async function materializeLocalIcon(stackDir: string, url: string): Promise<stri
       return localUrl(filename);
     }
     if (/^https?:\/\//i.test(url)) {
-      // 外链图片：服务端下载后转本地（8s 超时 + 2MB 上限）
+      // 外链图片：服务端下载后转本地（8s 超时 + 10MB 上限）
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 8000);
       const resp = await fetch(url, { signal: ctrl.signal });
@@ -1328,7 +1328,7 @@ app.post("/api/custom-icons/check", (req, res) => {
   }
 });
 
-/** 提供自定义图标库单个文件（防穿越 / 符号链接越界 / 扩展名白名单 / 2MB） */
+/** 提供自定义图标库单个文件（防穿越 / 符号链接越界 / 扩展名白名单 / 10MB） */
 app.get("/api/custom-icons/:file", (req, res) => {
   const { dir, error: dirError } = boundCustomIconDir();
   if (!dir) {
@@ -2087,7 +2087,7 @@ app.put("/api/nav-page-settings", (req, res) => {
 // ============ 导航页背景资源上传（v1.51.8，独立 nav-assets 目录） ============
 
 const NAV_ASSETS_DIR = configPath("nav-assets");
-/** 背景图体积上限 20MB（与前端 NavPageSettingsModal 保持一致；图标上传仍为 2MB） */
+/** 背景图体积上限 20MB（与前端 NavPageSettingsModal 保持一致；图标上传为 10MB） */
 const NAV_ASSET_MAX_BYTES = 20 * 1024 * 1024;
 try { mkdirSync(NAV_ASSETS_DIR, { recursive: true }); } catch { /* 目录创建失败：上传时再报错 */ }
 
@@ -2179,7 +2179,7 @@ app.post("/api/nav-icons/download", async (req, res) => {
   }
 });
 
-/** 提供导航图标库单个文件（防穿越 / 符号链接越界 / 扩展名白名单 / 2MB） */
+/** 提供导航图标库单个文件（防穿越 / 符号链接越界 / 扩展名白名单 / 10MB） */
 app.get("/api/nav-icons/:file", (req, res) => {
   const { file, error } = resolveNavIconFile(req.params.file);
   if (!file) {

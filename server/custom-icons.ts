@@ -6,7 +6,7 @@
  * - 绑定后按「名称（不含扩展名）」自动匹配图标：同名多格式优先 png > jpg/jpeg > ico > 其他。
  *
  * 安全边界：绝对路径 + 拒绝 .. + realpath 落在绑定目录内 + 单段文件名 +
- * 扩展名白名单 + 2MB 上限。扫描 / 取图为**只读**；v1.52.15 起额外提供
+ * 扩展名白名单 + 10MB 上限。扫描 / 取图为**只读**；v1.52.15 起额外提供
  * 受控下载 downloadCustomIcon（写入绑定目录，安全约束与 nav-icons 下载一致）。
  */
 import fs from "node:fs";
@@ -14,8 +14,8 @@ import path from "node:path";
 
 /** 图标扩展名白名单（与堆栈图库一致） */
 export const CUSTOM_ICON_FILE_RE = /\.(png|jpe?g|gif|svg|webp|ico)$/i;
-/** 单个图标文件体积上限（2MB） */
-export const CUSTOM_ICON_MAX_BYTES = 2 * 1024 * 1024;
+/** 单个图标文件体积上限（10MB，v1.52.16 由 2MB 放宽） */
+export const CUSTOM_ICON_MAX_BYTES = 10 * 1024 * 1024;
 
 export interface CustomIconEntry {
   /** 原始文件名 */
@@ -65,7 +65,7 @@ export function resolveCustomIconDir(raw: unknown): { dir: string; error: string
   }
 }
 
-/** 枚举目录内的图标文件（普通文件 + 白名单 + 2MB 以内），按名称与格式优先级排序 */
+/** 枚举目录内的图标文件（普通文件 + 白名单 + 10MB 以内），按名称与格式优先级排序 */
 export function listCustomIconEntries(dir: string): CustomIconEntry[] {
   if (!dir) return [];
   const out: CustomIconEntry[] = [];
@@ -225,7 +225,7 @@ export async function downloadCustomIcon(rawUrl: unknown, rawName: unknown, dir:
     ext = ICON_CT_EXT[ct] || extFromUrl(current) || ".png";
     if (!ICON_EXTS.has(ext)) throw new Error(`不支持的图片类型：${ct}`);
     const declared = Number(res.headers.get("content-length") || 0);
-    if (declared > CUSTOM_ICON_MAX_BYTES) throw new Error("图标超过 2MB，请换一张更小的图片");
+    if (declared > CUSTOM_ICON_MAX_BYTES) throw new Error("图标超过 10MB，请换一张更小的图片");
     // 流式累计，超限立即中断，避免无 Content-Length 的大响应吃满内存
     const reader = res.body?.getReader();
     if (!reader) throw new Error("无法读取图标内容");
@@ -237,7 +237,7 @@ export async function downloadCustomIcon(rawUrl: unknown, rawName: unknown, dir:
       total += value.byteLength;
       if (total > CUSTOM_ICON_MAX_BYTES) {
         await reader.cancel();
-        throw new Error("图标超过 2MB，请换一张更小的图片");
+        throw new Error("图标超过 10MB，请换一张更小的图片");
       }
       chunks.push(Buffer.from(value));
     }

@@ -4,7 +4,7 @@
  * 用**真实临时目录** + esbuild 编译后的真实模块，断言：
  *   ① 格式优先级 png > jpg/jpeg > ico > 其他（同名多格式只保留最优）；
  *   ② 目录校验：相对路径 / .. / 不存在 / 非目录 一律拒绝，留空 = 未绑定；
- *   ③ 文件枚举：只认普通文件 + 白名单扩展 + 2MB 以内，子目录与非图标文件排除；
+ *   ③ 文件枚举：只认普通文件 + 白名单扩展 + 10MB 以内，子目录与非图标文件排除；
  *   ④ 取图防穿越：.. / 子目录 / 非法扩展 / 不存在 / 未绑定 一律拒绝；
  *   ⑤ 名称自动匹配：compose 默认命名派生服务名、大小写不敏感、手工图标不被覆盖；
  *   ⑥ 源码接线：服务端三路由、设置持久化、App 装配、设置卡片、图标输入自动匹配（IconAutoComplete）。
@@ -84,7 +84,7 @@ const serverOrder = entries.filter((e) => e.stem === "server").map((e) => e.ext)
 check("server.* 枚举顺序", serverOrder, [".png", ".jpg", ".ico", ".svg"]);
 ok("非图标文件 notes.txt 被排除", !entries.some((e) => e.name === "notes.txt"));
 ok("子目录 subdir/evil.png 被排除", !entries.some((e) => e.name === "evil.png"));
-ok("超过 2MB 的 big.png 被排除", !entries.some((e) => e.name === "big.png"));
+ok("超过 10MB 的 big.png 被排除", !entries.some((e) => e.name === "big.png"));
 const map = buildCustomIconMap(entries);
 check("同名映射选中 server.png", map.server, "/api/custom-icons/server.png");
 check("单一格式 redis.webp 命中", map.redis, "/api/custom-icons/redis.webp");

@@ -16,6 +16,21 @@
 
 ---
 
+## v1.52.16 — 2026-11-13（**main 分支 · 已构建 · 已推 Gitea**）
+
+### 图标单张体积上限 2MB → 10MB
+
+- **改动**：所有图标单文件体积上限由 **2MB 放宽至 10MB**，覆盖——
+  - 自定义图标库（`server/custom-icons.ts` `CUSTOM_ICON_MAX_BYTES`）：扫描排除阈值、取图校验、「从链接下载图标」下载校验（Content-Length 预检 + 流式累计双卡点）；
+  - 堆栈图库上传/外链转存（`server/index.ts` `ICON_MAX_BYTES`）；
+  - 导航图标库旧接口 `/api/nav-icons/*`（`server/nav-icons.ts` `NAV_ICON_MAX_BYTES`，兼容保留、同步放宽）。
+- **前端提示**：下载弹窗说明文案改为「支持 png / jpg / gif / svg / webp / ico，单张 ≤10MB」；超限错误消息改为「图标超过 10MB，请换一张更小的图片」。
+- **门禁**：`check-custom-icons.mjs` 大文件排除用例跟随（`MAX_BYTES + 1` 自动适配），断言文案同步 10MB。
+- **已完成**：双 `tsc` 0 错；`check-custom-icons` 67 PASS / 0 FAIL；`check-nav` 229 ok / 0 FAIL；`test:gates` 22 组全绿；SEA 四步构建 + 硬核验。
+- **验证（硬证据）**：二进制 130,616,512 B / SHA-256 `dd277961…36a401`；ELF `7f454c46` + e_machine=62；版本锚点 1.52.16 ×1、旧版 0；zip 内二进制 SHA 一致；deb（ar 手工解析 + data.tar.gz）内二进制 SHA 一致；dist JS base64 解码逐字节一致。zip 43,135,450 B（SHA `46d4b872…d3c03`）、deb 42,850,368 B（SHA `2ceb4ac0…548ac`）。
+- **未完成 / 已知限制**：无。
+- **下一步**：无。
+
 ## v1.52.15 — 2026-11-13（**main 分支 · 已构建 · 已推 Gitea**）
 
 ### 图标库目录统一 + 下载图标增强（推翻 v1.52.4 导航图标库独立绑定）

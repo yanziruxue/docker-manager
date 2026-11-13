@@ -158,7 +158,7 @@ export function NavIconDownloadModal({
                 </button>
                 {!bound && <p className="text-[11px] text-amber-600">绑定图标库目录后即可下载</p>}
                 <p className="text-[11px] text-slate-400 leading-4">
-                  支持 png / jpg / gif / svg / webp / ico，单张 ≤2MB；重名自动追加序号，不会覆盖已有图标。同名项目 / 服务 / 堆栈会自动匹配该图标。
+                  支持 png / jpg / gif / svg / webp / ico，单张 ≤10MB；重名自动追加序号，不会覆盖已有图标。同名项目 / 服务 / 堆栈会自动匹配该图标。
                 </p>
               </section>
 

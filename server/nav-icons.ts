@@ -6,7 +6,7 @@
  *  - 只读扫描 / 取图防穿越复用 server/custom-icons.ts 的纯函数，避免两套实现漂移。
  *
  * 安全边界：URL 仅 http(s)；拒绝回环 / 本机 / 云元数据；重定向手动跟随 ≤3 跳且逐跳校验；
- * Content-Type 必须 image/*；流式读取累计 ≤2MB；文件名保留中文但剔除路径与危险字符；
+ * Content-Type 必须 image/*；流式读取累计 ≤10MB；文件名保留中文但剔除路径与危险字符；
  * 写入前二次 realpath 校验目录；重名追加序号绝不覆盖。
  */
 import fs from "node:fs";
@@ -21,7 +21,7 @@ import {
 } from "./custom-icons.js";
 
 const NAV_ICONS_FILE = configPath("nav-icons.json");
-const NAV_ICON_MAX_BYTES = 2 * 1024 * 1024;
+const NAV_ICON_MAX_BYTES = 10 * 1024 * 1024; // v1.52.16 由 2MB 放宽，与 custom-icons 一致
 
 const NAV_ICON_CT_EXT: Record<string, string> = {
   "image/png": ".png",
@@ -176,7 +176,7 @@ export async function downloadNavIcon(rawUrl: unknown, rawName: unknown): Promis
     ext = NAV_ICON_CT_EXT[ct] || extFromUrl(current) || ".png";
     if (!NAV_ICON_EXTS.has(ext)) throw new Error(`不支持的图片类型：${ct}`);
     const declared = Number(res.headers.get("content-length") || 0);
-    if (declared > NAV_ICON_MAX_BYTES) throw new Error("图标超过 2MB，请换一张更小的图片");
+    if (declared > NAV_ICON_MAX_BYTES) throw new Error("图标超过 10MB，请换一张更小的图片");
     // 流式累计，超限立即中断，避免无 Content-Length 的大响应吃满内存
     const reader = res.body?.getReader();
     if (!reader) throw new Error("无法读取图标内容");
@@ -188,7 +188,7 @@ export async function downloadNavIcon(rawUrl: unknown, rawName: unknown): Promis
       total += value.byteLength;
       if (total > NAV_ICON_MAX_BYTES) {
         await reader.cancel();
-        throw new Error("图标超过 2MB，请换一张更小的图片");
+        throw new Error("图标超过 10MB，请换一张更小的图片");
       }
       chunks.push(Buffer.from(value));
     }
