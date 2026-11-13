@@ -16,6 +16,17 @@
 
 ---
 
+## v1.52.17 — 2026-11-13（**main 分支 · 已构建 · 已推 Gitea**）
+
+### 编辑态点击卡片任意位置直达编辑弹窗（不跳转链接）
+
+- **改动**：导航页编辑模式下，点击项目卡片**任意区域**（图标 / 名称 / 空白处）都打开编辑弹窗——不再只能点左上角 ✎；且编辑态点击**绝不跳转链接**（右上角跳转指示图标 ExternalLink 在编辑态一并隐藏）。左上角 ✎ 按钮保留作为显式入口。
+- **实现**：`NavBoard.tsx` `AppCard` 新增 `editMode` / `onEditApp` props——`open()` 编辑态优先走 `onEditApp`；`disabled={editMode ? false : !url}`（无链接卡片编辑态也可点开编辑）；ExternalLink 门控 `!editMode && url`。NavBoard 向下传 `editMode={!!editMode}` + `onEditApp`。
+- **门禁**：`check-nav.mjs` +2 正向断言 + 3 类负向自检（48→51 类）→ **237 ok / 0 FAIL**；负向注入「NavBoard 不接收 editMode prop」改 `replaceAll`（AppCard 也声明 `editMode?: boolean` 后 `replace` 只命中第一处会漏检）。
+- **验证（硬证据）**：前端 `tsc` 0 错；`test:gates` 22 组全绿；二进制 130,616,512 B / SHA-256 `c627bec2…02ab`；ELF `7f454c46` + e_machine=62；版本锚点 1.52.17 ×1、旧版 0；zip / deb 内二进制 SHA 一致；dist JS base64 解码逐字节一致。zip 43,135,588 B（SHA `ddd82d0d…238d`）、deb 42,850,532 B（SHA `81ad45d8…748f`）。
+- **未完成 / 已知限制**：无。
+- **下一步**：无。
+
 ## v1.52.16 — 2026-11-13（**main 分支 · 已构建 · 已推 Gitea**）
 
 ### 图标单张体积上限 2MB → 10MB

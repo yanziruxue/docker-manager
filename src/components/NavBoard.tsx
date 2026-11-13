@@ -8,6 +8,8 @@
  * v1.52.1：分组标题行不再渲染 ＋/齿轮（入口收敛至导航页顶栏图标条），本组件仅渲染分组与卡片。
  * v1.52.5：卡片墙一律自动换行（含水平布局），不设横向滚动条；flex-shrink-0 保持卡片固定宽度。
  * v1.52.6：弹窗内示意卡小样已移除，AppCard 仅本组件内部使用、不再导出。
+ * v1.52.17：编辑态点击卡片**任意位置**直达编辑弹窗（不再只能点左上角 ✎），
+ *           且编辑态点击绝不跳转链接（含右上角跳转指示图标一并隐藏）。
  */
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { ExternalLink, Pencil } from "lucide-react";
@@ -90,6 +92,8 @@ function AppCard({
   onCardDragStart,
   onCardDragEnd,
   onCardDrop,
+  editMode,
+  onEditApp,
 }: {
   app: NavAppItem;
   iconMap: Record<string, string>;
@@ -111,9 +115,15 @@ function AppCard({
   onCardDragStart?: (appId: string, groupId: string) => void;
   onCardDragEnd?: () => void;
   onCardDrop?: (appId: string, groupId: string) => void;
+  /** v1.52.17：编辑态点击卡片任意位置 = 编辑（不跳转链接） */
+  editMode?: boolean;
+  /** v1.52.17：编辑态卡片点击回调（打开 NavAppModal） */
+  onEditApp?: (app: NavAppItem) => void;
 }) {
   const src = resolveNavIconSrc(app.icon, iconMap, app.name);
+  // v1.52.17：编辑态点击卡片任意位置直达编辑弹窗（即使无链接也可编辑）；浏览态保持原跳转行为
   const open = () => {
+    if (editMode) { onEditApp?.(app); return; }
     if (!url) return;
     window.open(url, "_blank", "noopener");
   };
@@ -162,7 +172,7 @@ function AppCard({
     return (
       <button
         onClick={open}
-        disabled={!url}
+        disabled={editMode ? false : !url}
         title={hoverTitle}
         draggable={draggableCard}
         onDragStart={(e) => { if (onCardDragStart) { e.stopPropagation(); onCardDragStart(app.id, groupForDnd || ""); } }}
@@ -175,7 +185,7 @@ function AppCard({
           <div className="text-[13px] font-medium truncate" style={{ color: titleColor }}>{app.name}</div>
           {subtitle && <div className="text-[11px] text-slate-400 truncate whitespace-pre-line">{subtitle}</div>}
         </div>
-        {url && (
+        {!editMode && url && (
           <ExternalLink size={12} className="absolute top-2 right-2 text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity" />
         )}
       </button>
@@ -185,7 +195,7 @@ function AppCard({
   return (
       <button
         onClick={open}
-        disabled={!url}
+        disabled={editMode ? false : !url}
         title={hoverTitle}
         draggable={draggableCard}
         onDragStart={(e) => { if (onCardDragStart) { e.stopPropagation(); onCardDragStart(app.id, groupForDnd || ""); } }}
@@ -196,7 +206,7 @@ function AppCard({
       {iconBlock}
       <span className="text-[13px] font-medium truncate w-full text-center" style={{ color: titleColor }}>{app.name}</span>
       {subtitle && <span className="text-[11px] text-slate-400 truncate w-full text-center -mt-1.5">{subtitle}</span>}
-      {url && (
+      {!editMode && url && (
         <ExternalLink
           size={12}
           className="absolute top-2 right-2 text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity"
@@ -336,9 +346,12 @@ export function NavBoard({
                 onCardDragStart={onCardDragStart}
                 onCardDragEnd={onCardDragEnd}
                 onCardDrop={onCardDrop}
+                editMode={!!editMode}
+                onEditApp={onEditApp}
               />
               {/* 编辑按钮是卡片 <button> 的兄弟节点，绝不嵌套（保留 disabled={!url} 语义）。
-                  v1.51.18：仅 editMode 态渲染，且常显（opacity-100）以提示可编辑。 */}
+                  v1.51.18：仅 editMode 态渲染，且常显（opacity-100）以提示可编辑。
+                  v1.52.17：卡片本体的点击在编辑态也直达编辑弹窗，✎ 按钮保留作为显式入口。 */}
               {editMode && (
                 <button
                   type="button"

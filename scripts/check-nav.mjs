@@ -116,7 +116,14 @@ const board = read("src/components/NavBoard.tsx");
 ok("NavBoard 走 resolveNavAppUrl 解析地址", board.includes("resolveNavAppUrl"));
 ok("NavBoard 拉取 /api/network-zone 分区", board.includes("getNetworkZoneApi"));
 ok("NavBoard 图标三级解析（URL/图标库/首字母）", board.includes("resolveNavIconSrc"));
-ok("无地址卡片禁用打开", board.includes("disabled={!url}"));
+ok("无地址卡片禁用打开（v1.52.17 起编辑态豁免）", board.includes("disabled={editMode ? false : !url}"));
+// v1.52.17：编辑态点击卡片任意位置直达编辑弹窗，且绝不跳转链接
+ok("★ v1.52.17 编辑态点击卡片任意位置 = 编辑（open 优先走 onEditApp）",
+  board.includes("if (editMode) { onEditApp?.(app); return; }") &&
+  board.includes("editMode={!!editMode}") && board.includes("onEditApp={onEditApp}"));
+ok("★ v1.52.17 编辑态隐藏跳转指示图标（ExternalLink 门控）",
+  board.includes("!editMode && url && (") &&
+  board.split("!editMode && url && (").length - 1 === 2);
 ok("★ NavBoard 卡片编辑入口 onEditApp（v1.51.18：仅 editMode 渲染，不再 hover 才显）",
   board.includes("onEditApp") && board.includes("{editMode && (") && board.includes('title={`编辑「${a.name}」`}'));
 ok("★ NavBoard 不再有旧管理弹窗齿轮入口", !board.includes("onOpenEditor") && !board.includes("GearIcon"));
@@ -537,12 +544,28 @@ if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
     {
       name: "注入 NavBoard 不接收 editMode prop 回归",
       rel: "src/components/NavBoard.tsx",
-      inject: (s) => s.replace("editMode?: boolean;", "editModeProp?: boolean;"),
+      // v1.52.17 起 AppCard 也声明 editMode?: boolean，必须 replaceAll 才能确保 NavBoard 的声明也被改掉
+      inject: (s) => s.replaceAll("editMode?: boolean;", "editModeProp?: boolean;"),
     },
     {
       name: "注入卡片 ✎ 非编辑态即可见回归（移除 editMode 门控）",
       rel: "src/components/NavBoard.tsx",
       inject: (s) => s.replace("{editMode && (", ""),
+    },
+    {
+      name: "注入 v1.52.17 编辑态点卡片跳链接回归（移除 open 的 editMode 分支）",
+      rel: "src/components/NavBoard.tsx",
+      inject: (s) => s.replace("if (editMode) { onEditApp?.(app); return; }", ""),
+    },
+    {
+      name: "注入 v1.52.17 编辑态无地址卡片被禁用回归（disabled 撤回旧语义）",
+      rel: "src/components/NavBoard.tsx",
+      inject: (s) => s.replaceAll("disabled={editMode ? false : !url}", "disabled={!url}"),
+    },
+    {
+      name: "注入 v1.52.17 编辑态仍显示跳转图标回归（ExternalLink 门控移除）",
+      rel: "src/components/NavBoard.tsx",
+      inject: (s) => s.replaceAll("!editMode && url && (", "url && ("),
     },
     {
       name: "注入容器图标回归（重新引用 c.icon）",
