@@ -958,6 +958,12 @@ export interface NavZone {
   cardStyle?: NavCardStyle;
   /** 图标形状（v1.52.3，参照 FlatNas iconShape）：默认 rounded=圆角矩形 */
   iconShape?: NavIconShape;
+  /** 首个分组标题距分区标签条的距离 px（v1.52.4，仅作用于该分区第一个分组，默认 20） */
+  zoneFirstGroupGap?: number;
+  /** 分组标题与项目卡片的上间距 px（v1.52.4，分区级，作用于所有分组，默认 20） */
+  groupCardGapTop?: number;
+  /** 项目卡片与下一个分组的下间距 px（v1.52.4，分区级，作用于所有分组，默认 32） */
+  groupCardGapBottom?: number;
 }
 
 export interface NavConfig {

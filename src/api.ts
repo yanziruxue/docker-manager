@@ -1014,6 +1014,23 @@ export function checkCustomIconDirApi(dir: string): Promise<import("./custom-ico
   return request("/custom-icons/check", { method: "POST", body: JSON.stringify({ dir }) });
 }
 
+// ============ 导航页专属图标库（v1.52.4，与 Docker 图标库独立） ============
+
+/** 列出导航图标库（绑定状态 / 目录 / 文件清单 / stem→URL 映射） */
+export function listNavIconsApi(): Promise<import("./custom-icons").CustomIconsPayload> {
+  return request("/nav-icons");
+}
+
+/** 绑定 / 解绑导航图标库目录（服务端绝对路径；空串 = 解绑） */
+export function bindNavIconDirApi(dir: string): Promise<import("./custom-icons").CustomIconsPayload> {
+  return request("/nav-icons/bind", { method: "POST", body: JSON.stringify({ dir }) });
+}
+
+/** 从链接下载图标到导航图标库；name 用作「按项目名匹配」的键 */
+export function downloadNavIconApi(url: string, name: string): Promise<{ url: string; file: string }> {
+  return request("/nav-icons/download", { method: "POST", body: JSON.stringify({ url, name }) });
+}
+
 /** 查询当前访问者的内外网分区（v1.50.36：服务端按请求来源 IP 与配置网段判定） */
 export function getNetworkZoneApi(): Promise<{ zone: "intranet" | "internet"; ip: string }> {
   return request("/network-zone");

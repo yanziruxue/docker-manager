@@ -16,6 +16,36 @@
 
 ---
 
+## v1.52.4 — 2026-11-13（**main 分支 · 已构建 · 已推 Gitea**）
+
+### 导航页：分区间距 / 排序 / 专属图标库与链接下载
+
+- **移除入口**：分区与分组设置弹窗**标题栏右侧「新建分区」按钮**删除；左上分区列表的「＋ 新建分区」保留（否则无法新建），空态文案同步改指左上方入口。
+- **分区级间距**（`src/types.ts` + `server/nav-groups.ts` + `NavBoard.tsx` + `NavPage.tsx` + `NavGroupSettingsModal.tsx`）：`NavZone` 新增 `zoneFirstGroupGap`（首个分组标题距分区标签条，**仅作用第一个分组**，默认 20）、`groupCardGapTop`（标题→卡片「上」间距，默认 20）、`groupCardGapBottom`（卡片→下一分组「下」间距，默认 32）；服务端 `zoneAppearanceFromRaw` 钳制 0–120，旧数据缺字段回落为改动前视觉值。渲染不再叠容器层 `space-y-8` 与标签条 `mb-5`，间距完全由分区配置控制；「全部」视图按各分区自己的 `firstInZone` 标记生效。
+- **分区 / 分组移动位置**：设置弹窗左上下两个列表各加 ↑↓ 按钮（`moveZone` / `moveGroup`，数组顺序即展示顺序，首/末禁用）。不引入新拖拽，避免与编辑态卡片拖拽冲突。
+- **图标按项目名称优先匹配**：`useNavIconMap` 合并「导航专属图标库（同名优先）+ Docker 自定义图标库（兜底）」；`resolveNavIconSrc(icon, map, appName)` 让用户手填完整 URL 仍最高优先，其余情况先按**项目名称**查库、再按 icon 字段名称查库。`NavAppModal.applyContainerPreset` **不再引用 `c.icon`**，改按容器名查库；保存时图标留空也按项目名自动补入。`IconAutoComplete` 下拉并入导航图标库。
+- **导航页专属图标库 + 链接下载**（`server/nav-icons.ts` 🆕 + `server/index.ts` + `src/api.ts` + `src/components/NavIconDownloadModal.tsx` 🆕）：独立配置文件 `config/nav-icons.json`（只存 `{dir}`），与 `settings.json` 的 `modal.iconDir`（Docker/堆栈用）**完全分开**；独立路由 `GET /api/nav-icons`、`POST /api/nav-icons/bind`、`POST /api/nav-icons/download`、`GET /api/nav-icons/:file`。下载弹窗在**未绑定时先要求绑定目录**（服务端绝对路径，需已存在且服务账号可写），已绑定后输入链接 + 名称（默认取项目名）下载入库，成功可一键「应用到项目」。文件名保留中文（便于中文项目名匹配）、重名追加序号不覆盖。
+- **下载安全边界**：仅 http(s)；拒绝回环 / 本机 / 云元数据地址；重定向手动跟随 ≤3 跳且逐跳校验；`Content-Type` 必须 `image/*`；流式累计 ≤2MB 即中断；写入前二次 `realpath` 校验目录；取图复用 `custom-icons.ts` 防穿越 / 符号链接越界实现。
+- **门禁**：`scripts/check-nav.mjs` 更新「容器四字段」断言为「按名匹配、不引用容器图标」，新增 15 条正向断言 + 4 类负向自检（共 20 类）；**141 ok / 0 FAIL**；`npm run test:gates` 全 22 组 `FAIL=0`、双 `tsc` 0 错。
+
+### 发布物
+
+- 包：`dockermanagementyanzi-linux-x64-v1.52.4.zip`、`dockermanagementyanzi_1.52.4_amd64.deb`；SEA 硬核验见本节末尾提交记录（ELF 魔数 / e_machine / 版本锚点 / zip 与 deb 内二进制 SHA-256 一致）。
+
+### 已知限制
+
+- 下载 API 允许访问内网非回环主机（用户可能从内网图床取图），但拒绝 `127.*` / `localhost` / `169.254.169.254`；若需更严格白名单可后续加配置项。
+- 导航图标库目录须**预先在运行服务的机器上创建**且服务账号可写，绑定接口不代建目录（与 Docker 图标库一致，避免越权写盘）。
+- 历史项目若已手填图标 URL，不会被图标库同名图标覆盖（显式 URL 优先）；仅 icon 为空或为名称时按项目名匹配。
+- 中间版本 v1.51.19 / v1.52.0 / v1.52.1 的 Gitea Release 资产仍空缺（此前只选补发 v1.52.2）。
+
+### 下一步
+
+- 在 Gitea UI 确认 `build-and-publish`（SEA→Releases）v1.52.4 全绿并发布 Release；`build-docker-image` tag 触发推 Gitea 容器镜像库。
+- 如需补齐历史三个版本的 Release 资产，用「cherry-pick 修复 + 移动 tag + force-push」逐个补发。
+
+---
+
 ## v1.52.3 — 2026-11-13（**main 分支 · 已构建 · 已推 Gitea**）
 
 ### 导航设置弹窗重构：样式归分区 + 左右分区布局

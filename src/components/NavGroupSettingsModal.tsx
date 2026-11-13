@@ -6,7 +6,7 @@
  * 保存经 onSave(zones) 整体落盘（服务端 normalizeNavZones 白名单兜底）。
  */
 import { useEffect, useState } from "react";
-import { Pencil, Plus, RotateCcw, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Pencil, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import type { NavCardStyle, NavIconShape, NavZone } from "../types";
 
 const inputCls =
@@ -48,6 +48,10 @@ const DEFAULT_APPEARANCE = {
   iconSize: 48,
   cardStyle: "solid" as NavCardStyle,
   iconShape: "rounded" as NavIconShape,
+  // v1.52.4：分区级间距（与改动前视觉一致：标签条 20 / 标题下 20 / 组间 32）
+  zoneFirstGroupGap: 20,
+  groupCardGapTop: 20,
+  groupCardGapBottom: 32,
 };
 
 function Segmented<T extends string>({
@@ -96,7 +100,7 @@ function SliderRow({
 }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="text-[12px] text-slate-500 w-16 flex-shrink-0">{label}</span>
+      <span className="text-[12px] text-slate-500 w-20 flex-shrink-0">{label}</span>
       <input
         type="range"
         min={min}
@@ -179,6 +183,29 @@ export function NavGroupSettingsModal({
       prev.map((z) => ({ ...z, groups: z.groups.map((g) => (g.id === groupId ? { ...g, name } : g)) })),
     );
 
+  // v1.52.4：分区 / 分组位置调整——数组顺序即展示顺序（↑↓ 按钮，不与卡片拖拽冲突）
+  const moveZone = (id: string, delta: number) =>
+    setDraft((prev) => {
+      const i = prev.findIndex((z) => z.id === id);
+      const j = i + delta;
+      if (i < 0 || j < 0 || j >= prev.length) return prev;
+      const next = [...prev];
+      [next[i], next[j]] = [next[j], next[i]];
+      return next;
+    });
+  const moveGroup = (id: string, delta: number) =>
+    setDraft((prev) =>
+      prev.map((z) => {
+        if (z.id !== selectedZoneId) return z;
+        const groups = [...z.groups];
+        const i = groups.findIndex((g) => g.id === id);
+        const j = i + delta;
+        if (i < 0 || j < 0 || j >= groups.length) return z;
+        [groups[i], groups[j]] = [groups[j], groups[i]];
+        return { ...z, groups };
+      }),
+    );
+
   // 分区新建 / 删除
   const addZone = () => {
     const z: NavZone = { id: genId(), name: `分区 ${draft.length + 1}`, groups: [] };
@@ -228,14 +255,6 @@ export function NavGroupSettingsModal({
         <div className="flex items-center gap-2 px-5 py-3.5 border-b border-slate-100">
           <h3 className="text-base font-semibold text-slate-800">分区与分组设置</h3>
           <div className="flex-1" />
-          <button
-            type="button"
-            onClick={addZone}
-            className="flex items-center gap-1 px-2.5 py-1 text-[12px] text-rose-600 border border-rose-200 rounded-lg hover:bg-rose-50"
-            title="新建一个导航分区"
-          >
-            <Plus size={12} /> 新建分区
-          </button>
           <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600">
             <X size={18} />
           </button>
@@ -258,9 +277,9 @@ export function NavGroupSettingsModal({
                 </button>
               </div>
               {draft.length === 0 ? (
-                <p className="text-[12px] text-slate-400 px-1 py-2">还没有分区，点右上角「新建分区」开始</p>
+                <p className="text-[12px] text-slate-400 px-1 py-2">还没有分区，点左上「＋ 新建分区」开始</p>
               ) : (
-                draft.map((z) => {
+                draft.map((z, idx) => {
                   const selected = z.id === selectedZoneId;
                   return (
                     <div
@@ -285,7 +304,31 @@ export function NavGroupSettingsModal({
                       ) : (
                         <span className="flex-1 text-[13px] font-medium text-slate-700 truncate">{z.name}</span>
                       )}
-                      <span className="flex items-center gap-0.5 opacity-0 group-hover/row:opacity-100 transition-opacity">
+                      <span className="flex items-center gap-0.5 flex-shrink-0">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            moveZone(z.id, -1);
+                          }}
+                          disabled={idx === 0}
+                          className="p-1 text-slate-400 hover:text-fuchsia-600 hover:bg-fuchsia-50 rounded disabled:opacity-25 disabled:hover:bg-transparent"
+                          title="上移分区"
+                        >
+                          <ArrowUp size={12} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            moveZone(z.id, 1);
+                          }}
+                          disabled={idx === draft.length - 1}
+                          className="p-1 text-slate-400 hover:text-fuchsia-600 hover:bg-fuchsia-50 rounded disabled:opacity-25 disabled:hover:bg-transparent"
+                          title="下移分区"
+                        >
+                          <ArrowDown size={12} />
+                        </button>
                         <button
                           type="button"
                           onClick={(e) => {
@@ -336,7 +379,7 @@ export function NavGroupSettingsModal({
               ) : activeZone.groups.length === 0 ? (
                 <p className="text-[12px] text-slate-400 px-1 py-2">该分区下还没有分组</p>
               ) : (
-                activeZone.groups.map((g) => (
+                activeZone.groups.map((g, idx) => (
                   <div
                     key={g.id}
                     className="group/row flex items-center gap-2 px-2.5 py-2 rounded-lg border border-transparent hover:bg-white transition-colors"
@@ -353,7 +396,25 @@ export function NavGroupSettingsModal({
                     ) : (
                       <span className="flex-1 text-[13px] text-slate-600 truncate">{g.name}</span>
                     )}
-                    <span className="flex items-center gap-0.5 opacity-0 group-hover/row:opacity-100 transition-opacity">
+                    <span className="flex items-center gap-0.5 flex-shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => moveGroup(g.id, -1)}
+                        disabled={idx === 0}
+                        className="p-1 text-slate-400 hover:text-fuchsia-600 hover:bg-fuchsia-50 rounded disabled:opacity-25 disabled:hover:bg-transparent"
+                        title="上移分组"
+                      >
+                        <ArrowUp size={12} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => moveGroup(g.id, 1)}
+                        disabled={idx === activeZone.groups.length - 1}
+                        className="p-1 text-slate-400 hover:text-fuchsia-600 hover:bg-fuchsia-50 rounded disabled:opacity-25 disabled:hover:bg-transparent"
+                        title="下移分组"
+                      >
+                        <ArrowDown size={12} />
+                      </button>
                       <button
                         type="button"
                         onClick={() => setEditingGroupId(g.id)}
@@ -434,6 +495,36 @@ export function NavGroupSettingsModal({
                     unit="px"
                     onChange={(v) => patchZone({ iconSize: v })}
                   />
+                </section>
+
+                {/* v1.52.4：分区级间距——首组距分区（仅第一个分组）+ 标题/卡片上下间距（全部分组） */}
+                <section className="rounded-xl border border-slate-100 bg-slate-50/60 p-3 space-y-2.5">
+                  <p className="text-xs font-medium text-slate-600">分组间距</p>
+                  <SliderRow
+                    label="首组距分区"
+                    value={activeZone.zoneFirstGroupGap ?? 20}
+                    min={0}
+                    max={120}
+                    unit="px"
+                    onChange={(v) => patchZone({ zoneFirstGroupGap: v })}
+                  />
+                  <SliderRow
+                    label="标题→卡片"
+                    value={activeZone.groupCardGapTop ?? 20}
+                    min={0}
+                    max={120}
+                    unit="px"
+                    onChange={(v) => patchZone({ groupCardGapTop: v })}
+                  />
+                  <SliderRow
+                    label="卡片→下组"
+                    value={activeZone.groupCardGapBottom ?? 32}
+                    min={0}
+                    max={120}
+                    unit="px"
+                    onChange={(v) => patchZone({ groupCardGapBottom: v })}
+                  />
+                  <p className="text-[11px] text-slate-400">「首组距分区」仅作用于该分区下第一个分组；上下间距对该分区所有分组生效</p>
                 </section>
 
                 <section className="rounded-xl border border-slate-100 bg-slate-50/60 p-3">

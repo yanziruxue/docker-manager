@@ -91,6 +91,10 @@ function zoneAppearanceFromRaw(z: any): Record<string, unknown> {
     iconSize: num(z?.iconSize ?? g0?.iconSize, 16, 96, 48),
     cardStyle: pick(z?.cardStyle ?? g0?.cardStyle, CARD_STYLES, "solid"),
     iconShape: pick(z?.iconShape ?? g0?.iconShape, ICON_SHAPES, "rounded"),
+    // v1.52.4：分区级间距（0–120），旧数据缺字段回落为改动前的视觉值
+    zoneFirstGroupGap: num(z?.zoneFirstGroupGap, 0, 120, 20),
+    groupCardGapTop: num(z?.groupCardGapTop, 0, 120, 20),
+    groupCardGapBottom: num(z?.groupCardGapBottom, 0, 120, 32),
   };
 }
 

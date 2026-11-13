@@ -83,6 +83,12 @@ import {
   resolveCustomIconFile,
   type CustomIconEntry,
 } from "./custom-icons.js";
+import {
+  navIconsPayload,
+  bindNavIconDir,
+  resolveNavIconFile,
+  downloadNavIcon,
+} from "./nav-icons.js";
 import { normalizeIntranetCidrs, clientIpFromRequest, resolveNetworkZone } from "./network-zone.js";
 import { startUpdateScheduler, getSchedulerStatus, runSchedulerCheckNow, checkEngineImages, getImageUpdateCache, startBackupScheduler, getBackupSchedulerStatus } from "./scheduler.js";
 import { addPushClient, removePushClient } from "./push.js";
@@ -2121,6 +2127,51 @@ app.get("/api/nav-assets/:file", (req, res) => {
   res.setHeader("Content-Type", ICON_EXT_CT[path.extname(file).toLowerCase()] || "image/png");
   res.setHeader("Cache-Control", "no-cache");
   res.send(readFileSync(p));
+});
+
+// ============ 导航页专属图标库（v1.52.4，与 Docker 图标库独立） ============
+
+/** 列出导航图标库：绑定状态 / 目录 / 文件清单 / stem→URL 映射 */
+app.get("/api/nav-icons", (_req, res) => {
+  res.json({ success: true, data: navIconsPayload() });
+});
+
+/** 绑定 / 解绑导航图标库目录（绝对路径；空串 = 解绑），不借道 /api/settings */
+app.post("/api/nav-icons/bind", (req, res) => {
+  try {
+    const raw = String((req.body as any)?.dir ?? "");
+    const r = bindNavIconDir(raw);
+    if (r.error) {
+      res.json({ success: false, error: r.error });
+      return;
+    }
+    res.json({ success: true, data: navIconsPayload() });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || "绑定图标库失败" });
+  }
+});
+
+/** 从链接下载图标到绑定目录；name 用作匹配键（与项目名称同名即可自动匹配） */
+app.post("/api/nav-icons/download", async (req, res) => {
+  try {
+    const { url, name } = (req.body as any) || {};
+    const r = await downloadNavIcon(url, name);
+    res.json({ success: true, data: r });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err?.message || "下载图标失败" });
+  }
+});
+
+/** 提供导航图标库单个文件（防穿越 / 符号链接越界 / 扩展名白名单 / 2MB） */
+app.get("/api/nav-icons/:file", (req, res) => {
+  const { file, error } = resolveNavIconFile(req.params.file);
+  if (!file) {
+    res.status(404).send(error);
+    return;
+  }
+  res.setHeader("Content-Type", ICON_EXT_CT[path.extname(file).toLowerCase()] || "image/png");
+  res.setHeader("Cache-Control", "no-cache");
+  res.send(readFileSync(file));
 });
 
 /** 获取当前日志级别（运行时） */

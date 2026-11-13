@@ -77,10 +77,11 @@ export function NavPage({ navZones, onSaveNavZones, containers, navPageSettings,
   const effectiveTab = !isAll && zones.some((z) => z.id === navTab) ? navTab : zones[0]?.id || "";
   const activeZone = isAll ? null : zones.find((z) => z.id === effectiveTab) || null;
 
-  // 渲染分区：全部视图合并所有分区；否则取当前分区的分组
-  const sections: { zone: NavZone; group: NavGroup }[] = isAll
-    ? zones.flatMap((z) => (z.groups || []).map((g) => ({ zone: z, group: g })))
-    : (activeZone ? activeZone.groups.map((g) => ({ zone: activeZone, group: g })) : []);
+  // 渲染分区：全部视图合并所有分区；否则取当前分区的分组。
+  // v1.52.4：firstInZone 标记各分区下第一个分组，用于「首组距分区」间距（其余分组靠前一组的下间距）。
+  const sections: { zone: NavZone; group: NavGroup; firstInZone: boolean }[] = isAll
+    ? zones.flatMap((z) => (z.groups || []).map((g, i) => ({ zone: z, group: g, firstInZone: i === 0 })))
+    : (activeZone ? activeZone.groups.map((g, i) => ({ zone: activeZone, group: g, firstInZone: i === 0 })) : []);
 
   // v1.51.11：项目 CRUD 直接对 zones 做不可变更新并落盘，不再经 NavEditor 中转
   const openAddApp = (groupId: string) => setAppModal({ open: true, initial: null, groupId });
@@ -220,7 +221,8 @@ export function NavPage({ navZones, onSaveNavZones, containers, navPageSettings,
       <WeatherEffect weather={settings.weather || "none"} />
 
       {/* 分区标签条 + 顶栏图标条（v1.52.1：编辑 | ＋添加项目 | ⚙分区/分组设置 | 页面设置） */}
-      <div className="flex items-center gap-2 mb-5 flex-wrap relative">
+      {/* v1.52.4：标签条下不再固定 mb-5，首个分组距分区的距离由分区级 zoneFirstGroupGap 控制 */}
+      <div className="flex items-center gap-2 flex-wrap relative">
         {zones.length === 0 && (
           <span className="text-[13px] text-white/80 px-1">还没有导航分区</span>
         )}
@@ -311,7 +313,7 @@ export function NavPage({ navZones, onSaveNavZones, containers, navPageSettings,
       </div>
 
       {activeZone || isAll ? (
-        <div className="space-y-8">
+        <div>
           {sections.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 rounded-2xl border border-white/40 bg-white/30 backdrop-blur-sm text-white">
               <Compass size={36} className="mb-3 opacity-90" />
@@ -324,12 +326,13 @@ export function NavPage({ navZones, onSaveNavZones, containers, navPageSettings,
               </button>
             </div>
           ) : (
-            sections.map(({ zone, group }) => (
+            sections.map(({ zone, group, firstInZone }) => (
               <NavBoard
                 key={group.id}
                 group={group}
                 zoneCfg={zone}
                 zoneTag={isAll ? zone.name : undefined}
+                isFirstGroup={firstInZone}
                 iconMap={navIconMap}
                 editMode={editMode}
                 onEditApp={openEditApp}
@@ -360,6 +363,7 @@ export function NavPage({ navZones, onSaveNavZones, containers, navPageSettings,
         <NavAppModal
           zones={zones}
           containers={containers}
+          iconMap={navIconMap}
           initial={appModal.initial}
           initialGroupId={appModal.groupId || effectiveTab || undefined}
           onSave={handleSaveApp}

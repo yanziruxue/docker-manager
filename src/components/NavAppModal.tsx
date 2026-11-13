@@ -12,9 +12,10 @@
  * 保存经 onSave(groupId, app) 由 NavPage 直接落盘；编辑态可经 onDelete(appId) 删除项目（v1.51.11）。
  */
 import { useMemo, useState } from "react";
-import { Globe, List, Trash2, X } from "lucide-react";
+import { Download, Globe, List, Trash2, X } from "lucide-react";
 import type { Container, NavAppItem, NavZone } from "../types";
 import { IconAutoComplete } from "./IconAutoComplete";
+import { NavIconDownloadModal } from "./NavIconDownloadModal";
 
 function genId(): string {
   return `n${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
@@ -38,6 +39,7 @@ const inputCls =
 export function NavAppModal({
   zones,
   containers,
+  iconMap,
   initial,
   initialGroupId,
   onSave,
@@ -48,6 +50,8 @@ export function NavAppModal({
   zones: NavZone[];
   /** 全局容器列表（含已停止的容器，v1.51.16：用于一次填入 4 个字段） */
   containers: Container[];
+  /** 图标库映射（导航专属库同名优先 + Docker 库兜底），用于按项目名称匹配图标 */
+  iconMap: Record<string, string>;
   /** 编辑已有项目时传入；null/undefined = 新增 */
   initial?: NavAppItem | null;
   /** 新增时默认归属的分组 id（通常为当前分组） */
@@ -82,6 +86,7 @@ export function NavAppModal({
   const [icon, setIcon] = useState(initial?.icon || "");
   const [showContainers, setShowContainers] = useState(false);
   const [containerQuery, setContainerQuery] = useState("");
+  const [iconDownloadOpen, setIconDownloadOpen] = useState(false);
 
   /** 容器列表（v1.51.16）：不过滤 status，已停止的容器同样可选；运行中 / 有图标优先 */
   const containerOptions = useMemo(() => {
@@ -107,13 +112,14 @@ export function NavAppModal({
     return s;
   }, [groups, initial]);
 
-  /** 选择容器 → 一次填入 4 个字段；端口优先 LABELS WebUI 端口，回退真实宿主端口映射 */
+  /** 选择容器 → 一次填入 4 个字段；端口优先 LABELS WebUI 端口，回退真实宿主端口映射。
+   *  v1.52.4：图标按项目（容器）名称从图标库匹配，不沿用容器列表里的容器图标。 */
   const applyContainerPreset = (c: Container) => {
     setName(c.name);
     const port = c.webuiPort || c.ports?.find((p) => p.host)?.host || "";
     setLanUrl(port ? `:${port}` : "");
     setUrl(c.webuiUrl || "");
-    setIcon(c.icon || "");
+    setIcon(iconMap[c.name.trim().toLowerCase()] || "");
     setShowContainers(false);
     setContainerQuery("");
   };
@@ -126,7 +132,8 @@ export function NavAppModal({
     const app: NavAppItem = {
       id: initial?.id || genId(),
       name: name.trim(),
-      icon: icon.trim(),
+      // v1.52.4：图标留空时按项目名称从图标库匹配（手工粘贴 URL / 点选结果不动）
+      icon: icon.trim() || iconMap[name.trim().toLowerCase()] || "",
       iconColor: initial?.iconColor || "#3B82F6",
       description: description.trim(),
       remark: remark.trim(),
@@ -146,6 +153,7 @@ export function NavAppModal({
   };
 
   return (
+    <>
     <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       <div
         className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[88vh] flex flex-col overflow-hidden"
@@ -283,7 +291,17 @@ export function NavAppModal({
 
           {/* 图标（v1.51.15：复用堆栈 IconAutoComplete，输入名称自动匹配 / 点选写入 URL） */}
           <div>
-            <span className="block text-xs text-slate-500 mb-1">图标</span>
+            <div className="flex items-center justify-between mb-1">
+              <span className="block text-xs text-slate-500">图标</span>
+              <button
+                type="button"
+                onClick={() => setIconDownloadOpen(true)}
+                className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] text-fuchsia-600 border border-fuchsia-200 rounded-md hover:bg-fuchsia-50"
+                title="输入图片链接下载到导航图标库（未绑定目录时先绑定）"
+              >
+                <Download size={11} /> 从链接下载
+              </button>
+            </div>
             <IconAutoComplete
               value={icon}
               onChange={(val) => setIcon(val)}
@@ -332,5 +350,14 @@ export function NavAppModal({
         </div>
       </div>
     </div>
+      {/* 下载弹窗与项目弹窗平级，z-[1200] 覆盖在项目弹窗之上 */}
+      {iconDownloadOpen && (
+        <NavIconDownloadModal
+          suggestedName={name.trim()}
+          onDownloaded={(u) => setIcon(u)}
+          onClose={() => setIconDownloadOpen(false)}
+        />
+      )}
+    </>
   );
 }

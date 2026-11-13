@@ -167,9 +167,14 @@ ok("★ 容器列表数据链路 App → NavPage → NavAppModal（含已停止�
 ok("★ 「容器列表」按钮仅在勾选自托管后渲染，且位于图标区之前",
   appModalCode.includes("容器列表") && appModalCode.includes("selfHosted && (") &&
   appModalCode.indexOf("容器列表") < appModalCode.indexOf("<IconAutoComplete"));
-ok("★ 选择容器一次填入 4 字段（名称/内网端口/外网 WebUI/图标）",
+ok("★ 选择容器一次填入 4 字段（名称/内网端口/外网 WebUI/按名匹配的图标）",
   appModalCode.includes("setName(c.name)") && appModalCode.includes("setLanUrl(port") &&
-  appModalCode.includes("setUrl(c.webuiUrl") && appModalCode.includes("setIcon(c.icon"));
+  appModalCode.includes("setUrl(c.webuiUrl") && appModalCode.includes("setIcon(iconMap["));
+ok("★ 容器列表不再引用容器图标（v1.52.4：统一按项目名匹配图标库）",
+  !appModalCode.includes("setIcon(c.icon") && appModalCode.includes("iconMap[c.name.trim().toLowerCase()]"));
+ok("★ 保存时图标留空按项目名称自动匹配", appModalCode.includes("icon.trim() || iconMap["));
+ok("★ 项目弹窗挂载「从链接下载」图标弹窗",
+  appModalCode.includes("<NavIconDownloadModal") && appModalCode.includes("setIconDownloadOpen(true)"));
 ok("★ 容器列表包含已停止容器（排序不排除 stopped，且有状态标识）",
   appModalCode.includes('c.status === "running" ? 0 : 1') && appModalCode.includes("已停止"));
 ok("★ 图标区仍只有一个 IconAutoComplete（容器按钮不侵入图标区）",
@@ -248,6 +253,49 @@ ok("★ 分区下内联「添加分组」入口", navPage.includes("addGroupToZo
 ok("★ 分组设置弹窗升级为分区+分组管理（新建/删除分区）", gs.includes("addZone") && gs.includes("removeZone") && gs.includes("新建分区"));
 ok("★ 服务端分区持久化：落盘 { zones } + 旧 {groups} 包裹默认分区迁移", navMod.includes("{ zones }") && navMod.includes("wrapLegacyAsZone") && navMod.includes("默认分区"));
 
+// v1.52.4：分区级间距 / 分区与分组移动 / 导航页专属图标库（含链接下载）
+const navIconsMod = read("server/nav-icons.ts");
+const navIconDlModal = read("src/components/NavIconDownloadModal.tsx");
+ok("★ NavZone 新增 3 个分区级间距字段",
+  ["zoneFirstGroupGap", "groupCardGapTop", "groupCardGapBottom"].every((k) => typesSrc.includes(k)));
+ok("★ 服务端归一化钳制 3 个间距（0–120 + 默认 20/20/32）",
+  ["zoneFirstGroupGap", "groupCardGapTop", "groupCardGapBottom"].every((k) => navMod.includes(k)) &&
+  navMod.includes("groupCardGapBottom: num(z?.groupCardGapBottom, 0, 120, 32)"));
+ok("★ NavBoard 按分区级间距渲染首组/标题/组间距离",
+  board.includes("firstGap") && board.includes("titleGap") && board.includes("bottomGap") &&
+  board.includes("isFirstGroup ? firstGap : 0"));
+ok("★ NavPage 下传 firstInZone 与 iconMap（容器层不再叠固定 space-y-8）",
+  navPage.includes("firstInZone") && navPage.includes("isFirstGroup={firstInZone}") &&
+  navPage.includes("iconMap={navIconMap}") && !navPage.includes("space-y-8"));
+ok("★ 分区设置支持上移/下移分区与分组",
+  gs.includes("const moveZone =") && gs.includes("const moveGroup =") &&
+  gs.includes("ArrowUp") && gs.includes("ArrowDown"));
+ok("★ 分区设置右侧配置区含 3 个间距滑块",
+  ["首组距分区", "标题→卡片", "卡片→下组"].every((k) => gs.includes(k)));
+ok("★ 分区设置已移除标题栏右侧「新建分区」按钮",
+  (() => {
+    const header = gs.split('分区与分组设置</h3>')[1]?.split("</div>")[0] || "";
+    return !!header && !header.includes("新建分区");
+  })());
+ok("★ 卡片图标按项目名称优先查库（用户显式 URL 仍最高优先）",
+  board.includes("resolveNavIconSrc(app.icon, iconMap, app.name)") &&
+  board.includes("map[String(appName).trim().toLowerCase()]"));
+ok("★ 图标映射合并导航专属库（同名优先）与 Docker 库（兜底）",
+  board.includes("listNavIconsApi") && board.includes("...(custom?.map || {}), ...(nav?.map || {})"));
+ok("★ IconAutoComplete 下拉并入导航专属图标库",
+  iconAuto.includes("listNavIconsApi") && iconAuto.includes("(nav?.entries || []).forEach"));
+ok("★ 服务端注册导航专属图标库 4 条路由",
+  ['app.get("/api/nav-icons"', 'app.post("/api/nav-icons/bind"',
+   'app.post("/api/nav-icons/download"', 'app.get("/api/nav-icons/:file"'].every((k) => indexSrc.includes(k)));
+ok("★ 导航图标库独立配置文件（不借道 settings.json）",
+  navIconsMod.includes('configPath("nav-icons.json")') && !navIconsMod.includes("getSettings()"));
+ok("★ 下载 API 有 SSRF / 类型 / 体积 / 重定向 / 目录越界防护",
+  ["assertSafeIconUrl", 'redirect: "manual"', "NAV_ICON_MAX_BYTES", "image/", "realpathSync"].every((k) => navIconsMod.includes(k)));
+ok("★ 前端暴露导航图标库 3 个 API",
+  ["listNavIconsApi", "bindNavIconDirApi", "downloadNavIconApi"].every((k) => navApiSrc.includes(k)));
+ok("★ 下载弹窗未绑定时先绑定目录，成功可回填项目图标",
+  ["检测并绑定", "bindNavIconDirApi", "downloadNavIconApi", "onDownloaded", "请先在上方绑定图标库目录"].every((k) => navIconDlModal.includes(k)));
+
 console.log("== ③ 负向自检（注入回归 → 检出 → 还原） ==");
 // 注入「内网缺 lanUrl 不回落 url」回归：应被 ⑤ 号用例检出
 const TARGET = "src/webui-url.ts";
@@ -270,8 +318,8 @@ if (BROKEN === ORIGINAL) {
   ok("还原字节级一致", read(TARGET) === ORIGINAL);
 }
 
-console.log("== ④ 负向自检（进程级注入 16 类回归 → 重跑本门禁应 exit 1） ==");
-// 父进程注入 13 类回归文本，子进程跳过 ④（NAV_GATE_NEGATIVE_CHILD=1）只跑 ①②③，
+console.log("== ④ 负向自检（进程级注入 20 类回归 → 重跑本门禁应 exit 1） ==");
+// 父进程注入 20 类回归文本，子进程跳过 ④（NAV_GATE_NEGATIVE_CHILD=1）只跑 ①②③，
 // 若 ② 的对应断言确实生效，子进程必因 FAIL 而 exit 1。
 if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
   const NAV_PAGE_REL = "src/pages/NavPage.tsx";
@@ -358,6 +406,26 @@ if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
       name: "注入卡片 ✎ 非编辑态即可见回归（移除 editMode 门控）",
       rel: "src/components/NavBoard.tsx",
       inject: (s) => s.replace("{editMode && (", ""),
+    },
+    {
+      name: "注入容器图标回归（重新引用 c.icon）",
+      rel: "src/components/NavAppModal.tsx",
+      inject: (s) => s.replace('setIcon(iconMap[c.name.trim().toLowerCase()] || "");', 'setIcon(c.icon || "");'),
+    },
+    {
+      name: "注入分区间距字段缺失回归",
+      rel: "server/nav-groups.ts",
+      inject: (s) => s.replace("zoneFirstGroupGap: num(z?.zoneFirstGroupGap, 0, 120, 20),", ""),
+    },
+    {
+      name: "注入导航图标库路由缺失回归",
+      rel: "server/index.ts",
+      inject: (s) => s.replace('app.get("/api/nav-icons"', 'app.get("/api/nav-icons-disabled"'),
+    },
+    {
+      name: "注入分区/分组移动缺失回归",
+      rel: "src/components/NavGroupSettingsModal.tsx",
+      inject: (s) => s.replace("const moveZone = (", "const moveZoneRemoved = ("),
     },
   ];
   for (const c of cases) {

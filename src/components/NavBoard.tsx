@@ -10,18 +10,20 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { ExternalLink, Pencil } from "lucide-react";
 import type { NavAppItem, NavCardStyle, NavGroup, NavIconShape, NavNetworkMode, NavZone } from "../types";
-import { getNetworkZoneApi, listCustomIconsApi } from "../api";
+import { getNetworkZoneApi, listCustomIconsApi, listNavIconsApi } from "../api";
 import { resolveNavAppUrl, type WebuiZone, type WebuiZoneMode } from "../webui-url";
-import type { CustomIconsPayload } from "../custom-icons";
 
-const EMPTY_ICONS: CustomIconsPayload = { bound: false, dir: "", error: "", entries: [], map: {} };
-
-/** 图标字段 → 可直接作为 <img src> 的地址；空串 = 无图标（渲染首字母色块） */
-export function resolveNavIconSrc(icon: string | undefined, map: Record<string, string>): string {
+/**
+ * 图标字段 → 可直接作为 <img src> 的地址；空串 = 无图标（渲染首字母色块）。
+ * v1.52.4：用户手填的完整 URL 最高优先；否则「图标库内以项目名称命名的图标」优先，
+ * 再回落按 icon 字段（名称）查表。这样图标库新增同名图标会自动应用到已有项目。
+ */
+export function resolveNavIconSrc(icon: string | undefined, map: Record<string, string>, appName?: string): string {
   const v = String(icon || "").trim();
-  if (!v) return "";
   if (/^(https?:\/\/|data:|\/api\/)/i.test(v)) return v;
-  return map[v.toLowerCase()] || "";
+  const byName = appName ? map[String(appName).trim().toLowerCase()] : "";
+  if (byName) return byName;
+  return v ? map[v.toLowerCase()] || "" : "";
 }
 
 /** 任意地址归一化：http(s) 原样；`:端口` → 浏览器协议+地址栏host+端口；其余 → 协议+值 */
@@ -107,7 +109,7 @@ function AppCard({
   onCardDragEnd?: () => void;
   onCardDrop?: (appId: string, groupId: string) => void;
 }) {
-  const src = resolveNavIconSrc(app.icon, iconMap);
+  const src = resolveNavIconSrc(app.icon, iconMap, app.name);
   const open = () => {
     if (!url) return;
     window.open(url, "_blank", "noopener");
@@ -205,6 +207,7 @@ export function NavBoard({
   group,
   zoneCfg,
   zoneTag,
+  isFirstGroup,
   iconMap,
   editMode,
   onEditApp,
@@ -217,6 +220,8 @@ export function NavBoard({
   group: NavGroup;
   /** 所属分区（v1.52.3 起外观配置上移到分区级，卡片墙统一取父分区外观） */
   zoneCfg?: NavZone;
+  /** 是否为所属分区的第一个分组（v1.52.4：首组距分区的间距只作用于它） */
+  isFirstGroup?: boolean;
   /** 「全部」视图下显示所属分区名（普通分区视图不传，分区名仅作顶部 tab） */
   zoneTag?: string;
   iconMap: Record<string, string>;
@@ -259,11 +264,15 @@ export function NavBoard({
   const iconShape: NavIconShape = zoneCfg?.iconShape || "rounded";
   const loc = { protocol: window.location.protocol, hostname: window.location.hostname };
   const urls = useMemo(() => apps.map((a) => resolveCardUrl(a, mode, zone, loc)), [apps, mode, zone, loc.protocol, loc.hostname]);
+  // v1.52.4：分区级间距——首组距分区 / 标题与卡片上间距 / 卡片与下一组下间距
+  const firstGap = zoneCfg?.zoneFirstGroupGap ?? 20;
+  const titleGap = zoneCfg?.groupCardGapTop ?? 20;
+  const bottomGap = zoneCfg?.groupCardGapBottom ?? 32;
 
   return (
-    <div>
+    <div style={{ paddingTop: isFirstGroup ? firstGap : 0, paddingBottom: bottomGap }}>
       {/* 分组标题行（v1.52.1：仅标题，＋/齿轮已收敛至导航页顶栏图标条） */}
-      <div className="flex items-center justify-between mb-5">
+      <div className="flex items-center justify-between" style={{ marginBottom: titleGap }}>
         <h2 className="text-xl font-bold text-white drop-shadow-sm flex items-baseline gap-2">
           {group.name}
           {zoneTag && <span className="text-[12px] font-normal text-white/60">· {zoneTag}</span>}
@@ -275,7 +284,7 @@ export function NavBoard({
           <p className="text-sm">该分组还没有入口，点顶栏「＋」添加</p>
         </div>
       ) : (
-        <div className="flex gap-3 overflow-x-auto pb-3 snap-x" style={{ gap: gridGap }}>
+        <div className="flex gap-3 overflow-x-auto snap-x" style={{ gap: gridGap }}>
           {apps.map((a, i) => {
             // 全部视图下卡片归属真实分组（由 resolveGroupOf 解析），用于拖拽跨组
             const cardGroupId = resolveGroupOf?.(a.id) || group.id;
@@ -322,19 +331,22 @@ export function NavBoard({
   );
 }
 
-/** 便捷 hook：一次性拉取自定义图标映射（导航图标自动匹配用） */
+/** 便捷 hook：合并导航专属图标库（同名优先）与 Docker 自定义图标库（兜底） */
 export function useNavIconMap(): Record<string, string> {
-  const [payload, setPayload] = useState<CustomIconsPayload>(EMPTY_ICONS);
+  const [map, setMap] = useState<Record<string, string>>({});
   useEffect(() => {
     let alive = true;
-    listCustomIconsApi()
-      .then((r) => alive && setPayload(r))
-      .catch(() => {});
+    Promise.all([
+      listCustomIconsApi().catch(() => null),
+      listNavIconsApi().catch(() => null),
+    ]).then(([custom, nav]) => {
+      if (!alive) return;
+      setMap({ ...(custom?.map || {}), ...(nav?.map || {}) });
+    });
     return () => {
       alive = false;
     };
   }, []);
-  const map = useMemo(() => payload?.map || {}, [payload]);
   return map;
 }
 

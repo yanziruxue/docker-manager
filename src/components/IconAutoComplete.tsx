@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Loader2 } from "lucide-react";
 import { Input } from "./UI";
-import { listCustomIconsApi, listStackIconsApi } from "../api";
+import { listCustomIconsApi, listNavIconsApi, listStackIconsApi } from "../api";
 
 /**
  * 图标输入框「输入名称自动匹配」（v1.50.33）：参考标签选择器交互——
@@ -66,9 +66,11 @@ export function IconAutoComplete({
     setLoadedFor(key);
     setLoading(true);
     try {
-      const [custom, files] = await Promise.all([
+      const [custom, nav, files] = await Promise.all([
         // v1.51.15：自定义图标库是全局资源，导航页无 engine 上下文也要能拉到
         listCustomIconsApi().catch(() => null),
+        // v1.52.4：导航页专属图标库（从链接下载的图标也能在下拉里点选）
+        listNavIconsApi().catch(() => null),
         engineId && stackName
           ? listStackIconsApi(engineId, stackName).catch(() => [] as string[])
           : Promise.resolve([] as string[]),
@@ -81,6 +83,8 @@ export function IconAutoComplete({
         seen.add(stem);
         list.push({ name, url, stem });
       };
+      // 导航专属库优先：同名图标覆盖 Docker 图库，再回落堆栈 icon/ 目录
+      (nav?.entries || []).forEach((e) => push(e.name, e.url));
       (custom?.entries || []).forEach((e) => push(e.name, e.url));
       files.forEach((f) =>
         push(f, `/api/stack-icons/${encodeURIComponent(stackName || "")}/${encodeURIComponent(f)}`)
