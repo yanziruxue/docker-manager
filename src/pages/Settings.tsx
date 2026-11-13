@@ -343,6 +343,8 @@ interface SettingsProps {
   onUpdateInfoChange?: (info: UpdateInfo | null) => void;
   /** 当前登录用户（用于「用户」区块展示与改密） */
   currentUser?: AuthUser | null;
+  /** v1.52.15：初始定位的 section（如图标下载弹窗跳转「modal」= 页面设置，图标库目录所在） */
+  initialSection?: string;
 }
 
 /** 「用户」区块：修改当前登录账户密码（单管理员，需校验原密码） */
@@ -1046,8 +1048,8 @@ function ReleaseNotesView({ notes }: { notes: string }) {
   );
 }
 
-export function Settings({ settings, activeEngineId, engines, onActiveEngineChange, onEnginesChange, onSaveSettings, updateInfo, onUpdateInfoChange, currentUser }: SettingsProps) {
-  const [activeSection, setActiveSection] = useState("docker");
+export function Settings({ settings, activeEngineId, engines, onActiveEngineChange, onEnginesChange, onSaveSettings, updateInfo, onUpdateInfoChange, currentUser, initialSection }: SettingsProps) {
+  const [activeSection, setActiveSection] = useState(initialSection || "docker");
   const [data, setData] = useState<SystemSettings>(settings || getDefaultSettings());
   const [settingsLoaded, setSettingsLoaded] = useState(!!settings);
 

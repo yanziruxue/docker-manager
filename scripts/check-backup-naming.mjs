@@ -214,8 +214,8 @@ check("key 集合未变（排序不等于改 key）", actualKeys.slice().sort(),
 // ★ 每个 key 都必须仍有一个对应的 JSX 分支，否则点了侧栏会是空白页
 const missingBranch = EXPECTED_KEYS.filter((k) => !settingsTsx.includes(`activeSection === "${k}" && (`));
 check("每个分区都有对应 JSX 分支（无空白页）", missingBranch, []);
-// 默认落地分区仍存在
-ok("默认 activeSection = docker 仍有效", /useState\("docker"\)/.test(settingsTsx));
+// 默认落地分区仍存在（v1.52.15 起支持 initialSection 跳转定位，未传时仍回落 docker）
+ok("默认 activeSection = docker 仍有效", /useState\(initialSection \|\| "docker"\)/.test(settingsTsx));
 
 console.log(`\n结果: PASS=${pass} FAIL=${fail}`);
 process.exit(fail === 0 ? 0 : 1);

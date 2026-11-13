@@ -64,6 +64,7 @@ import {
 } from "../api";
 import type { CustomIconEntry } from "../custom-icons";
 import { IconAutoComplete } from "../components/IconAutoComplete";
+import { NavIconDownloadModal } from "../components/NavIconDownloadModal";
 import { addOpLog } from "../opLog";
 import { StatusBadge, Tag } from "../components/Badge";
 import { ContextMenu, type MenuItem } from "../components/ContextMenu";
@@ -326,6 +327,8 @@ interface StacksProps {
   engineId?: string;
   onRefresh?: () => void;
   menuLanguage?: "en" | "zh";
+  /** v1.52.15：编辑堆栈「从链接下载图标」未绑定图标库目录时「前往图标库目录设置」跳转 */
+  onGoToSettings?: () => void;
   /** 全局标签库（来自系统设置 → 标签管理），LABELS 编辑器选择与列表聚合展示共用 */
   tagLibrary?: ResourceTag[];
   /** 标签库新建标签回调（v1.49.2）：LABELS 标签选择器输入无匹配时「+ 新建」直达，落盘系统设置 */
@@ -346,7 +349,7 @@ interface StacksProps {
   onOpenContainerDetail?: (containerName: string, tab?: "info" | "logs" | "terminal") => void;
 }
 
-export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLanguage = "zh", tagLibrary = [], onCreateTag, defaultVisibleColumns, defaultSubColumns, autoCloseDelay = 5, composeTemplates = [], autoDetectWebui = true, doubleClickIconEditStack = true, onOpenContainerDetail }: StacksProps) {
+export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLanguage = "zh", tagLibrary = [], onCreateTag, defaultVisibleColumns, defaultSubColumns, autoCloseDelay = 5, composeTemplates = [], autoDetectWebui = true, doubleClickIconEditStack = true, onOpenContainerDetail, onGoToSettings }: StacksProps) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   // 排序：默认按堆栈名称升序；名称/状态/标签/容器数 列头可点击切换
@@ -969,7 +972,7 @@ export function Stacks({ stacks, loading, error, engineId, onRefresh, menuLangua
       )}
 
       {/* Stack Editor Modal */}
-      {editStack && <StackEditorModal stack={editStack} onClose={() => setEditStack(null)} engineId={engineId} onRefresh={onRefresh} tagLibrary={tagLibrary} onCreateTag={onCreateTag} composeTemplates={composeTemplates} autoDetectWebui={autoDetectWebui} />}
+      {editStack && <StackEditorModal stack={editStack} onClose={() => setEditStack(null)} engineId={engineId} onRefresh={onRefresh} tagLibrary={tagLibrary} onCreateTag={onCreateTag} composeTemplates={composeTemplates} autoDetectWebui={autoDetectWebui} onGoToSettings={onGoToSettings} />}
 
       {/* Create Stack Modal */}
       {createMode && <CreateStackModal onClose={() => setCreateMode(false)} engineId={engineId} onRefresh={onRefresh} onCreated={handleStackCreated} />}
@@ -1239,7 +1242,7 @@ const STACK_NAME_RE = /^[a-z0-9_-]+$/;
 const isValidStackName = (name: string) => STACK_NAME_RE.test(name);
 const STACK_NAME_HINT = "堆栈名称只能包含小写字母、数字、横线(-)和下划线(_)";
 
-function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = [], onCreateTag, composeTemplates = [], autoDetectWebui = true }: { stack: Stack; onClose: () => void; engineId?: string; onRefresh?: () => void; tagLibrary?: ResourceTag[]; onCreateTag?: (name: string) => Promise<ResourceTag | null>; composeTemplates?: ComposeTemplate[]; autoDetectWebui?: boolean }) {
+function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = [], onCreateTag, composeTemplates = [], autoDetectWebui = true, onGoToSettings }: { stack: Stack; onClose: () => void; engineId?: string; onRefresh?: () => void; tagLibrary?: ResourceTag[]; onCreateTag?: (name: string) => Promise<ResourceTag | null>; composeTemplates?: ComposeTemplate[]; autoDetectWebui?: boolean; onGoToSettings?: () => void }) {
   const [activeTab, setActiveTab] = useState<"compose" | "env" | "webui" | "settings">("compose");
   const [composeContent, setComposeContent] = useState(stack.composeContent ?? "");
   const [envContent, setEnvContent] = useState(stack.envContent ?? "");
@@ -1320,6 +1323,8 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
   // LABELS 图标：本地文件 → data URI（LABELS 图标不托管于服务器，直接内联）
   const labelIconInputRef = useRef<HTMLInputElement>(null);
   const pendingLabelIconIndexRef = useRef<number>(-1);
+  // v1.52.15：「从链接下载图标」弹窗目标（settings = 堆栈图标；label = 某个 LABELS 服务图标）
+  const [iconDownloadTarget, setIconDownloadTarget] = useState<IconTarget | null>(null);
 
   // v1.50.33：图标输入框改为「输入名称自动匹配」（IconAutoComplete），移除图库下拉按钮
 
@@ -1775,6 +1780,15 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
                             >
                               <Upload size={14} /> 上传
                             </button>
+                            {/* v1.52.15：从链接下载图标写入图标库目录；名称预填服务名称（可手改） */}
+                            <button
+                              type="button"
+                              onClick={() => setIconDownloadTarget({ kind: "label", index: i })}
+                              title="从链接下载图标到图标库目录"
+                              className="flex items-center gap-1 px-3 py-1.5 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 whitespace-nowrap"
+                            >
+                              <Download size={14} /> 下载
+                            </button>
                             <button
                               type="button"
                               onClick={() => openSvgEditor({ kind: "label", index: i })}
@@ -1917,6 +1931,15 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
                         {iconUploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
                         上传
                       </button>
+                      {/* v1.52.15：从链接下载图标写入图标库目录；名称预填堆栈名称（可手改） */}
+                      <button
+                        type="button"
+                        onClick={() => setIconDownloadTarget({ kind: "settings" })}
+                        title="从链接下载图标到图标库目录"
+                        className="flex items-center gap-1 px-3 py-1.5 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 whitespace-nowrap"
+                      >
+                        <Download size={14} /> 下载
+                      </button>
                       <button
                         type="button"
                         onClick={() => openSvgEditor({ kind: "settings" })}
@@ -1989,6 +2012,16 @@ function StackEditorModal({ stack, onClose, engineId, onRefresh, tagLibrary = []
             </button>
           </div>
         </div>
+
+        {/* v1.52.15：「从链接下载图标」弹窗（z-[1200] 覆盖编辑弹窗）；名称按目标预填：LABELS=服务名称 / SETTINGS=堆栈名称 */}
+        {iconDownloadTarget && (
+          <NavIconDownloadModal
+            suggestedName={iconDownloadTarget.kind === "settings" ? (settings.name.trim() || stack.name) : (webuiLabels[iconDownloadTarget.index]?.serviceName?.trim() || stack.name)}
+            onDownloaded={(u) => setIconUrl(iconDownloadTarget, u)}
+            onGoToSettings={onGoToSettings}
+            onClose={() => setIconDownloadTarget(null)}
+          />
+        )}
 
         {/* 内嵌 SVG 图标：代码编辑器 */}
         <Modal

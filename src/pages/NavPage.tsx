@@ -30,6 +30,8 @@ interface NavPageProps {
   navPageSettings: NavPageSettings;
   /** 导航页「页面设置」落盘回调 */
   onSaveNavPageSettings: (s: NavPageSettings) => void;
+  /** v1.52.15：下载图标弹窗未绑定图标库目录时「前往图标库目录设置」跳转（定位设置中心 → 页面设置） */
+  onGoToSettings?: () => void;
 }
 
 /** 项目弹窗状态：initial=null 为新增，否则为编辑；groupId 为新增时默认归属分组 */
@@ -48,7 +50,7 @@ interface GroupSettingsState {
   initialZoneId?: string;
 }
 
-export function NavPage({ navZones, onSaveNavZones, containers, navPageSettings, onSaveNavPageSettings }: NavPageProps) {
+export function NavPage({ navZones, onSaveNavZones, containers, navPageSettings, onSaveNavPageSettings, onGoToSettings }: NavPageProps) {
   const zones = navZones || [];
   const settings = navPageSettings || {};
   // v1.52.5：分区设置弹窗草稿预览（null=不预览）。所有渲染取 renderZones，所有写操作仍取真实 zones。
@@ -394,6 +396,7 @@ export function NavPage({ navZones, onSaveNavZones, containers, navPageSettings,
           initialGroupId={appModal.groupId || effectiveTab || undefined}
           onSave={handleSaveApp}
           onDelete={handleDeleteApp}
+          onGoToSettings={onGoToSettings}
           onClose={() => setAppModal(APP_MODAL_CLOSED)}
         />
       )}

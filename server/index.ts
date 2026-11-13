@@ -81,6 +81,7 @@ import {
   listCustomIconEntries,
   buildCustomIconMap,
   resolveCustomIconFile,
+  downloadCustomIcon,
   type CustomIconEntry,
 } from "./custom-icons.js";
 import {
@@ -1277,6 +1278,22 @@ app.get("/api/custom-icons", (_req, res) => {
     }
   }
   res.json({ success: true, data: { bound, dir, error, entries, map: buildCustomIconMap(entries) } });
+});
+
+/** 从链接下载图标写入图标库目录（v1.52.15：导航页 / 堆栈 LABELS / SETTINGS 三处入口统一使用） */
+app.post("/api/custom-icons/download", async (req, res) => {
+  const { dir, error } = boundCustomIconDir();
+  if (!dir) {
+    res.status(400).json({ success: false, error: error || "没有绑定图标库目录" });
+    return;
+  }
+  try {
+    const { url, name } = (req.body as any) || {};
+    const r = await downloadCustomIcon(url, name, dir);
+    res.json({ success: true, data: r });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err?.message || "下载图标失败" });
+  }
 });
 
 /** 检测目录（设置卡片用）：不落盘，只回报可用图标数量与错误；留空视为未绑定 */

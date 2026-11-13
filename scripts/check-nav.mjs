@@ -15,7 +15,7 @@
  *    v1.51.11 起 NavEditor 弹窗已删除，项目 CRUD 由 NavPage + NavAppModal 直接落盘、
  *    分组新建/删除由 NavGroupSettingsModal 接管、卡片 hover ✎ 由 NavBoard.onEditApp 直达；
  *  - 负向自检①：注入「内网缺 lanUrl 不回落 url」回归 → 重载模块应检出差异 → 还原 → 复核全绿；
- *  - 负向自检②：进程级注入 45 类回归（<NavEditor / 顶栏分组设置文字按钮 / 齿轮接线缺失 /
+ *  - 负向自检②：进程级注入 48 类回归（<NavEditor / 顶栏分组设置文字按钮 / 齿轮接线缺失 /
  *    顶栏添加项目按钮 / 高级字段折叠区 / 智能匹配 / 全局图库被 engineId 阻挡 /
  *    容器列表接线缺失 / 容器四字段映射缺失 / 背景图上限回退 2mb / 超限 JSON 中间件缺失 /
  *    上传兜底文案回退 / 前端体积预校验缺失 / 编辑按钮缺失 / editMode 未下传 NavBoard /
@@ -370,8 +370,32 @@ ok("★ 下载 API 有 SSRF / 类型 / 体积 / 重定向 / 目录越界防护",
   ["assertSafeIconUrl", 'redirect: "manual"', "NAV_ICON_MAX_BYTES", "image/", "realpathSync"].every((k) => navIconsMod.includes(k)));
 ok("★ 前端暴露导航图标库 3 个 API",
   ["listNavIconsApi", "bindNavIconDirApi", "downloadNavIconApi"].every((k) => navApiSrc.includes(k)));
-ok("★ 下载弹窗未绑定时先绑定目录，成功可回填项目图标",
-  ["检测并绑定", "bindNavIconDirApi", "downloadNavIconApi", "onDownloaded", "请先在上方绑定图标库目录"].every((k) => navIconDlModal.includes(k)));
+
+// v1.52.15：下载弹窗统一用设置中心「图标库目录」，未绑定提示 + 跳转按钮
+const stacksSrc = read("src/pages/Stacks.tsx");
+const settingsSrc = read("src/pages/Settings.tsx");
+ok("★ 下载弹窗统一图标库目录（不再独立绑定），未绑定提示 + 前往设置跳转（v1.52.15）",
+  ["listCustomIconsApi", "downloadCustomIconApi", "没有绑定图标库目录", "前往图标库目录设置", "onGoToSettings", "suggestedName"].every((k) => navIconDlModal.includes(k)) &&
+  !navIconDlModal.includes("bindNavIconDirApi") && !navIconDlModal.includes("listNavIconsApi"));
+ok("★ 服务端 /api/custom-icons/download 写入图标库目录（三处入口统一）",
+  indexSrc.includes('app.post("/api/custom-icons/download"') &&
+  read("server/custom-icons.ts").includes("export async function downloadCustomIcon(") &&
+  indexSrc.includes("downloadCustomIcon"));
+ok("★ 跳转链路：下载弹窗 → NavAppModal/NavPage → App 定位设置中心页面设置 section",
+  navPage.includes("onGoToSettings={onGoToSettings}") &&
+  read("src/components/NavAppModal.tsx").includes("onGoToSettings={onGoToSettings}") &&
+  appSrc.includes("const goToIconDirSettings = () =>") &&
+  appSrc.includes('setSettingsFocusSection("modal")') &&
+  appSrc.includes("onGoToSettings={goToIconDirSettings}") &&
+  appSrc.includes("onGoToSettings={goToIconDirSettings}") === true &&
+  stacksSrc.includes("onGoToSettings={onGoToSettings}") &&
+  settingsSrc.includes("initialSection || \"docker\""));
+ok("★ 堆栈编辑弹窗 LABELS / SETTINGS 图标增加「下载」入口，名称按上下文预填",
+  stacksSrc.includes("NavIconDownloadModal") &&
+  stacksSrc.includes('setIconDownloadTarget({ kind: "label", index: i })') &&
+  stacksSrc.includes('setIconDownloadTarget({ kind: "settings" })') &&
+  stacksSrc.includes("webuiLabels[iconDownloadTarget.index]?.serviceName?.trim() || stack.name") &&
+  stacksSrc.includes("settings.name.trim() || stack.name"));
 
 // v1.52.5：卡片墙换行 / 实时预览事务链 / 天气与图标形状全部平铺
 ok("★ 卡片墙自动换行且无横向滚动条（含水平布局）",
@@ -431,8 +455,8 @@ if (BROKEN === ORIGINAL) {
   ok("还原字节级一致", read(TARGET) === ORIGINAL);
 }
 
-console.log("== ④ 负向自检（进程级注入 45 类回归 → 重跑本门禁应 exit 1） ==");
-// 父进程注入 45 类回归文本，子进程跳过 ④（NAV_GATE_NEGATIVE_CHILD=1）只跑 ①②③，
+console.log("== ④ 负向自检（进程级注入 48 类回归 → 重跑本门禁应 exit 1） ==");
+// 父进程注入 48 类回归文本，子进程跳过 ④（NAV_GATE_NEGATIVE_CHILD=1）只跑 ①②③，
 // 若 ② 的对应断言确实生效，子进程必因 FAIL 而 exit 1。
 if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
   const NAV_PAGE_REL = "src/pages/NavPage.tsx";
@@ -671,6 +695,22 @@ if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
       name: "注入图标下载弹窗遮罩点击关闭回归",
       rel: "src/components/NavIconDownloadModal.tsx",
       inject: (s) => s.replace('bg-black/40 p-4">', 'bg-black/40 p-4" onClick={onClose}>'),
+    },
+    // v1.52.15：下载弹窗统一图标库目录 / 跳转按钮
+    {
+      name: "注入下载弹窗恢复独立绑定区回归",
+      rel: "src/components/NavIconDownloadModal.tsx",
+      inject: (s) => s.replace("downloadCustomIconApi(url.trim(), finalName)", "bindNavIconDirApi(url.trim(), finalName) as any"),
+    },
+    {
+      name: "注入下载弹窗跳转按钮缺失回归",
+      rel: "src/components/NavIconDownloadModal.tsx",
+      inject: (s) => s.replaceAll("前往图标库目录设置", "前往设置"),
+    },
+    {
+      name: "注入堆栈 LABELS 下载入口缺失回归",
+      rel: "src/pages/Stacks.tsx",
+      inject: (s) => s.replace('setIconDownloadTarget({ kind: "label", index: i })', "undefined"),
     },
   ];
   for (const c of cases) {

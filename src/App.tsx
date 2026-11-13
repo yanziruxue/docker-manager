@@ -619,6 +619,14 @@ export default function App() {
     setPage(target as PageKey);
   };
 
+  // v1.52.15：图标下载弹窗未绑定图标库目录时「前往图标库目录设置」——
+  // 跳设置中心并定位「页面设置」section（图标库目录卡片所在），从导航页 / 堆栈页共用
+  const [settingsFocusSection, setSettingsFocusSection] = useState("");
+  const goToIconDirSettings = () => {
+    setSettingsFocusSection("modal");
+    setPage("settings");
+  };
+
   // 会话级页面持久化（v1.50.7）：页面变化即写入 sessionStorage，刷新后恢复
   useEffect(() => {
     try {
@@ -994,6 +1002,7 @@ export default function App() {
               containers={containers}
               navPageSettings={navPageSettings}
               onSaveNavPageSettings={handleSaveNavPageSettings}
+              onGoToSettings={goToIconDirSettings}
             />
           )}
           {page === "containers" && (
@@ -1028,6 +1037,7 @@ export default function App() {
               doubleClickIconEditStack={settings?.modal?.doubleClickIconEditStack ?? true}
               defaultVisibleColumns={settings?.columnVisibility?.stackList}
               onOpenContainerDetail={(name, tab) => handleNavigate("containers", { focusContainerName: name, focusContainerTab: tab })}
+              onGoToSettings={goToIconDirSettings}
             />
           )}
           {page === "images" && (
@@ -1099,6 +1109,7 @@ export default function App() {
               updateInfo={appUpdateInfo}
               onUpdateInfoChange={setAppUpdateInfo}
               currentUser={me}
+              initialSection={settingsFocusSection}
             />
           )}
         </main>

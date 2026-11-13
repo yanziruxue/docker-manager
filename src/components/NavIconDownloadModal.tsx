@@ -1,12 +1,15 @@
 /**
- * 导航页「从链接下载图标」弹窗（v1.52.4）：
- *  - 未绑定导航图标库时先绑定（服务端绝对路径，独立于 Docker / 堆栈图标库）；
- *  - 已绑定后输入图片链接 + 名称（建议与项目名称同名）→ 下载写入图标库目录；
- *  - 下载成功可一键回填当前正在编辑的项目图标。
+ * 「从链接下载图标」弹窗（v1.52.4 引入，v1.52.15 重构）：
+ *  - 图标库目录**统一使用**「设置中心 → 页面设置 → 图标库目录」（modal.iconDir），
+ *    与 Docker / 堆栈自定义图标库共用同一目录，不再单独绑定导航页目录；
+ *  - 未绑定时提示「没有绑定图标库目录」+「前往图标库目录设置」一键跳转（onGoToSettings）；
+ *  - 输入图片链接 + 名称（默认预填当前上下文名称：项目名称 / 服务名称 / 堆栈名称，可手动修改）
+ *    → 下载写入图标库目录，同名自动匹配；
+ *  - 下载成功可一键回填当前正在编辑的图标位（onDownloaded）。
  */
 import { useEffect, useState } from "react";
-import { Download, FolderOpen, Loader2, X } from "lucide-react";
-import { bindNavIconDirApi, downloadNavIconApi, listNavIconsApi } from "../api";
+import { Download, FolderOpen, Loader2, Settings as SettingsIcon, X } from "lucide-react";
+import { downloadCustomIconApi, listCustomIconsApi } from "../api";
 import type { CustomIconsPayload } from "../custom-icons";
 
 const inputCls =
@@ -25,17 +28,19 @@ function nameFromUrl(u: string): string {
 export function NavIconDownloadModal({
   suggestedName,
   onDownloaded,
+  onGoToSettings,
   onClose,
 }: {
-  /** 默认名称（当前项目名，便于下载后自动匹配） */
+  /** 默认名称（当前上下文：项目名称 / 服务名称 / 堆栈名称，便于下载后自动匹配，可手动修改） */
   suggestedName?: string;
-  /** 下载成功后回填当前项目图标 */
+  /** 下载成功后回填当前编辑中的图标位 */
   onDownloaded?: (url: string) => void;
+  /** 未绑定图标库目录时「前往图标库目录设置」跳转回调 */
+  onGoToSettings?: () => void;
   onClose: () => void;
 }) {
   const [payload, setPayload] = useState<CustomIconsPayload | null>(null);
   const [loading, setLoading] = useState(true);
-  const [dirInput, setDirInput] = useState("");
   const [url, setUrl] = useState("");
   const [name, setName] = useState(suggestedName || "");
   const [busy, setBusy] = useState(false);
@@ -44,12 +49,8 @@ export function NavIconDownloadModal({
 
   useEffect(() => {
     let alive = true;
-    listNavIconsApi()
-      .then((r) => {
-        if (!alive) return;
-        setPayload(r);
-        setDirInput(r.dir || "");
-      })
+    listCustomIconsApi()
+      .then((r) => alive && setPayload(r))
       .catch((e: any) => alive && setErr(e?.message || "读取图标库状态失败"))
       .finally(() => alive && setLoading(false));
     return () => {
@@ -57,35 +58,8 @@ export function NavIconDownloadModal({
     };
   }, []);
 
-  // dir 为 realpath 后的绝对路径；error 非空说明目录不可读，同样需重新绑定
+  // dir 为 realpath 后的绝对路径；error 非空说明目录不可读，同样视为未就绪
   const bound = !!payload && payload.bound && !payload.error && !!payload.dir;
-
-  const onBind = async () => {
-    setBusy(true);
-    setErr("");
-    try {
-      const next = await bindNavIconDirApi(dirInput.trim());
-      setPayload(next);
-      if (next.error) setErr(next.error);
-    } catch (e: any) {
-      setErr(e?.message || "绑定图标库失败");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const onUnbind = async () => {
-    setBusy(true);
-    setErr("");
-    try {
-      setDirInput("");
-      setPayload(await bindNavIconDirApi(""));
-    } catch (e: any) {
-      setErr(e?.message || "解绑图标库失败");
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const onDownload = async () => {
     if (!url.trim()) {
@@ -97,9 +71,9 @@ export function NavIconDownloadModal({
     setResult(null);
     try {
       const finalName = name.trim() || nameFromUrl(url.trim()) || "icon";
-      const r = await downloadNavIconApi(url.trim(), finalName);
+      const r = await downloadCustomIconApi(url.trim(), finalName);
       setResult(r);
-      setPayload(await listNavIconsApi());
+      setPayload(await listCustomIconsApi());
     } catch (e: any) {
       setErr(e?.message || "下载图标失败");
     } finally {
@@ -129,43 +103,31 @@ export function NavIconDownloadModal({
             </div>
           ) : (
             <>
-              {/* 绑定区：与 Docker / 堆栈图标库完全独立 */}
+              {/* v1.52.15：图标库目录统一走设置中心；未绑定时提示 + 一键跳转 */}
               <section className="rounded-xl border border-slate-100 bg-slate-50/60 p-3 space-y-2">
                 <p className="text-xs font-medium text-slate-600 flex items-center gap-1">
-                  <FolderOpen size={12} /> 导航页图标库目录
+                  <FolderOpen size={12} /> 图标库目录
                 </p>
-                <p className="text-[11px] text-slate-400 leading-4">
-                  仅用于导航页，与 Docker / 堆栈图标库相互独立。请填写<strong>运行本服务的机器上</strong>已存在的绝对路径，服务账号需有写入权限。
-                </p>
-                <input
-                  className={inputCls}
-                  value={dirInput}
-                  onChange={(e) => setDirInput(e.target.value)}
-                  placeholder="/opt/dockermanagementyanzi/config/nav-icons"
-                />
-                <div className="flex items-center gap-2 flex-wrap">
-                  <button
-                    type="button"
-                    onClick={onBind}
-                    disabled={busy}
-                    className="px-3 py-1.5 text-[12px] text-white bg-fuchsia-600 rounded-lg hover:bg-fuchsia-700 disabled:opacity-40"
-                  >
-                    {busy ? "处理中…" : bound ? "更换目录" : "检测并绑定"}
-                  </button>
-                  {bound && (
-                    <button
-                      type="button"
-                      onClick={onUnbind}
-                      disabled={busy}
-                      className="px-3 py-1.5 text-[12px] text-slate-500 border border-slate-200 rounded-lg hover:bg-white disabled:opacity-40"
-                    >
-                      解绑
-                    </button>
-                  )}
-                  {bound && (
-                    <span className="text-[11px] text-emerald-600">已绑定 · {payload?.entries.length || 0} 个图标</span>
-                  )}
-                </div>
+                {bound ? (
+                  <p className="text-[11px] text-emerald-600">
+                    已绑定 · {payload?.entries.length || 0} 个图标 · {payload?.dir}
+                  </p>
+                ) : (
+                  <>
+                    <p className="text-[11px] text-amber-600 leading-4">
+                      没有绑定图标库目录。请先在设置中心 → 页面设置 → 图标库目录 填写运行本服务的机器上的绝对路径（服务账号需有写入权限）。
+                    </p>
+                    {onGoToSettings && (
+                      <button
+                        type="button"
+                        onClick={onGoToSettings}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 text-[12px] text-white bg-blue-500 rounded-lg hover:bg-blue-600"
+                      >
+                        <SettingsIcon size={12} /> 前往图标库目录设置
+                      </button>
+                    )}
+                  </>
+                )}
                 {payload?.error && <p className="text-[11px] text-amber-600">{payload.error}</p>}
               </section>
 
@@ -183,7 +145,7 @@ export function NavIconDownloadModal({
                   className={inputCls}
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="图标名称（与项目名称同名即可自动匹配，留空取链接文件名）"
+                  placeholder={`图标名称（默认${suggestedName ? `「${suggestedName}」` : "取链接文件名"}，可手动修改）`}
                   disabled={!bound}
                 />
                 <button
@@ -194,9 +156,9 @@ export function NavIconDownloadModal({
                 >
                   {busy ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} 下载到图标库
                 </button>
-                {!bound && <p className="text-[11px] text-amber-600">请先在上方绑定图标库目录</p>}
+                {!bound && <p className="text-[11px] text-amber-600">绑定图标库目录后即可下载</p>}
                 <p className="text-[11px] text-slate-400 leading-4">
-                  支持 png / jpg / gif / svg / webp / ico，单张 ≤2MB；重名自动追加序号，不会覆盖已有图标。
+                  支持 png / jpg / gif / svg / webp / ico，单张 ≤2MB；重名自动追加序号，不会覆盖已有图标。同名项目 / 服务 / 堆栈会自动匹配该图标。
                 </p>
               </section>
 
@@ -207,7 +169,7 @@ export function NavIconDownloadModal({
                   <img src={result.url} alt="" className="w-10 h-10 object-contain rounded" />
                   <div className="min-w-0 flex-1">
                     <p className="text-[12px] font-medium text-emerald-700 truncate">已保存：{result.file}</p>
-                    <p className="text-[11px] text-emerald-600">同名项目会自动匹配该图标</p>
+                    <p className="text-[11px] text-emerald-600">同名项目 / 服务 / 堆栈会自动匹配该图标</p>
                   </div>
                   {onDownloaded && (
                     <button

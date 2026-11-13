@@ -1014,6 +1014,11 @@ export function checkCustomIconDirApi(dir: string): Promise<import("./custom-ico
   return request("/custom-icons/check", { method: "POST", body: JSON.stringify({ dir }) });
 }
 
+/** 从链接下载图标写入图标库目录（v1.52.15：导航页 / 堆栈 LABELS / SETTINGS 统一入口）；name = 保存文件名（去扩展名前的键） */
+export function downloadCustomIconApi(url: string, name: string): Promise<{ url: string; file: string }> {
+  return request("/custom-icons/download", { method: "POST", body: JSON.stringify({ url, name }) });
+}
+
 // ============ 导航页专属图标库（v1.52.4，与 Docker 图标库独立） ============
 
 /** 列出导航图标库（绑定状态 / 目录 / 文件清单 / stem→URL 映射） */

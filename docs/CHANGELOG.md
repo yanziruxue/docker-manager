@@ -16,6 +16,23 @@
 
 ---
 
+## v1.52.15 — 2026-11-13（**main 分支 · 已构建 · 已推 Gitea**）
+
+### 图标库目录统一 + 下载图标增强（推翻 v1.52.4 导航图标库独立绑定）
+
+- **统一目录**：「从链接下载图标」弹窗**移除「导航页图标库目录」独立绑定区**，统一使用设置中心 → 页面设置 → **图标库目录**（modal.iconDir）；下载的图标写入该目录，导航页 / Docker / 堆栈三处同名自动匹配。
+- **未绑定跳转**：未绑定图标库目录时弹窗提示「没有绑定图标库目录」+ **「前往图标库目录设置」一键跳转**（App 统一 `goToIconDirSettings()`：切设置中心并定位「页面设置」section；导航页与堆栈页共用）。
+- **名称预填**：下载图标名称按上下文自适应预填、可手动修改——导航页 = 项目名称；堆栈 **LABELS** = 服务名称（空则堆栈名）；堆栈 **SETTINGS** = 堆栈名称。
+- **堆栈编辑弹窗新增下载入口**：LABELS 页每个服务图标按钮组 + SETTINGS 页堆栈图标按钮组各加「下载」按钮，打开同一下载弹窗，成功后直接回填对应图标位。
+- **服务端**：`server/custom-icons.ts` 新增 `downloadCustomIcon()`（SSRF 防护 / 重定向 ≤3 跳逐跳校验 / Content-Type image\* / 2MB 流式上限 / 文件名净化 / 重名追加序号 / realpath 越界校验，与 nav-icons 下载一致）；`POST /api/custom-icons/download` 读取 settings.json 的 iconDir 落盘。
+- **已完成**：`NavIconDownloadModal` 重构（`bindNavIconDirApi`/`listNavIconsApi` 零残留）；跳转链路（NavAppModal/NavPage/Stacks → App → Settings `initialSection`）；`check-nav.mjs` +4 正向断言 + 3 类负向自检（45→48 类）；`check-backup-naming.mjs` 的「默认 activeSection」锚点同步 `initialSection || "docker"`。
+- **保留**：`/api/nav-icons/*` 旧接口与 `config/nav-icons.json` 不动（兼容），前端已不再调用绑定。
+- **验证**：双 `tsc` 0 错；`check-nav` 229 ok / 0 FAIL；升版本前后 `test:gates` 22 组全绿。
+- **发布**：SEA 四步构建；zip/deb 内 = postject 产物二进制 130,616,512 B，SHA-256 `082b02efae53cc5bf85b21348d03b20ac5dcccc58f588b023d5c8c5ff5fabadb` 字节级一致；ELF `7f454c46` / e_machine=62 / 版本锚点 `1.52.15` 1 处、`1.52.14` 归零；前端 JS base64 解码 1,225,145 B 与 dist 逐字节一致。
+- **包**：`dockermanagementyanzi-linux-x64-v1.52.15.zip` 43,135,345 B（SHA-256 `fb9140b57251251a45b7419702ce06c1c64480c5ec82e4c261cfc67695efa5ae`）、`dockermanagementyanzi_1.52.15_amd64.deb` 42,850,250 B（SHA-256 `48814c464a745c31a8dc51fb562e96c82400ed531588034cede41c2f76333589`）。
+
+---
+
 ## v1.52.14 — 2026-11-13（**main 分支 · 已构建 · 已推 Gitea**）
 
 ### Nav 弹窗移除「点击弹窗外区域自动关闭」
