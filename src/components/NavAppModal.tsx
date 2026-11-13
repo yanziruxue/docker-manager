@@ -171,7 +171,7 @@ export function NavAppModal({
 
   return (
     <>
-    <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/40 p-4">
       <div
         className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[88vh] flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}

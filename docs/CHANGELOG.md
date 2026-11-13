@@ -16,6 +16,18 @@
 
 ---
 
+## v1.52.14 — 2026-11-13（**main 分支 · 已构建 · 已推 Gitea**）
+
+### Nav 弹窗移除「点击弹窗外区域自动关闭」
+
+- **功能**：导航页三个弹窗（编辑项目 `NavAppModal` / 页面设置 `NavPageSettingsModal` / 链接下载图标 `NavIconDownloadModal`）的遮罩层移除 `onClick={onClose}`，**点击弹窗外区域不再自动关闭**；仍可通过标题栏 ✕ 与底部「取消」按钮关闭。分区/分组设置弹窗（`NavGroupSettingsModal`）本就无此行为，不动。
+- **已完成**：三弹窗遮罩层改动；`check-nav.mjs` +1 正向断言 + 3 类负向自检（42→45 类，重新挂 `onClick={onClose}` 均被检出且还原字节级一致）。
+- **验证**：双 `tsc` 0 错；`check-nav` 220 ok / 0 FAIL；升版本前后 `test:gates` 22 组全绿。
+- **发布**：SEA 四步构建；zip/deb 内 = postject 产物二进制 130,616,512 B，SHA-256 `77967f31b3958d533889a55f3e48fd5a24401cb60db5b19cf904844ddb01c1c8` 字节级一致；ELF `7f454c46` / e_machine=62 / 版本锚点 `1.52.14` 1 处、`1.52.13` 归零；前端 JS base64 解码 1,225,025 B 与 dist 逐字节一致。
+- **包**：`dockermanagementyanzi-linux-x64-v1.52.14.zip` 43,135,525 B（SHA-256 `66d66b4abf6c99fdeec298f5d8b3b3a294066d81a5b925444b26fa17af546df0`）、`dockermanagementyanzi_1.52.14_amd64.deb` 42,850,492 B（SHA-256 `922e91174cd597d710fc5aa3a4021fce900e1f9d0b110d86311bf5201ed4b26f`）。
+
+---
+
 ## v1.52.13 — 2026-11-13（**main 分支 · 已构建 · 已推 Gitea**）
 
 ### 分区设置：「应用到其他分区」改为下拉选择
