@@ -68,7 +68,8 @@ jobs:
           chmod +x deploy/linux/dockermanagementyanzi
           echo "✅ SEA 二进制构建完成："
           ls -l deploy/linux/dockermanagementyanzi
-          head -c4 deploy/linux/dockermanagementyanzi | xxd | head -1   # 应为 7f454c46 (ELF)
+          # 校验 ELF 魔数 7f454c46（用 node 读取，避免依赖 runner 未安装的 xxd/hexdump）
+          node -e "const fs=require('fs'); const hex=fs.readFileSync('deploy/linux/dockermanagementyanzi').slice(0,4).toString('hex'); const ok=hex==='7f454c46'; console.log('ELF magic: '+hex+(ok?' ✅ 是有效 ELF (7f454c46)':' ❌ 非 ELF 二进制')); if(!ok) process.exit(1)"
 
       - name: Run gates (12 组门禁)
         run: npm run test:gates
