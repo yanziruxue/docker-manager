@@ -49,6 +49,12 @@ interface GroupSettingsState {
 export function NavPage({ navZones, onSaveNavZones, containers, navPageSettings, onSaveNavPageSettings }: NavPageProps) {
   const zones = navZones || [];
   const settings = navPageSettings || {};
+  // v1.52.5：分区设置弹窗草稿预览（null=不预览）。所有渲染取 renderZones，所有写操作仍取真实 zones。
+  const [previewZones, setPreviewZones] = useState<NavZone[] | null>(null);
+  const renderZones = previewZones ?? zones;
+  const handlePreviewZones = useCallback((d: NavZone[] | null) => setPreviewZones(d), []);
+  // 真实分区数据落盘成功后撤销预览（保存瞬间不闪回旧外观）
+  useEffect(() => { setPreviewZones(null); }, [navZones]);
   const [navTab, setNavTab] = useState<string>(() => {
     if (typeof window !== "undefined") {
       const t = new URLSearchParams(window.location.search).get("navTab");
@@ -60,6 +66,12 @@ export function NavPage({ navZones, onSaveNavZones, containers, navPageSettings,
   const [appModal, setAppModal] = useState<AppModalState>(APP_MODAL_CLOSED);
   const [navPageSettingsOpen, setNavPageSettingsOpen] = useState(false);
   const [groupSettings, setGroupSettings] = useState<GroupSettingsState>({ open: false });
+  // 兜底：保存请求挂起/失败时 4s 后撤销预览，回落到真实分区，不停留在「看似已生效但未落盘」的状态
+  useEffect(() => {
+    if (previewZones === null || groupSettings.open) return;
+    const t = window.setTimeout(() => setPreviewZones(null), 4000);
+    return () => window.clearTimeout(t);
+  }, [previewZones, groupSettings.open]);
   // v1.51.18：编辑模式开关。默认关闭；开启后卡片 ✎ 编辑入口才可见（不制约 ＋ / 齿轮，两者始终可用）。
   const [editMode, setEditMode] = useState(false);
   // v1.51.19：编辑态拖拽状态（被拖拽项目的 id 与来源分组）
@@ -74,13 +86,14 @@ export function NavPage({ navZones, onSaveNavZones, containers, navPageSettings,
   );
 
   const isAll = navTab === "__all__";
-  const effectiveTab = !isAll && zones.some((z) => z.id === navTab) ? navTab : zones[0]?.id || "";
-  const activeZone = isAll ? null : zones.find((z) => z.id === effectiveTab) || null;
+  // v1.52.5：渲染链统一取 renderZones（预览草稿优先），故分区改名/排序/外观在弹窗中即时可见
+  const effectiveTab = !isAll && renderZones.some((z) => z.id === navTab) ? navTab : renderZones[0]?.id || "";
+  const activeZone = isAll ? null : renderZones.find((z) => z.id === effectiveTab) || null;
 
   // 渲染分区：全部视图合并所有分区；否则取当前分区的分组。
   // v1.52.4：firstInZone 标记各分区下第一个分组，用于「首组距分区」间距（其余分组靠前一组的下间距）。
   const sections: { zone: NavZone; group: NavGroup; firstInZone: boolean }[] = isAll
-    ? zones.flatMap((z) => (z.groups || []).map((g, i) => ({ zone: z, group: g, firstInZone: i === 0 })))
+    ? renderZones.flatMap((z) => (z.groups || []).map((g, i) => ({ zone: z, group: g, firstInZone: i === 0 })))
     : (activeZone ? activeZone.groups.map((g, i) => ({ zone: activeZone, group: g, firstInZone: i === 0 })) : []);
 
   // v1.51.11：项目 CRUD 直接对 zones 做不可变更新并落盘，不再经 NavEditor 中转
@@ -223,10 +236,10 @@ export function NavPage({ navZones, onSaveNavZones, containers, navPageSettings,
       {/* 分区标签条 + 顶栏图标条（v1.52.1：编辑 | ＋添加项目 | ⚙分区/分组设置 | 页面设置） */}
       {/* v1.52.4：标签条下不再固定 mb-5，首个分组距分区的距离由分区级 zoneFirstGroupGap 控制 */}
       <div className="flex items-center gap-2 flex-wrap relative">
-        {zones.length === 0 && (
+        {renderZones.length === 0 && (
           <span className="text-[13px] text-white/80 px-1">还没有导航分区</span>
         )}
-        {zones.map((z) => {
+        {renderZones.map((z) => {
           // 角标 = 该分区下应用总数
           const count = (z.groups || []).reduce((s, g) => s + (g.apps?.length || 0), 0);
           const active = z.id === effectiveTab;
@@ -390,8 +403,10 @@ export function NavPage({ navZones, onSaveNavZones, containers, navPageSettings,
           zones={zones}
           initialGroupId={groupSettings.initialGroupId}
           initialZoneId={groupSettings.initialZoneId}
+          onPreview={handlePreviewZones}
           onSave={(next) => {
             onSaveNavZones(next);
+            // v1.52.5：不清预览，交给 navZones 落盘后的 effect 撤销（保存瞬间无闪回）
             setGroupSettings({ open: false });
             // 当前选中的分区被删时回落第一个（原保存时的回落语义）
             if (effectiveTab && !next.some((z) => z.id === effectiveTab)) setNavTab(next[0]?.id || "");

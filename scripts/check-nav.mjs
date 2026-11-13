@@ -15,7 +15,7 @@
  *    v1.51.11 起 NavEditor 弹窗已删除，项目 CRUD 由 NavPage + NavAppModal 直接落盘、
  *    分组新建/删除由 NavGroupSettingsModal 接管、卡片 hover ✎ 由 NavBoard.onEditApp 直达；
  *  - 负向自检①：注入「内网缺 lanUrl 不回落 url」回归 → 重载模块应检出差异 → 还原 → 复核全绿；
- *  - 负向自检②：进程级注入 13 类回归（<NavEditor / 顶栏分组设置文字按钮 / 齿轮接线缺失 /
+ *  - 负向自检②：进程级注入 25 类回归（<NavEditor / 顶栏分组设置文字按钮 / 齿轮接线缺失 /
  *    顶栏添加项目按钮 / 高级字段折叠区 / 智能匹配 / 全局图库被 engineId 阻挡 /
  *    容器列表接线缺失 / 容器四字段映射缺失 / 背景图上限回退 2mb / 超限 JSON 中间件缺失 /
  *    上传兜底文案回退 / 前端体积预校验缺失 / 编辑按钮缺失 / editMode 未下传 NavBoard /
@@ -85,7 +85,7 @@ ok("双空 → 空串（调用方禁用卡片）", mod.resolveNavAppUrl({ url: "
 console.log("== ② 源码接线断言 ==");
 const navPage = read("src/pages/NavPage.tsx");
 ok("NavPage 接收 navZones/onSaveNavZones（v1.52.0 分区结构）", navPage.includes("navZones") && navPage.includes("onSaveNavZones"));
-ok("NavPage 顶部分区标签条渲染分区按钮", navPage.includes("zones.map((z) => {") && navPage.includes("setNavTab(z.id)"));
+ok("NavPage 顶部分区标签条渲染分区按钮", navPage.includes("renderZones.map((z) => {") && navPage.includes("setNavTab(z.id)"));
 ok("选中分区渲染 NavBoard、无分区提示空状态", navPage.includes("<NavBoard") && navPage.includes("还没有导航分区"));
 ok("★ NavPage 不再挂载/导入 NavEditor 弹窗",
   !navPage.includes("<NavEditor") && !navPage.includes('from "../components/NavEditor"'));
@@ -296,6 +296,37 @@ ok("★ 前端暴露导航图标库 3 个 API",
 ok("★ 下载弹窗未绑定时先绑定目录，成功可回填项目图标",
   ["检测并绑定", "bindNavIconDirApi", "downloadNavIconApi", "onDownloaded", "请先在上方绑定图标库目录"].every((k) => navIconDlModal.includes(k)));
 
+// v1.52.5：卡片墙换行 / 实时预览事务链 / 天气与图标形状全部平铺
+ok("★ 卡片墙自动换行且无横向滚动条（含水平布局）",
+  board.includes('className="flex flex-wrap items-start"') &&
+  !board.includes("overflow-x-auto") && !board.includes("snap-x") && !board.includes("snap-start"));
+ok("★ NavBoard 导出 AppCard 供弹窗实时预览复用",
+  board.includes("export function AppCard(") && gs.includes('import { AppCard } from "./NavBoard"'));
+ok("★ 分区设置草稿实时上抛预览，保存提交 / 取消撤销恢复",
+  gs.includes("onPreview: (zones: NavZone[] | null) => void") &&
+  gs.includes("onPreview(draft)") && gs.includes("if (!committed.current) onPreview(null)") &&
+  gs.includes("committed.current = true"));
+ok("★ NavPage 渲染链走 renderZones、写操作仍走真实 zones",
+  navPage.includes("const renderZones = previewZones ?? zones") &&
+  navPage.includes("renderZones.flatMap") && navPage.includes("renderZones.map((z) => {") &&
+  navPage.includes("onPreview={handlePreviewZones}") &&
+  navPage.includes("onSaveNavZones(next)") &&
+  navPage.includes("useEffect(() => { setPreviewZones(null); }, [navZones])"));
+ok("★ 保存后由落盘数据撤销预览 + 请求挂起兜底回落",
+  navPage.includes("setTimeout(() => setPreviewZones(null), 4000)") &&
+  navPage.includes("if (previewZones === null || groupSettings.open) return;"));
+ok("★ 弹窗内实时预览小样（复用 AppCard，5 类配置即时可见）",
+  ["实时预览（未保存）", "PREVIEW_APPS.map", "activeZone.zoneFirstGroupGap", "activeZone.groupCardGapTop",
+   "activeZone.groupCardGapBottom", "activeZone.gridGap", "activeZone.cardLayout",
+   "activeZone.cardSize", "activeZone.iconSize", "activeZone.cardStyle", "activeZone.iconShape"]
+    .every((k) => gs.includes(k)));
+ok("★ 图标形状 10 项全部平铺（不再用下拉框）",
+  gs.includes("options={ICON_SHAPE_OPTIONS}") && !gs.includes("<select") && !gs.includes('className={inputCls}'));
+ok("★ 环境天气 5 项全部平铺（不再用下拉框）",
+  navSettingsModal.includes("options={WEATHER_OPTIONS}") &&
+  navSettingsModal.includes('value={draft.weather || "none"}') &&
+  !navSettingsModal.includes("<select") && navSettingsModal.includes("flex flex-wrap gap-1.5"));
+
 console.log("== ③ 负向自检（注入回归 → 检出 → 还原） ==");
 // 注入「内网缺 lanUrl 不回落 url」回归：应被 ⑤ 号用例检出
 const TARGET = "src/webui-url.ts";
@@ -318,8 +349,8 @@ if (BROKEN === ORIGINAL) {
   ok("还原字节级一致", read(TARGET) === ORIGINAL);
 }
 
-console.log("== ④ 负向自检（进程级注入 20 类回归 → 重跑本门禁应 exit 1） ==");
-// 父进程注入 20 类回归文本，子进程跳过 ④（NAV_GATE_NEGATIVE_CHILD=1）只跑 ①②③，
+console.log("== ④ 负向自检（进程级注入 25 类回归 → 重跑本门禁应 exit 1） ==");
+// 父进程注入 25 类回归文本，子进程跳过 ④（NAV_GATE_NEGATIVE_CHILD=1）只跑 ①②③，
 // 若 ② 的对应断言确实生效，子进程必因 FAIL 而 exit 1。
 if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
   const NAV_PAGE_REL = "src/pages/NavPage.tsx";
@@ -426,6 +457,30 @@ if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
       name: "注入分区/分组移动缺失回归",
       rel: "src/components/NavGroupSettingsModal.tsx",
       inject: (s) => s.replace("const moveZone = (", "const moveZoneRemoved = ("),
+    },
+    {
+      name: "注入卡片墙横向滚动回归（撤回自动换行）",
+      rel: "src/components/NavBoard.tsx",
+      inject: (s) => s.replace('className="flex flex-wrap items-start"', 'className="flex gap-3 overflow-x-auto snap-x"'),
+    },
+    {
+      name: "注入预览事务标志缺失回归（保存被误判为取消）",
+      rel: "src/components/NavGroupSettingsModal.tsx",
+      inject: (s) => s.replace("committed.current = true;", ""),
+    },
+    {
+      name: "注入渲染链不走预览草稿回归",
+      inject: (s) => s.replace("renderZones.flatMap", "zones.flatMap"),
+    },
+    {
+      name: "注入天气选项错配回归（不再全部平铺）",
+      rel: "src/components/NavPageSettingsModal.tsx",
+      inject: (s) => s.replace("options={WEATHER_OPTIONS}", "options={NETWORK_OPTIONS}"),
+    },
+    {
+      name: "注入图标形状选项错配回归（不再全部平铺）",
+      rel: "src/components/NavGroupSettingsModal.tsx",
+      inject: (s) => s.replace("options={ICON_SHAPE_OPTIONS}", "options={CARD_STYLE_OPTIONS}"),
     },
   ];
   for (const c of cases) {

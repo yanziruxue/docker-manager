@@ -6,6 +6,8 @@
  * v1.51.7：支持分组级卡片布局/大小/间距/图标大小（参照 FlatNas）与 ext 外链直开、self 备用地址回退。
  * v1.51.11：卡片 hover 显示「✎」直达项目编辑弹窗（旧管理弹窗齿轮入口一并移除）。
  * v1.52.1：分组标题行不再渲染 ＋/齿轮（入口收敛至导航页顶栏图标条），本组件仅渲染分组与卡片。
+ * v1.52.5：卡片墙一律自动换行（含水平布局），不设横向滚动条；flex-shrink-0 保持卡片固定宽度；
+ *          AppCard 导出供分区设置弹窗的「实时预览」复用。
  */
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { ExternalLink, Pencil } from "lucide-react";
@@ -73,7 +75,8 @@ const ICON_SHAPE_STYLE: Record<NavIconShape, CSSProperties> = {
   hidden: {},
 };
 
-function AppCard({
+/** 导出供分区设置弹窗的「实时预览」复用，保证预览与真实卡片视觉 100% 一致 */
+export function AppCard({
   app,
   iconMap,
   url,
@@ -284,14 +287,14 @@ export function NavBoard({
           <p className="text-sm">该分组还没有入口，点顶栏「＋」添加</p>
         </div>
       ) : (
-        <div className="flex gap-3 overflow-x-auto snap-x" style={{ gap: gridGap }}>
+        <div className="flex flex-wrap items-start" style={{ gap: gridGap }}>
           {apps.map((a, i) => {
             // 全部视图下卡片归属真实分组（由 resolveGroupOf 解析），用于拖拽跨组
             const cardGroupId = resolveGroupOf?.(a.id) || group.id;
             return (
             <div
               key={a.id}
-              className="snap-start relative group/card"
+              className="relative group/card"
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => { e.preventDefault(); onCardDrop?.(a.id, cardGroupId); }}
             >

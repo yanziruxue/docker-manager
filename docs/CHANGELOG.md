@@ -16,6 +16,36 @@
 
 ---
 
+## v1.52.5 — 2026-11-13（**main 分支 · 已构建 · 已推 Gitea**）
+
+### 导航页：卡片换行 / 实时预览事务链 / 选项全部平铺
+
+- **卡片墙自动换行**（`src/components/NavBoard.tsx`）：水平布局不再出现横向滚动条——容器由 `flex gap-3 overflow-x-auto snap-x` 改为 `flex flex-wrap items-start`，子项去掉 `snap-start`，卡片保留 `flex-shrink-0` 固定宽度；超出容器宽度自动排到第二行，垂直/水平两种布局一致。
+- **实时预览 + 事务性保存**（`NavGroupSettingsModal.tsx` + `NavPage.tsx`）：卡片布局 / 布局与间距 / 分组间距 / 卡片样式 / 图标形状 5 类配置**改动即时可见**，仅点「保存」才落盘，点「取消 / ✕ / 遮罩」立即恢复打开前状态。
+  - 弹窗 `draft` 经 `onPreview(zones | null)` 实时上抛；`committed` ref 区分「保存」与「取消」，卸载 cleanup 仅在未提交时撤销预览。
+  - `NavPage` 新增 `previewZones`，渲染链统一走 `renderZones = previewZones ?? zones`（分区标签条 / sections / activeZone / effectiveTab），**所有写操作仍取真实 `zones`**，草稿绝不落盘。
+  - 保存后由 `navZones` 落盘变更触发 effect 撤销预览（不闪回旧外观）；请求挂起/失败时 4s 兜底回落到真实分区，避免停留在「看似生效但未落盘」的状态。
+  - `AppCard` 导出并在弹窗右侧顶部新增「实时预览（未保存）」小样：复用真实卡片组件，5 类配置 + 3 个分区间距字段全部即时可见，视觉与页面 100% 一致。
+- **图标形状全部平铺**（`NavGroupSettingsModal.tsx`）：10 种形状由 `<select>` 改为 `Segmented` 按钮组平铺（`flex flex-wrap`），移除不再使用的 `inputCls`。
+- **环境天气效果全部平铺**（`NavPageSettingsModal.tsx`）：无/雨天/雪天/樱花/落叶 5 种由 `<select>` 改为 `Segmented` 平铺；`Segmented` 容器改 `flex flex-wrap gap-1.5`，内外网 / 白昼模式两组按钮同样自动换行。
+- **门禁**：`scripts/check-nav.mjs` 同步「分区标签条」字面断言为 `renderZones.map`，新增 8 条正向断言 + 5 类负向自检（共 25 类）；**159 ok / 0 FAIL**；`npm run test:gates` 全 22 组 `FAIL=0`、双 `tsc` 0 错。
+
+### 发布物
+
+- 包：`dockermanagementyanzi-linux-x64-v1.52.5.zip`、`dockermanagementyanzi_1.52.5_amd64.deb`；SEA 硬核验：ELF 魔数 / e_machine / 版本锚点 / zip 与 deb 内二进制与 postject 产物 SHA-256 三者一致。
+
+### 已知限制
+
+- 实时预览作用于弹窗所在的整个导航页（含被遮罩变暗的背景区域）；弹窗内的预览小样使用 3 张示意卡，不代表真实项目的图标与链接。
+- 保存请求极端超时（>4s）时会先回落到真实分区，待 API 返回后再更新；局域网正常往返远小于该阈值。
+- 中间版本 v1.51.19 / v1.52.0 / v1.52.1 的 Gitea Release 资产仍空缺（此前只选补发 v1.52.2）。
+
+### 下一步
+
+- 在 Gitea UI 确认 `build-and-publish`（SEA→Releases）v1.52.5 全绿并发布 Release；`build-docker-image` tag 触发推 Gitea 容器镜像库。
+
+---
+
 ## v1.52.4 — 2026-11-13（**main 分支 · 已构建 · 已推 Gitea**）
 
 ### 导航页：分区间距 / 排序 / 专属图标库与链接下载

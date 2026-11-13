@@ -5,12 +5,17 @@
  *  - 分组仅为分类容器（v1.52.3），外观统一在分区级配置，该分区下所有分组共享。
  * 保存经 onSave(zones) 整体落盘（服务端 normalizeNavZones 白名单兜底）。
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, Pencil, Plus, RotateCcw, Trash2, X } from "lucide-react";
-import type { NavCardStyle, NavIconShape, NavZone } from "../types";
+import type { NavAppItem, NavCardStyle, NavIconShape, NavZone } from "../types";
+import { AppCard } from "./NavBoard";
 
-const inputCls =
-  "w-full px-2.5 py-1.5 text-[13px] border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-500/30 focus:border-rose-400 bg-white text-slate-700";
+/** 实时预览示意卡（url 为空 → 卡片禁用点击，不会打开链接） */
+const PREVIEW_APPS: NavAppItem[] = [
+  { id: "preview-1", name: "示例应用", description: "卡片预览", iconColor: "#f472b6" },
+  { id: "preview-2", name: "相册", description: "副标题", iconColor: "#60a5fa" },
+  { id: "preview-3", name: "下载器", description: "第二行", iconColor: "#34d399" },
+];
 
 /** 随机 id（与项目弹窗同风格：时间戳 36 进制 + 随机尾） */
 function genId(): string {
@@ -147,6 +152,7 @@ export function NavGroupSettingsModal({
   initialZoneId,
   onSave,
   onClose,
+  onPreview,
 }: {
   /** 导航分区（v1.52.0）：分区 → 分组 → 卡片三级 */
   zones: NavZone[];
@@ -156,10 +162,20 @@ export function NavGroupSettingsModal({
   initialZoneId?: string;
   onSave: (zones: NavZone[]) => void;
   onClose: () => void;
+  /** v1.52.5：草稿实时上抛给导航页预览；null = 撤销预览（取消/关闭恢复原状） */
+  onPreview: (zones: NavZone[] | null) => void;
 }) {
   const [draft, setDraft] = useState<NavZone[]>(() =>
     (zones || []).map((z) => ({ ...z, groups: (z.groups || []).map((g) => ({ ...g, apps: [...(g.apps || [])] })) })),
   );
+  // v1.52.5 事务性预览：保存则保留预览直到真实数据落盘，取消/关闭立即撤销 → 页面恢复
+  const committed = useRef(false);
+  useEffect(() => {
+    onPreview(draft);
+  }, [draft, onPreview]);
+  useEffect(() => () => {
+    if (!committed.current) onPreview(null);
+  }, [onPreview]);
   // 由 initialGroupId 解析父分区；否则回落 initialZoneId；再回落首个分区
   const resolveInitialZoneId = (): string => {
     if (initialGroupId && (zones || []).some((z) => (z.groups || []).some((g) => g.id === initialGroupId))) {
@@ -444,6 +460,46 @@ export function NavGroupSettingsModal({
               <p className="text-[12px] text-slate-400">请选择左侧分区以配置其卡片外观</p>
             ) : (
               <>
+                {/* v1.52.5：实时预览——5 类配置改动即时可见；仅保存才落盘，取消即恢复 */}
+                <section className="rounded-xl border border-rose-100 bg-rose-50/50 p-3">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <p className="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">实时预览（未保存）</p>
+                    <span className="text-[10px] text-rose-500">保存后生效 · 取消恢复</span>
+                  </div>
+                  <div
+                    className="rounded-lg bg-gradient-to-br from-rose-200 via-fuchsia-200 to-indigo-300 px-3 overflow-hidden"
+                    style={{ paddingTop: activeZone.zoneFirstGroupGap ?? 20 }}
+                  >
+                    <div
+                      className="text-sm font-bold text-white drop-shadow-sm"
+                      style={{ marginBottom: activeZone.groupCardGapTop ?? 20 }}
+                    >
+                      {activeZone.groups[0]?.name || "分组标题"}
+                    </div>
+                    <div
+                      className="flex flex-wrap items-start"
+                      style={{
+                        gap: activeZone.gridGap ?? 16,
+                        paddingBottom: activeZone.groupCardGapBottom ?? 32,
+                      }}
+                    >
+                      {PREVIEW_APPS.map((a) => (
+                        <AppCard
+                          key={a.id}
+                          app={a}
+                          iconMap={{}}
+                          url=""
+                          layout={activeZone.cardLayout || "vertical"}
+                          cardSize={activeZone.cardSize ?? 120}
+                          iconSize={activeZone.iconSize ?? 48}
+                          cardStyle={activeZone.cardStyle || "solid"}
+                          iconShape={activeZone.iconShape || "rounded"}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </section>
+
                 <div className="flex items-center justify-between">
                   <p className="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">分区配置 · {activeZone.name}</p>
                   <button
@@ -538,16 +594,13 @@ export function NavGroupSettingsModal({
                 </section>
 
                 <section className="rounded-xl border border-slate-100 bg-slate-50/60 p-3">
-                  <p className="text-xs font-medium text-slate-600 mb-2">图标形状（参照 FlatNas）</p>
-                  <select
-                    className={inputCls}
+                  <p className="text-xs font-medium text-slate-600 mb-2">图标形状（全部形状平铺，参照 FlatNas）</p>
+                  {/* v1.52.5：10 种形状一次性平铺，不再收进下拉框 */}
+                  <Segmented
                     value={activeZone.iconShape || "rounded"}
-                    onChange={(e) => patchZone({ iconShape: e.target.value as NavIconShape })}
-                  >
-                    {ICON_SHAPE_OPTIONS.map((o) => (
-                      <option key={o.value} value={o.value}>{o.label}</option>
-                    ))}
-                  </select>
+                    options={ICON_SHAPE_OPTIONS}
+                    onChange={(v) => patchZone({ iconShape: v })}
+                  />
                 </section>
               </>
             )}
@@ -563,7 +616,11 @@ export function NavGroupSettingsModal({
             取消
           </button>
           <button
-            onClick={() => canSave && onSave(draft)}
+            onClick={() => {
+              if (!canSave) return;
+              committed.current = true;
+              onSave(draft);
+            }}
             disabled={!canSave}
             className="px-4 py-1.5 text-sm text-white bg-rose-500 rounded-lg hover:bg-rose-600 disabled:opacity-40"
           >

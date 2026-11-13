@@ -44,7 +44,7 @@ function Segmented<T extends string>({
   onChange: (v: T) => void;
 }) {
   return (
-    <div className="flex gap-1">
+    <div className="flex flex-wrap gap-1.5">
       {options.map((o) => (
         <button
           key={o.value}
@@ -178,16 +178,13 @@ export function NavPageSettingsModal({
 
           {/* 环境天气效果 */}
           <section className="rounded-xl border border-slate-100 bg-slate-50/60 p-3">
-            <p className="text-xs font-medium text-slate-600 mb-2">环境天气效果</p>
-            <select
-              className={inputCls}
+            <p className="text-xs font-medium text-slate-600 mb-2">环境天气效果（全部效果平铺）</p>
+            {/* v1.52.5：5 种效果一次性平铺展示，不再收进下拉框 */}
+            <Segmented
               value={draft.weather || "none"}
-              onChange={(e) => patch({ weather: e.target.value as NavWeather })}
-            >
-              {WEATHER_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
+              options={WEATHER_OPTIONS}
+              onChange={(v) => patch({ weather: v })}
+            />
           </section>
 
           {/* 内外网设置 */}
