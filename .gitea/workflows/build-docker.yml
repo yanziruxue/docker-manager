@@ -94,7 +94,7 @@ jobs:
             .
 
       - name: 推送 Gitea 容器镜像库（tag 自动触发，或手动选 target=gitea）
-        if: github.event_name == 'push' || inputs.target == 'gitea'
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.target == 'gitea') }}
         env:
           DOCKER_USER: ${{ secrets.DOCKER_USER }}
           DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
@@ -104,11 +104,16 @@ jobs:
           docker push "${{ steps.meta.outputs.gitea_image }}:latest"
 
       - name: 推送 ghcr.io（仅手动选 target=ghcr）
-        if: github.event_name == 'workflow_dispatch' && inputs.target == 'ghcr'
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.target == 'ghcr' }}
         env:
           GHCR_USER: ${{ secrets.GHCR_USER }}
           GHCR_PAT: ${{ secrets.GHCR_PAT }}
         run: |
+          # ghcr 为可选目标：未配置 GHCR_PAT 时清晰跳过，不让可选目标把整个 run 弄红
+          if [ -z "${GHCR_PAT}" ]; then
+            echo "⚠️ GHCR_PAT 未配置，跳过 ghcr 推送（如需推 ghcr，请在仓库 Settings → Actions → Secrets 配置 GHCR_PAT(GitHub classic PAT, write:packages) 与可选 GHCR_USER）"
+            exit 0
+          fi
           echo "${GHCR_PAT}" | docker login ghcr.io -u "${GHCR_USER:-yanzirue}" --password-stdin
           docker push "${{ steps.meta.outputs.ghcr_image }}:${{ steps.meta.outputs.version }}"
           docker push "${{ steps.meta.outputs.ghcr_image }}:latest"
