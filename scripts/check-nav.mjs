@@ -15,7 +15,7 @@
  *    v1.51.11 起 NavEditor 弹窗已删除，项目 CRUD 由 NavPage + NavAppModal 直接落盘、
  *    分组新建/删除由 NavGroupSettingsModal 接管、卡片 hover ✎ 由 NavBoard.onEditApp 直达；
  *  - 负向自检①：注入「内网缺 lanUrl 不回落 url」回归 → 重载模块应检出差异 → 还原 → 复核全绿；
- *  - 负向自检②：进程级注入 41 类回归（<NavEditor / 顶栏分组设置文字按钮 / 齿轮接线缺失 /
+ *  - 负向自检②：进程级注入 42 类回归（<NavEditor / 顶栏分组设置文字按钮 / 齿轮接线缺失 /
  *    顶栏添加项目按钮 / 高级字段折叠区 / 智能匹配 / 全局图库被 engineId 阻挡 /
  *    容器列表接线缺失 / 容器四字段映射缺失 / 背景图上限回退 2mb / 超限 JSON 中间件缺失 /
  *    上传兜底文案回退 / 前端体积预校验缺失 / 编辑按钮缺失 / editMode 未下传 NavBoard /
@@ -313,11 +313,13 @@ ok("★ dragActive 全分区下传、dragZoneId 零残留（「全部」视图�
   !navPage.includes("dragZoneId") &&
   (navPage.match(/dragActive=\{dragActive\}/g) || []).length === 1);
 
-// v1.52.12：分区配置一键应用到其他分区（仅 9 个外观字段，实时预览 / 保存落盘）
-ok("★ 分区配置可一键应用到其他分区（v1.52.12）",
-  gs.includes("const applyAppearanceToOthers = () => {") &&
+// v1.52.13：分区配置应用到其他分区——按钮弹下拉，列出其他分区 + 最下方「全部分区」
+ok("★ 分区配置应用按钮弹下拉（其他分区可单选 + 底部全部分区）（v1.52.13）",
+  gs.includes("const applyAppearanceTo = (targetZoneId: string | null) => {") &&
   gs.includes("应用到其他分区") &&
-  gs.includes("z.id === activeZone.id ? z : { ...z, ...appearance }") &&
+  gs.includes("if (targetZoneId !== null && z.id !== targetZoneId) return z;") &&
+  gs.includes("全部分区") &&
+  gs.includes("onClick={() => applyAppearanceTo(null)}") &&
   gs.includes("disabled={draft.length <= 1}"));
 
 // v1.52.4：分区级间距 / 分区与分组移动 / 导航页专属图标库（含链接下载）
@@ -421,8 +423,8 @@ if (BROKEN === ORIGINAL) {
   ok("还原字节级一致", read(TARGET) === ORIGINAL);
 }
 
-console.log("== ④ 负向自检（进程级注入 41 类回归 → 重跑本门禁应 exit 1） ==");
-// 父进程注入 41 类回归文本，子进程跳过 ④（NAV_GATE_NEGATIVE_CHILD=1）只跑 ①②③，
+console.log("== ④ 负向自检（进程级注入 42 类回归 → 重跑本门禁应 exit 1） ==");
+// 父进程注入 42 类回归文本，子进程跳过 ④（NAV_GATE_NEGATIVE_CHILD=1）只跑 ①②③，
 // 若 ② 的对应断言确实生效，子进程必因 FAIL 而 exit 1。
 if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
   const NAV_PAGE_REL = "src/pages/NavPage.tsx";
@@ -635,11 +637,16 @@ if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
       rel: "src/components/NavBoard.tsx",
       inject: (s) => s.replace(': "py-2"', ': "py-10 border-2 border-dashed border-transparent text-white/85"'),
     },
-    // v1.52.12：分区外观一键应用
+    // v1.52.13：分区外观应用下拉菜单
     {
-      name: "注入外观应用到其他分区缺失回归（按钮变 no-op）",
+      name: "注入外观应用到分区缺失回归（按钮变 no-op）",
       rel: "src/components/NavGroupSettingsModal.tsx",
-      inject: (s) => s.replace("prev.map((z) => (z.id === activeZone.id ? z : { ...z, ...appearance }))", "prev"),
+      inject: (s) => s.replace("if (targetZoneId !== null && z.id !== targetZoneId) return z;", "if (true) return z;"),
+    },
+    {
+      name: "注入下拉「全部分区」项缺失回归",
+      rel: "src/components/NavGroupSettingsModal.tsx",
+      inject: (s) => s.replaceAll("全部分区", "全部"),
     },
   ];
   for (const c of cases) {

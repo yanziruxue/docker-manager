@@ -4,7 +4,8 @@
  *  - 右侧=该分区的外观配置（卡片布局 / 间距 / 大小 / 图标大小 / 卡片样式 / 图标形状）；
  *  - 分组仅为分类容器（v1.52.3），外观统一在分区级配置，该分区下所有分组共享。
  * v1.52.6：移除弹窗内的示意卡小样；标题栏改为可拖动，拖开后直接观察导航页实时效果。
- * v1.52.12：右侧新增「应用到其他分区」按钮，把当前分区的外观配置一键复制到其他所有分区。
+ * v1.52.12：右侧新增「应用到其他分区」按钮，把当前分区的外观配置复制到其他分区。
+ * v1.52.13：按钮改为下拉菜单——列出其他分区（选中即应用到该分区），最下方固定「全部分区」。
  * v1.52.9：新建分区自动带一个与分区同名的默认分组；分区下至少保留一个分组（禁止删最后一组）。
  * 草稿仍经 onPreview 上抛给背景页实时渲染，仅 onSave(zones) 整体落盘。
  */
@@ -240,17 +241,27 @@ export function NavGroupSettingsModal({
   const [selectedZoneId, setSelectedZoneId] = useState<string>(resolveInitialZoneId);
   const [editingZoneId, setEditingZoneId] = useState<string | null>(null);
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
+  // v1.52.13：「应用到其他分区」下拉菜单开关
+  const [applyMenuOpen, setApplyMenuOpen] = useState(false);
 
   const activeZone = draft.find((z) => z.id === selectedZoneId) || null;
 
   const patchZone = (p: Partial<NavZone>) =>
     setDraft((prev) => prev.map((z) => (z.id === selectedZoneId ? { ...z, ...p } : z)));
-  // v1.52.12：把当前分区的外观配置（仅 9 个外观字段）一键应用到其他所有分区；不动名称 / 分组 / 项目
-  const applyAppearanceToOthers = () => {
+  // v1.52.13：把当前分区的外观配置（仅 9 个外观字段）应用到指定分区；targetZoneId=null 表示全部其他分区。
+  // 不动名称 / 分组 / 项目；实时预览、保存才落盘、取消恢复。
+  const applyAppearanceTo = (targetZoneId: string | null) => {
     if (!activeZone) return;
     const { cardLayout, cardSize, gridGap, iconSize, cardStyle, iconShape, zoneFirstGroupGap, groupCardGapTop, groupCardGapBottom } = activeZone;
     const appearance = { cardLayout, cardSize, gridGap, iconSize, cardStyle, iconShape, zoneFirstGroupGap, groupCardGapTop, groupCardGapBottom };
-    setDraft((prev) => prev.map((z) => (z.id === activeZone.id ? z : { ...z, ...appearance })));
+    setDraft((prev) =>
+      prev.map((z) => {
+        if (z.id === activeZone.id) return z;
+        if (targetZoneId !== null && z.id !== targetZoneId) return z;
+        return { ...z, ...appearance };
+      }),
+    );
+    setApplyMenuOpen(false);
   };
   const renameZone = (id: string, name: string) =>
     setDraft((prev) =>
@@ -558,16 +569,47 @@ export function NavGroupSettingsModal({
                 <div className="flex items-center justify-between">
                   <p className="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">分区配置 · {activeZone.name}</p>
                   <div className="flex items-center gap-1.5">
-                    {/* v1.52.12：把当前分区外观配置一键应用到其他所有分区（仅 1 个分区时无意义，禁用） */}
-                    <button
-                      type="button"
-                      onClick={applyAppearanceToOthers}
-                      disabled={draft.length <= 1}
-                      className="inline-flex items-center gap-1 px-2 py-1 text-[11px] text-fuchsia-600 border border-fuchsia-200 rounded-lg hover:bg-fuchsia-50 disabled:opacity-40 disabled:cursor-not-allowed"
-                      title="把该分区的卡片外观配置（布局/间距/大小/样式/形状）应用到其他所有分区"
-                    >
-                      <CopyPlus size={11} /> 应用到其他分区
-                    </button>
+                    {/* v1.52.13：点击弹出下拉——列出其他分区（选中即应用到该分区），最下方「全部分区」；仅 1 个分区时禁用 */}
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setApplyMenuOpen((v) => !v)}
+                        disabled={draft.length <= 1}
+                        className="inline-flex items-center gap-1 px-2 py-1 text-[11px] text-fuchsia-600 border border-fuchsia-200 rounded-lg hover:bg-fuchsia-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                        title="把该分区的卡片外观配置（布局/间距/大小/样式/形状）应用到其他分区"
+                      >
+                        <CopyPlus size={11} /> 应用到其他分区
+                      </button>
+                      {applyMenuOpen && (
+                        <>
+                          {/* 点外部关闭：透明遮罩层 */}
+                          <div className="fixed inset-0 z-40" onClick={() => setApplyMenuOpen(false)} />
+                          <div className="absolute right-0 top-full mt-1 z-50 min-w-[150px] max-h-56 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg py-1">
+                            {draft
+                              .filter((z) => z.id !== activeZone.id)
+                              .map((z) => (
+                                <button
+                                  key={z.id}
+                                  type="button"
+                                  onClick={() => applyAppearanceTo(z.id)}
+                                  className="w-full text-left px-3 py-1.5 text-[12px] text-slate-600 hover:bg-fuchsia-50 hover:text-fuchsia-600"
+                                >
+                                  {z.name}
+                                </button>
+                              ))}
+                            {/* 最下方固定「全部分区」 */}
+                            <div className="my-1 border-t border-slate-100" />
+                            <button
+                              type="button"
+                              onClick={() => applyAppearanceTo(null)}
+                              className="w-full text-left px-3 py-1.5 text-[12px] font-medium text-fuchsia-600 hover:bg-fuchsia-50"
+                            >
+                              全部分区
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
                     <button
                       type="button"
                       onClick={() => patchZone({ ...DEFAULT_APPEARANCE })}
