@@ -4,12 +4,13 @@
  *  - 右侧=该分区的外观配置（卡片布局 / 间距 / 大小 / 图标大小 / 卡片样式 / 图标形状）；
  *  - 分组仅为分类容器（v1.52.3），外观统一在分区级配置，该分区下所有分组共享。
  * v1.52.6：移除弹窗内的示意卡小样；标题栏改为可拖动，拖开后直接观察导航页实时效果。
+ * v1.52.9：新建分区自动带一个与分区同名的默认分组；分区下至少保留一个分组（禁止删最后一组）。
  * 草稿仍经 onPreview 上抛给背景页实时渲染，仅 onSave(zones) 整体落盘。
  */
 import { useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { ArrowDown, ArrowUp, Move, Pencil, Plus, RotateCcw, Trash2, X } from "lucide-react";
-import type { NavCardStyle, NavIconShape, NavZone } from "../types";
+import type { NavCardStyle, NavGroup, NavIconShape, NavZone } from "../types";
 
 /** 随机 id（与项目弹窗同风格：时间戳 36 进制 + 随机尾） */
 function genId(): string {
@@ -160,7 +161,12 @@ export function NavGroupSettingsModal({
   onPreview: (zones: NavZone[] | null) => void;
 }) {
   const [draft, setDraft] = useState<NavZone[]>(() =>
-    (zones || []).map((z) => ({ ...z, groups: (z.groups || []).map((g) => ({ ...g, apps: [...(g.apps || [])] })) })),
+    (zones || []).map((z) => {
+      const groups: NavGroup[] = (z.groups || []).map((g) => ({ ...g, apps: [...(g.apps || [])] }));
+      // v1.52.9：分区下至少一个分组——旧数据缺组时补一个与分区同名的默认分组
+      if (groups.length === 0) groups.push({ id: genId(), name: z.name, apps: [] });
+      return { ...z, groups };
+    }),
   );
   // v1.52.5 事务性预览：保存则保留预览直到真实数据落盘，取消/关闭立即撤销 → 页面恢复
   const committed = useRef(false);
@@ -239,7 +245,14 @@ export function NavGroupSettingsModal({
   const patchZone = (p: Partial<NavZone>) =>
     setDraft((prev) => prev.map((z) => (z.id === selectedZoneId ? { ...z, ...p } : z)));
   const renameZone = (id: string, name: string) =>
-    setDraft((prev) => prev.map((z) => (z.id === id ? { ...z, name } : z)));
+    setDraft((prev) =>
+      prev.map((z) => {
+        if (z.id !== id) return z;
+        // v1.52.9：自动创建的默认分组与分区同名，分区改名时同步（用户手动改过名的分组不受影响）
+        const groups = z.groups.map((g) => (g.name === z.name ? { ...g, name } : g));
+        return { ...z, name, groups };
+      }),
+    );
   const renameGroup = (groupId: string, name: string) =>
     setDraft((prev) =>
       prev.map((z) => ({ ...z, groups: z.groups.map((g) => (g.id === groupId ? { ...g, name } : g)) })),
@@ -270,7 +283,9 @@ export function NavGroupSettingsModal({
 
   // 分区新建 / 删除
   const addZone = () => {
-    const z: NavZone = { id: genId(), name: `分区 ${draft.length + 1}`, groups: [] };
+    // v1.52.9：创建分区即自动创建一个与分区同名的默认分组，分区下永不出现 0 分组
+    const name = `分区 ${draft.length + 1}`;
+    const z: NavZone = { id: genId(), name, groups: [{ id: genId(), name, apps: [] }] };
     setDraft((prev) => [...prev, z]);
     setSelectedZoneId(z.id);
     setEditingZoneId(z.id); // 新建后立即进入改名，操作顺畅
@@ -297,6 +312,8 @@ export function NavGroupSettingsModal({
   };
   const removeGroup = (groupId: string) => {
     if (!activeZone) return;
+    // v1.52.9：分区下至少保留一个分组，最后一组不允许删除
+    if (activeZone.groups.length <= 1) return;
     const g = activeZone.groups.find((x) => x.id === groupId);
     if (!g) return;
     const count = g.apps?.length || 0;
@@ -305,8 +322,10 @@ export function NavGroupSettingsModal({
     if (editingGroupId === groupId) setEditingGroupId(null);
   };
 
-  // 允许删到 0 分区 / 0 分组；禁止保存空名分区或空名分组
-  const canSave = draft.every((z) => z.name.trim().length > 0 && z.groups.every((g) => g.name.trim().length > 0));
+  // v1.52.9：允许删到 0 分区，但每个分区至少一个分组；禁止保存空名分区或空名分组
+  const canSave = draft.every(
+    (z) => z.name.trim().length > 0 && z.groups.length > 0 && z.groups.every((g) => g.name.trim().length > 0),
+  );
 
   return (
     <div
@@ -455,7 +474,7 @@ export function NavGroupSettingsModal({
               {!activeZone ? (
                 <p className="text-[12px] text-slate-400 px-1 py-2">请先选择或新建一个分区</p>
               ) : activeZone.groups.length === 0 ? (
-                <p className="text-[12px] text-slate-400 px-1 py-2">该分区下还没有分组</p>
+                <p className="text-[12px] text-slate-400 px-1 py-2">该分区下至少保留一个分组，请点右上「＋ 新建分组」</p>
               ) : (
                 activeZone.groups.map((g, idx) => (
                   <div
@@ -504,8 +523,9 @@ export function NavGroupSettingsModal({
                       <button
                         type="button"
                         onClick={() => removeGroup(g.id)}
-                        className="p-1 text-slate-400 hover:text-red-500 hover:bg-red-100/60 rounded"
-                        title="删除分组"
+                        disabled={activeZone.groups.length <= 1}
+                        className="p-1 text-slate-400 hover:text-red-500 hover:bg-red-100/60 rounded disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:text-slate-400 disabled:hover:bg-transparent"
+                        title={activeZone.groups.length <= 1 ? "分区下至少保留一个分组" : "删除分组"}
                       >
                         <Trash2 size={12} />
                       </button>

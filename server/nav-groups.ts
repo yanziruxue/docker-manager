@@ -12,6 +12,7 @@ import { configPath } from "./paths.js";
  * v1.52.0 结构升级为三级：分区(zones) → 分组(groups) → 应用(apps)。
  * 文件形状由 `{ groups: [...] }` 升级为 `{ zones: [...] }`，并保留向后兼容迁移：
  * 旧版 `{ groups }` 自动包裹进一个默认分区「默认分区」，已配置的导航不丢失。
+ * v1.52.9 不变量：每个分区至少存在一个分组；空组分区归一化时自动补一个与分区同名的默认分组。
  */
 
 const NAV_GROUPS_FILE = configPath("nav-groups.json");
@@ -114,6 +115,11 @@ function normalizeNavZones(v: any): Array<Record<string, unknown>> {
     const groups = (rawGroups.slice(0, 50) as any[])
       .map((g: any) => normalizeNavGroup(g))
       .filter((g: any): g is Record<string, unknown> => !!g);
+    // v1.52.9：分区下至少一个分组——旧数据 / 直接 PUT 的空组分区自动补一个同名默认分组（幂等）
+    // 读取(get)只归一化内存结构不改写文件；下次保存(save)时规范化结果自然落盘。
+    if (groups.length === 0) {
+      groups.push({ id: genId(), name, icon: "", apps: [] });
+    }
     out.push({
       id: str(z.id, 40) || genId(),
       name,

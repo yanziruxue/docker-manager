@@ -15,7 +15,7 @@
  *    v1.51.11 起 NavEditor 弹窗已删除，项目 CRUD 由 NavPage + NavAppModal 直接落盘、
  *    分组新建/删除由 NavGroupSettingsModal 接管、卡片 hover ✎ 由 NavBoard.onEditApp 直达；
  *  - 负向自检①：注入「内网缺 lanUrl 不回落 url」回归 → 重载模块应检出差异 → 还原 → 复核全绿；
- *  - 负向自检②：进程级注入 31 类回归（<NavEditor / 顶栏分组设置文字按钮 / 齿轮接线缺失 /
+ *  - 负向自检②：进程级注入 38 类回归（<NavEditor / 顶栏分组设置文字按钮 / 齿轮接线缺失 /
  *    顶栏添加项目按钮 / 高级字段折叠区 / 智能匹配 / 全局图库被 engineId 阻挡 /
  *    容器列表接线缺失 / 容器四字段映射缺失 / 背景图上限回退 2mb / 超限 JSON 中间件缺失 /
  *    上传兜底文案回退 / 前端体积预校验缺失 / 编辑按钮缺失 / editMode 未下传 NavBoard /
@@ -130,10 +130,12 @@ ok("★ 整个分组容器接管拖放，空分组可追加到末尾",
   board.includes("松手放到该分组") && board.includes("dragActive?: boolean"));
 ok("★ 卡片落点 stopPropagation（不与容器追加重复搬移）",
   board.includes("e.stopPropagation(); onCardDrop?.(a.id, cardGroupId);"));
-ok("★ NavPage 编辑态下传 dragActive，0 分组分区给明确引导",
+ok("★ NavPage 编辑态下传 dragActive（v1.52.9 按来源分区下传），0 分组分区给明确引导",
   navPage.includes("const dragActive = editMode && !!drag;") &&
-  navPage.includes("dragActive={dragActive}") &&
+  navPage.includes("dragActive={dragActive && zone.id === dragZoneId}") &&
   navPage.includes("请先在分区与分组设置里新建分组后再拖入"));
+ok("★ NavBoard 卡片落点也受 dragActive 约束（跨分区不 preventDefault）",
+  (board.match(/onDragOver=\{dragActive \? \(e\) => e\.preventDefault\(\) : undefined\}/g) || []).length >= 2);
 
 const appModal = read("src/components/NavAppModal.tsx");
 ok("★ NavAppModal 编辑态支持删除项目", appModal.includes("onDelete") && appModal.includes("删除项目"));
@@ -206,7 +208,8 @@ ok("★ 图标区仍只有一个 IconAutoComplete（容器按钮不侵入图标�
 
 const gs = read("src/components/NavGroupSettingsModal.tsx");
 ok("★ 分组设置接管分组新建/删除", gs.includes("addGroup") && gs.includes("removeGroup"));
-ok("★ 分组设置空态可新建且允许删到 0 组", gs.includes("新建分组") && gs.includes("draft.every"));
+ok("★ 分组设置可新建分组且强制每分区至少一组（v1.52.9 不再允许删到 0 组）",
+  gs.includes("新建分组") && gs.includes("draft.every") && gs.includes("z.groups.length > 0"));
 ok("★ 分组设置不再引导到管理分组", !gs.includes("请先到「管理分组」"));
 
 const appSrc = read("src/App.tsx");
@@ -275,6 +278,30 @@ ok("★ NavBoard 支持 zoneTag（全部视图标注所属分区）", board.incl
 ok("★ 分区下内联「添加分组」入口", navPage.includes("addGroupToZone") && navPage.includes("添加分组"));
 ok("★ 分组设置弹窗升级为分区+分组管理（新建/删除分区）", gs.includes("addZone") && gs.includes("removeZone") && gs.includes("新建分区"));
 ok("★ 服务端分区持久化：落盘 { zones } + 旧 {groups} 包裹默认分区迁移", navMod.includes("{ zones }") && navMod.includes("wrapLegacyAsZone") && navMod.includes("默认分区"));
+
+// v1.52.9：自动默认分组 / 分区至少一组 / 拖放禁止跨分区
+ok("★ 新建分区自动创建一个与分区同名的默认分组（设置弹窗）",
+  gs.includes("const name = `分区 ${draft.length + 1}`;") &&
+  gs.includes("groups: [{ id: genId(), name, apps: [] }]"));
+ok("★ 设置弹窗打开时为空组分区补齐同名默认分组",
+  gs.includes("if (groups.length === 0) groups.push({ id: genId(), name: z.name, apps: [] });"));
+ok("★ 分区改名时同名默认分组跟随（手动改过名的分组不受影响）",
+  gs.includes("g.name === z.name ? { ...g, name } : g"));
+ok("★ 分区下至少保留一个分组：删除按钮禁用 + removeGroup 兜底 + 保存校验",
+  gs.includes("if (activeZone.groups.length <= 1) return;") &&
+  gs.includes("disabled={activeZone.groups.length <= 1}") &&
+  gs.includes("z.groups.length > 0") && gs.includes("分区下至少保留一个分组"));
+ok("★ 服务端归一化兜底：空组分区自动补同名默认分组",
+  navMod.includes('groups.push({ id: genId(), name, icon: "", apps: [] });'));
+ok("★ 项目拖放同分区硬校验（跨分区直接 return，来源按 appId 反查）",
+  navPage.includes("if (!fromZone || !toZone || fromZone.id !== toZone.id) return;") &&
+  navPage.includes("const zoneOfApp = zones.find"));
+ok("★ 跨分区拖放零残留：分区标签不再是放置目标",
+  !navPage.includes("if (firstGroup) moveApp") &&
+  !navPage.includes("onDragOver={editMode ? (e) => e.preventDefault() : undefined}"));
+ok("★ 仅来源分区的卡片墙接收放置（dragZoneId 按 appId 反查）",
+  navPage.includes("const dragZoneId = drag") &&
+  navPage.includes("dragActive={dragActive && zone.id === dragZoneId}"));
 
 // v1.52.4：分区级间距 / 分区与分组移动 / 导航页专属图标库（含链接下载）
 const navIconsMod = read("server/nav-icons.ts");
@@ -377,8 +404,8 @@ if (BROKEN === ORIGINAL) {
   ok("还原字节级一致", read(TARGET) === ORIGINAL);
 }
 
-console.log("== ④ 负向自检（进程级注入 31 类回归 → 重跑本门禁应 exit 1） ==");
-// 父进程注入 31 类回归文本，子进程跳过 ④（NAV_GATE_NEGATIVE_CHILD=1）只跑 ①②③，
+console.log("== ④ 负向自检（进程级注入 38 类回归 → 重跑本门禁应 exit 1） ==");
+// 父进程注入 38 类回归文本，子进程跳过 ④（NAV_GATE_NEGATIVE_CHILD=1）只跑 ①②③，
 // 若 ② 的对应断言确实生效，子进程必因 FAIL 而 exit 1。
 if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
   const NAV_PAGE_REL = "src/pages/NavPage.tsx";
@@ -539,6 +566,42 @@ if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
       name: "注入卡片落点冒泡重复搬移回归（缺 stopPropagation）",
       rel: "src/components/NavBoard.tsx",
       inject: (s) => s.replace("e.stopPropagation(); onCardDrop?.(a.id, cardGroupId);", "onCardDrop?.(a.id, cardGroupId);"),
+    },
+    // v1.52.9：自动默认分组 / 至少一组 / 禁止跨分区拖放
+    {
+      name: "注入新建分区不带默认分组回归",
+      rel: "src/components/NavGroupSettingsModal.tsx",
+      inject: (s) => s.replace("groups: [{ id: genId(), name, apps: [] }]", "groups: []"),
+    },
+    {
+      name: "注入服务层空组兜底缺失回归",
+      rel: "server/nav-groups.ts",
+      inject: (s) => s.replace('groups.push({ id: genId(), name, icon: "", apps: [] });', ""),
+    },
+    {
+      name: "注入允许删最后一个分组回归",
+      rel: "src/components/NavGroupSettingsModal.tsx",
+      inject: (s) => s.replace("if (activeZone.groups.length <= 1) return;", ""),
+    },
+    {
+      name: "注入跨分区拖放硬校验缺失回归",
+      rel: "src/pages/NavPage.tsx",
+      inject: (s) => s.replace("if (!fromZone || !toZone || fromZone.id !== toZone.id) return;", ""),
+    },
+    {
+      name: "注入分区标签恢复为放置目标回归",
+      rel: "src/pages/NavPage.tsx",
+      inject: (s) => s.replace("const count = (z.groups || []).reduce", "if (firstGroup) moveApp\n          const count = (z.groups || []).reduce"),
+    },
+    {
+      name: "注入 dragActive 未按分区下传回归",
+      rel: "src/pages/NavPage.tsx",
+      inject: (s) => s.replace("dragActive={dragActive && zone.id === dragZoneId}", "dragActive={dragActive}"),
+    },
+    {
+      name: "注入卡片落点跳过同分区校验回归",
+      rel: "src/components/NavBoard.tsx",
+      inject: (s) => s.replace("onDragOver={dragActive ? (e) => e.preventDefault() : undefined}", "onDragOver={(e) => e.preventDefault()}"),
     },
   ];
   for (const c of cases) {

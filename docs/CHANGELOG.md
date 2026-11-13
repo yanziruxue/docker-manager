@@ -16,6 +16,39 @@
 
 ---
 
+## v1.52.9 — 2026-11-13（**main 分支 · 已构建 · 已推 Gitea**）
+
+### 导航页：分区自动带同名默认分组 / 分区至少一组 / 禁止跨分区拖动
+
+- **需求**：创建完分区若没有分组则自动创建分组，分组名称与分区名称一致；分区下至少存在一个分组；项目无法拖动到其他分区。此版**推翻 v1.52.8「不自动建组」的拍板**，以本版规则为准。
+- **实现**：
+  - `src/components/NavGroupSettingsModal.tsx`：`addZone()` 新建分区即带一个 `name = 分区名` 的默认分组；`renameZone()` 在分区改名时同步仍与旧分区同名的默认分组（用户手动改过名的分组不受影响）；`draft` 初始化为空组分区补同名默认组（兼容旧数据）；`removeGroup()` 在 `groups.length <= 1` 时直接 return，删除按钮同步 `disabled` 且 title 提示「分区下至少保留一个分组」；`canSave` 增加 `z.groups.length > 0`；0 组空态文案改为引导新建分组。
+  - `server/nav-groups.ts`：`normalizeNavZones()` 对每个分区在归一化后检查 `groups.length === 0`，自动 `push({ id: genId(), name, icon: "", apps: [] })`。这是**服务端数据不变量**，覆盖旧 `nav-groups.json` 与绕过前端直接 `PUT /api/nav-groups` 的写入；读取只归一化内存结构不改写文件，下次保存自然落盘；空 `zones: []`（用户删光分区）仍保留为空，不自动造分区。
+  - `src/pages/NavPage.tsx`：分区标签条移除 `onDragOver` / `onDrop`（不再是放置目标）与拖拽 ring；新增 `dragZoneId`（按 `appId` 反查来源分区，兼容「全部」视图 `fromGroupId` 为空）；`moveApp()` 入口硬校验来源分区与目标分区一致，否则直接 `return`（`zoneOfGroup` + `zoneOfApp` 双解析）；`NavBoard` 只收到 `dragActive && zone.id === dragZoneId`。
+  - `src/components/NavBoard.tsx`：卡片落点的 `onDragOver` / `onDrop` 同样受 `dragActive` 约束，跨分区卡片墙不 `preventDefault`，浏览器直接拒绝放置；容器级空分组 / 空白区落点保持 v1.52.8 语义。
+- **门禁**：`scripts/check-nav.mjs` 更新 2 条被打破的字面断言（`dragActive` 下传、`允许删到 0 组`），新增 9 条 v1.52.9 正向断言 + 7 类进程级负向自检（31→38 类）→ **203 ok / 0 FAIL**。
+
+### 未完成 / 已知限制
+
+- **仅封拖放路径**：v1.52.7 的编辑项目弹窗「分区 → 该分区下的分组」两级联动**保留**，用户在弹窗里手动改分区仍可改变项目归属；如要求分区完全隔离需另行收紧该入口。
+- 服务端归一化只在读取时修正内存结构，不主动回写 `nav-groups.json`；文件内容在下一次保存时才规范化（API 返回值始终满足不变量）。
+- Gitea CI（`build-and-publish` / `build-docker-image`）与 Release 发布结果仍需用户在 Gitea UI 确认；本机无 Gitea API token 可查。
+- 上一版 GitHub Docker 镜像 gzip 上传已按用户要求**取消且不重跑**，本地 `build-upload` 中的 tar / tar.gz 保留；GitHub 仅保留已建的 prerelease Release（无资产或残留未完资产，需人工确认）。
+- GitHub 源码 / zip / deb 未推（沿用 Gitea-only 发布）。
+
+### 下一步
+
+- 如需分区完全隔离，把「编辑项目弹窗」的分区下拉限定为项目当前所属分区（会撤销 v1.52.7 的跨分区改归属能力）。
+- 在 Gitea UI 确认打 tag 后的两条工作流与 Release 资产。
+
+### 验证
+
+- 双 `tsc`（src / server）0 错；`check-nav` **203 ok / 0 FAIL**（38 类负向自检全被检出且还原字节级一致）；`npm run test:gates` 全 **22 组 FAIL=0**。
+- SEA 硬核验：ELF `7f454c46` / e_machine=62 / 版本锚点 `var CURRENT_VERSION = true ? "1.52.9" : "0.0.0-dev"` 在 bundle 与二进制各 1 处、旧版 `1.52.8` 锚点归零 / zip 与 deb 各 5 个成员 / zip 内二进制权限 `0o755` / dist 前端 JS base64 解码 1,223,351 B 与 `dist/assets/*.js` 逐字节一致。
+- 包：`dockermanagementyanzi-linux-x64-v1.52.9.zip`（43,134,397 B）、`dockermanagementyanzi_1.52.9_amd64.deb`（42,849,456 B）；**zip 内 = deb 内 = postject 产物**（130,616,512 B）二进制 SHA-256 `92a9b90d3ea7474b80b0dc75f99467826920e1fd03ae31dfda8a58ad36911057` 字节级一致。
+
+---
+
 ## v1.52.8 — 2026-11-13（**main 分支 · 已构建 · 已推 Gitea**）
 
 ### 导航页：空分组 / 卡片墙空白处也能拖入项目
