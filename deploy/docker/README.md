@@ -2,6 +2,8 @@
 
 单文件 Node SEA 二进制（前后端一体）的容器化部署。镜像内完成全部构建（前端 → esbuild → SEA），**本机无需 node/docker 环境**，把源码包拷到装有 Docker 的 Linux 机器上一条命令出镜像。
 
+> 📦 **不想从源码构建？** 预构建镜像（离线 `.tar` 包 / 仓库拉取权限）暂不公开发布，请邮件联系 **yanziruxue@163.com** 索取；导入后直接跳到本文「二、运行」。项目根 [`README.md`](../../README.md) 的「安装与部署 → 方式三：Docker 容器部署」有完整步骤与注意事项。
+
 ## 目录结构
 
 ```
@@ -76,6 +78,8 @@ docker compose down               # 停止（数据保留在 ./data ./logs ./con
 docker save -o dockermanagementyanzi.tar dockermanagementyanzi:latest   # 导出离线镜像包
 docker load -i dockermanagementyanzi.tar                               # 另一台机器导入
 ```
+
+已通过 **yanziruxue@163.com** 拿到预构建镜像包时，可跳过第一节构建，直接 `docker load -i <镜像包>.tar`（`.tar.gz` 同样可自动解压）导入；导入后的镜像名可能带仓库前缀，先用 `docker images` 核对，必要时 `docker tag <实际镜像名> dockermanagementyanzi:latest` 改名，再按第二节运行。
 
 ## 五、说明与注意事项
 

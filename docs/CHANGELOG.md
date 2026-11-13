@@ -47,6 +47,13 @@
 - SEA 硬核验：ELF `7f454c46` / e_machine=62 / 版本锚点 `var CURRENT_VERSION = true ? "1.52.9" : "0.0.0-dev"` 在 bundle 与二进制各 1 处、旧版 `1.52.8` 锚点归零 / zip 与 deb 各 5 个成员 / zip 内二进制权限 `0o755` / dist 前端 JS base64 解码 1,223,351 B 与 `dist/assets/*.js` 逐字节一致。
 - 包：`dockermanagementyanzi-linux-x64-v1.52.9.zip`（43,134,397 B）、`dockermanagementyanzi_1.52.9_amd64.deb`（42,849,456 B）；**zip 内 = deb 内 = postject 产物**（130,616,512 B）二进制 SHA-256 `92a9b90d3ea7474b80b0dc75f99467826920e1fd03ae31dfda8a58ad36911057` 字节级一致。
 
+### 文档补充（v1.52.9 同版后续 · 纯文档，不升版本）
+
+- **已完成**：根 `README.md` 目录列出三种部署方式并新增「方式三：Docker 容器部署」——预构建镜像需邮件联系 **yanziruxue@163.com** 索取 → `docker load` 导入（含带仓库前缀时 `docker tag` 改名）→ `docker run` / compose 两种运行方式 → `/app/data`、`/app/logs`、`/app/config` 三卷与容器升级注意事项；「说明」段补镜像索取邮箱。`deploy/docker/README.md` 开头与第四节补预构建镜像索取入口与跳转。
+- **未完成 / 已知限制**：预构建镜像按要求不公开分发；容器内应用内 OTA 只换容器内二进制，重建后回退，升级须替换镜像并重建容器。
+- **下一步**：如需公开镜像仓库地址，再更新本节与根 README。
+- **验证**：纯 Markdown 改动，不进入 SEA 二进制，也不属于交付包的 5 个成员 ⇒ **二进制字节不变**，沿用已出的 v1.52.9 zip / deb，不重新构建、不打新 tag；仅提交并推 Gitea main。
+
 ---
 
 ## v1.52.8 — 2026-11-13（**main 分支 · 已构建 · 已推 Gitea**）

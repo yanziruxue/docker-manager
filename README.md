@@ -25,6 +25,9 @@
 - [界面导览预览页](#界面导览预览页)
 - [技术架构](#技术架构)
 - [安装与部署](#安装与部署)
+  - [方式一：一键安装（推荐）](#方式一一键安装推荐无需手动下载)
+  - [方式二：手动安装](#方式二手动安装)
+  - [方式三：Docker 容器部署](#方式三docker-容器部署)
 - [常见问题](#常见问题)
 - [目录结构（安装后）](#目录结构安装后)
 - [说明](#说明)
@@ -245,6 +248,71 @@ systemctl restart dockermanagementyanzi   # 重启
 journalctl -u dockermanagementyanzi -f    # 实时日志
 ```
 
+### 方式三：Docker 容器部署
+
+> 🐳 **预构建 Docker 镜像暂不公开分发**：需要离线镜像包（`docker save` 导出的 `.tar` / `.tar.gz`）或镜像仓库拉取权限，请邮件联系 **yanziruxue@163.com**，注明用途与所需版本。也可以按 [`deploy/docker/README.md`](deploy/docker/README.md) 从源码自行构建，无需索取镜像。
+
+**1）导入镜像**
+
+```bash
+docker load -i dockermanagementyanzi-docker.tar        # .tar.gz 也可，docker load 会自动解压
+docker images | grep dockermanagementyanzi             # 确认实际镜像名与 tag
+```
+
+> 若导入后的镜像名带仓库前缀（如 `192.168.x.x:8024/yanzi/...`），先改成统一名称，或把下面命令里的镜像名替换为实际值：
+>
+> ```bash
+> docker tag <实际镜像名:tag> dockermanagementyanzi:latest
+> ```
+
+**2）单容器运行**
+
+```bash
+mkdir -p /opt/dsm/data /opt/dsm/logs /opt/dsm/config
+docker run -d --name dockermanagementyanzi --restart unless-stopped \
+  -p 5024:5024 \
+  -e TZ=Asia/Shanghai \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v /opt/dsm/data:/app/data \
+  -v /opt/dsm/logs:/app/logs \
+  -v /opt/dsm/config:/app/config \
+  dockermanagementyanzi:latest
+```
+
+**3）compose（推荐）**：直接用仓库里的 [`deploy/docker/docker-compose.yml`](deploy/docker/docker-compose.yml)，或新建 `docker-compose.yml`：
+
+```yaml
+services:
+  dockermanagementyanzi:
+    image: dockermanagementyanzi:latest
+    container_name: dockermanagementyanzi
+    restart: unless-stopped
+    ports:
+      - "5024:5024"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./config:/app/config
+    environment:
+      TZ: Asia/Shanghai
+```
+
+```bash
+docker compose up -d          # 启动
+docker compose logs -f        # 实时日志
+docker compose down           # 停止（挂载数据保留）
+```
+
+访问 `http://<服务器IP>:5024`。容器内数据固定落在 `/app/data`、`/app/logs`、`/app/config`（可用 `DATA_DIR` / `LOG_DIR` / `CONFIG_DIR` 覆盖），**三个目录务必挂载出来**，否则容器重建会丢失配置与数据。
+
+**容器部署注意事项**
+
+- 必须挂载宿主机 `/var/run/docker.sock`，容器因此拥有宿主机 Docker 管理权限：**仅部署在可信内网，勿暴露公网**。容器内默认以 root 运行，已内置 docker CLI、compose 插件与 openssh-client，堆栈管理与 SSH 远程引擎可用。
+- 改端口用 `PORT` 环境变量并**同步修改 `ports` 映射**。
+- ⚠️ **不要用应用内 OTA 升级**：OTA 只替换容器内的二进制，容器重建后会回到镜像自带版本。升级请导入新版镜像后重建容器（`docker compose up -d --force-recreate`，或 `docker rm -f` 后重新 `docker run`），挂载的三个目录会保留数据。
+- 容器内没有 systemctl，无法重启宿主机 Docker；「镜像加速源」请在**宿主机**手动配置 `/etc/docker/daemon.json`。
+
 ---
 
 ## 常见问题
@@ -307,4 +375,5 @@ sudo systemctl restart dockermanagementyanzi
 ## 说明
 
 - 本项目为个人自用 / 自部署工具，升级二进制通过公开 GitHub Releases 分发。
+- **Docker 镜像（离线包 / 仓库权限）需邮件索取：yanziruxue@163.com**；源码与 zip / deb 交付包仍按上面的公开方式获取。
 - 应用内升级仅替换二进制本身，不改动你的 `data/` 与 `config/`，升级安全、可回退（旧版自动备份为 `/opt/dockermanagementyanzi.bak.<时间戳>`）。
