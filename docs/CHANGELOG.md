@@ -16,6 +16,20 @@
 
 ---
 
+## v1.52.2 — 2026-11-13（**main 分支 · 已构建 · 已推 Gitea**）
+
+### CI 修复：build.yml（SEA→Releases）首次真实运行暴露的 esbuild 原生模块问题
+
+- **现象**：Gitea Actions runner（Linux）上 esbuild 报 `No loader is configured for ".node" files: sshcrypto.node` → exit 1（#90/#92 两次 tag 发布全挂）。
+- **根因**：Windows 本地 `node_modules/ssh2/lib/protocol/crypto/build/Release/` 不存在，esbuild 解析不到该 require 按外部保留；Linux 上 ssh2 install 脚本**构建出** `sshcrypto.node` 后文件存在，esbuild 试图打包 .node 即失败。
+- **修复**：`build-binary.mjs` esbuild `external` 增加 `"*.node"` 通配符——两平台统一：.node 一律运行时 require，由 ssh2 包内 `try/catch` 回落纯 JS（SEA 二进制本就不支持 SSH 模式原生绑定）。
+- 附带：手动 dispatch 默认 target 改 `gitea`、恢复 target 选择框（`060a34d`/`377f6c8`）。
+
+### 发布物
+
+- SEA SHA-256 `73cc9a7abb999035eb98a82e66cd7116f18bfb890be9993dffc4008fc31c5f83`；zip 内二进制逐字节一致。
+- 包：`dockermanagementyanzi-linux-x64-v1.52.2.zip`（42MB）、`dockermanagementyanzi_1.52.2_amd64.deb`（41MB）。
+
 ## v1.52.1 — 2026-11-12（**main 分支 · 已构建 · 已推 Gitea**）
 
 ### 导航页入口收敛：顶栏图标条

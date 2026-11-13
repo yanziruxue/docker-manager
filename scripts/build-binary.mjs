@@ -138,7 +138,10 @@ async function build() {
     minify: false,
     // 原生模块标为外部（仅 SSH 模式需要，二进制中不可用）
     // 二进制模式支持 socket 和 TCP，SSH 需用传统部署
-    external: ["cpu-features"],
+    // "*.node"：ssh2 等包的预编译绑定（如 sshcrypto.node）在 Linux 上被 install 脚本
+    // 构建出来后 esbuild 会因 ".node 无 loader" 直接失败；统一标外部，
+    // 运行时 require 由包内 try/catch 回落纯 JS（与 Windows 行为一致）
+    external: ["cpu-features", "*.node"],
     mainFields: ["module", "main"],
     plugins: [embeddedDistPlugin(embedded), embeddedServicePlugin(serviceTemplate)],
     banner: {
