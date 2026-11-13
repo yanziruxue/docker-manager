@@ -16,6 +16,38 @@
 
 ---
 
+## v1.52.7 — 2026-11-13（**main 分支 · 已构建 · 已推 Gitea**）
+
+### 导航页：编辑项目归属改为「分区 → 该分区下的分组」两级
+
+- **问题**：`NavAppModal` 标题栏原只有一个「分组」下拉，选项来自 `zones.flatMap(z => z.groups)` 的**全部分区扁平列表**——不同分区的同名分组无法区分，也看不出项目属于哪个分区。
+- **实现**（`src/components/NavAppModal.tsx`）：
+  - 新增 `zoneId` state，初始值由 `groupId` 反查父分区（编辑态自动定位项目真实所属分区，避免 select value 落空）；回落顺序 = 首个含分组的分区 → 首个分区。
+  - 标题栏改为「分区」下拉（列 `zones`）+「分组」下拉（只列 `zoneGroups = activeZone.groups`），两个控件均 `flex-shrink-0` + `max-w-[100px]` 防止窄屏挤压。
+  - `changeZone()` 切换分区时把 `groupId` 回落到该分区首分组；该分区 0 分组时置空 → `canSave` 因 `!!groupId` 为假而禁用保存，并在表单顶部给出「请先在分区与分组设置中新建分组」引导。
+  - 扁平 `groups` 仅保留给「名称全局唯一」/ 编辑态定位，不再用于归属下拉；**保存链路 `onSave(groupId, app)` 未改**，跨分区移动沿用 `NavPage.handleSaveApp` 的「从旧分组移除同 id」语义。
+- **门禁**：`scripts/check-nav.mjs` 新增 4 条正向断言（两级联动 / 回落语义 / 分组不跨分区 / 无分组禁存）+ 2 类负向自检（分组下拉退回扁平列表、切换分区不回落，共 29 类）；文件头与 ④ 段数量同步。
+
+### 验证
+
+- 双 `tsc` 0 错；`check-nav` **173 ok / 0 FAIL**（29 类负向自检全检出）；`npm run test:gates` **全 22 组 FAIL=0**。
+- SEA 硬核验：ELF 魔数 `7f454c46` / e_machine=62 / 版本 `1.52.7` 嵌入 / 包成员 5 个 / dist JS base64 完整嵌入 / zip 内 = deb 内 = postject 产物 SHA-256 字节级一致。
+
+### 发布物
+
+- 包：`dockermanagementyanzi-linux-x64-v1.52.7.zip`（43,134,128 B）、`dockermanagementyanzi_1.52.7_amd64.deb`（42,849,110 B）；**zip 内 = deb 内 = postject 产物** 二进制 SHA-256 `5fd3612aeb64cae7939b84cd007f0147f9fa0d4564fbbe633021612fe91b0635` 字节级一致。
+
+### 已知限制
+
+- 归属下拉只支持选择**已存在**的分区/分组，新建仍需到「分区与分组设置」弹窗；无分组分区下无法保存项目。
+- 中间版本 v1.51.19 / v1.52.0 / v1.52.1 的 Gitea Release 资产仍空缺（此前只选补发 v1.52.2）。
+
+### 下一步
+
+- 在 Gitea UI 确认 `build-and-publish`（SEA→Releases）v1.52.7 全绿并发布 Release；`build-docker-image` tag 触发推 Gitea 容器镜像库。
+
+---
+
 ## v1.52.6 — 2026-11-13（**main 分支 · 已构建 · 已推 Gitea**）
 
 ### 导航页：移除弹窗内示意卡小样 / 分区设置弹窗可拖动

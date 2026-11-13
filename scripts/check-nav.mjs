@@ -15,7 +15,7 @@
  *    v1.51.11 起 NavEditor 弹窗已删除，项目 CRUD 由 NavPage + NavAppModal 直接落盘、
  *    分组新建/删除由 NavGroupSettingsModal 接管、卡片 hover ✎ 由 NavBoard.onEditApp 直达；
  *  - 负向自检①：注入「内网缺 lanUrl 不回落 url」回归 → 重载模块应检出差异 → 还原 → 复核全绿；
- *  - 负向自检②：进程级注入 27 类回归（<NavEditor / 顶栏分组设置文字按钮 / 齿轮接线缺失 /
+ *  - 负向自检②：进程级注入 29 类回归（<NavEditor / 顶栏分组设置文字按钮 / 齿轮接线缺失 /
  *    顶栏添加项目按钮 / 高级字段折叠区 / 智能匹配 / 全局图库被 engineId 阻挡 /
  *    容器列表接线缺失 / 容器四字段映射缺失 / 背景图上限回退 2mb / 超限 JSON 中间件缺失 /
  *    上传兜底文案回退 / 前端体积预校验缺失 / 编辑按钮缺失 / editMode 未下传 NavBoard /
@@ -142,6 +142,18 @@ ok("★ 高级字段保存时从 initial 透传（编辑已有项目不丢数据
     return !!seg && ["initial?.titleColor", "initial?.urlBackups", "initial?.lanBackups",
       "initial?.isPublic", "initial?.iconZoom"].every((k) => seg.includes(k));
   })());
+
+// v1.52.7：项目归属两级「分区 → 该分区下的分组」
+ok("★ 编辑项目归属两级：分区下拉 + 仅列该分区分组的下拉",
+  ["value={zoneId}", "changeZone(e.target.value)", "zoneGroups.map((g) => (",
+   "(zones || []).find((z) => (z.groups || []).some((g) => g.id === groupId))",
+   "disabled={zoneGroups.length === 0}"].every((k) => appModal.includes(k)));
+ok("★ 切换分区自动回落到该分区首分组（分组不跨分区残留）",
+  appModal.includes('setGroupId(z?.groups?.[0]?.id || "")'));
+ok("★ 分组下拉不再平铺全部分区（扁平 groups 仅用于名称唯一校验）",
+  !appModal.includes("groups.map(") && appModal.includes("existingNames"));
+ok("★ 无分组分区禁止保存并给出引导",
+  appModal.includes("!!groupId") && appModal.includes("该分区下还没有分组"));
 
 // v1.51.15：图标统一改用堆栈 IconAutoComplete，导航页自研匹配功能全部移除
 const iconAuto = read("src/components/IconAutoComplete.tsx");
@@ -354,8 +366,8 @@ if (BROKEN === ORIGINAL) {
   ok("还原字节级一致", read(TARGET) === ORIGINAL);
 }
 
-console.log("== ④ 负向自检（进程级注入 27 类回归 → 重跑本门禁应 exit 1） ==");
-// 父进程注入 27 类回归文本，子进程跳过 ④（NAV_GATE_NEGATIVE_CHILD=1）只跑 ①②③，
+console.log("== ④ 负向自检（进程级注入 29 类回归 → 重跑本门禁应 exit 1） ==");
+// 父进程注入 29 类回归文本，子进程跳过 ④（NAV_GATE_NEGATIVE_CHILD=1）只跑 ①②③，
 // 若 ② 的对应断言确实生效，子进程必因 FAIL 而 exit 1。
 if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
   const NAV_PAGE_REL = "src/pages/NavPage.tsx";
@@ -496,6 +508,16 @@ if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
       name: "注入弹窗内实时预览小样回归（重新引入预览区块）",
       rel: "src/components/NavGroupSettingsModal.tsx",
       inject: (s) => s.replace("function genId(): string {", 'const PREVIEW_MARKER = "实时预览（未保存）";\nfunction genId(): string {'),
+    },
+    {
+      name: "注入项目归属两级缺失回归（分组下拉退回全部分区扁平列表）",
+      rel: "src/components/NavAppModal.tsx",
+      inject: (s) => s.replace("zoneGroups.map((g) => (", "groups.map((g) => ("),
+    },
+    {
+      name: "注入切换分区不回落分组回归（跨分区残留旧 groupId）",
+      rel: "src/components/NavAppModal.tsx",
+      inject: (s) => s.replace('setGroupId(z?.groups?.[0]?.id || "");', ""),
     },
   ];
   for (const c of cases) {

@@ -9,6 +9,8 @@
  * - v1.51.15：图标区统一改用堆栈图标逻辑（IconAutoComplete：输入名称自动匹配图库、点选写入 URL）。
  * - v1.51.16：勾选自托管后右侧新增「容器列表」按钮，展开全局容器列表（含已停止的容器），
  *   选择容器后把名称 / 内网端口 / 外网 WebUI 地址 / 图标一次填入对应字段。
+ * - v1.52.7：项目归属改为两级「分区 → 该分区下的分组」，切换分区自动回落首分组；
+ *   扁平 groups 仅保留给「名称全局唯一」校验，不再用于归属下拉。
  * 保存经 onSave(groupId, app) 由 NavPage 直接落盘；编辑态可经 onDelete(appId) 删除项目（v1.51.11）。
  */
 import { useMemo, useState } from "react";
@@ -62,7 +64,7 @@ export function NavAppModal({
   onClose: () => void;
 }) {
   const editing = !!initial;
-  // v1.52.0：分区→分组→卡片；把全部分区下的分组展开为扁平列表，复用既有分组级逻辑
+  // v1.52.0：分区→分组→卡片；扁平分组仅用于名称全局唯一 / 编辑态定位，不再用于归属下拉
   const groups = useMemo(
     () => (zones || []).flatMap((z) => z.groups || []),
     [zones],
@@ -76,6 +78,21 @@ export function NavAppModal({
     if (initialGroupId && groups.some((g) => g.id === initialGroupId)) return initialGroupId;
     return groups[0]?.id || "";
   });
+  // v1.52.7：归属两级——由 groupId 反查父分区（编辑态自动定位，避免下拉 value 落空）
+  const [zoneId, setZoneId] = useState<string>(() =>
+    (zones || []).find((z) => (z.groups || []).some((g) => g.id === groupId))?.id
+    || (zones || []).find((z) => (z.groups || []).length > 0)?.id
+    || (zones || [])[0]?.id
+    || "",
+  );
+  const activeZone = (zones || []).find((z) => z.id === zoneId) || null;
+  const zoneGroups = activeZone?.groups || [];
+  /** 切换分区：分组回落到该分区首分组；该分区无分组时置空（保存按钮随之禁用） */
+  const changeZone = (nextZoneId: string) => {
+    setZoneId(nextZoneId);
+    const z = (zones || []).find((x) => x.id === nextZoneId);
+    setGroupId(z?.groups?.[0]?.id || "");
+  };
 
   const [selfHosted, setSelfHosted] = useState<boolean>(initial?.kind !== "ext");
   const [name, setName] = useState(initial?.name || "");
@@ -159,28 +176,47 @@ export function NavAppModal({
         className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[88vh] flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* 标题 + 分组下拉（可切换项目归属分组） */}
-        <div className="flex items-center gap-3 px-5 py-3.5 border-b border-slate-100">
-          <h3 className="text-base font-semibold text-slate-800">{editing ? "编辑项目" : "添加新项目"}</h3>
+        {/* v1.52.7：标题 + 归属两级「分区 → 该分区下的分组」，切换分区自动回落首分组 */}
+        <div className="flex items-center gap-2 px-5 py-3.5 border-b border-slate-100">
+          <h3 className="text-base font-semibold text-slate-800 flex-shrink-0">{editing ? "编辑项目" : "添加新项目"}</h3>
           <div className="flex-1" />
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1 flex-shrink-0">
+            <span className="text-[11px] text-slate-400">分区</span>
+            <select
+              value={zoneId}
+              onChange={(e) => changeZone(e.target.value)}
+              className="px-1.5 py-1 text-[12px] border border-slate-200 rounded-lg bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/30 max-w-[100px]"
+              title="项目所属分区"
+            >
+              {(zones || []).map((z) => (
+                <option key={z.id} value={z.id}>{z.name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-center gap-1 flex-shrink-0">
             <span className="text-[11px] text-slate-400">分组</span>
             <select
               value={groupId}
               onChange={(e) => setGroupId(e.target.value)}
-              className="px-2 py-1 text-[12px] border border-slate-200 rounded-lg bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/30 max-w-[150px]"
+              disabled={zoneGroups.length === 0}
+              className="px-1.5 py-1 text-[12px] border border-slate-200 rounded-lg bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/30 max-w-[100px] disabled:opacity-40"
+              title="该分区下的分组"
             >
-              {groups.map((g) => (
+              {zoneGroups.map((g) => (
                 <option key={g.id} value={g.id}>{g.name}</option>
               ))}
             </select>
           </div>
-          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600">
+          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600 flex-shrink-0">
             <X size={18} />
           </button>
         </div>
 
         <div className="flex-1 overflow-y-auto p-5 space-y-3">
+          {/* v1.52.7：该分区下无分组时禁止保存（groupId 为空），引导先在分区与分组设置中新建 */}
+          {zoneGroups.length === 0 && (
+            <p className="text-[12px] text-amber-600">该分区下还没有分组，请先在「分区与分组设置」中新建分组</p>
+          )}
           {/* 名称 */}
           <Field label="名称" required>
             <input
