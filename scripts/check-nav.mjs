@@ -243,7 +243,7 @@ ok("SystemSettings 已移除 nav 字段", !typesSrc.includes("nav: NavConfig"));
 ok("★ NavPage 分区角标 = 分区下应用总数", navPage.includes("reduce((s, g) => s + (g.apps?.length || 0), 0)"));
 ok("★ 选中分区高亮放大（字号 ~1.5 倍 + 轻微 scale）", navPage.includes("text-[18px]") && navPage.includes("scale-[1.04]"));
 ok("★ 「全部」标签合并所有分区", navPage.includes('"__all__"') && navPage.includes("显示全部分区的分组"));
-ok("★ NavBoard 支持 zoneTag（全部视图标注所属分区）", board.includes("zoneTag") && navPage.includes("zoneTag={isAll ? zoneName : undefined}"));
+ok("★ NavBoard 支持 zoneTag（全部视图标注所属分区）", board.includes("zoneTag") && navPage.includes("zoneTag={isAll ? zone.name : undefined}"));
 ok("★ 分区下内联「添加分组」入口", navPage.includes("addGroupToZone") && navPage.includes("添加分组"));
 ok("★ 分组设置弹窗升级为分区+分组管理（新建/删除分区）", gs.includes("addZone") && gs.includes("removeZone") && gs.includes("新建分区"));
 ok("★ 服务端分区持久化：落盘 { zones } + 旧 {groups} 包裹默认分区迁移", navMod.includes("{ zones }") && navMod.includes("wrapLegacyAsZone") && navMod.includes("默认分区"));

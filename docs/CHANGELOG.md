@@ -16,6 +16,36 @@
 
 ---
 
+## v1.52.3 — 2026-11-13（**main 分支 · 已构建 · 已推 Gitea**）
+
+### 导航设置弹窗重构：样式归分区 + 左右分区布局
+
+- **设计边界澄清**：卡片布局/间距/大小/图标大小/卡片样式/图标形状等**外观属性属于「分区」**，**分组仅为分类容器**（仅有名称 + 卡片墙），不再承载任何外观字段。
+- **数据模型迁移**（`src/types.ts` + `server/nav-groups.ts`）：6 个样式字段 `cardLayout/cardSize/gridGap/iconSize/cardStyle/iconShape` 从 `NavGroup` 上移到 `NavZone`；`normalizeNavZones`/`normalizeNavGroup` 拆分，新增 `zoneAppearanceFromRaw` 提升逻辑（分区自身 > 首个分组的遗留值 > 默认）。**旧 `nav-groups.json`（样式挂在 group 上）GET 即干净、渲染不丢**——迁移时取首个分组外观提升到分区级。
+- **渲染闭环**：`NavBoard` 新增 `zoneCfg` prop，6 样式改从父分区读（`src/components/NavBoard.tsx`）；`NavPage.sections` 改为 `{ zone, group }` 并下传 zone，新建分组不再散落样式默认值（`src/pages/NavPage.tsx`）。
+- **分区设置弹窗左右布局**（`src/components/NavGroupSettingsModal.tsx` 重写）：
+  - 左右分区；左侧分上下——**左上**：分区列表（显示「共 N 个分区」，每行分区名右侧 ✎ 改名 / 🗑 删除，内联编辑）；**左下**：当前分区下分组列表（每组名右侧 ✎ 改名 / 🗑 删除，内联编辑）。
+  - **右侧**：该分区的外观配置（卡片布局 / 间距 / 大小 / 图标大小 / 卡片样式 / 图标形状），「恢复默认」仅重置外观。
+  - 新建分区 / 新建分组按钮美化（头部 + 各区标题行 + 号入口，新建后立即进入改名态）。
+- **门禁**：`scripts/check-nav.mjs` 更新 zoneTag 接线断言字面量（`zone.name`），复跑 **115 ok / 0 FAIL**；`npm run test:gates` 全 22 组 0 FAIL。
+- 重命名冲突修复：`NavBoard` 既有 `zone`（`WebuiZone` 网络分区 state）与新 prop 同名，新 prop 改名 `zoneCfg` 消除 `Duplicate identifier`。
+
+### 发布物
+
+- SEA SHA-256 `80ed7a2330e0f9412484f2c742c29ecb24368a589096d97902091cf9b4203b24`；zip 内 / deb 内 / postject 产物三者逐字节一致。
+- 包：`dockermanagementyanzi-linux-x64-v1.52.3.zip`（43MB）、`dockermanagementyanzi_1.52.3_amd64.deb`（41MB）。
+- 硬核验：ELF 魔数 `7f454c46` ✅、e_machine=62(x86-64) ✅、版本 `1.52.3` 已嵌入 ✅。
+
+### 已知限制
+
+- 中间版本 Release 仍空缺：v1.51.19 / v1.52.0 / v1.52.1 此前因 CI 故障未发出（用户本次仅选补发 v1.52.2）；本次 v1.52.3 新 tag 触发 `build-and-publish` 即可补回最新 Release，历史三版暂不补发。
+
+### 下一步
+
+- 在 Gitea UI 确认 `build-and-publish`（SEA→Releases）v1.52.3 全绿并已发布 Release（此前 xxd 已修复）；Docker 镜像验证走手动 dispatch `target=gitea`。
+
+---
+
 ## v1.52.2 — 2026-11-13（**main 分支 · 已构建 · 已推 Gitea**）
 
 ### CI 修复：build.yml（SEA→Releases）首次真实运行暴露的 esbuild 原生模块问题

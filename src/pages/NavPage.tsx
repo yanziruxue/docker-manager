@@ -78,9 +78,9 @@ export function NavPage({ navZones, onSaveNavZones, containers, navPageSettings,
   const activeZone = isAll ? null : zones.find((z) => z.id === effectiveTab) || null;
 
   // 渲染分区：全部视图合并所有分区；否则取当前分区的分组
-  const sections: { zoneName: string; group: NavGroup }[] = isAll
-    ? zones.flatMap((z) => (z.groups || []).map((g) => ({ zoneName: z.name, group: g })))
-    : (activeZone ? activeZone.groups.map((g) => ({ zoneName: activeZone.name, group: g })) : []);
+  const sections: { zone: NavZone; group: NavGroup }[] = isAll
+    ? zones.flatMap((z) => (z.groups || []).map((g) => ({ zone: z, group: g })))
+    : (activeZone ? activeZone.groups.map((g) => ({ zone: activeZone, group: g })) : []);
 
   // v1.51.11：项目 CRUD 直接对 zones 做不可变更新并落盘，不再经 NavEditor 中转
   const openAddApp = (groupId: string) => setAppModal({ open: true, initial: null, groupId });
@@ -161,11 +161,11 @@ export function NavPage({ navZones, onSaveNavZones, containers, navPageSettings,
     return undefined;
   };
 
-  // 分区下「添加分组」：在指定分区追加一个空分组并打开设置聚焦它
+  // 分区下「添加分组」：在指定分区追加一个空分组（纯分类容器，外观继承所属分区）
   const addGroupToZone = (zoneId: string) => {
     const next = zones.map((z) =>
       z.id === zoneId
-        ? { ...z, groups: [...z.groups, { id: `n${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`, name: `分组 ${(z.groups.length + 1)}`, apps: [], cardLayout: "vertical" as const, cardSize: 120, gridGap: 16, iconSize: 48, cardStyle: "solid" as const, iconShape: "rounded" as const }] }
+        ? { ...z, groups: [...z.groups, { id: `n${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`, name: `分组 ${(z.groups.length + 1)}`, apps: [] }] }
         : z,
     );
     onSaveNavZones(next);
@@ -324,11 +324,12 @@ export function NavPage({ navZones, onSaveNavZones, containers, navPageSettings,
               </button>
             </div>
           ) : (
-            sections.map(({ zoneName, group }) => (
+            sections.map(({ zone, group }) => (
               <NavBoard
                 key={group.id}
                 group={group}
-                zoneTag={isAll ? zoneName : undefined}
+                zoneCfg={zone}
+                zoneTag={isAll ? zone.name : undefined}
                 iconMap={navIconMap}
                 editMode={editMode}
                 onEditApp={openEditApp}

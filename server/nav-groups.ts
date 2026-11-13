@@ -43,7 +43,7 @@ const backups = (raw: unknown, cap: number, each: number): string[] => {
   return raw.slice(0, 10).map((x) => str(x, each)).filter(Boolean).slice(0, cap);
 };
 
-/** 归一化单个分组（沿用 v1.51.x 逻辑，返回 {name,...} 或 null） */
+/** 归一化单个分组（v1.52.3 起分组为纯分类容器：仅 id/name/icon/apps，不再携带外观字段） */
 function normalizeNavGroup(g: any): Record<string, unknown> | null {
   if (!g || typeof g !== "object") return null;
   const name = str(g.name, 40);
@@ -69,26 +69,35 @@ function normalizeNavGroup(g: any): Record<string, unknown> | null {
       iconZoom: num(an.iconZoom, 50, 200, 100),
     };
   });
-  const gl = g.cardLayout === "horizontal" ? "horizontal" : "vertical";
   return {
     id: str(g.id, 40) || genId(),
     name,
     icon: str(g.icon, 300),
     apps,
-    // v1.51.7：分组卡片布局/尺寸（参照 FlatNas）
-    cardLayout: gl,
-    cardSize: num(g.cardSize, 60, 240, 120),
-    gridGap: num(g.gridGap, 0, 60, 16),
-    iconSize: num(g.iconSize, 16, 96, 48),
-    // v1.51.9：卡片样式 / 图标形状（参照 FlatNas），白名单回落
-    cardStyle: pick(g.cardStyle, CARD_STYLES, "solid"),
-    iconShape: pick(g.iconShape, ICON_SHAPES, "rounded"),
+  };
+}
+
+/**
+ * 分区外观提升（v1.52.3）：外观参数统一上移到分区级。
+ * 取值优先级：分区自身字段 > 首个分组的遗留外观字段（旧数据样式挂在 group 上，迁移时提升）> 默认值。
+ * 这样旧 nav-groups.json（样式在 group 上）GET 即干净、渲染不丢。
+ */
+function zoneAppearanceFromRaw(z: any): Record<string, unknown> {
+  const g0 = Array.isArray(z?.groups) && z.groups.length > 0 ? z.groups[0] : undefined;
+  return {
+    cardLayout: z?.cardLayout === "horizontal" || g0?.cardLayout === "horizontal" ? "horizontal" : "vertical",
+    cardSize: num(z?.cardSize ?? g0?.cardSize, 60, 240, 120),
+    gridGap: num(z?.gridGap ?? g0?.gridGap, 0, 60, 16),
+    iconSize: num(z?.iconSize ?? g0?.iconSize, 16, 96, 48),
+    cardStyle: pick(z?.cardStyle ?? g0?.cardStyle, CARD_STYLES, "solid"),
+    iconShape: pick(z?.iconShape ?? g0?.iconShape, ICON_SHAPES, "rounded"),
   };
 }
 
 /**
  * 导航分区归一化（v1.52.0）：宽容解析用户 / 旧版数据——
  * 字段全做 trim + 长度钳制、非法条目丢弃、id 缺失补生成；整体条数设上限防配置膨胀。
+ * v1.52.3：外观字段提升到分区级（zoneAppearanceFromRaw）。
  */
 function normalizeNavZones(v: any): Array<Record<string, unknown>> {
   if (!Array.isArray(v)) return [];
@@ -105,6 +114,7 @@ function normalizeNavZones(v: any): Array<Record<string, unknown>> {
       id: str(z.id, 40) || genId(),
       name,
       groups,
+      ...zoneAppearanceFromRaw(z),
     });
   }
   return out;
@@ -112,11 +122,13 @@ function normalizeNavZones(v: any): Array<Record<string, unknown>> {
 
 /** 把任意旧结构（{groups} 或 settings.nav.groups）包裹为单一默认分区 */
 function wrapLegacyAsZone(groupsRaw: any): Array<Record<string, unknown>> {
-  const groups = (Array.isArray(groupsRaw) ? groupsRaw : [])
+  const rawGroups = Array.isArray(groupsRaw) ? groupsRaw : [];
+  const groups = rawGroups
     .map(normalizeNavGroup)
     .filter((g): g is Record<string, unknown> => !!g);
   if (groups.length === 0) return [];
-  return [{ id: genId(), name: "默认分区", groups }];
+  // 旧数据样式挂在 group 上，迁移时提升到分区级（取首个分组的外观）
+  return [{ id: genId(), name: "默认分区", groups, ...zoneAppearanceFromRaw({ groups: rawGroups }) }];
 }
 
 function writeNavGroupsFile(zones: Array<Record<string, unknown>>): void {

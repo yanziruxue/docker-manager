@@ -922,33 +922,42 @@ export interface NavAppItem {
   iconZoom?: number;
 }
 
-/** 导航分组（标签条的一项；apps 为该组卡片墙内容）。v1.51.7 增加卡片布局/尺寸参数（参照 FlatNas） */
+/**
+ * 导航分组（分区下的一项分类区块；apps 为该组卡片墙内容）。
+ * v1.52.3 起分组仅为「分类容器」——名称 + 卡片墙，不再承载任何外观参数；
+ * 布局/间距/大小/图标大小/卡片样式/图标形状等外观统一上移到「分区」（NavZone）。
+ */
 export interface NavGroup {
   id: string;
   name: string;
   /** 组图标（可选，同 NavAppItem.icon 规则） */
   icon?: string;
   apps: NavAppItem[];
-  /** 卡片布局（v1.51.7，参照 FlatNas）：vertical=图标在上（默认）；horizontal=图标在左、文字在右（描述按行显示） */
-  cardLayout?: "vertical" | "horizontal";
-  /** 卡片宽度 px（v1.51.7，参照 FlatNas cardSize，默认 120） */
-  cardSize?: number;
-  /** 卡片间距 px（v1.51.7，参照 FlatNas gridGap，默认 16） */
-  gridGap?: number;
-  /** 图标尺寸 px（v1.51.7，参照 FlatNas iconSize，默认 48） */
-  iconSize?: number;
-  /** 卡片样式预设（v1.51.9，参照 FlatNas）：默认 solid=白底实色卡片 */
-  cardStyle?: NavCardStyle;
-  /** 图标形状（v1.51.9，参照 FlatNas iconShape）：默认 rounded=圆角矩形 */
-  iconShape?: NavIconShape;
 }
 
-/** 导航分区（v1.52.0）：导航页顶层结构；分区下含若干「分组」，分组下含应用卡片。 */
+/**
+ * 导航分区（v1.52.0 三级结构顶层；v1.52.3 起承载外观配置）：
+ * 分区下含若干「分组」，分组下含应用卡片。
+ * 外观参数（布局/间距/大小/图标大小/卡片样式/图标形状）参照 FlatNas，统一在分区级配置，
+ * 该分区下所有分组卡片共享同一套外观。
+ */
 export interface NavZone {
   id: string;
   name: string;
-  /** 分区下的分组（沿用旧 NavGroup：含 apps 与卡片外观参数） */
+  /** 分区下的分组（纯分类容器：名称 + 卡片墙） */
   groups: NavGroup[];
+  /** 卡片布局（v1.52.3，参照 FlatNas）：vertical=图标在上（默认）；horizontal=图标在左、文字在右 */
+  cardLayout?: "vertical" | "horizontal";
+  /** 卡片宽度 px（v1.52.3，参照 FlatNas cardSize，默认 120） */
+  cardSize?: number;
+  /** 卡片间距 px（v1.52.3，参照 FlatNas gridGap，默认 16） */
+  gridGap?: number;
+  /** 图标尺寸 px（v1.52.3，参照 FlatNas iconSize，默认 48） */
+  iconSize?: number;
+  /** 卡片样式预设（v1.52.3，参照 FlatNas）：默认 solid=白底实色卡片 */
+  cardStyle?: NavCardStyle;
+  /** 图标形状（v1.52.3，参照 FlatNas iconShape）：默认 rounded=圆角矩形 */
+  iconShape?: NavIconShape;
 }
 
 export interface NavConfig {

@@ -9,7 +9,7 @@
  */
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { ExternalLink, Pencil } from "lucide-react";
-import type { NavAppItem, NavCardStyle, NavGroup, NavIconShape, NavNetworkMode } from "../types";
+import type { NavAppItem, NavCardStyle, NavGroup, NavIconShape, NavNetworkMode, NavZone } from "../types";
 import { getNetworkZoneApi, listCustomIconsApi } from "../api";
 import { resolveNavAppUrl, type WebuiZone, type WebuiZoneMode } from "../webui-url";
 import type { CustomIconsPayload } from "../custom-icons";
@@ -203,6 +203,7 @@ function AppCard({
 
 export function NavBoard({
   group,
+  zoneCfg,
   zoneTag,
   iconMap,
   editMode,
@@ -214,6 +215,8 @@ export function NavBoard({
   onCardDrop,
 }: {
   group: NavGroup;
+  /** 所属分区（v1.52.3 起外观配置上移到分区级，卡片墙统一取父分区外观） */
+  zoneCfg?: NavZone;
   /** 「全部」视图下显示所属分区名（普通分区视图不传，分区名仅作顶部 tab） */
   zoneTag?: string;
   iconMap: Record<string, string>;
@@ -246,13 +249,14 @@ export function NavBoard({
   // navNetworkMode：auto=按访问 IP 自动分区；lan=强制内网；wan=强制外网
   const mode: WebuiZoneMode =
     navNetworkMode === "lan" ? "intranet" : navNetworkMode === "wan" ? "internet" : "auto";
-  const layout = group.cardLayout || "vertical";
-  const cardSize = group.cardSize || 120;
-  const gridGap = group.gridGap ?? 16;
-  const iconSize = group.iconSize || 48;
+  // v1.52.3：外观配置统一取父分区（分区级）；分组不再携带任何外观字段
+  const layout = zoneCfg?.cardLayout || "vertical";
+  const cardSize = zoneCfg?.cardSize || 120;
+  const gridGap = zoneCfg?.gridGap ?? 16;
+  const iconSize = zoneCfg?.iconSize || 48;
   // v1.51.9：分组卡片样式 / 图标形状（参照 FlatNas），缺省回落与 v1.51.8 视觉一致
-  const cardStyle: NavCardStyle = group.cardStyle || "solid";
-  const iconShape: NavIconShape = group.iconShape || "rounded";
+  const cardStyle: NavCardStyle = zoneCfg?.cardStyle || "solid";
+  const iconShape: NavIconShape = zoneCfg?.iconShape || "rounded";
   const loc = { protocol: window.location.protocol, hostname: window.location.hostname };
   const urls = useMemo(() => apps.map((a) => resolveCardUrl(a, mode, zone, loc)), [apps, mode, zone, loc.protocol, loc.hostname]);
 
