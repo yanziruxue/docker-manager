@@ -4,12 +4,13 @@
  *  - 右侧=该分区的外观配置（卡片布局 / 间距 / 大小 / 图标大小 / 卡片样式 / 图标形状）；
  *  - 分组仅为分类容器（v1.52.3），外观统一在分区级配置，该分区下所有分组共享。
  * v1.52.6：移除弹窗内的示意卡小样；标题栏改为可拖动，拖开后直接观察导航页实时效果。
+ * v1.52.12：右侧新增「应用到其他分区」按钮，把当前分区的外观配置一键复制到其他所有分区。
  * v1.52.9：新建分区自动带一个与分区同名的默认分组；分区下至少保留一个分组（禁止删最后一组）。
  * 草稿仍经 onPreview 上抛给背景页实时渲染，仅 onSave(zones) 整体落盘。
  */
 import { useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
-import { ArrowDown, ArrowUp, Move, Pencil, Plus, RotateCcw, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, CopyPlus, Move, Pencil, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import type { NavCardStyle, NavGroup, NavIconShape, NavZone } from "../types";
 
 /** 随机 id（与项目弹窗同风格：时间戳 36 进制 + 随机尾） */
@@ -244,6 +245,13 @@ export function NavGroupSettingsModal({
 
   const patchZone = (p: Partial<NavZone>) =>
     setDraft((prev) => prev.map((z) => (z.id === selectedZoneId ? { ...z, ...p } : z)));
+  // v1.52.12：把当前分区的外观配置（仅 9 个外观字段）一键应用到其他所有分区；不动名称 / 分组 / 项目
+  const applyAppearanceToOthers = () => {
+    if (!activeZone) return;
+    const { cardLayout, cardSize, gridGap, iconSize, cardStyle, iconShape, zoneFirstGroupGap, groupCardGapTop, groupCardGapBottom } = activeZone;
+    const appearance = { cardLayout, cardSize, gridGap, iconSize, cardStyle, iconShape, zoneFirstGroupGap, groupCardGapTop, groupCardGapBottom };
+    setDraft((prev) => prev.map((z) => (z.id === activeZone.id ? z : { ...z, ...appearance })));
+  };
   const renameZone = (id: string, name: string) =>
     setDraft((prev) =>
       prev.map((z) => {
@@ -549,14 +557,26 @@ export function NavGroupSettingsModal({
 
                 <div className="flex items-center justify-between">
                   <p className="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">分区配置 · {activeZone.name}</p>
-                  <button
-                    type="button"
-                    onClick={() => patchZone({ ...DEFAULT_APPEARANCE })}
-                    className="inline-flex items-center gap-1 px-2 py-1 text-[11px] text-slate-500 border border-slate-200 rounded-lg hover:bg-slate-50"
-                    title="恢复该分区的外观默认设置"
-                  >
-                    <RotateCcw size={11} /> 恢复默认
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    {/* v1.52.12：把当前分区外观配置一键应用到其他所有分区（仅 1 个分区时无意义，禁用） */}
+                    <button
+                      type="button"
+                      onClick={applyAppearanceToOthers}
+                      disabled={draft.length <= 1}
+                      className="inline-flex items-center gap-1 px-2 py-1 text-[11px] text-fuchsia-600 border border-fuchsia-200 rounded-lg hover:bg-fuchsia-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                      title="把该分区的卡片外观配置（布局/间距/大小/样式/形状）应用到其他所有分区"
+                    >
+                      <CopyPlus size={11} /> 应用到其他分区
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => patchZone({ ...DEFAULT_APPEARANCE })}
+                      className="inline-flex items-center gap-1 px-2 py-1 text-[11px] text-slate-500 border border-slate-200 rounded-lg hover:bg-slate-50"
+                      title="恢复该分区的外观默认设置"
+                    >
+                      <RotateCcw size={11} /> 恢复默认
+                    </button>
+                  </div>
                 </div>
 
                 <section className="rounded-xl border border-slate-100 bg-slate-50/60 p-3">

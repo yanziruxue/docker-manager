@@ -16,6 +16,32 @@
 
 ---
 
+## v1.52.12 — 2026-11-13（**main 分支 · 已构建 · 已推 Gitea**）
+
+### 分区设置：新增「应用到其他分区」一键复制外观配置
+
+- **需求**：可以把选中分区的配置应用到其他分区，增加一个按钮。
+- **实现**：
+  - `src/components/NavGroupSettingsModal.tsx`：右上角「恢复默认」左侧新增 **「应用到其他分区」** 按钮（`CopyPlus` 图标，仅 1 个分区时禁用）；`applyAppearanceToOthers()` 把当前分区的 9 个外观字段（`cardLayout` / `cardSize` / `gridGap` / `iconSize` / `cardStyle` / `iconShape` / `zoneFirstGroupGap` / `groupCardGapTop` / `groupCardGapBottom`）一键复制到**其他所有分区**；**不动**分区名 / 分组结构 / 项目。改动经既有 `draft → onPreview` 链路实时预览，保存才落盘、取消恢复。
+- **门禁**：`scripts/check-nav.mjs` 新增 1 条正向断言（函数 / 按钮文案 / 禁用条件）+ 1 类进程级负向自检（注入按钮变 no-op），40→41 类 → **211 ok / 0 FAIL**。
+
+### 未完成 / 已知限制
+
+- 应用目标是「其他**所有**分区」一键生效，暂不支持勾选部分分区；如需按分区勾选再扩展。
+- Gitea CI（`build-and-publish` / `build-docker-image`）与 Release 发布结果仍需用户在 Gitea UI 确认；本机无 Gitea API token 可查。GitHub 源码 / zip / deb 未推（沿用 Gitea-only）。
+
+### 下一步
+
+- 在 Gitea UI 确认 v1.52.9 ~ v1.52.12 四个 tag 触发的两条工作流与 Release 资产。
+
+### 验证
+
+- 双 `tsc`（src / server）0 错；`check-nav` **211 ok / 0 FAIL**（41 类负向自检全被检出且还原字节级一致）；`npm run test:gates` **22 组全绿 FAIL=0**。
+- SEA 硬核验：ELF `7f454c46` / e_machine=62 / 版本锚点 `var CURRENT_VERSION = true ? "1.52.12" : "0.0.0-dev"` 在 bundle 与二进制各 1 处、旧版 `1.52.11` 锚点归零 / zip 与 deb 各 5 个成员 / zip 内二进制权限 `0o755` / dist 前端 JS base64 解码 1,224,168 B 与 `dist/assets/*.js` 逐字节一致 / 源码锚点「applyAppearanceToOthers / 按钮文案 / 禁用条件」。
+- 包：`dockermanagementyanzi-linux-x64-v1.52.12.zip`（43,135,110 B，SHA-256 `bed37d33206183174b18715e75c407b884e6230dfd4d9647d7c244a101312a9c`）、`dockermanagementyanzi_1.52.12_amd64.deb`（42,850,128 B，SHA-256 `43d7a0dd8ff8c4d27b14107ee612e4b130aa27b8c161a7dcb70f0ad759303507`）；**zip 内 = deb 内 = postject 产物**（130,616,512 B）二进制 SHA-256 `7d854d4aa78d226ea99bb0f7356ea84d37ef41a2c73f37df679c07a9cd8025e3` 字节级一致。
+
+---
+
 ## v1.52.11 — 2026-11-13（**main 分支 · 已构建 · 已推 Gitea**）
 
 ### 导航页：空分组占位区移除「＋」图标、引导文案与虚线框

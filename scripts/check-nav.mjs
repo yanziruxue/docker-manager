@@ -15,7 +15,7 @@
  *    v1.51.11 起 NavEditor 弹窗已删除，项目 CRUD 由 NavPage + NavAppModal 直接落盘、
  *    分组新建/删除由 NavGroupSettingsModal 接管、卡片 hover ✎ 由 NavBoard.onEditApp 直达；
  *  - 负向自检①：注入「内网缺 lanUrl 不回落 url」回归 → 重载模块应检出差异 → 还原 → 复核全绿；
- *  - 负向自检②：进程级注入 40 类回归（<NavEditor / 顶栏分组设置文字按钮 / 齿轮接线缺失 /
+ *  - 负向自检②：进程级注入 41 类回归（<NavEditor / 顶栏分组设置文字按钮 / 齿轮接线缺失 /
  *    顶栏添加项目按钮 / 高级字段折叠区 / 智能匹配 / 全局图库被 engineId 阻挡 /
  *    容器列表接线缺失 / 容器四字段映射缺失 / 背景图上限回退 2mb / 超限 JSON 中间件缺失 /
  *    上传兜底文案回退 / 前端体积预校验缺失 / 编辑按钮缺失 / editMode 未下传 NavBoard /
@@ -313,6 +313,13 @@ ok("★ dragActive 全分区下传、dragZoneId 零残留（「全部」视图�
   !navPage.includes("dragZoneId") &&
   (navPage.match(/dragActive=\{dragActive\}/g) || []).length === 1);
 
+// v1.52.12：分区配置一键应用到其他分区（仅 9 个外观字段，实时预览 / 保存落盘）
+ok("★ 分区配置可一键应用到其他分区（v1.52.12）",
+  gs.includes("const applyAppearanceToOthers = () => {") &&
+  gs.includes("应用到其他分区") &&
+  gs.includes("z.id === activeZone.id ? z : { ...z, ...appearance }") &&
+  gs.includes("disabled={draft.length <= 1}"));
+
 // v1.52.4：分区级间距 / 分区与分组移动 / 导航页专属图标库（含链接下载）
 const navIconsMod = read("server/nav-icons.ts");
 const navIconDlModal = read("src/components/NavIconDownloadModal.tsx");
@@ -414,8 +421,8 @@ if (BROKEN === ORIGINAL) {
   ok("还原字节级一致", read(TARGET) === ORIGINAL);
 }
 
-console.log("== ④ 负向自检（进程级注入 40 类回归 → 重跑本门禁应 exit 1） ==");
-// 父进程注入 40 类回归文本，子进程跳过 ④（NAV_GATE_NEGATIVE_CHILD=1）只跑 ①②③，
+console.log("== ④ 负向自检（进程级注入 41 类回归 → 重跑本门禁应 exit 1） ==");
+// 父进程注入 41 类回归文本，子进程跳过 ④（NAV_GATE_NEGATIVE_CHILD=1）只跑 ①②③，
 // 若 ② 的对应断言确实生效，子进程必因 FAIL 而 exit 1。
 if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
   const NAV_PAGE_REL = "src/pages/NavPage.tsx";
@@ -627,6 +634,12 @@ if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
       name: "注入空分组常态虚线回归（恢复 border-transparent 占位框）",
       rel: "src/components/NavBoard.tsx",
       inject: (s) => s.replace(': "py-2"', ': "py-10 border-2 border-dashed border-transparent text-white/85"'),
+    },
+    // v1.52.12：分区外观一键应用
+    {
+      name: "注入外观应用到其他分区缺失回归（按钮变 no-op）",
+      rel: "src/components/NavGroupSettingsModal.tsx",
+      inject: (s) => s.replace("prev.map((z) => (z.id === activeZone.id ? z : { ...z, ...appearance }))", "prev"),
     },
   ];
   for (const c of cases) {
