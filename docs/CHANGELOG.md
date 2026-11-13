@@ -16,6 +16,32 @@
 
 ---
 
+## v1.52.11 — 2026-11-13（**main 分支 · 已构建 · 已推 Gitea**）
+
+### 导航页：空分组占位区移除「＋」图标、引导文案与虚线框
+
+- **需求**：移除空分组占位区的「＋」图标与「该分组还没有入口，点顶栏「＋」添加」文案；随后追加**虚线框也不保留**。空分组常态渲染为完全空白（仅保留极小的放置区域），不回退 v1.52.8「空分组可拖入」能力。
+- **实现**：
+  - `src/components/NavBoard.tsx`：空分组占位 `<div>` 常态只剩 `py-2`（无图标、无文案、无边框、无背景）；**仅拖拽悬停态**临时切换为 `py-10 + border-2 border-dashed + 高亮 ring` 并显示「松手放到该分组」提示；分组容器级 `onDragOver` / `onDrop` 不变，空分组仍可作为放置目标。删除已无引用的内联 `PlusIcon` 组件。
+- **门禁**：`scripts/check-nav.mjs` 新增 1 条正向断言（PlusIcon / 旧文案零残留 + 常态 `py-2` + 拖拽态虚线）+ 2 类进程级负向自检（「重新显示 ＋ 图标」「恢复常态虚线框」），38→40 类 → **208 ok / 0 FAIL**。
+
+### 未完成 / 已知限制
+
+- 空分组在浏览态没有任何视觉占位，只有分组标题行；这是本次拍板的预期效果。
+- Gitea CI（`build-and-publish` / `build-docker-image`）与 Release 发布结果仍需用户在 Gitea UI 确认；本机无 Gitea API token 可查。GitHub 源码 / zip / deb 未推（沿用 Gitea-only）。
+
+### 下一步
+
+- 在 Gitea UI 确认 v1.52.10 / v1.52.11 两个 tag 触发的两条工作流与 Release 资产。
+
+### 验证
+
+- 双 `tsc`（src / server）0 错；`check-nav` **208 ok / 0 FAIL**（40 类负向自检全被检出且还原字节级一致）；`npm run test:gates` **22 组全绿 FAIL=0**。
+- SEA 硬核验：ELF `7f454c46` / e_machine=62 / 版本锚点 `var CURRENT_VERSION = true ? "1.52.11" : "0.0.0-dev"` 在 bundle 与二进制各 1 处、旧版 `1.52.10` 锚点归零 / zip 与 deb 各 5 个成员 / zip 内二进制权限 `0o755` / dist 前端 JS base64 解码 1,228,840 B 与 `dist/assets/*.js` 逐字节一致 / 源码锚点「PlusIcon 与旧文案零残留、常态 `py-2`、拖拽态虚线存在」。
+- 包：`dockermanagementyanzi-linux-x64-v1.52.11.zip`（43,134,044 B，SHA-256 `8d6615736662d431d3bf2d88fdb1286f0e0d33bf86340ad2f0fbea863bf5e679`）、`dockermanagementyanzi_1.52.11_amd64.deb`（42,849,152 B，SHA-256 `7826c0c57af9e2cfe3a8ca07d45456f8ba5febc5963d695b2706ff700da6fdae`）；**zip 内 = deb 内 = postject 产物**（130,616,512 B）二进制 SHA-256 `052753be3677dca519c9fb69e82b7861b814a9edc7f9eb85c17670500de693a4` 字节级一致。
+
+---
+
 ## v1.52.10 — 2026-11-13（**main 分支 · 已构建 · 已推 Gitea**）
 
 ### 导航页：恢复项目跨分区拖动

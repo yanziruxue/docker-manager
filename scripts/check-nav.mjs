@@ -15,7 +15,7 @@
  *    v1.51.11 起 NavEditor 弹窗已删除，项目 CRUD 由 NavPage + NavAppModal 直接落盘、
  *    分组新建/删除由 NavGroupSettingsModal 接管、卡片 hover ✎ 由 NavBoard.onEditApp 直达；
  *  - 负向自检①：注入「内网缺 lanUrl 不回落 url」回归 → 重载模块应检出差异 → 还原 → 复核全绿；
- *  - 负向自检②：进程级注入 38 类回归（<NavEditor / 顶栏分组设置文字按钮 / 齿轮接线缺失 /
+ *  - 负向自检②：进程级注入 40 类回归（<NavEditor / 顶栏分组设置文字按钮 / 齿轮接线缺失 /
  *    顶栏添加项目按钮 / 高级字段折叠区 / 智能匹配 / 全局图库被 engineId 阻挡 /
  *    容器列表接线缺失 / 容器四字段映射缺失 / 背景图上限回退 2mb / 超限 JSON 中间件缺失 /
  *    上传兜底文案回退 / 前端体积预校验缺失 / 编辑按钮缺失 / editMode 未下传 NavBoard /
@@ -128,6 +128,12 @@ ok("★ NavBoard 分组标题行不再渲染 ＋/齿轮（入口收敛顶栏，v
 ok("★ 整个分组容器接管拖放，空分组可追加到末尾",
   board.includes("onDragOver={dragActive") && board.includes('onCardDrop?.("", group.id)') &&
   board.includes("松手放到该分组") && board.includes("dragActive?: boolean"));
+// v1.52.11：空分组占位常态完全空白（无 ＋ 图标 / 无文案 / 无虚线框），拖拽态才显示放置提示
+ok("★ 空分组占位常态空白、拖拽态才出现虚线放置提示（v1.52.11）",
+  !board.includes("PlusIcon") && !board.includes("该分组还没有入口") &&
+  board.includes('{dragActive && <p className="text-sm">松手放到该分组</p>}') &&
+  board.includes(': "py-2"') &&
+  board.includes("border-2 border-dashed border-fuchsia-300"));
 ok("★ 卡片落点 stopPropagation（不与容器追加重复搬移）",
   board.includes("e.stopPropagation(); onCardDrop?.(a.id, cardGroupId);"));
 ok("★ NavPage 编辑态全局下传 dragActive（v1.52.10 不再按来源分区裁剪），0 分组分区给明确引导",
@@ -408,8 +414,8 @@ if (BROKEN === ORIGINAL) {
   ok("还原字节级一致", read(TARGET) === ORIGINAL);
 }
 
-console.log("== ④ 负向自检（进程级注入 38 类回归 → 重跑本门禁应 exit 1） ==");
-// 父进程注入 38 类回归文本，子进程跳过 ④（NAV_GATE_NEGATIVE_CHILD=1）只跑 ①②③，
+console.log("== ④ 负向自检（进程级注入 40 类回归 → 重跑本门禁应 exit 1） ==");
+// 父进程注入 40 类回归文本，子进程跳过 ④（NAV_GATE_NEGATIVE_CHILD=1）只跑 ①②③，
 // 若 ② 的对应断言确实生效，子进程必因 FAIL 而 exit 1。
 if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
   const NAV_PAGE_REL = "src/pages/NavPage.tsx";
@@ -608,6 +614,19 @@ if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
       name: "注入卡片落点不响应拖拽回归（非拖拽态也接管放置）",
       rel: "src/components/NavBoard.tsx",
       inject: (s) => s.replace("onDragOver={dragActive ? (e) => e.preventDefault() : undefined}", "onDragOver={(e) => e.preventDefault()}"),
+    },
+    // v1.52.11：空分组占位 ＋ 图标 / 引导文案
+    {
+      name: "注入空分组 ＋ 图标回归（重新显示占位图标）",
+      rel: "src/components/NavBoard.tsx",
+      inject: (s) => s.replace(
+        '{dragActive && <p className="text-sm">松手放到该分组</p>}',
+        '<PlusIcon className="mb-2 opacity-80" />\n          {dragActive && <p className="text-sm">松手放到该分组</p>}'),
+    },
+    {
+      name: "注入空分组常态虚线回归（恢复 border-transparent 占位框）",
+      rel: "src/components/NavBoard.tsx",
+      inject: (s) => s.replace(': "py-2"', ': "py-10 border-2 border-dashed border-transparent text-white/85"'),
     },
   ];
   for (const c of cases) {

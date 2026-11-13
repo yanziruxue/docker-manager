@@ -299,15 +299,16 @@ export function NavBoard({
         </h2>
       </div>
       {apps.length === 0 ? (
+        // v1.52.11：空分组常态完全空白（无 ＋ / 无文案 / 无虚线框），仅保留放置区；
+        // 拖拽悬停时才临时出现虚线高亮 + 「松手放到该分组」提示（不回退 v1.52.8 空分组可拖入）
         <div
-          className={`flex flex-col items-center justify-center py-12 rounded-2xl border-2 border-dashed transition-all ${
+          className={`rounded-2xl transition-all ${
             dragActive
-              ? "border-fuchsia-300 bg-white/25 text-white ring-2 ring-fuchsia-400/70"
-              : "border-transparent text-white/85"
+              ? "flex items-center justify-center py-10 border-2 border-dashed border-fuchsia-300 bg-white/25 text-white ring-2 ring-fuchsia-400/70"
+              : "py-2"
           }`}
         >
-          <PlusIcon className="mb-2 opacity-80" />
-          <p className="text-sm">{dragActive ? "松手放到该分组" : "该分组还没有入口，点顶栏「＋」添加"}</p>
+          {dragActive && <p className="text-sm">松手放到该分组</p>}
         </div>
       ) : (
         <div className="flex flex-wrap items-start" style={{ gap: gridGap }}>
@@ -374,13 +375,4 @@ export function useNavIconMap(): Record<string, string> {
     };
   }, []);
   return map;
-}
-
-// 内联小图标（避免额外 import 干扰既有 lucide 引用）
-function PlusIcon({ className = "" }: { className?: string }) {
-  return (
-    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={className}>
-      <line x1={12} y1={5} x2={12} y2={19} /><line x1={5} y1={12} x2={19} y2={12} />
-    </svg>
-  );
 }
