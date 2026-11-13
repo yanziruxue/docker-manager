@@ -3,8 +3,9 @@
  *  - 顶部分区标签条（FNOS / 在线应用 / 管理平台…），选中分区高亮并放大、分区名仅作标签不另起大标题；
  *  - 选中分区下逐「分组」渲染为区块（分组标题 + ＋ + ⚙ + 卡片墙）；
  *  - 「全部」标签合并所有分区的全部分组；
- *  - 编辑态卡片可拖拽：v1.52.9 起仅允许同一分区内跨分组移动 + 排序，跨分区拖放一律拒绝；
- *    分区标签不再是放置目标（编辑项目弹窗内手动改归属分区不受此限制）。
+ *  - 编辑态卡片可拖拽：v1.52.10 起恢复跨分区移动（拖到分区标签 = 落到该分区首分组；
+ *    「全部」视图下可直接拖到其他分区的分组卡片墙）+ 组内排序；
+ *    v1.52.9 的「禁止跨分区」规则已撤销（编辑项目弹窗仍可手动改归属分区）。
  * v1.51.11：移除「管理导航」(NavEditor)，项目 CRUD 直达。
  * v1.52.1：入口全部收敛顶栏图标条「编辑 | ＋添加项目 | ⚙分区/分组设置 | 页面设置」；
  *          分组标题行不再渲染 ＋/齿轮；顶栏齿轮 = 设置当前分区（弹窗自动定位）。
@@ -79,11 +80,7 @@ export function NavPage({ navZones, onSaveNavZones, containers, navPageSettings,
   const [drag, setDrag] = useState<{ appId: string; fromGroupId: string } | null>(null);
   // v1.52.8：仅编辑态且确实有卡片被拖拽时，才开启空分组 / 空白区放置目标
   const dragActive = editMode && !!drag;
-  // v1.52.9：按 appId 反查被拖项目的来源分区（「全部」视图下 fromGroupId 可能为空），
-  // 只有同分区的卡片墙才会收到 dragActive，跨分区连放置目标都不渲染。
-  const dragZoneId = drag
-    ? (zones.find((z) => (z.groups || []).some((g) => (g.apps || []).some((a) => a.id === drag.appId)))?.id || "")
-    : "";
+  // v1.52.10：dragActive 全分区生效，跨分区落点不再按来源分区裁剪。
   const navIconMap = useNavIconMap();
   // 打开页面设置弹窗（整页外观/环境）
   const openPageSettings = useCallback(() => setNavPageSettingsOpen(true), []);
@@ -136,15 +133,9 @@ export function NavPage({ navZones, onSaveNavZones, containers, navPageSettings,
     setAppModal(APP_MODAL_CLOSED);
   };
 
-  // v1.51.19：编辑态拖拽——同分区内移动到其他分组（拖到卡片=插到该卡前，落到空白=追加到末尾）。
+  // v1.51.19：编辑态拖拽——跨分组 / 跨分区移动（拖到卡片=插到该卡前，落到空白=追加到末尾）。
+  // v1.52.10：撤销同分区硬校验；zones 全局剥离同 id 项目 + 按目标 groupId 插入，天然支持跨分区。
   const moveApp = (appId: string, fromGroupId: string, toGroupId: string, beforeAppId?: string) => {
-    // v1.52.9：项目无法拖动到其他分区——来源 / 目标必须属于同一分区，否则原样不动。
-    // fromGroupId 在「全部」视图下可能为空，故额外按 appId 反查归属分区。
-    const zoneOfGroup = (gid: string) => zones.find((z) => (z.groups || []).some((g) => g.id === gid));
-    const zoneOfApp = zones.find((z) => (z.groups || []).some((g) => (g.apps || []).some((a) => a.id === appId)));
-    const fromZone = zoneOfGroup(fromGroupId) || zoneOfApp;
-    const toZone = zoneOfGroup(toGroupId);
-    if (!fromZone || !toZone || fromZone.id !== toZone.id) return;
     let app: NavAppItem | undefined;
     const stripped = zones.map((z) => ({
       ...z,
@@ -262,13 +253,26 @@ export function NavPage({ navZones, onSaveNavZones, containers, navPageSettings,
             <button
               key={z.id}
               onClick={() => setNavTab(z.id)}
-              // v1.52.9：分区标签不再是放置目标，项目无法拖动到其他分区
+              // v1.52.10：分区标签恢复为跨分区放置目标，松手落到该分区首分组
+              onDragOver={editMode ? (e) => e.preventDefault() : undefined}
+              onDrop={
+                editMode
+                  ? (e) => {
+                      e.preventDefault();
+                      if (drag) {
+                        const firstGroup = z.groups[0];
+                        if (firstGroup) moveApp(drag.appId, drag.fromGroupId, firstGroup.id);
+                        setDrag(null);
+                      }
+                    }
+                  : undefined
+              }
               // 选中分区：高亮 + 字号放大(~1.5倍) + 轻微 scale；分区名仅作标签，不另起大标题
               className={`rounded-full backdrop-blur-sm transition-all ${
                 active
                   ? "bg-white text-fuchsia-600 font-bold shadow-md text-[18px] scale-[1.04] py-2 px-5"
                   : "bg-white/60 text-slate-600 hover:bg-white/85 text-[13px] py-1.5 px-4"
-              }`}
+              } ${dragActive ? "ring-2 ring-fuchsia-400/70" : ""}`}
             >
               {z.name}
               <span className={`ml-1.5 text-[11px] ${active ? "text-fuchsia-400" : "text-slate-400"}`}>
@@ -355,8 +359,8 @@ export function NavPage({ navZones, onSaveNavZones, containers, navPageSettings,
                 isFirstGroup={firstInZone}
                 iconMap={navIconMap}
                 editMode={editMode}
-                // v1.52.9：只让来源分区的卡片墙成为放置目标，跨分区落点完全不启用
-                dragActive={dragActive && zone.id === dragZoneId}
+                // v1.52.10：所有分区的卡片墙均可接收放置，「全部」视图下可直接跨分区拖入
+                dragActive={dragActive}
                 onEditApp={openEditApp}
                 navNetworkMode={navNetworkMode}
                 resolveGroupOf={isAll ? resolveGroupOf : undefined}

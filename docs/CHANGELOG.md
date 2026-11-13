@@ -16,6 +16,39 @@
 
 ---
 
+## v1.52.10 — 2026-11-13（**main 分支 · 已构建 · 已推 Gitea**）
+
+### 导航页：恢复项目跨分区拖动
+
+- **需求**：项目需要能拖动到其他分区；撤销 v1.52.9 的「禁止跨分区拖动」规则。v1.52.9 的另两条规则（新建分区自动带同名默认分组 / 分区下至少保留一个分组）**保留不变**。
+- **实现**：
+  - `src/pages/NavPage.tsx`：
+    - 分区标签恢复 `onDragOver` / `onDrop`（编辑态生效），松手时 `moveApp(drag.appId, drag.fromGroupId, z.groups[0].id)` 落到该分区首分组；拖拽态给分区标签加 `ring-2 ring-fuchsia-400/70` 高亮。因 v1.52.9 已保证每分区至少一组，首分组必然存在。
+    - `moveApp()` 删除同分区硬校验（`zoneOfGroup` / `zoneOfApp` 双解析 + `fromZone.id !== toZone.id` 直接 return）。原有实现本就是「遍历所有 zones 全局剥离同 id 项目 → 按目标 groupId 插入」，天然支持跨分区，无需改数据流。
+    - 删除 `dragZoneId`（按 appId 反查来源分区），`NavBoard` 恢复 `dragActive={dragActive}` 全分区下传；「全部」视图下其他分区的分组卡片墙 / 空分组 / 卡片前均可作为落点。
+  - `src/components/NavBoard.tsx`：仅同步 `dragActive` 注释语义，容器级 / 卡片级落点逻辑不变（仍只在编辑态拖拽时接管）。
+- **门禁**：`scripts/check-nav.mjs` 更新 2 条被打破的字面断言（`dragActive` 下传、卡片落点约束文案），把 3 条 v1.52.9 跨分区封锁断言替换为 3 条恢复断言 + 1 条零残留断言；4 类进程级负向自检改为「重新引入同分区硬校验 / 移除分区标签 drop / dragActive 按来源分区裁剪 / 卡片落点不响应拖拽」（仍 38 类）→ **203 ok / 0 FAIL**。
+
+### 未完成 / 已知限制
+
+- 拖到分区标签只能落到该分区**第一个分组**；要放到同一分区的其他分组，需切到该分区（或「全部」视图）后再拖到目标分组。
+- 拖放完成后不会自动切换到目标分区，仍停留在当前视图；可点分区标签查看结果。
+- Gitea CI（`build-and-publish` / `build-docker-image`）与 Release 发布结果仍需用户在 Gitea UI 确认；本机无 Gitea API token 可查。
+- GitHub 源码 / zip / deb 未推（沿用 Gitea-only 发布）；上一版 GitHub Docker 镜像 gzip 上传已按用户要求取消且不重跑。
+
+### 下一步
+
+- 在 Gitea UI 确认打 tag 后的两条工作流与 Release 资产。
+- 如需「拖到分区标签时可选择目标分组」，再扩展为悬停展开分组落点。
+
+### 验证
+
+- 双 `tsc`（src / server）0 错；`check-nav` **203 ok / 0 FAIL**（38 类负向自检全被检出且还原字节级一致）；升版本号前后各跑一次 `npm run test:gates`，**22 组全绿 FAIL=0**。
+- SEA 硬核验：ELF `7f454c46` / e_machine=62 / 版本锚点 `var CURRENT_VERSION = true ? "1.52.10" : "0.0.0-dev"` 在 bundle 与二进制各 1 处、旧版 `1.52.9` 锚点归零 / zip 与 deb 各 5 个成员 / zip 内二进制权限 `0o755` / dist 前端 JS base64 解码 1,223,259 B 与 `dist/assets/*.js` 逐字节一致 / 源码锚点「分区 tab drop 存在、同分区硬校验与 dragZoneId 零残留」。
+- 包：`dockermanagementyanzi-linux-x64-v1.52.10.zip`（43,134,271 B，SHA-256 `0a920d372cf8c19d88a29a145236b8efc7b0cc9507b96c4cac97e49465f59dce`）、`dockermanagementyanzi_1.52.10_amd64.deb`（42,849,352 B，SHA-256 `4a9dc9e45dcb807775b897ae1ed0764e29bcb6bd5e932c4e4b49f608a512d425`）；**zip 内 = deb 内 = postject 产物**（130,616,512 B）二进制 SHA-256 `9d2476e708a3027b23e38519af8a3b9c18fa95c32849dbbe16856833dfd5c1d9` 字节级一致。
+
+---
+
 ## v1.52.9 — 2026-11-13（**main 分支 · 已构建 · 已推 Gitea**）
 
 ### 导航页：分区自动带同名默认分组 / 分区至少一组 / 禁止跨分区拖动

@@ -130,11 +130,12 @@ ok("★ 整个分组容器接管拖放，空分组可追加到末尾",
   board.includes("松手放到该分组") && board.includes("dragActive?: boolean"));
 ok("★ 卡片落点 stopPropagation（不与容器追加重复搬移）",
   board.includes("e.stopPropagation(); onCardDrop?.(a.id, cardGroupId);"));
-ok("★ NavPage 编辑态下传 dragActive（v1.52.9 按来源分区下传），0 分组分区给明确引导",
+ok("★ NavPage 编辑态全局下传 dragActive（v1.52.10 不再按来源分区裁剪），0 分组分区给明确引导",
   navPage.includes("const dragActive = editMode && !!drag;") &&
-  navPage.includes("dragActive={dragActive && zone.id === dragZoneId}") &&
+  navPage.includes("dragActive={dragActive}") &&
+  !navPage.includes("dragZoneId") &&
   navPage.includes("请先在分区与分组设置里新建分组后再拖入"));
-ok("★ NavBoard 卡片落点也受 dragActive 约束（跨分区不 preventDefault）",
+ok("★ NavBoard 容器 / 卡片落点均受 dragActive 约束（仅编辑态拖拽才接管）",
   (board.match(/onDragOver=\{dragActive \? \(e\) => e\.preventDefault\(\) : undefined\}/g) || []).length >= 2);
 
 const appModal = read("src/components/NavAppModal.tsx");
@@ -279,7 +280,7 @@ ok("★ 分区下内联「添加分组」入口", navPage.includes("addGroupToZo
 ok("★ 分组设置弹窗升级为分区+分组管理（新建/删除分区）", gs.includes("addZone") && gs.includes("removeZone") && gs.includes("新建分区"));
 ok("★ 服务端分区持久化：落盘 { zones } + 旧 {groups} 包裹默认分区迁移", navMod.includes("{ zones }") && navMod.includes("wrapLegacyAsZone") && navMod.includes("默认分区"));
 
-// v1.52.9：自动默认分组 / 分区至少一组 / 拖放禁止跨分区
+// v1.52.9：自动默认分组 / 分区至少一组（保留）；v1.52.10：恢复跨分区拖放
 ok("★ 新建分区自动创建一个与分区同名的默认分组（设置弹窗）",
   gs.includes("const name = `分区 ${draft.length + 1}`;") &&
   gs.includes("groups: [{ id: genId(), name, apps: [] }]"));
@@ -293,15 +294,18 @@ ok("★ 分区下至少保留一个分组：删除按钮禁用 + removeGroup 兜
   gs.includes("z.groups.length > 0") && gs.includes("分区下至少保留一个分组"));
 ok("★ 服务端归一化兜底：空组分区自动补同名默认分组",
   navMod.includes('groups.push({ id: genId(), name, icon: "", apps: [] });'));
-ok("★ 项目拖放同分区硬校验（跨分区直接 return，来源按 appId 反查）",
-  navPage.includes("if (!fromZone || !toZone || fromZone.id !== toZone.id) return;") &&
-  navPage.includes("const zoneOfApp = zones.find"));
-ok("★ 跨分区拖放零残留：分区标签不再是放置目标",
-  !navPage.includes("if (firstGroup) moveApp") &&
-  !navPage.includes("onDragOver={editMode ? (e) => e.preventDefault() : undefined}"));
-ok("★ 仅来源分区的卡片墙接收放置（dragZoneId 按 appId 反查）",
-  navPage.includes("const dragZoneId = drag") &&
-  navPage.includes("dragActive={dragActive && zone.id === dragZoneId}"));
+ok("★ 项目拖放不再限制同分区（全局剥离 + 按目标 groupId 插入）",
+  !navPage.includes("fromZone.id !== toZone.id") &&
+  !navPage.includes("const zoneOfApp = zones.find") &&
+  navPage.includes("const next = stripped.map(") &&
+  navPage.includes("onSaveNavZones(next);"));
+ok("★ 分区标签恢复为跨分区放置目标（松手落到该分区首分组 + 拖拽高亮）",
+  navPage.includes("onDragOver={editMode ? (e) => e.preventDefault() : undefined}") &&
+  navPage.includes("if (firstGroup) moveApp(drag.appId, drag.fromGroupId, firstGroup.id);") &&
+  navPage.includes('${dragActive ? "ring-2 ring-fuchsia-400/70" : ""}'));
+ok("★ dragActive 全分区下传、dragZoneId 零残留（「全部」视图可跨分区落点）",
+  !navPage.includes("dragZoneId") &&
+  (navPage.match(/dragActive=\{dragActive\}/g) || []).length === 1);
 
 // v1.52.4：分区级间距 / 分区与分组移动 / 导航页专属图标库（含链接下载）
 const navIconsMod = read("server/nav-icons.ts");
@@ -567,7 +571,7 @@ if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
       rel: "src/components/NavBoard.tsx",
       inject: (s) => s.replace("e.stopPropagation(); onCardDrop?.(a.id, cardGroupId);", "onCardDrop?.(a.id, cardGroupId);"),
     },
-    // v1.52.9：自动默认分组 / 至少一组 / 禁止跨分区拖放
+    // v1.52.9：自动默认分组 / 至少一组（保留）；v1.52.10：跨分区拖放（负向 = 重新引入封锁 / 移除落点）
     {
       name: "注入新建分区不带默认分组回归",
       rel: "src/components/NavGroupSettingsModal.tsx",
@@ -584,22 +588,24 @@ if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
       inject: (s) => s.replace("if (activeZone.groups.length <= 1) return;", ""),
     },
     {
-      name: "注入跨分区拖放硬校验缺失回归",
+      name: "注入同分区硬校验回归（跨分区又被拒绝）",
       rel: "src/pages/NavPage.tsx",
-      inject: (s) => s.replace("if (!fromZone || !toZone || fromZone.id !== toZone.id) return;", ""),
+      inject: (s) => s.replace(
+        "  const moveApp = (appId: string, fromGroupId: string, toGroupId: string, beforeAppId?: string) => {",
+        "  const moveApp = (appId: string, fromGroupId: string, toGroupId: string, beforeAppId?: string) => {\n    if (!fromZone || !toZone || fromZone.id !== toZone.id) return;"),
     },
     {
-      name: "注入分区标签恢复为放置目标回归",
+      name: "注入分区标签 drop 缺失回归（无法拖到其他分区）",
       rel: "src/pages/NavPage.tsx",
-      inject: (s) => s.replace("const count = (z.groups || []).reduce", "if (firstGroup) moveApp\n          const count = (z.groups || []).reduce"),
+      inject: (s) => s.replace("if (firstGroup) moveApp(drag.appId, drag.fromGroupId, firstGroup.id);", ""),
     },
     {
-      name: "注入 dragActive 未按分区下传回归",
+      name: "注入 dragActive 按来源分区裁剪回归（跨分区卡片墙不接管）",
       rel: "src/pages/NavPage.tsx",
-      inject: (s) => s.replace("dragActive={dragActive && zone.id === dragZoneId}", "dragActive={dragActive}"),
+      inject: (s) => s.replace("dragActive={dragActive}", "dragActive={dragActive && zone.id === dragZoneId}"),
     },
     {
-      name: "注入卡片落点跳过同分区校验回归",
+      name: "注入卡片落点不响应拖拽回归（非拖拽态也接管放置）",
       rel: "src/components/NavBoard.tsx",
       inject: (s) => s.replace("onDragOver={dragActive ? (e) => e.preventDefault() : undefined}", "onDragOver={(e) => e.preventDefault()}"),
     },

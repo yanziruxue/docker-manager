@@ -232,7 +232,7 @@ export function NavBoard({
   /** 编辑模式（v1.51.18，由导航页「编辑」按钮切换）：仅此态下渲染卡片 ✎ 编辑入口 */
   editMode?: boolean;
   /** 编辑态且正在拖拽卡片（v1.52.8：空分组 / 卡片墙空白处也作为放置目标）；
-   *  v1.52.9：由导航页按分区下传，跨分区的卡片墙一律为 false，不接收放置 */
+   *  v1.52.10：导航页全分区下传，「全部」视图下其他分区的分组也可作为落点 */
   dragActive?: boolean;
   /** 编辑单个项目（v1.51.11）：由 NavPage 打开独立 NavAppModal */
   onEditApp: (app: NavAppItem) => void;
