@@ -6,8 +6,8 @@
  * v1.51.7：支持分组级卡片布局/大小/间距/图标大小（参照 FlatNas）与 ext 外链直开、self 备用地址回退。
  * v1.51.11：卡片 hover 显示「✎」直达项目编辑弹窗（旧管理弹窗齿轮入口一并移除）。
  * v1.52.1：分组标题行不再渲染 ＋/齿轮（入口收敛至导航页顶栏图标条），本组件仅渲染分组与卡片。
- * v1.52.5：卡片墙一律自动换行（含水平布局），不设横向滚动条；flex-shrink-0 保持卡片固定宽度；
- *          AppCard 导出供分区设置弹窗的「实时预览」复用。
+ * v1.52.5：卡片墙一律自动换行（含水平布局），不设横向滚动条；flex-shrink-0 保持卡片固定宽度。
+ * v1.52.6：弹窗内示意卡小样已移除，AppCard 仅本组件内部使用、不再导出。
  */
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { ExternalLink, Pencil } from "lucide-react";
@@ -76,7 +76,7 @@ const ICON_SHAPE_STYLE: Record<NavIconShape, CSSProperties> = {
 };
 
 /** 导出供分区设置弹窗的「实时预览」复用，保证预览与真实卡片视觉 100% 一致 */
-export function AppCard({
+function AppCard({
   app,
   iconMap,
   url,

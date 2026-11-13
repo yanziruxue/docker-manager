@@ -16,6 +16,38 @@
 
 ---
 
+## v1.52.6 — 2026-11-13（**main 分支 · 已构建 · 已推 Gitea**）
+
+### 导航页：移除弹窗内示意卡小样 / 分区设置弹窗可拖动
+
+- **移除「实时预览（未保存）」示意卡小样**（`src/components/NavGroupSettingsModal.tsx`）：删掉右侧顶部的渐变预览区块、`PREVIEW_APPS` 示意数据与 `AppCard` / `NavAppItem` 引用；右侧改为一行浅色说明「改动即时作用于导航页；按住标题栏拖开弹窗即可观察」。`NavBoard.tsx` 的 `AppCard` 收回 `export`（唯一外部消费方已删），并更新文件头注释。
+- **分区 / 分组设置弹窗可拖动**：标题栏即拖动手柄（`Move` 图标 + 「按住可拖动」提示），`onPointerDown` 记录起点，window 级 `pointermove` / `pointerup` / `pointercancel` 更新 `transform: translate(dx, dy)` 偏移；保持遮罩 flex 居中与响应式尺寸不变。
+  - 边界 clamp：面板初始居中，允许偏移到「只留 80px 在视口内」，再远拖不出去，避免弹窗找不回来。
+  - 交互隔离：标题栏内的按钮 / 输入控件经 `closest()` 排除，不误触拖动；`dragMovedRef` 抑制 pointerup 后冒泡到遮罩的 click，避免「拖完顺手把弹窗关掉」（取消 / 恢复逻辑不被打断）。
+- **保留** v1.52.5 的事务链：`onPreview` 草稿实时上抛 → `NavPage.renderZones` 背景实时渲染 → `committed` 区分保存/取消 → 落盘后撤销 + 4s 兜底。拖开弹窗看到的即为真实导航页效果，而非示意卡。
+- **门禁**：`scripts/check-nav.mjs` 把「小样存在 / AppCard 导出」断言改为「小样零残留 / 拖动链路 / 遮罩防误关」4 条，负向自检新增 2 类（拖动缺失、小样回归，共 27 类）；文件头与 ④ 段数量同步。
+
+### 验证
+
+- 双 `tsc` 0 错；`check-nav` **165 ok / 0 FAIL**（27 类负向自检全检出）；`npm run test:gates` **全 22 组 FAIL=0**。
+- SEA 硬核验：ELF 魔数 `7f454c46` / e_machine=62 / 版本 `1.52.6` 嵌入 / 包成员 5 个 / dist JS base64 完整嵌入 / zip 内 = deb 内 = postject 产物 SHA-256 字节级一致。
+
+### 发布物
+
+- 包：`dockermanagementyanzi-linux-x64-v1.52.6.zip`（43,132,611 B）、`dockermanagementyanzi_1.52.6_amd64.deb`（42,847,798 B）；**zip 内 = deb 内 = postject 产物** 二进制 SHA-256 `66ad04059f6099c7c742d608a4c7bf79aa9e743024599d991ea3b35977bfece1` 字节级一致。
+
+### 已知限制
+
+- 拖动偏移不持久化，每次打开仍居中；窗口尺寸变化后偏移不自动重算（clamp 在下次拖动时生效）。
+- 拖到视口边缘时最多只留 80px 面板可见；遮罩点击仍可关闭（拖动本身除外）。
+- 中间版本 v1.51.19 / v1.52.0 / v1.52.1 的 Gitea Release 资产仍空缺（此前只选补发 v1.52.2）。
+
+### 下一步
+
+- 在 Gitea UI 确认 `build-and-publish`（SEA→Releases）v1.52.6 全绿并发布 Release；`build-docker-image` tag 触发推 Gitea 容器镜像库。
+
+---
+
 ## v1.52.5 — 2026-11-13（**main 分支 · 已构建 · 已推 Gitea**）
 
 ### 导航页：卡片换行 / 实时预览事务链 / 选项全部平铺

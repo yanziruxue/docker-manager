@@ -15,7 +15,7 @@
  *    v1.51.11 起 NavEditor 弹窗已删除，项目 CRUD 由 NavPage + NavAppModal 直接落盘、
  *    分组新建/删除由 NavGroupSettingsModal 接管、卡片 hover ✎ 由 NavBoard.onEditApp 直达；
  *  - 负向自检①：注入「内网缺 lanUrl 不回落 url」回归 → 重载模块应检出差异 → 还原 → 复核全绿；
- *  - 负向自检②：进程级注入 25 类回归（<NavEditor / 顶栏分组设置文字按钮 / 齿轮接线缺失 /
+ *  - 负向自检②：进程级注入 27 类回归（<NavEditor / 顶栏分组设置文字按钮 / 齿轮接线缺失 /
  *    顶栏添加项目按钮 / 高级字段折叠区 / 智能匹配 / 全局图库被 engineId 阻挡 /
  *    容器列表接线缺失 / 容器四字段映射缺失 / 背景图上限回退 2mb / 超限 JSON 中间件缺失 /
  *    上传兜底文案回退 / 前端体积预校验缺失 / 编辑按钮缺失 / editMode 未下传 NavBoard /
@@ -300,8 +300,6 @@ ok("★ 下载弹窗未绑定时先绑定目录，成功可回填项目图标",
 ok("★ 卡片墙自动换行且无横向滚动条（含水平布局）",
   board.includes('className="flex flex-wrap items-start"') &&
   !board.includes("overflow-x-auto") && !board.includes("snap-x") && !board.includes("snap-start"));
-ok("★ NavBoard 导出 AppCard 供弹窗实时预览复用",
-  board.includes("export function AppCard(") && gs.includes('import { AppCard } from "./NavBoard"'));
 ok("★ 分区设置草稿实时上抛预览，保存提交 / 取消撤销恢复",
   gs.includes("onPreview: (zones: NavZone[] | null) => void") &&
   gs.includes("onPreview(draft)") && gs.includes("if (!committed.current) onPreview(null)") &&
@@ -315,11 +313,18 @@ ok("★ NavPage 渲染链走 renderZones、写操作仍走真实 zones",
 ok("★ 保存后由落盘数据撤销预览 + 请求挂起兜底回落",
   navPage.includes("setTimeout(() => setPreviewZones(null), 4000)") &&
   navPage.includes("if (previewZones === null || groupSettings.open) return;"));
-ok("★ 弹窗内实时预览小样（复用 AppCard，5 类配置即时可见）",
-  ["实时预览（未保存）", "PREVIEW_APPS.map", "activeZone.zoneFirstGroupGap", "activeZone.groupCardGapTop",
-   "activeZone.groupCardGapBottom", "activeZone.gridGap", "activeZone.cardLayout",
-   "activeZone.cardSize", "activeZone.iconSize", "activeZone.cardStyle", "activeZone.iconShape"]
-    .every((k) => gs.includes(k)));
+// v1.52.6：移除弹窗内示意卡小样，改为标题栏可拖动 + 背景页实时渲染观察
+ok("★ 弹窗内实时预览小样零残留（示意卡与预览区块均已移除）",
+  !gs.includes("实时预览（未保存）") && !gs.includes("PREVIEW_APPS") &&
+  !gs.includes('import { AppCard } from "./NavBoard"'));
+ok("★ NavBoard 的 AppCard 不再导出（唯一外部消费方已删）",
+  !board.includes("export function AppCard(") && board.includes("function AppCard({"));
+ok("★ 分区设置弹窗标题栏可拖动（pointer + transform 偏移 + 视口边界 clamp）",
+  ["onDragHandlePointerDown", "onPointerDown={onDragHandlePointerDown}", "pointermove",
+   "pointerup", "dragOffset", "transform: `translate(", "cursor-grab",
+   "Math.max(0, (window.innerWidth - d.w) / 2 + 80)"].every((k) => gs.includes(k)));
+ok("★ 拖动后遮罩不会误关闭（取消 / 恢复不被打断）",
+  gs.includes("if (dragMovedRef.current) { dragMovedRef.current = false; return; }"));
 ok("★ 图标形状 10 项全部平铺（不再用下拉框）",
   gs.includes("options={ICON_SHAPE_OPTIONS}") && !gs.includes("<select") && !gs.includes('className={inputCls}'));
 ok("★ 环境天气 5 项全部平铺（不再用下拉框）",
@@ -349,8 +354,8 @@ if (BROKEN === ORIGINAL) {
   ok("还原字节级一致", read(TARGET) === ORIGINAL);
 }
 
-console.log("== ④ 负向自检（进程级注入 25 类回归 → 重跑本门禁应 exit 1） ==");
-// 父进程注入 25 类回归文本，子进程跳过 ④（NAV_GATE_NEGATIVE_CHILD=1）只跑 ①②③，
+console.log("== ④ 负向自检（进程级注入 27 类回归 → 重跑本门禁应 exit 1） ==");
+// 父进程注入 27 类回归文本，子进程跳过 ④（NAV_GATE_NEGATIVE_CHILD=1）只跑 ①②③，
 // 若 ② 的对应断言确实生效，子进程必因 FAIL 而 exit 1。
 if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
   const NAV_PAGE_REL = "src/pages/NavPage.tsx";
@@ -481,6 +486,16 @@ if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
       name: "注入图标形状选项错配回归（不再全部平铺）",
       rel: "src/components/NavGroupSettingsModal.tsx",
       inject: (s) => s.replace("options={ICON_SHAPE_OPTIONS}", "options={CARD_STYLE_OPTIONS}"),
+    },
+    {
+      name: "注入弹窗拖动缺失回归（标题栏不可拖）",
+      rel: "src/components/NavGroupSettingsModal.tsx",
+      inject: (s) => s.replace("onPointerDown={onDragHandlePointerDown}", ""),
+    },
+    {
+      name: "注入弹窗内实时预览小样回归（重新引入预览区块）",
+      rel: "src/components/NavGroupSettingsModal.tsx",
+      inject: (s) => s.replace("function genId(): string {", 'const PREVIEW_MARKER = "实时预览（未保存）";\nfunction genId(): string {'),
     },
   ];
   for (const c of cases) {

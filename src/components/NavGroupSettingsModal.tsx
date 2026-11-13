@@ -3,19 +3,13 @@
  *  - 左侧分上下：左上=分区列表（分区名右侧 ✎ 改名 / 🗑 删除），左下=当前分区下的分组列表（分组名右侧 ✎ 改名 / 🗑 删除）；
  *  - 右侧=该分区的外观配置（卡片布局 / 间距 / 大小 / 图标大小 / 卡片样式 / 图标形状）；
  *  - 分组仅为分类容器（v1.52.3），外观统一在分区级配置，该分区下所有分组共享。
- * 保存经 onSave(zones) 整体落盘（服务端 normalizeNavZones 白名单兜底）。
+ * v1.52.6：移除弹窗内的示意卡小样；标题栏改为可拖动，拖开后直接观察导航页实时效果。
+ * 草稿仍经 onPreview 上抛给背景页实时渲染，仅 onSave(zones) 整体落盘。
  */
 import { useEffect, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, Pencil, Plus, RotateCcw, Trash2, X } from "lucide-react";
-import type { NavAppItem, NavCardStyle, NavIconShape, NavZone } from "../types";
-import { AppCard } from "./NavBoard";
-
-/** 实时预览示意卡（url 为空 → 卡片禁用点击，不会打开链接） */
-const PREVIEW_APPS: NavAppItem[] = [
-  { id: "preview-1", name: "示例应用", description: "卡片预览", iconColor: "#f472b6" },
-  { id: "preview-2", name: "相册", description: "副标题", iconColor: "#60a5fa" },
-  { id: "preview-3", name: "下载器", description: "第二行", iconColor: "#34d399" },
-];
+import type { PointerEvent as ReactPointerEvent } from "react";
+import { ArrowDown, ArrowUp, Move, Pencil, Plus, RotateCcw, Trash2, X } from "lucide-react";
+import type { NavCardStyle, NavIconShape, NavZone } from "../types";
 
 /** 随机 id（与项目弹窗同风格：时间戳 36 进制 + 随机尾） */
 function genId(): string {
@@ -176,6 +170,58 @@ export function NavGroupSettingsModal({
   useEffect(() => () => {
     if (!committed.current) onPreview(null);
   }, [onPreview]);
+
+  // v1.52.6：标题栏可拖动——把弹窗挪开即可观察导航页（草稿实时渲染）的真实效果。
+  // 采用 transform 偏移而非 absolute 定位，保持遮罩居中布局与响应式尺寸不变。
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const dragRef = useRef<{
+    startX: number; startY: number; baseX: number; baseY: number; w: number; h: number;
+  } | null>(null);
+  // 拖动结束后紧跟的 click 会冒泡到遮罩；用它抑制「拖完顺手把弹窗关掉」
+  const dragMovedRef = useRef(false);
+  const onDragHandlePointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    // 标题栏上的按钮（✕ 等）与输入控件不触发拖动
+    if ((e.target as HTMLElement).closest("button, input, select, textarea, [data-no-drag]")) return;
+    const rect = panelRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    dragRef.current = {
+      startX: e.clientX, startY: e.clientY,
+      baseX: dragOffset.x, baseY: dragOffset.y,
+      w: rect.width, h: rect.height,
+    };
+    dragMovedRef.current = false;
+    e.preventDefault(); // 阻止拖选文本
+  };
+  useEffect(() => {
+    const clamp = (v: number, min: number, max: number) => (min > max ? 0 : Math.min(Math.max(v, min), max));
+    const onMove = (e: PointerEvent) => {
+      const d = dragRef.current;
+      if (!d) return;
+      const dx = e.clientX - d.startX;
+      const dy = e.clientY - d.startY;
+      if (Math.abs(dx) + Math.abs(dy) > 3) dragMovedRef.current = true;
+      // 面板初始居中：允许偏移到「只留 80px 在视口内」，再远就拖不出去（避免找不回弹窗）
+      const maxX = Math.max(0, (window.innerWidth - d.w) / 2 + 80);
+      const maxY = Math.max(0, (window.innerHeight - d.h) / 2 + 80);
+      setDragOffset({ x: clamp(d.baseX + dx, -maxX, maxX), y: clamp(d.baseY + dy, -maxY, maxY) });
+    };
+    const onUp = () => {
+      if (!dragRef.current) return;
+      dragRef.current = null;
+      // click 在 pointerup 后派发，留到下一轮再清除标记供遮罩消费
+      window.setTimeout(() => { dragMovedRef.current = false; }, 0);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+  }, []);
+
   // 由 initialGroupId 解析父分区；否则回落 initialZoneId；再回落首个分区
   const resolveInitialZoneId = (): string => {
     if (initialGroupId && (zones || []).some((z) => (z.groups || []).some((g) => g.id === initialGroupId))) {
@@ -263,15 +309,31 @@ export function NavGroupSettingsModal({
   const canSave = draft.every((z) => z.name.trim().length > 0 && z.groups.every((g) => g.name.trim().length > 0));
 
   return (
-    <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/40 p-4"
+      onClick={() => {
+        // 刚拖动过标题栏时，pointerup 派发的 click 不应被当成「点遮罩关闭」
+        if (dragMovedRef.current) { dragMovedRef.current = false; return; }
+        onClose();
+      }}
+    >
       <div
+        ref={panelRef}
         className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[88vh] flex flex-col overflow-hidden"
+        style={{ transform: `translate(${dragOffset.x}px, ${dragOffset.y}px)` }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center gap-2 px-5 py-3.5 border-b border-slate-100">
+        {/* v1.52.6：标题栏即拖动手柄，按住拖开弹窗可观察导航页实时效果 */}
+        <div
+          onPointerDown={onDragHandlePointerDown}
+          className="flex items-center gap-2 px-5 py-3.5 border-b border-slate-100 cursor-grab active:cursor-grabbing select-none"
+          title="按住标题栏拖动弹窗，拖开即可观察导航页效果"
+        >
+          <Move size={14} className="text-slate-400 flex-shrink-0" />
           <h3 className="text-base font-semibold text-slate-800">分区与分组设置</h3>
+          <span className="text-[11px] text-slate-400">按住可拖动</span>
           <div className="flex-1" />
-          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600">
+          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600" title="关闭">
             <X size={18} />
           </button>
         </div>
@@ -460,45 +522,10 @@ export function NavGroupSettingsModal({
               <p className="text-[12px] text-slate-400">请选择左侧分区以配置其卡片外观</p>
             ) : (
               <>
-                {/* v1.52.5：实时预览——5 类配置改动即时可见；仅保存才落盘，取消即恢复 */}
-                <section className="rounded-xl border border-rose-100 bg-rose-50/50 p-3">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <p className="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">实时预览（未保存）</p>
-                    <span className="text-[10px] text-rose-500">保存后生效 · 取消恢复</span>
-                  </div>
-                  <div
-                    className="rounded-lg bg-gradient-to-br from-rose-200 via-fuchsia-200 to-indigo-300 px-3 overflow-hidden"
-                    style={{ paddingTop: activeZone.zoneFirstGroupGap ?? 20 }}
-                  >
-                    <div
-                      className="text-sm font-bold text-white drop-shadow-sm"
-                      style={{ marginBottom: activeZone.groupCardGapTop ?? 20 }}
-                    >
-                      {activeZone.groups[0]?.name || "分组标题"}
-                    </div>
-                    <div
-                      className="flex flex-wrap items-start"
-                      style={{
-                        gap: activeZone.gridGap ?? 16,
-                        paddingBottom: activeZone.groupCardGapBottom ?? 32,
-                      }}
-                    >
-                      {PREVIEW_APPS.map((a) => (
-                        <AppCard
-                          key={a.id}
-                          app={a}
-                          iconMap={{}}
-                          url=""
-                          layout={activeZone.cardLayout || "vertical"}
-                          cardSize={activeZone.cardSize ?? 120}
-                          iconSize={activeZone.iconSize ?? 48}
-                          cardStyle={activeZone.cardStyle || "solid"}
-                          iconShape={activeZone.iconShape || "rounded"}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                </section>
+                {/* v1.52.6：移除示意卡小样——把弹窗拖开直接看导航页真实卡片，效果与保存后一致 */}
+                <p className="text-[11px] text-slate-400">
+                  改动即时作用于导航页；按住标题栏拖开弹窗即可观察，保存后生效 · 取消恢复
+                </p>
 
                 <div className="flex items-center justify-between">
                   <p className="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">分区配置 · {activeZone.name}</p>
