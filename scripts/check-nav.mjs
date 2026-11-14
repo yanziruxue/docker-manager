@@ -286,7 +286,7 @@ ok("SystemSettings 已移除 nav 字段", !typesSrc.includes("nav: NavConfig"));
 
 // v1.52.0：分区 → 分组 → 卡片三级结构
 ok("★ NavPage 分区角标 = 分区下应用总数", navPage.includes("reduce((s, g) => s + (g.apps?.length || 0), 0)"));
-ok("★ 选中分区高亮放大（v1.52.19 起 scale 1.2 倍）", navPage.includes("text-[18px]") && navPage.includes("scale-[1.2]"));
+ok("★ 选中分区高亮（v1.52.21 起不放大，仅白底高亮 + 字号 18px 区分）", navPage.includes("text-[18px]") && !navPage.includes("scale-[1.2]") && !navPage.includes("scale-[1.04]"));
 ok("★ 「全部」标签合并所有分区", navPage.includes('"__all__"') && navPage.includes("显示全部分区的分组"));
 ok("★ NavBoard 支持 zoneTag（全部视图标注所属分区）", board.includes("zoneTag") && navPage.includes("zoneTag={isAll ? zone.name : undefined}"));
 ok("★ 分区下内联「添加分组」入口", navPage.includes("addGroupToZone") && navPage.includes("添加分组"));
@@ -440,10 +440,10 @@ ok("★ 环境天气 5 项全部平铺（不再用下拉框）",
   navSettingsModal.includes('value={draft.weather || "none"}') &&
   !navSettingsModal.includes("<select") && navSettingsModal.includes("flex flex-wrap gap-1.5"));
 
-// ── v1.52.19：分区标签透明度/放大 + 卡片右键上下文菜单 ──
-ok("★ v1.52.19 分区标签未选中透明度 30%（hover 回升）、选中放大 1.2 倍",
-  navPage.includes("scale-[1.2]") && navPage.includes("opacity-30") &&
-  !navPage.includes("scale-[1.04]"));
+// ── v1.52.19/21：分区标签透明度 + 卡片右键上下文菜单 ──
+ok("★ v1.52.21 分区标签未选中透明度 30%（hover 回升）、选中不放大",
+  !navPage.includes("scale-[1.2]") && !navPage.includes("scale-[1.04]") &&
+  navPage.includes("opacity-30"));
 ok("★ v1.52.19 卡片右键上下文菜单接线（NavBoard altZone 反向解析 → NavPage 菜单）",
   navPage.includes("onAppContextMenu={openAppContextMenu}") &&
   board.includes("onAppContextMenu?:") && board.includes("onContextMenu={(e) => onAppContextMenu?.(") &&
@@ -601,8 +601,8 @@ if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
       inject: (s) => s.replaceAll("!editMode && url && (", "url && ("),
     },
     {
-      name: "注入 v1.52.19 分区标签样式回退回归（撤销 30% 透明 / 1.2 倍放大）",
-      inject: (s) => s.replaceAll("scale-[1.2]", "scale-[1.04]").replaceAll("opacity-30", "opacity-100"),
+      name: "注入 v1.52.21 分区标签样式回退回归（撤销 30% 透明 / 恢复放大）",
+      inject: (s) => s.replaceAll("text-[18px] py-2", "text-[18px] scale-[1.2] py-2").replaceAll("opacity-30", "opacity-100"),
     },
     {
       name: "注入 v1.52.19 右键菜单接线缺失回归（NavPage 不下传 onAppContextMenu）",

@@ -290,10 +290,10 @@ export function NavPage({ navZones, onSaveNavZones, containers, navPageSettings,
                     }
                   : undefined
               }
-              // v1.52.19：未选中透明度 30%（hover 回升）、选中放大 1.2 倍；选中仍高亮白底
+              // v1.52.21：未选中透明度 30%（hover 回升）、选中不放大（仅白底高亮 + 字号区分）
               className={`rounded-full backdrop-blur-sm transition-all ${
                 active
-                  ? "bg-white text-fuchsia-600 font-bold shadow-md text-[18px] scale-[1.2] py-2 px-5"
+                  ? "bg-white text-fuchsia-600 font-bold shadow-md text-[18px] py-2 px-5"
                   : "bg-white/60 text-slate-600 hover:bg-white/85 hover:opacity-90 text-[13px] py-1.5 px-4 opacity-30"
               } ${dragActive ? "ring-2 ring-fuchsia-400/70" : ""}`}
             >
@@ -310,7 +310,7 @@ export function NavPage({ navZones, onSaveNavZones, containers, navPageSettings,
           onClick={() => setNavTab("__all__")}
           className={`rounded-full backdrop-blur-sm transition-all ${
             isAll
-              ? "bg-white text-fuchsia-600 font-bold shadow-md text-[18px] scale-[1.2] py-2 px-5"
+              ? "bg-white text-fuchsia-600 font-bold shadow-md text-[18px] py-2 px-5"
               : "bg-white/60 text-slate-600 hover:bg-white/85 hover:opacity-90 text-[13px] py-1.5 px-4 opacity-30"
           }`}
           title="显示全部分区的分组"
