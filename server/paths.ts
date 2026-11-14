@@ -22,6 +22,13 @@ export const CONFIG_DIR = resolveDir(process.env.CONFIG_DIR, CONFIG_DIR_DEFAULT)
 /** Compose 项目统一存放目录：<data>/dockercompose/<项目名>/ */
 export const COMPOSE_DIR = path.join(DATA_DIR, "dockercompose");
 
+/**
+ * 自定义图标库目录（v1.53.1）：固定为 <data>/图标，不再由设置中心自由绑定。
+ * data 目录本就在 systemd ProtectSystem 白名单（ReadWritePaths= 安装目录）内，天然可写，
+ * 彻底规避用户自选路径（如 /vol1/1000/photos/图标）触发的 EROFS 只读沙箱问题。
+ */
+export const ICON_LIB_DIR = path.join(DATA_DIR, "图标");
+
 /** 解析数据文件路径（<data>/...） */
 export function dataPath(filename: string): string {
   return path.join(DATA_DIR, filename);
@@ -37,8 +44,8 @@ export function logPath(filename: string): string {
   return path.join(LOG_DIR, filename);
 }
 
-// 确保目录存在（幂等）
-for (const dir of [DATA_DIR, LOG_DIR, CONFIG_DIR, COMPOSE_DIR]) {
+// 确保目录存在（幂等）；ICON_LIB_DIR 同样启动即建，保证下载/上传/扫描始终可用
+for (const dir of [DATA_DIR, LOG_DIR, CONFIG_DIR, COMPOSE_DIR, ICON_LIB_DIR]) {
   fs.mkdirSync(dir, { recursive: true });
 }
 

@@ -1002,16 +1002,11 @@ export function listStackIconsApi(engineId: string, stackName: string): Promise<
   return request(`/engines/${engineId}/stacks/${encodeURIComponent(stackName)}/icons`);
 }
 
-// ============ 自定义图标库目录（v1.50.32，设置中心 → 页面设置） ============
+// ============ 自定义图标库（v1.50.32；v1.53.1 起目录固定为服务端 <data>/图标，不再自由绑定） ============
 
-/** 列出自定义图标目录：映射（自动匹配用）+ 文件清单（图库下拉用）+ 绑定状态/错误 */
+/** 列出自定义图标目录：映射（自动匹配用）+ 文件清单（图库下拉用）+ 就绪状态/错误 */
 export function listCustomIconsApi(): Promise<import("./custom-icons").CustomIconsPayload> {
   return request("/custom-icons");
-}
-
-/** 检测目录（设置卡片用）：不落盘，只回报可用图标数量与错误 */
-export function checkCustomIconDirApi(dir: string): Promise<import("./custom-icons").CustomIconCheckResult> {
-  return request("/custom-icons/check", { method: "POST", body: JSON.stringify({ dir }) });
 }
 
 /** 从链接下载图标写入图标库目录（v1.52.15：导航页 / 堆栈 LABELS / SETTINGS 统一入口）；name = 保存文件名（去扩展名前的键） */
@@ -1019,16 +1014,11 @@ export function downloadCustomIconApi(url: string, name: string): Promise<{ url:
   return request("/custom-icons/download", { method: "POST", body: JSON.stringify({ url, name }) });
 }
 
-// ============ 导航页专属图标库（v1.52.4，与 Docker 图标库独立） ============
+// ============ 导航页专属图标库（v1.52.4 历史通道；v1.52.15 已统一进 custom-icons，仅保留兼容读取） ============
 
 /** 列出导航图标库（绑定状态 / 目录 / 文件清单 / stem→URL 映射） */
 export function listNavIconsApi(): Promise<import("./custom-icons").CustomIconsPayload> {
   return request("/nav-icons");
-}
-
-/** 绑定 / 解绑导航图标库目录（服务端绝对路径；空串 = 解绑） */
-export function bindNavIconDirApi(dir: string): Promise<import("./custom-icons").CustomIconsPayload> {
-  return request("/nav-icons/bind", { method: "POST", body: JSON.stringify({ dir }) });
 }
 
 /** 从链接下载图标到导航图标库；name 用作「按项目名匹配」的键 */

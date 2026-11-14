@@ -619,13 +619,9 @@ export default function App() {
     setPage(target as PageKey);
   };
 
-  // v1.52.15：图标下载弹窗未绑定图标库目录时「前往图标库目录设置」——
-  // 跳设置中心并定位「页面设置」section（图标库目录卡片所在），从导航页 / 堆栈页共用
-  const [settingsFocusSection, setSettingsFocusSection] = useState("");
-  const goToIconDirSettings = () => {
-    setSettingsFocusSection("modal");
-    setPage("settings");
-  };
+  // v1.53.1：图标库目录固定 <data>/图标，「前往图标库目录设置」跳转链路整体移除；
+  // settingsFocusSection 机制保留（initialSection 为 Settings 通用定位入口）
+  const [settingsFocusSection] = useState("");
 
   // 会话级页面持久化（v1.50.7）：页面变化即写入 sessionStorage，刷新后恢复
   useEffect(() => {
@@ -723,12 +719,10 @@ export default function App() {
     try {
       const saved = await saveSettingsApi(newSettings);
       setSettings(saved);
-      // 图标库目录保存后立即重拉数据：loadEngineData 会重新读取映射并补齐图标
-      if (activeEngineId) void loadEngineData(activeEngineId);
     } catch (err) {
       console.error("保存设置失败:", err);
     }
-  }, [activeEngineId, loadEngineData]);
+  }, []);
 
   // 导航分区落盘（v1.52.0：分区→分组→卡片三级结构）：走独立 /api/nav-groups 通道，绝不污染 main settings
   const handleSaveNavZones = useCallback(
@@ -1002,7 +996,6 @@ export default function App() {
               containers={containers}
               navPageSettings={navPageSettings}
               onSaveNavPageSettings={handleSaveNavPageSettings}
-              onGoToSettings={goToIconDirSettings}
             />
           )}
           {page === "containers" && (
@@ -1037,7 +1030,6 @@ export default function App() {
               doubleClickIconEditStack={settings?.modal?.doubleClickIconEditStack ?? true}
               defaultVisibleColumns={settings?.columnVisibility?.stackList}
               onOpenContainerDetail={(name, tab) => handleNavigate("containers", { focusContainerName: name, focusContainerTab: tab })}
-              onGoToSettings={goToIconDirSettings}
             />
           )}
           {page === "images" && (

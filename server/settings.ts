@@ -199,6 +199,7 @@ const DEFAULT_SETTINGS = {
      * 运行本服务机器上的**绝对路径**；留空 = 未绑定 ⇒ 沿用堆栈 icon/ 图库方案。
      * 绑定后按名称自动匹配图标，格式优先级 png > jpg/jpeg > ico > 其他。
      */
+    /** @deprecated v1.53.1 起图标库目录固定为 <data>/图标（ICON_LIB_DIR），此字段不再被消费（保留仅为兼容旧 settings.json） */
     iconDir: "",
     /**
      * 页面显示控制（v1.51.4）：被隐藏的一级页面 key 列表；顶栏不渲染、不可作登录默认页。

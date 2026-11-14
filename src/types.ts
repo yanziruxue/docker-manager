@@ -744,10 +744,8 @@ export interface ModalConfig {
    */
   doubleClickIconEditStack: boolean;
   /**
-   * 自定义图标库目录（v1.50.32，设置中心 → 页面设置 → 图标库目录）：
-   * 运行本服务机器上的绝对路径；留空 = 未绑定 ⇒ 使用原有堆栈 icon/ 图库方案。
-   * 绑定后按名称（不含扩展名）自动匹配图标，格式优先级 png > jpg > ico > 其他。
-   * 可选字段：旧 settings.json 无此键时回落为空串。
+   * 自定义图标库目录（v1.50.32）：**v1.53.1 起已废弃**——图标库目录固定为
+   * 服务端 <data>/图标（ICON_LIB_DIR），此字段不再被消费（保留仅为兼容旧 settings.json）。
    */
   iconDir?: string;
   /**

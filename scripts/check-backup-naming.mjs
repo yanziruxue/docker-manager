@@ -138,13 +138,9 @@ ok("已清理 loadMirror / handleMirrorSyncNow", !/loadMirror|handleMirrorSyncNo
 ok("已清理镜像 API import", !/fetchMirrorStatusApi|syncMirrorNowApi/.test(settingsTsx));
 ok("已清理 MirrorRuntimeState 类型 import", !/MirrorRuntimeState/.test(settingsTsx));
 ok("已清理随之失效的图标 import（Info）", !/^\s*Info,$/m.test(settingsTsx));
-// FolderOpen 自 v1.50.32 起被「页面设置 → 图标库目录」卡片合法复用：
-// 允许存在，但必须确实服务于该新卡片，防止旧备份卡片删除后残留死 import。
-ok(
-  "FolderOpen 仅服务于图标库目录卡片",
-  !/\bFolderOpen,/.test(settingsTsx) ||
-    (settingsTsx.includes('title="图标库目录"') && settingsTsx.includes("icon={<FolderOpen size={16} />}"))
-);
+// FolderOpen 曾被「页面设置 → 图标库目录」卡片复用（v1.50.32）；
+// v1.53.1 该卡片已删（图标库目录固定 <data>/图标）⇒ FolderOpen 必须零残留，防死 import。
+ok("v1.53.1 FolderOpen 随图标库目录卡片删除零残留", !/\bFolderOpen,/.test(settingsTsx));
 
 /* ---------- ④ 权限预检退役 ---------- */
 console.log("\n── ④ 备份权限预检退役 ──");

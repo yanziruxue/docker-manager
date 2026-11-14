@@ -149,17 +149,18 @@ ok("服务端默认 iconDir 为空", read("server/settings.ts").includes('iconDi
 ok("前端类型声明 iconDir", read("src/types.ts").includes("iconDir?: string"));
 const apiSrc = read("src/api.ts");
 ok("api.ts 暴露 listCustomIconsApi", apiSrc.includes("export function listCustomIconsApi"));
-ok("api.ts 暴露 checkCustomIconDirApi", apiSrc.includes("export function checkCustomIconDirApi"));
 const appSrc = read("src/App.tsx");
 ok("App 装配层拉取图标映射", appSrc.includes("listCustomIconsApi().catch(() => EMPTY_CUSTOM_ICONS)"));
 ok("App 装配层调用 shouldAutoFillIcon", appSrc.includes("shouldAutoFillIcon(st.icon)"));
 ok("App 装配层调用 iconNameCandidates", appSrc.includes("iconNameCandidates(c.name"));
 ok("App 装配层调用 pickCustomIcon", appSrc.includes("pickCustomIcon(customIconMap, candidates)"));
-ok("设置保存后立即刷新数据", appSrc.includes("if (activeEngineId) void loadEngineData(activeEngineId)"));
+ok("v1.53.1 保存设置不再触发数据重拉（图标库目录已固定）", !appSrc.includes("图标库目录保存后立即重拉数据"));
 const settingsSrc = read("src/pages/Settings.tsx");
-ok("页面设置新增图标库目录卡片", settingsSrc.includes('title="图标库目录"'));
-ok("卡片写入 modal.iconDir", settingsSrc.includes('update("modal", "iconDir", v)'));
-ok("卡片调用检测接口", settingsSrc.includes("checkCustomIconDirApi("));
+// v1.53.1：图标库目录固定 <data>/图标，设置卡片与检测链路整体移除（零残留断言）
+ok("v1.53.1 设置页「图标库目录」卡片零残留", !settingsSrc.includes('title="图标库目录"') &&
+  !settingsSrc.includes('update("modal", "iconDir"') &&
+  !settingsSrc.includes("checkCustomIconDirApi(") &&
+  !settingsSrc.includes("目录可读但不可写"));
 const stacksSrc = read("src/pages/Stacks.tsx");
 ok("新增图标输入自动匹配组件", fs.existsSync("src/components/IconAutoComplete.tsx"));
 const iconAutoSrc = read("src/components/IconAutoComplete.tsx");
@@ -167,8 +168,8 @@ ok("自动匹配组件拉取自定义目录与堆栈图库", iconAutoSrc.include
 ok("自动匹配组件按名称过滤", iconAutoSrc.includes("e.stem.includes(q)"));
 ok("编辑堆栈图标输入接入 IconAutoComplete", stacksSrc.includes("<IconAutoComplete"));
 ok("设置卡片移除冗长描述段落", !settingsSrc.includes("绑定后自动识别：堆栈"));
-// v1.52.18：图标库目录可写性探测（只读挂载 EROFS / 权限不足 EACCES 提前暴露）
 const ciSrc = read("server/custom-icons.ts");
+// v1.52.18：图标库目录可写性探测（只读挂载 EROFS / 权限不足 EACCES 提前暴露）
 ok("v1.52.18 导出 probeIconDirWritable 可写性探测", ciSrc.includes("export function probeIconDirWritable"));
 ok("v1.52.18 探测覆盖 EROFS 只读挂载", ciSrc.includes('code === "EROFS"'));
 ok("v1.52.18 下载前 fail-fast 探测可写", ciSrc.includes("const w = probeIconDirWritable(dir);") &&
@@ -177,12 +178,26 @@ ok("v1.52.18 写入失败人话错误（EROFS/EACCES）",
   ciSrc.includes("写入失败：目录是只读挂载") && ciSrc.includes("写入失败：服务运行账号对该目录没有写权限"));
 ok("v1.52.18 检测接口回报 writable/warn", indexSrc.includes("probeIconDirWritable(dir);") &&
   indexSrc.includes("writable: w.writable") && indexSrc.includes("warn: w.writable"));
-ok("v1.52.18 前端检测结果显示不可写警告", settingsSrc.includes("目录可读但不可写"));
+ok("v1.53.1 前端检测警告 UI 零残留（卡片已删）", !settingsSrc.includes("目录可读但不可写"));
 // v1.53.0：EROFS 提示附 systemd 沙箱修复指引（ProtectSystem=strict + ReadWritePaths drop-in）
 ok("v1.53.0 EROFS 指引常量与两处文案接线和引导", ciSrc.includes("const EROFS_HINT") &&
   ciSrc.includes("systemctl edit dockermanagementyanzi") &&
   ciSrc.includes("ReadWritePaths=-") &&
   ciSrc.includes("${EROFS_HINT}"));
+// v1.53.1：图标库目录固定 <data>/图标（ICON_LIB_DIR），不再自由绑定
+const pathsSrc = read("server/paths.ts");
+ok("v1.53.1 paths.ts 导出 ICON_LIB_DIR = <data>/图标 并启动即建",
+  pathsSrc.includes('export const ICON_LIB_DIR = path.join(DATA_DIR, "图标")') &&
+  pathsSrc.includes("COMPOSE_DIR, ICON_LIB_DIR"));
+ok("v1.53.1 服务端 boundCustomIconDir 固定走 ICON_LIB_DIR",
+  indexSrc.includes("return resolveCustomIconDir(ICON_LIB_DIR);") &&
+  indexSrc.includes("ICON_LIB_DIR") && indexSrc.includes('from "./paths.js"'));
+ok("v1.53.1 下载弹窗不再有「前往设置」跳转（onGoToSettings 零残留）",
+  !read("src/components/NavIconDownloadModal.tsx").includes("onGoToSettings") &&
+  !appSrc.includes("goToIconDirSettings") &&
+  !read("src/pages/NavPage.tsx").includes("onGoToSettings") &&
+  !stacksSrc.includes("onGoToSettings") &&
+  !appSrc.includes("onGoToSettings"));
 // v1.52.23：编辑项目「上传本地图片」与「从链接下载」并列（服务端 upload 路由 + 前端按钮）
 ok("v1.52.23 导出 uploadCustomIcon（探测可写 → CT 映射扩展名 → 落盘）",
   ciSrc.includes("export function uploadCustomIcon") &&

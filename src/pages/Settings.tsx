@@ -53,7 +53,6 @@ import {
   FileText,
   Eye,
   Smartphone,
-  FolderOpen,
 } from "lucide-react";
 import type { SystemSettings, DockerEngine, UpdateInfo, UpdateState, ResourceTag, ComposeTemplate, AppInfo, LogListResult, LogTailResult, NetInterfaceOption, NotifyRuntimeStatus, PageKey } from "../types";
 // 值导入（不是 type）：密钥「清除」哨兵值
@@ -157,7 +156,6 @@ import {
   fetchNetInterfacesApi,
   testNotifyApi,
   fetchNotifyStatusApi,
-  checkCustomIconDirApi,
 } from "../api";
 import { copyText, selectNodeText } from "../lib/clipboard";
 
@@ -2216,31 +2214,7 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
     setTags(tags.map((t) => (t.id === id ? { ...t, ...patch } : t)));
   const removeTag = (id: string) => setTags(tags.filter((t) => t.id !== id));
 
-  // 自定义图标库目录（v1.50.32）：「检测目录」只探测不落盘，路径仍由底部「保存设置」写入 settings.json
-  const [iconDirCheck, setIconDirCheck] = useState<{ ok: boolean; message: string } | null>(null);
-  const [iconDirChecking, setIconDirChecking] = useState(false);
-  const handleCheckIconDir = async () => {
-    setIconDirChecking(true);
-    setIconDirCheck(null);
-    try {
-      const r = await checkCustomIconDirApi(String(data.modal?.iconDir ?? ""));
-      let message = "";
-      let okish = r.ok;
-      if (r.unbound) message = "当前未绑定目录：将使用原有的堆栈 icon/ 图库方案";
-      else if (r.ok && r.warn) {
-        // v1.52.18：目录可读但不可写（只读挂载 / 权限不足）——黄色警告，图标仍可显示
-        message = `目录可读但不可写：${r.warn}`;
-        okish = false;
-      }
-      else if (r.ok) message = `目录可用：识别到 ${r.count} 个可自动匹配的图标（共 ${r.files} 个图标文件）`;
-      else message = `目录不可用：${r.error}`;
-      setIconDirCheck({ ok: okish, message });
-    } catch (e: any) {
-      setIconDirCheck({ ok: false, message: `检测失败：${e?.message || "请求失败"}` });
-    } finally {
-      setIconDirChecking(false);
-    }
-  };
+  // v1.53.1：图标库目录已固定为服务端 <data>/图标（ICON_LIB_DIR），设置卡片与检测逻辑整体移除
 
   const update = (section: string, field: string, value: any) => {
     // section 只会取 docker / notifications 等对象段；defaultsVersion 等标量段不参与
@@ -4400,36 +4374,6 @@ docker-compose version</code>
                   onChange={(val) => update("modal", "doubleClickIconEditStack", val)}
                 />
               </FormField>
-            </Card>
-
-            <Card title="图标库目录" icon={<FolderOpen size={16} />}>
-              <FormField
-                label="自定义图标文件夹（服务端绝对路径）"
-                hint="填写运行本服务那台机器上的图标目录绝对路径，如 /mnt/user/appdata/icons。留空 = 未绑定，使用原有的堆栈 icon/ 图库方案。点击底部「保存设置」后立即生效。"
-              >
-                <div className="flex items-center gap-2">
-                  <Input
-                    value={String(data.modal?.iconDir ?? "")}
-                    onChange={(v) => { update("modal", "iconDir", v); setIconDirCheck(null); }}
-                    placeholder="/mnt/user/appdata/icons"
-                    className="flex-1"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleCheckIconDir}
-                    disabled={iconDirChecking}
-                    className="flex items-center gap-1.5 px-3 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50 whitespace-nowrap"
-                  >
-                    {iconDirChecking ? <Loader2 size={14} className="animate-spin" /> : <FolderOpen size={14} />}
-                    检测目录
-                  </button>
-                </div>
-              </FormField>
-              {iconDirCheck && (
-                <p className={`text-xs mt-1.5 ${iconDirCheck.ok ? "text-green-600" : "text-amber-600"}`}>
-                  {iconDirCheck.message}
-                </p>
-              )}
             </Card>
 
             {/* v1.50.36 内外网自动切换：配置内网网段，容器管理页 WebUI 按访问来源分派 */}

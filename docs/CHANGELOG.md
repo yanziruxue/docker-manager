@@ -16,6 +16,21 @@
 
 ---
 
+## v1.53.1 — 2026-11-14（**main 分支 · 已构建 · 已推 Gitea**）
+
+### 图标库目录固定为 `<data>/图标`，移除设置页「图标库目录」卡片
+
+- **需求**：图标库目录写死为应用数据目录下的「图标」文件夹（`<安装目录>/data/图标`），并整体移除设置中心的「图标库目录」自由绑定卡片——`data` 目录本就在 systemd `ProtectSystem=strict` 白名单内，**天然可写，从根上消灭 EROFS**。
+- **服务端**：`server/paths.ts` 新增 `ICON_LIB_DIR = <DATA_DIR>/图标` 并加入启动幂等 mkdir 循环；`server/index.ts` `boundCustomIconDir()` 固定返回 `resolveCustomIconDir(ICON_LIB_DIR)`，`/api/custom-icons` 的 `bound` 恒为 true，`/api/custom-icons/check` 保留端点但忽略入参、只探测固定目录（供 OTA 过渡期旧前端调用）；`settings.ts` / `src/types.ts` 的 `modal.iconDir` 保留字段标 `@deprecated`（不再被消费）。
+- **前端**：`Settings.tsx` 删「图标库目录」卡片 + 检测状态与逻辑；`NavIconDownloadModal.tsx` 删「没有绑定图标库目录」提示与「前往图标库目录设置」按钮（`onGoToSettings` prop 移除），改为展示固定目录与图标数；`NavAppModal` / `NavPage` / `Stacks` / `App.tsx` 拆除 `onGoToSettings` 全链路与 `goToIconDirSettings`，保存设置不再触发数据重拉；`api.ts` 删 `checkCustomIconDirApi` 与 `bindNavIconDirApi`。
+- **门禁**：`check-custom-icons` 翻转 + 新增（设置卡片/检测警告零残留、ICON_LIB_DIR 接线、onGoToSettings 零残留）→ **77 PASS / 0 FAIL**；`check-nav` 断言同步 + 负向注入替换（含新增「恢复 onGoToSettings 回归」注入）→ **258 ok / 0 FAIL**；`check-backup-naming` FolderOpen 断言翻转（随卡片删除零残留）→ **48 PASS / 0 FAIL**；`test:gates` 22 组全绿；双 `tsc` 0 错。
+- **迁移**：不做自动迁移（用户拍板手动搬文件）——旧目录（如 `/vol1/1000/photos/图标`）的图标文件需手动复制到 `<data>/图标`；旧目录原样保留、不受影响。
+- **未完成 / 已知限制**：无。
+- **验证（硬证据）**：二进制 130,616,512 B / SHA-256 `9dc5a928…8dbb8c`（全串 `9dc5a9288fd65df0f5c40a6730af3e61dbea6e1ff8a744fb8ace2212b48dbb8c`）；ELF `7f454c46` + e_machine=62；版本锚点 1.53.1 ×1、旧版 1.53.0 归零；`ICON_LIB_DIR` / `图标` / upload 路由字符串已嵌入二进制；zip（43,136,687 B / SHA `0d936848…1f239`）与 deb（42,851,492 B / SHA `4a42936f…51217`）内二进制与 postject 产物 SHA 逐字节一致。
+- **下一步**：无。
+
+---
+
 ## v1.53.0 — 2026-11-14（**main 分支 · 已构建 · 已推 Gitea**）
 
 ### EROFS 提示附 systemd 沙箱修复指引

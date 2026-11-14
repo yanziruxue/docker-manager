@@ -1,9 +1,8 @@
 /**
- * 导航页专属图标库（v1.52.4）——与「设置中心 → 页面设置 → 图标库目录」
- * （settings.json 的 modal.iconDir，供 Docker / 堆栈页使用）完全分开：
- *  - 独立配置文件 config/nav-icons.json，只存 { dir }；
- *  - 独立路由 /api/nav-icons/*，从链接下载的图标只写入本库目录；
- *  - 只读扫描 / 取图防穿越复用 server/custom-icons.ts 的纯函数，避免两套实现漂移。
+ * 导航页专属图标库（v1.52.4）——**v1.52.15 起已统一进 /api/custom-icons（图标库目录），
+ * v1.53.1 起图标库目录固定为 <data>/图标（ICON_LIB_DIR）**；本文件仅保留
+ * /api/nav-icons/* 兼容路由（独立配置文件 config/nav-icons.json，只存 { dir }），
+ * 只读扫描 / 取图防穿越复用 server/custom-icons.ts 的纯函数，避免两套实现漂移。
  *
  * 安全边界：URL 仅 http(s)；拒绝回环 / 本机 / 云元数据；重定向手动跟随 ≤3 跳且逐跳校验；
  * Content-Type 必须 image/*；流式读取累计 ≤10MB；文件名保留中文但剔除路径与危险字符；

@@ -1,14 +1,13 @@
 /**
- * 「从链接下载图标」弹窗（v1.52.4 引入，v1.52.15 重构）：
- *  - 图标库目录**统一使用**「设置中心 → 页面设置 → 图标库目录」（modal.iconDir），
- *    与 Docker / 堆栈自定义图标库共用同一目录，不再单独绑定导航页目录；
- *  - 未绑定时提示「没有绑定图标库目录」+「前往图标库目录设置」一键跳转（onGoToSettings）；
+ * 「从链接下载图标」弹窗（v1.52.4 引入，v1.52.15 重构，v1.53.1 简化）：
+ *  - 图标库目录 v1.53.1 起固定为服务端 <data>/图标（ICON_LIB_DIR），不再自由绑定；
+ *  - 弹窗展示当前图库目录与图标数，目录不可读时仅提示错误（不再有「前往设置」跳转）；
  *  - 输入图片链接 + 名称（默认预填当前上下文名称：项目名称 / 服务名称 / 堆栈名称，可手动修改）
  *    → 下载写入图标库目录，同名自动匹配；
  *  - 下载成功可一键回填当前正在编辑的图标位（onDownloaded）。
  */
 import { useEffect, useState } from "react";
-import { Download, FolderOpen, Loader2, Settings as SettingsIcon, X } from "lucide-react";
+import { Download, FolderOpen, Loader2, X } from "lucide-react";
 import { downloadCustomIconApi, listCustomIconsApi } from "../api";
 import type { CustomIconsPayload } from "../custom-icons";
 
@@ -28,15 +27,12 @@ function nameFromUrl(u: string): string {
 export function NavIconDownloadModal({
   suggestedName,
   onDownloaded,
-  onGoToSettings,
   onClose,
 }: {
   /** 默认名称（当前上下文：项目名称 / 服务名称 / 堆栈名称，便于下载后自动匹配，可手动修改） */
   suggestedName?: string;
   /** 下载成功后回填当前编辑中的图标位 */
   onDownloaded?: (url: string) => void;
-  /** 未绑定图标库目录时「前往图标库目录设置」跳转回调 */
-  onGoToSettings?: () => void;
   onClose: () => void;
 }) {
   const [payload, setPayload] = useState<CustomIconsPayload | null>(null);
@@ -103,35 +99,22 @@ export function NavIconDownloadModal({
             </div>
           ) : (
             <>
-              {/* v1.52.15：图标库目录统一走设置中心；未绑定时提示 + 一键跳转 */}
+              {/* v1.53.1：图标库目录固定 <data>/图标，恒已绑定；仅展示目录与图标数 */}
               <section className="rounded-xl border border-slate-100 bg-slate-50/60 p-3 space-y-2">
                 <p className="text-xs font-medium text-slate-600 flex items-center gap-1">
                   <FolderOpen size={12} /> 图标库目录
                 </p>
                 {bound ? (
                   <p className="text-[11px] text-emerald-600">
-                    已绑定 · {payload?.entries.length || 0} 个图标 · {payload?.dir}
+                    {payload?.entries.length || 0} 个图标 · {payload?.dir}
                   </p>
                 ) : (
-                  <>
-                    <p className="text-[11px] text-amber-600 leading-4">
-                      没有绑定图标库目录。请先在设置中心 → 页面设置 → 图标库目录 填写运行本服务的机器上的绝对路径（服务账号需有写入权限）。
-                    </p>
-                    {onGoToSettings && (
-                      <button
-                        type="button"
-                        onClick={onGoToSettings}
-                        className="inline-flex items-center gap-1 px-3 py-1.5 text-[12px] text-white bg-blue-500 rounded-lg hover:bg-blue-600"
-                      >
-                        <SettingsIcon size={12} /> 前往图标库目录设置
-                      </button>
-                    )}
-                  </>
+                  <p className="text-[11px] text-amber-600 leading-4">图标库目录暂不可读。</p>
                 )}
                 {payload?.error && <p className="text-[11px] text-amber-600">{payload.error}</p>}
               </section>
 
-              {/* 下载区：仅在已绑定时可用 */}
+              {/* 下载区 */}
               <section className="rounded-xl border border-slate-100 bg-slate-50/60 p-3 space-y-2">
                 <p className="text-xs font-medium text-slate-600">下载图标</p>
                 <input
@@ -156,7 +139,6 @@ export function NavIconDownloadModal({
                 >
                   {busy ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} 下载到图标库
                 </button>
-                {!bound && <p className="text-[11px] text-amber-600">绑定图标库目录后即可下载</p>}
                 <p className="text-[11px] text-slate-400 leading-4">
                   支持 png / jpg / gif / svg / webp / ico，单张 ≤10MB；重名自动追加序号，不会覆盖已有图标。同名项目 / 服务 / 堆栈会自动匹配该图标。
                 </p>

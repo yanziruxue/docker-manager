@@ -46,7 +46,6 @@ export function NavAppModal({
   initialGroupId,
   onSave,
   onDelete,
-  onGoToSettings,
   onClose,
 }: {
   /** 导航分区（v1.52.0）：内部展开全部分组用于归属下拉 / 名称唯一 / 容器已添加判定 */
@@ -62,8 +61,6 @@ export function NavAppModal({
   onSave: (groupId: string, app: NavAppItem) => void;
   /** 编辑态删除项目（v1.51.11）：由 NavPage 从所有分组移除同 id 条目并落盘 */
   onDelete?: (appId: string) => void;
-  /** v1.52.15：下载弹窗未绑定图标库目录时「前往图标库目录设置」跳转 */
-  onGoToSettings?: () => void;
   onClose: () => void;
 }) {
   const editing = !!initial;
@@ -375,7 +372,7 @@ export function NavAppModal({
                   onClick={() => iconUploadRef.current?.click()}
                   disabled={iconUploading}
                   className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] text-fuchsia-600 border border-fuchsia-200 rounded-md hover:bg-fuchsia-50 disabled:opacity-50"
-                  title="上传本地图片到图标库目录（未绑定目录时先绑定）"
+                  title="上传本地图片到图标库目录"
                 >
                   <Upload size={11} /> {iconUploading ? "上传中…" : "上传"}
                 </button>
@@ -383,7 +380,7 @@ export function NavAppModal({
                   type="button"
                   onClick={() => setIconDownloadOpen(true)}
                   className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] text-fuchsia-600 border border-fuchsia-200 rounded-md hover:bg-fuchsia-50"
-                  title="输入图片链接下载到导航图标库（未绑定目录时先绑定）"
+                  title="输入图片链接下载到图标库目录"
                 >
                   <Download size={11} /> 从链接下载
                 </button>
@@ -442,7 +439,6 @@ export function NavAppModal({
         <NavIconDownloadModal
           suggestedName={name.trim()}
           onDownloaded={(u) => setIcon(u)}
-          onGoToSettings={onGoToSettings}
           onClose={() => setIconDownloadOpen(false)}
         />
       )}

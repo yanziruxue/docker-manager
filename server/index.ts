@@ -97,7 +97,7 @@ import { startUpdateScheduler, getSchedulerStatus, runSchedulerCheckNow, checkEn
 import { addPushClient, removePushClient } from "./push.js";
 import { readDaemonConfigInfo, writeDaemonConfig, writeDaemonConfigText, restartDockerService, refreshPrivileges } from "./daemon-config.js";
 import { CURRENT_VERSION, getInstallDir, checkForUpdate, performUpdate, performUpdateFromUpload, getUpdateState, getUpdateDir, markUpdateError, saveUploadPackage, getPendingUpload, getPendingUploadPath, schedulePendingExpiry, discardPendingUpload, cancelPendingExpiry, cancelUpdate } from "./updater.js";
-import { COMPOSE_DIR, configPath } from "./paths.js";
+import { COMPOSE_DIR, configPath, ICON_LIB_DIR } from "./paths.js";
 import {
   getTelemetryStatus,
   reportOnce,
@@ -1246,11 +1246,14 @@ app.get("/api/stack-icons/:name/:file", (req, res) => {
   res.send(readFileSync(p));
 });
 
-// ============ 自定义图标库目录（v1.50.32）：设置中心 → 页面设置 ============
+// ============ 自定义图标库目录（v1.50.32 引入；v1.53.1 起固定为 <data>/图标，不再自由绑定） ============
 
-/** 当前绑定的图标目录：每次请求读 settings.json，保存设置后立即生效 */
+/**
+ * 当前图标库目录：v1.53.1 起固定为 ICON_LIB_DIR（<data>/图标，启动即建、白名单内天然可写）。
+ * 仍走 resolveCustomIconDir 校验（realpath + 可读探测），失败时 error 非空由各路由降级处理。
+ */
 function boundCustomIconDir() {
-  return resolveCustomIconDir(getSettings()?.modal?.iconDir);
+  return resolveCustomIconDir(ICON_LIB_DIR);
 }
 
 /**
@@ -1263,9 +1266,10 @@ app.get("/api/network-zone", (req, res) => {
   res.json({ success: true, data: { zone: resolveNetworkZone(ip, cidrs), ip } });
 });
 
-/** 列出自定义图标库：映射（前端自动匹配用）+ 文件清单（图库下拉用）+ 绑定状态/错误 */
+/** 列出自定义图标库：映射（前端自动匹配用）+ 文件清单（图库下拉用）+ 就绪状态/错误 */
 app.get("/api/custom-icons", (_req, res) => {
-  const bound = !!String(getSettings()?.modal?.iconDir ?? "").trim();
+  // v1.53.1：目录固定 <data>/图标，bound 恒为 true（字段保留供旧前端兼容）
+  const bound = true;
   const { dir, error } = boundCustomIconDir();
   let entries: CustomIconEntry[] = [];
   if (dir) {
@@ -1330,10 +1334,9 @@ app.use("/api/custom-icons/upload", (err: any, _req: any, res: any, _next: any) 
   });
 });
 
-/** 检测目录（设置卡片用）：不落盘，只回报可用图标数量与错误；留空视为未绑定 */
-app.post("/api/custom-icons/check", (req, res) => {
-  const raw = String((req.body as any)?.dir ?? "");
-  const { dir, error } = resolveCustomIconDir(raw);
+/** 检测目录（v1.53.1 起忽略入参、只探测固定目录 <data>/图标；保留端点供 OTA 过渡期旧前端调用） */
+app.post("/api/custom-icons/check", (_req, res) => {
+  const { dir, error } = resolveCustomIconDir(ICON_LIB_DIR);
   if (error) {
     res.json({ success: true, data: { ok: false, count: 0, files: 0, error, unbound: false } });
     return;

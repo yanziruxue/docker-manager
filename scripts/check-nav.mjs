@@ -375,27 +375,29 @@ ok("★ 导航图标库独立配置文件（不借道 settings.json）",
   navIconsMod.includes('configPath("nav-icons.json")') && !navIconsMod.includes("getSettings()"));
 ok("★ 下载 API 有 SSRF / 类型 / 体积 / 重定向 / 目录越界防护",
   ["assertSafeIconUrl", 'redirect: "manual"', "NAV_ICON_MAX_BYTES", "image/", "realpathSync"].every((k) => navIconsMod.includes(k)));
-ok("★ 前端暴露导航图标库 3 个 API",
-  ["listNavIconsApi", "bindNavIconDirApi", "downloadNavIconApi"].every((k) => navApiSrc.includes(k)));
+ok("★ 前端暴露导航图标库 API（v1.53.1 起移除 bindNavIconDirApi）",
+  ["listNavIconsApi", "downloadNavIconApi"].every((k) => navApiSrc.includes(k)) &&
+  !navApiSrc.includes("bindNavIconDirApi") && !navApiSrc.includes("checkCustomIconDirApi"));
 
-// v1.52.15：下载弹窗统一用设置中心「图标库目录」，未绑定提示 + 跳转按钮
+// v1.53.1：图标库目录固定 <data>/图标，下载弹窗不再有「未绑定提示 + 前往设置」跳转链路
 const stacksSrc = read("src/pages/Stacks.tsx");
 const settingsSrc = read("src/pages/Settings.tsx");
-ok("★ 下载弹窗统一图标库目录（不再独立绑定），未绑定提示 + 前往设置跳转（v1.52.15）",
-  ["listCustomIconsApi", "downloadCustomIconApi", "没有绑定图标库目录", "前往图标库目录设置", "onGoToSettings", "suggestedName"].every((k) => navIconDlModal.includes(k)) &&
+ok("★ 下载弹窗展示固定图标库目录（无未绑定提示 / 无跳转按钮 / 无 onGoToSettings）",
+  ["listCustomIconsApi", "downloadCustomIconApi", "suggestedName"].every((k) => navIconDlModal.includes(k)) &&
+  !navIconDlModal.includes("没有绑定图标库目录") && !navIconDlModal.includes("前往图标库目录设置") &&
+  !navIconDlModal.includes("onGoToSettings") &&
   !navIconDlModal.includes("bindNavIconDirApi") && !navIconDlModal.includes("listNavIconsApi"));
 ok("★ 服务端 /api/custom-icons/download 写入图标库目录（三处入口统一）",
   indexSrc.includes('app.post("/api/custom-icons/download"') &&
   read("server/custom-icons.ts").includes("export async function downloadCustomIcon(") &&
   indexSrc.includes("downloadCustomIcon"));
-ok("★ 跳转链路：下载弹窗 → NavAppModal/NavPage → App 定位设置中心页面设置 section",
-  navPage.includes("onGoToSettings={onGoToSettings}") &&
-  read("src/components/NavAppModal.tsx").includes("onGoToSettings={onGoToSettings}") &&
-  appSrc.includes("const goToIconDirSettings = () =>") &&
-  appSrc.includes('setSettingsFocusSection("modal")') &&
-  appSrc.includes("onGoToSettings={goToIconDirSettings}") &&
-  appSrc.includes("onGoToSettings={goToIconDirSettings}") === true &&
-  stacksSrc.includes("onGoToSettings={onGoToSettings}") &&
+ok("★ v1.53.1 跳转链路零残留（onGoToSettings / goToIconDirSettings 全部移除）",
+  !navPage.includes("onGoToSettings") &&
+  !read("src/components/NavAppModal.tsx").includes("onGoToSettings") &&
+  !appSrc.includes("goToIconDirSettings") &&
+  !appSrc.includes('setSettingsFocusSection("modal")') &&
+  !appSrc.includes("onGoToSettings") &&
+  !stacksSrc.includes("onGoToSettings") &&
   settingsSrc.includes("initialSection || \"docker\""));
 ok("★ 堆栈编辑弹窗 LABELS / SETTINGS 图标增加「下载」入口，名称按上下文预填",
   stacksSrc.includes("NavIconDownloadModal") &&
@@ -784,16 +786,11 @@ if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
       rel: "src/components/NavIconDownloadModal.tsx",
       inject: (s) => s.replace('bg-black/40 p-4">', 'bg-black/40 p-4" onClick={onClose}>'),
     },
-    // v1.52.15：下载弹窗统一图标库目录 / 跳转按钮
+    // v1.53.1：图标库目录固定，跳转链路零残留
     {
-      name: "注入下载弹窗恢复独立绑定区回归",
+      name: "注入下载弹窗恢复 onGoToSettings 跳转回归",
       rel: "src/components/NavIconDownloadModal.tsx",
-      inject: (s) => s.replace("downloadCustomIconApi(url.trim(), finalName)", "bindNavIconDirApi(url.trim(), finalName) as any"),
-    },
-    {
-      name: "注入下载弹窗跳转按钮缺失回归",
-      rel: "src/components/NavIconDownloadModal.tsx",
-      inject: (s) => s.replaceAll("前往图标库目录设置", "前往设置"),
+      inject: (s) => s.replace("onDownloaded?: (url: string) => void;", "onDownloaded?: (url: string) => void;\n  onGoToSettings?: () => void;"),
     },
     {
       name: "注入堆栈 LABELS 下载入口缺失回归",
