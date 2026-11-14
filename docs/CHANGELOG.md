@@ -16,6 +16,25 @@
 
 ---
 
+## v1.53.2 — 2026-11-14（**main 分支 · 已构建 · 已推 Gitea**）
+
+### 移除「堆栈图标双击」设置卡片，双击行为固定常开
+
+- **需求**：用户拍板方案 A——设置卡片删掉后，双击堆栈图标打开「编辑堆栈」弹窗的行为**固定开启、不再可关**。
+- **改动**：
+  - `src/pages/Settings.tsx`：删「堆栈图标双击」卡片（Toggle 开关整块）+ `modal` 默认对象中 `doubleClickIconEditStack: true` + `MousePointerClick` lucide import（共 −13 行）。
+  - `src/App.tsx`：删 `<Stacks>` 的 `doubleClickIconEditStack={...}` 透传。
+  - `src/pages/Stacks.tsx`：删 `StacksProps.doubleClickIconEditStack` prop 与解构；图标容器三态门控（className / title / onDoubleClick）改为**无条件常开**——`cursor-pointer` + hover 蓝底/蓝环 + 「双击图标打开编辑堆栈」提示 + 双击打开编辑弹窗固定生效。
+  - `src/types.ts`：`ModalConfig.doubleClickIconEditStack` 改可选并标 **@deprecated**（v1.53.2 起不再被消费，保留仅为兼容旧 settings.json，读取归一化不回写）。
+- **行为对照**：旧配置 `doubleClickIconEditStack: false` 的用户升级后双击恢复可用（功能常开）；右键菜单不受影响。
+- **验证**：残留扫描零命中（types.ts deprecated 字段预期保留）；双 `tsc` 0 错；`test:gates` 22 组全绿；SEA 硬核验（ELF / 版本锚点 / 字节级 zip+deb 一致）见下。
+- **门禁**：`check-nav` 258 ok、`check-custom-icons` 77 PASS、`check-backup-naming` 48 PASS、22 组全绿。
+- **产物**：SEA 二进制 130,616,512 B / SHA `5596af5543ea6e77a6e748dc5847f05deccec4c12bb841799a4eeb0202d4106a`（ELF `7f454c46` / e_machine=62）；zip 43,135,977 B / SHA `ae4448ba…8e1b4`；deb 42,850,982 B / SHA `bfe48b06…f122`（zip/deb 内二进制与 postject 产物逐字节一致；前端 dist `index-BY2gFAvb.js` 命中「双击图标打开编辑堆栈」常开标题、`doubleClickIconEditStack`/「堆栈图标双击」零残留）。
+- **未完成 / 已知限制**：无。
+- **下一步**：无。
+
+---
+
 ## v1.53.1 — 2026-11-14（**main 分支 · 已构建 · 已推 Gitea**）
 
 ### 图标库目录固定为 `<data>/图标`，移除设置页「图标库目录」卡片

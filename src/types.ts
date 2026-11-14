@@ -738,11 +738,10 @@ export interface ModalConfig {
    */
   defaultNetIface: string;
   /**
-   * 堆栈管理页「图标」列双击打开编辑堆栈弹窗（v1.50.24）：
-   * - `true`（默认）= 双击某堆栈图标直接打开「编辑堆栈」弹窗（等同右键 → 编辑堆栈）；
-   * - `false`（默认）            = 关闭此快捷操作，双击图标无反应。
+   * **v1.53.2 起已废弃**——「堆栈图标双击」设置卡片已移除，双击堆栈图标打开
+   * 编辑弹窗固定常开（Stacks.tsx 不再读取此字段）。保留仅为兼容旧 settings.json。
    */
-  doubleClickIconEditStack: boolean;
+  doubleClickIconEditStack?: boolean;
   /**
    * 自定义图标库目录（v1.50.32）：**v1.53.1 起已废弃**——图标库目录固定为
    * 服务端 <data>/图标（ICON_LIB_DIR），此字段不再被消费（保留仅为兼容旧 settings.json）。

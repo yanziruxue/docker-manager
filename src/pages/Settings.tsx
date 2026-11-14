@@ -43,7 +43,6 @@ import {
   FileCode2,
   KeyRound,
   LogOut,
-  MousePointerClick,
   ShieldCheck,
   ShieldAlert,
   Radio,
@@ -298,8 +297,6 @@ function getDefaultSettings(): SystemSettings {
       engineSwitchTimeout: 30,
       // 内外网自动切换（v1.50.36）："" = 默认网段集（RFC1918 + 回环 + IPv6 私网）
       intranetCidrs: "",
-      // 堆栈管理页「图标」列双击打开编辑堆栈弹窗（v1.50.24，默认开）
-      doubleClickIconEditStack: true,
       // 页面显示控制（v1.51.4）：默认仅隐藏「导航」页，保持 main 默认体验不变
       hiddenPages: ["navigation"],
     },
@@ -4362,18 +4359,6 @@ docker-compose version</code>
                     : "尚未选定引擎，无法列出网卡。"}
                 </p>
               )}
-            </Card>
-
-            <Card title="堆栈图标双击" icon={<MousePointerClick size={16} />}>
-              <FormField
-                label="双击堆栈图标打开编辑弹窗"
-                hint="开启后，在「堆栈管理」页双击某个堆栈的图标即可直接打开「编辑堆栈」弹窗（等同于右键 → 编辑堆栈）。关闭后双击图标无反应。"
-              >
-                <Toggle
-                  active={data.modal?.doubleClickIconEditStack !== false}
-                  onChange={(val) => update("modal", "doubleClickIconEditStack", val)}
-                />
-              </FormField>
             </Card>
 
             {/* v1.50.36 内外网自动切换：配置内网网段，容器管理页 WebUI 按访问来源分派 */}
