@@ -178,6 +178,18 @@ ok("v1.52.18 写入失败人话错误（EROFS/EACCES）",
 ok("v1.52.18 检测接口回报 writable/warn", indexSrc.includes("probeIconDirWritable(dir);") &&
   indexSrc.includes("writable: w.writable") && indexSrc.includes("warn: w.writable"));
 ok("v1.52.18 前端检测结果显示不可写警告", settingsSrc.includes("目录可读但不可写"));
+// v1.52.23：编辑项目「上传本地图片」与「从链接下载」并列（服务端 upload 路由 + 前端按钮）
+ok("v1.52.23 导出 uploadCustomIcon（探测可写 → CT 映射扩展名 → 落盘）",
+  ciSrc.includes("export function uploadCustomIcon") &&
+  ciSrc.includes("function writeIconFile") && ciSrc.includes("const w = probeIconDirWritable(dir);"));
+ok("v1.52.23 服务端 /api/custom-icons/upload 路由（raw body + 10MB + X-Name/X-Filename）",
+  indexSrc.includes('"/api/custom-icons/upload"') && indexSrc.includes("uploadCustomIcon(name, req.get(\"Content-Type\"), body, dir)") &&
+  indexSrc.includes("图标过大，请上传 ≤10MB 的图片"));
+ok("v1.52.23 编辑项目弹窗「上传」按钮在「从链接下载」左侧（共用 fuchsia 描边样式）",
+  read("src/components/NavAppModal.tsx").includes("handleIconUpload") &&
+  read("src/components/NavAppModal.tsx").includes('ref={iconUploadRef}') &&
+  read("src/components/NavAppModal.tsx").indexOf("<Upload size={11} /> 上传") <
+  read("src/components/NavAppModal.tsx").indexOf("从链接下载"));
 const pkg = JSON.parse(read("package.json"));
 // 语义比较「不低于引入版」：避免后续升版本时硬编码断言假红
 const verCmp = (a, b) => {

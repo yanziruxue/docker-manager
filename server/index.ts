@@ -78,6 +78,7 @@ import { getNavGroups, saveNavGroups } from "./nav-groups.js";
 import { getNavPageSettings, saveNavPageSettings } from "./nav-page-settings.js";
 import {
   resolveCustomIconDir,
+  uploadCustomIcon,
   probeIconDirWritable,
   listCustomIconEntries,
   buildCustomIconMap,
@@ -1295,6 +1296,38 @@ app.post("/api/custom-icons/download", async (req, res) => {
   } catch (err: any) {
     res.status(400).json({ success: false, error: err?.message || "下载图标失败" });
   }
+});
+
+/** 上传本地图片到图标库目录（v1.52.23）：raw body + X-Filename/X-Name 头（同 nav-assets 模式） */
+app.post(
+  "/api/custom-icons/upload",
+  express.raw({ type: "image/*", limit: 10 * 1024 * 1024 }),
+  (req, res) => {
+    const { dir, error } = boundCustomIconDir();
+    if (!dir) {
+      res.status(400).json({ success: false, error: error || "没有绑定图标库目录" });
+      return;
+    }
+    try {
+      const body = req.body as Buffer;
+      // 名称：优先项目名（X-Name，前端预填），回落原始文件名（X-Filename）
+      const fallback = req.get("X-Filename") ? decodeURIComponent(req.get("X-Filename") as string).replace(/\.[^.]+$/, "") : "";
+      const name = (req.get("X-Name") ? decodeURIComponent(req.get("X-Name") as string) : "") || fallback;
+      const r = uploadCustomIcon(name, req.get("Content-Type"), body, dir);
+      res.json({ success: true, data: r });
+    } catch (err: any) {
+      res.status(400).json({ success: false, error: err?.message || "上传图标失败" });
+    }
+  },
+);
+
+/** 局部错误中间件：body-parser 超限(413)等错误统一转 JSON（前端 res.json() 不会解析失败） */
+app.use("/api/custom-icons/upload", (err: any, _req: any, res: any, _next: any) => {
+  const tooLarge = err?.status === 413 || err?.type === "entity.too.large";
+  res.status(tooLarge ? 413 : 400).json({
+    success: false,
+    error: tooLarge ? "图标过大，请上传 ≤10MB 的图片" : `上传图标失败：${err?.message || "请求体无效"}`,
+  });
 });
 
 /** 检测目录（设置卡片用）：不落盘，只回报可用图标数量与错误；留空视为未绑定 */

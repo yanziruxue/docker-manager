@@ -13,8 +13,8 @@
  *   扁平 groups 仅保留给「名称全局唯一」校验，不再用于归属下拉。
  * 保存经 onSave(groupId, app) 由 NavPage 直接落盘；编辑态可经 onDelete(appId) 删除项目（v1.51.11）。
  */
-import { useMemo, useState } from "react";
-import { Download, Globe, List, Trash2, X } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import { Download, Globe, List, Trash2, Upload, X } from "lucide-react";
 import type { Container, NavAppItem, NavZone } from "../types";
 import { IconAutoComplete } from "./IconAutoComplete";
 import { NavIconDownloadModal } from "./NavIconDownloadModal";
@@ -107,6 +107,35 @@ export function NavAppModal({
   const [showContainers, setShowContainers] = useState(false);
   const [containerQuery, setContainerQuery] = useState("");
   const [iconDownloadOpen, setIconDownloadOpen] = useState(false);
+  /** v1.52.23：上传本地图片到图标库目录 */
+  const iconUploadRef = useRef<HTMLInputElement>(null);
+  const [iconUploading, setIconUploading] = useState(false);
+
+  /** 上传本地图片 → POST /api/custom-icons/upload（raw body；名称预填项目名，回落文件名） */
+  const handleIconUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f) return;
+    setIconUploading(true);
+    try {
+      const res = await fetch("/api/custom-icons/upload", {
+        method: "POST",
+        headers: {
+          "Content-Type": f.type || "image/png",
+          "X-Filename": encodeURIComponent(f.name),
+          "X-Name": encodeURIComponent(name.trim() || f.name.replace(/\.[^.]+$/, "")),
+        },
+        body: f,
+      });
+      const j = await res.json().catch(() => null);
+      if (!res.ok || !j?.success) throw new Error(j?.error || `上传失败（HTTP ${res.status}）`);
+      setIcon(j.data.url);
+    } catch (err: any) {
+      window.alert(err?.message || "上传图标失败");
+    } finally {
+      setIconUploading(false);
+    }
+  };
 
   /** 容器列表（v1.51.16）：不过滤 status，已停止的容器同样可选；运行中 / 有图标优先 */
   const containerOptions = useMemo(() => {
@@ -332,14 +361,33 @@ export function NavAppModal({
           <div>
             <div className="flex items-center justify-between mb-1">
               <span className="block text-xs text-slate-500">图标</span>
-              <button
-                type="button"
-                onClick={() => setIconDownloadOpen(true)}
-                className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] text-fuchsia-600 border border-fuchsia-200 rounded-md hover:bg-fuchsia-50"
-                title="输入图片链接下载到导航图标库（未绑定目录时先绑定）"
-              >
-                <Download size={11} /> 从链接下载
-              </button>
+              <div className="inline-flex items-center gap-1.5">
+                {/* v1.52.23：上传本地图片到图标库目录（名称预填项目名，回落文件名） */}
+                <input
+                  ref={iconUploadRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/gif,image/svg+xml,image/webp,image/x-icon"
+                  className="hidden"
+                  onChange={handleIconUpload}
+                />
+                <button
+                  type="button"
+                  onClick={() => iconUploadRef.current?.click()}
+                  disabled={iconUploading}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] text-fuchsia-600 border border-fuchsia-200 rounded-md hover:bg-fuchsia-50 disabled:opacity-50"
+                  title="上传本地图片到图标库目录（未绑定目录时先绑定）"
+                >
+                  <Upload size={11} /> {iconUploading ? "上传中…" : "上传"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIconDownloadOpen(true)}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] text-fuchsia-600 border border-fuchsia-200 rounded-md hover:bg-fuchsia-50"
+                  title="输入图片链接下载到导航图标库（未绑定目录时先绑定）"
+                >
+                  <Download size={11} /> 从链接下载
+                </button>
+              </div>
             </div>
             <IconAutoComplete
               value={icon}

@@ -16,6 +16,20 @@
 
 ---
 
+## v1.52.23 — 2026-11-14（**main 分支 · 已构建 · 已推 Gitea**）
+
+### 编辑项目「上传」图标（与「从链接下载」并列）
+
+- **需求**：编辑项目弹窗图标区，「从链接下载」左边增加「上传」按钮。
+- **前端**（`src/components/NavAppModal.tsx`）：图标区标题行右侧按钮组 = **上传**（`Upload` 图标，隐藏 file input，accept png/jpg/gif/svg/webp/ico）+ 从链接下载；上传中按钮禁用并显示「上传中…」；成功后自动写入图标字段。名称预填**项目名**（未填回落文件名去扩展名），经 `X-Name`/`X-Filename` 头传递。
+- **服务端**：新增 `POST /api/custom-icons/upload`（`express.raw` 10MB + `X-Filename`/`X-Name` 头，同 nav-assets 模式）；`server/custom-icons.ts` 新增 `uploadCustomIcon`（Content-Type → 扩展名白名单映射 + 可写性 fail-fast 探测 + 重名追加序号 + 防穿越）并抽出 `writeIconFile` 与下载共用落盘逻辑；局部错误中间件把 413 等统一转 JSON（图标过大提示 ≤10MB）。
+- **门禁**：`check-custom-icons` +3 断言（uploadCustomIcon 导出与落盘收口 / 服务端路由与 10MB 提示 / 前端「上传」位于「从链接下载」左侧）→ **76 PASS / 0 FAIL**；`check-nav` 260 ok / 0 FAIL；`test:gates` 22 组全绿；双 `tsc` 0 错。
+- **验证（硬证据）**：二进制 130,616,512 B / SHA-256 `4fc57362…47996`；ELF `7f454c46` + e_machine=62；版本锚点 1.52.23 ×1、旧版 0；**upload 路由已嵌入二进制**（`/api/custom-icons/upload` 字符串命中）；zip / deb 内二进制 SHA 一致；dist JS base64 解码逐字节一致。zip 43,138,086 B（SHA `d5464fe2…3a0be`）、deb 42,853,044 B（SHA `de5aef12…de27b`）。
+- **未完成 / 已知限制**：堆栈 LABELS / SETTINGS 图标区未加上传入口（本次仅编辑项目弹窗，按需求范围）。
+- **下一步**：无。
+
+---
+
 ## v1.52.22 — 2026-11-14（**main 分支 · 已构建 · 已推 Gitea**）
 
 ### 选中分区标签样式微调

@@ -146,6 +146,23 @@ const ICON_CT_EXT: Record<string, string> = {
 };
 const ICON_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico"]);
 
+/** 图标文件写入统一收口（下载 / 上传共用）：探测可写 → 防穿越 → 写入（EROFS 等给中文提示） */
+function writeIconFile(dir: string, file: string, buf: Buffer): { url: string; file: string } {
+  // 写入前二次确认目录未被替换成软链接，且目标落在该目录内
+  const real = fs.realpathSync(dir);
+  if (!path.resolve(real, file).startsWith(real + path.sep)) throw new Error("图标目录异常");
+  try {
+    fs.writeFileSync(path.join(real, file), buf);
+  } catch (e: any) {
+    // v1.52.18：写入阶段被拒（如探测通过后被重新挂载为只读）也给出人话错误
+    const code = String(e?.code || "");
+    if (code === "EROFS") throw new Error("写入失败：目录是只读挂载（EROFS），请将该目录改为读写挂载或换一个可写的图标库目录");
+    if (code === "EACCES" || code === "EPERM") throw new Error("写入失败：服务运行账号对该目录没有写权限，请检查目录属主/权限");
+    throw e;
+  }
+  return { url: `/api/custom-icons/${encodeURIComponent(file)}`, file };
+}
+
 /** 逐跳校验下载目标（防 SSRF：回环 / 本机 / 云元数据拒绝；内网其它主机允许） */
 function assertSafeIconUrl(u: URL): void {
   if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error("仅支持 http / https 链接");
@@ -253,19 +270,27 @@ export async function downloadCustomIcon(rawUrl: unknown, rawName: unknown, dir:
   if (!buf) throw new Error("下载重定向次数过多（最多 3 跳）");
 
   const file = dedupeIconFile(dir, iconFilename(String(rawName ?? ""), ext));
-  // 写入前二次确认目录未被替换成软链接，且目标落在该目录内
-  const real = fs.realpathSync(dir);
-  if (!path.resolve(real, file).startsWith(real + path.sep)) throw new Error("图标目录异常");
-  try {
-    fs.writeFileSync(path.join(real, file), buf);
-  } catch (e: any) {
-    // v1.52.18：写入阶段被拒（如探测通过后被重新挂载为只读）也给出人话错误
-    const code = String(e?.code || "");
-    if (code === "EROFS") throw new Error("写入失败：目录是只读挂载（EROFS），请将该目录改为读写挂载或换一个可写的图标库目录");
-    if (code === "EACCES" || code === "EPERM") throw new Error("写入失败：服务运行账号对该目录没有写权限，请检查目录属主/权限");
-    throw e;
+  return writeIconFile(dir, file, buf);
+}
+
+/**
+ * 上传本地图片到图标库目录（v1.52.23）：与「从链接下载」同一套落盘安全逻辑。
+ * rawName 取项目名（前端预填），fallback 文件名；ext 由 Content-Type 映射。
+ */
+export function uploadCustomIcon(rawName: unknown, contentType: unknown, buf: Buffer, dir: string): { url: string; file: string } {
+  if (!dir) throw new Error("没有绑定图标库目录");
+  if (!buf?.length) throw new Error("请选择图片文件");
+  if (buf.length > CUSTOM_ICON_MAX_BYTES) throw new Error("图标超过 10MB，请换一张更小的图片");
+  // v1.52.18：写入前先探测可写性，只读挂载 / 无写权限提前报人话错误（fail-fast）
+  const w = probeIconDirWritable(dir);
+  if (!w.writable) {
+    throw new Error(`${w.error}；请将该目录改为读写挂载，或在设置中心换一个可写的图标库目录`);
   }
-  return { url: `/api/custom-icons/${encodeURIComponent(file)}`, file };
+  const ct = String(contentType ?? "").split(";")[0].trim().toLowerCase();
+  const ext = ICON_CT_EXT[ct] || "";
+  if (!ext) throw new Error(`不支持的图片类型：${ct || "未知"}`);
+  const file = dedupeIconFile(dir, iconFilename(String(rawName ?? ""), ext));
+  return writeIconFile(dir, file, buf);
 }
 
 /**
