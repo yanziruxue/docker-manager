@@ -2225,10 +2225,16 @@ export function Settings({ settings, activeEngineId, engines, onActiveEngineChan
     try {
       const r = await checkCustomIconDirApi(String(data.modal?.iconDir ?? ""));
       let message = "";
+      let okish = r.ok;
       if (r.unbound) message = "当前未绑定目录：将使用原有的堆栈 icon/ 图库方案";
+      else if (r.ok && r.warn) {
+        // v1.52.18：目录可读但不可写（只读挂载 / 权限不足）——黄色警告，图标仍可显示
+        message = `目录可读但不可写：${r.warn}`;
+        okish = false;
+      }
       else if (r.ok) message = `目录可用：识别到 ${r.count} 个可自动匹配的图标（共 ${r.files} 个图标文件）`;
       else message = `目录不可用：${r.error}`;
-      setIconDirCheck({ ok: r.ok, message });
+      setIconDirCheck({ ok: okish, message });
     } catch (e: any) {
       setIconDirCheck({ ok: false, message: `检测失败：${e?.message || "请求失败"}` });
     } finally {

@@ -167,6 +167,17 @@ ok("自动匹配组件拉取自定义目录与堆栈图库", iconAutoSrc.include
 ok("自动匹配组件按名称过滤", iconAutoSrc.includes("e.stem.includes(q)"));
 ok("编辑堆栈图标输入接入 IconAutoComplete", stacksSrc.includes("<IconAutoComplete"));
 ok("设置卡片移除冗长描述段落", !settingsSrc.includes("绑定后自动识别：堆栈"));
+// v1.52.18：图标库目录可写性探测（只读挂载 EROFS / 权限不足 EACCES 提前暴露）
+const ciSrc = read("server/custom-icons.ts");
+ok("v1.52.18 导出 probeIconDirWritable 可写性探测", ciSrc.includes("export function probeIconDirWritable"));
+ok("v1.52.18 探测覆盖 EROFS 只读挂载", ciSrc.includes('code === "EROFS"'));
+ok("v1.52.18 下载前 fail-fast 探测可写", ciSrc.includes("const w = probeIconDirWritable(dir);") &&
+  ciSrc.includes("if (!w.writable) {"));
+ok("v1.52.18 写入失败人话错误（EROFS/EACCES）",
+  ciSrc.includes("写入失败：目录是只读挂载") && ciSrc.includes("写入失败：服务运行账号对该目录没有写权限"));
+ok("v1.52.18 检测接口回报 writable/warn", indexSrc.includes("probeIconDirWritable(dir);") &&
+  indexSrc.includes("writable: w.writable") && indexSrc.includes("warn: w.writable"));
+ok("v1.52.18 前端检测结果显示不可写警告", settingsSrc.includes("目录可读但不可写"));
 const pkg = JSON.parse(read("package.json"));
 // 语义比较「不低于引入版」：避免后续升版本时硬编码断言假红
 const verCmp = (a, b) => {

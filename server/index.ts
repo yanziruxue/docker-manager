@@ -78,6 +78,7 @@ import { getNavGroups, saveNavGroups } from "./nav-groups.js";
 import { getNavPageSettings, saveNavPageSettings } from "./nav-page-settings.js";
 import {
   resolveCustomIconDir,
+  probeIconDirWritable,
   listCustomIconEntries,
   buildCustomIconMap,
   resolveCustomIconFile,
@@ -1310,6 +1311,8 @@ app.post("/api/custom-icons/check", (req, res) => {
   }
   try {
     const entries = listCustomIconEntries(dir);
+    // v1.52.18：目录可读 ≠ 可写——只读挂载/权限不足时提前提示（图标仍可正常显示，仅下载写入会失败）
+    const w = probeIconDirWritable(dir);
     res.json({
       success: true,
       data: {
@@ -1318,6 +1321,8 @@ app.post("/api/custom-icons/check", (req, res) => {
         files: entries.length,
         error: "",
         unbound: false,
+        writable: w.writable,
+        warn: w.writable ? "" : `${w.error}：图标可正常显示，但「从链接下载图标」会失败`,
       },
     });
   } catch (e: any) {

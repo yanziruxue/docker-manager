@@ -28,6 +28,10 @@ export interface CustomIconCheckResult {
   files: number;
   error: string;
   unbound: boolean;
+  /** v1.52.18：目录是否可写（只读挂载 / 权限不足时 false，图标仍可显示但下载写入会失败） */
+  writable?: boolean;
+  /** v1.52.18：不可写时的警告说明 */
+  warn?: string;
 }
 
 /**

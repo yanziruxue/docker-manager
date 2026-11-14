@@ -16,6 +16,20 @@
 
 ---
 
+## v1.52.18 — 2026-11-14（**main 分支 · 已构建 · 已推 Gitea**）
+
+### 图标库目录只读挂载（EROFS）修复：可写性提前探测 + 人话报错
+
+- **现象**：绑定 `/vol1/1000/photos/图标` 后「从链接下载图标」报 `EROFS: read-only file system`——该目录在服务侧是**只读挂载**（fnOS 上 Docker 将其以 `:ro` 挂进容器，或目录本身只读）。原「检测目录」只探测**可读性**，写不进的问题拖到下载时才以原始系统错误暴露。
+- **修复**：
+  - `server/custom-icons.ts` 新增 `probeIconDirWritable()`（`accessSync(W_OK)`：EROFS = 只读挂载、EACCES/EPERM = 运行账号无写权限）；
+  - `downloadCustomIcon` **下载前 fail-fast** 探测可写，直接报「目录是只读挂载（EROFS）；请将该目录改为读写挂载，或在设置中心换一个可写的图标库目录」，不再白下载一轮才报错；`writeFileSync` 兜底 catch 同样映射为人话错误；
+  - `POST /api/custom-icons/check` 回报 `writable` / `warn` 字段——目录可读但不可写时前端检测结果显示黄色警告「目录可读但不可写：图标可正常显示，但『从链接下载图标』会失败」（图标匹配/显示不受影响）。
+- **用户侧解法**（二选一）：①把容器挂载改为读写（去掉 `:ro`）后重启容器；②换一个可写目录绑定（如 `/vol1/1000/docker/dockermanagementyanzi/icons` 之类应用自身数据目录）。
+- **验证（硬证据）**：双 `tsc` 0 错；`check-custom-icons` 73 PASS / 0 FAIL（+6 断言）；`check-nav` 237 ok / 0 FAIL；`test:gates` 22 组全绿；二进制 130,616,512 B / SHA-256 `fa0c111c…e6881`；ELF `7f454c46` + e_machine=62；版本锚点 1.52.18 ×1、旧版 0；zip / deb 内二进制 SHA 一致；dist JS base64 解码逐字节一致。zip 43,136,120 B（SHA `bbda4383…b5b1`）、deb 42,851,058 B（SHA `d0df2f23…e7c`）。
+- **未完成 / 已知限制**：只读目录本身仍可绑定（图标正常显示/匹配），仅下载写入被拒——属预期行为。
+- **下一步**：无。
+
 ## v1.52.17 — 2026-11-13（**main 分支 · 已构建 · 已推 Gitea**）
 
 ### 编辑态点击卡片任意位置直达编辑弹窗（不跳转链接）

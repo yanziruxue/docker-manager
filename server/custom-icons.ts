@@ -195,6 +195,11 @@ function dedupeIconFile(dir: string, name: string): string {
 /** 从链接下载图标写入绑定目录（dir 必须已过 resolveCustomIconDir 校验），返回可取图的同源 URL */
 export async function downloadCustomIcon(rawUrl: unknown, rawName: unknown, dir: string): Promise<{ url: string; file: string }> {
   if (!dir) throw new Error("没有绑定图标库目录");
+  // v1.52.18：下载前先探测可写性，只读挂载 / 无写权限在下载前就报人话错误（fail-fast）
+  const w = probeIconDirWritable(dir);
+  if (!w.writable) {
+    throw new Error(`${w.error}；请将该目录改为读写挂载，或在设置中心换一个可写的图标库目录`);
+  }
   const first = String(rawUrl ?? "").trim();
   if (!first) throw new Error("请填写图标链接");
   let current: URL;
@@ -251,6 +256,31 @@ export async function downloadCustomIcon(rawUrl: unknown, rawName: unknown, dir:
   // 写入前二次确认目录未被替换成软链接，且目标落在该目录内
   const real = fs.realpathSync(dir);
   if (!path.resolve(real, file).startsWith(real + path.sep)) throw new Error("图标目录异常");
-  fs.writeFileSync(path.join(real, file), buf);
+  try {
+    fs.writeFileSync(path.join(real, file), buf);
+  } catch (e: any) {
+    // v1.52.18：写入阶段被拒（如探测通过后被重新挂载为只读）也给出人话错误
+    const code = String(e?.code || "");
+    if (code === "EROFS") throw new Error("写入失败：目录是只读挂载（EROFS），请将该目录改为读写挂载或换一个可写的图标库目录");
+    if (code === "EACCES" || code === "EPERM") throw new Error("写入失败：服务运行账号对该目录没有写权限，请检查目录属主/权限");
+    throw e;
+  }
   return { url: `/api/custom-icons/${encodeURIComponent(file)}`, file };
+}
+
+/**
+ * 目录可写性探测（v1.52.18）：accessSync(W_OK)。
+ * 只读挂载返回 EROFS（对 root 也生效），权限不足返回 EACCES/EPERM。
+ * 供「检测目录」与「从链接下载图标」两处提前暴露写不进的问题。
+ */
+export function probeIconDirWritable(dir: string): { writable: boolean; error: string } {
+  try {
+    fs.accessSync(dir, fs.constants.W_OK);
+    return { writable: true, error: "" };
+  } catch (e: any) {
+    const code = String(e?.code || "");
+    if (code === "EROFS") return { writable: false, error: "目录是只读挂载（EROFS）" };
+    if (code === "EACCES" || code === "EPERM") return { writable: false, error: "服务运行账号对该目录没有写权限" };
+    return { writable: false, error: `目录不可写：${e?.message || code || "未知错误"}` };
+  }
 }
