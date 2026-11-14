@@ -11,7 +11,7 @@
  * v1.52.17：编辑态点击卡片**任意位置**直达编辑弹窗（不再只能点左上角 ✎），
  *           且编辑态点击绝不跳转链接（含右上角跳转指示图标一并隐藏）。
  */
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
 import { ExternalLink, Pencil } from "lucide-react";
 import type { NavAppItem, NavCardStyle, NavGroup, NavIconShape, NavNetworkMode, NavZone } from "../types";
 import { getNetworkZoneApi, listCustomIconsApi, listNavIconsApi } from "../api";
@@ -94,6 +94,7 @@ function AppCard({
   onCardDrop,
   editMode,
   onEditApp,
+  onContextMenu,
 }: {
   app: NavAppItem;
   iconMap: Record<string, string>;
@@ -119,6 +120,8 @@ function AppCard({
   editMode?: boolean;
   /** v1.52.17：编辑态卡片点击回调（打开 NavAppModal） */
   onEditApp?: (app: NavAppItem) => void;
+  /** v1.52.19：右键卡片 → 上下文菜单（另一种网络模式打开 / 编辑 / 删除），由 NavBoard 注入 altUrl 与 altZone */
+  onContextMenu?: (e: ReactMouseEvent) => void;
 }) {
   const src = resolveNavIconSrc(app.icon, iconMap, app.name);
   // v1.52.17：编辑态点击卡片任意位置直达编辑弹窗（即使无链接也可编辑）；浏览态保持原跳转行为
@@ -175,6 +178,7 @@ function AppCard({
         disabled={editMode ? false : !url}
         title={hoverTitle}
         draggable={draggableCard}
+        onContextMenu={onContextMenu}
         onDragStart={(e) => { if (onCardDragStart) { e.stopPropagation(); onCardDragStart(app.id, groupForDnd || ""); } }}
         onDragEnd={() => onCardDragEnd?.()}
         className={`group relative flex items-center gap-3 px-4 py-3 rounded-2xl ${styleCls} transition-all disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0`}
@@ -198,6 +202,7 @@ function AppCard({
         disabled={editMode ? false : !url}
         title={hoverTitle}
         draggable={draggableCard}
+        onContextMenu={onContextMenu}
         onDragStart={(e) => { if (onCardDragStart) { e.stopPropagation(); onCardDragStart(app.id, groupForDnd || ""); } }}
         onDragEnd={() => onCardDragEnd?.()}
         className={`group relative flex flex-col items-center gap-2 p-4 rounded-2xl ${styleCls} transition-all disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0`}
@@ -230,6 +235,7 @@ export function NavBoard({
   onCardDragStart,
   onCardDragEnd,
   onCardDrop,
+  onAppContextMenu,
 }: {
   group: NavGroup;
   /** 所属分区（v1.52.3 起外观配置上移到分区级，卡片墙统一取父分区外观） */
@@ -256,6 +262,9 @@ export function NavBoard({
   onCardDragEnd?: () => void;
   /** 编辑态拖拽：卡片落到另一卡片前（v1.51.19） */
   onCardDrop?: (appId: string, groupId: string) => void;
+  /** v1.52.19：右键卡片 → 上下文菜单（另一种网络模式打开 / 编辑 / 删除）。
+   *  altUrl = 按「与当前生效分区相反」解析出的地址；altZone = 该地址所属分区（菜单第一项文案用）。 */
+  onAppContextMenu?: (app: NavAppItem, altUrl: string, altZone: WebuiZone, e: ReactMouseEvent) => void;
 }) {
   const [zone, setZone] = useState<WebuiZone>("intranet");
   useEffect(() => {
@@ -281,6 +290,14 @@ export function NavBoard({
   const iconShape: NavIconShape = zoneCfg?.iconShape || "rounded";
   const loc = { protocol: window.location.protocol, hostname: window.location.hostname };
   const urls = useMemo(() => apps.map((a) => resolveCardUrl(a, mode, zone, loc)), [apps, mode, zone, loc.protocol, loc.hostname]);
+  // v1.52.19：右键「另一种网络模式访问」——生效分区 = 强制模式优先（lan/wan），auto 时按服务端判定；
+  // altUrl 按相反分区强制解析（ext 外链卡两种模式同地址，天然兼容）
+  const effectiveZone: WebuiZone = mode === "intranet" ? "intranet" : mode === "internet" ? "internet" : zone;
+  const altZone: WebuiZone = effectiveZone === "intranet" ? "internet" : "intranet";
+  const altUrls = useMemo(
+    () => apps.map((a) => resolveCardUrl(a, altZone, altZone, loc)),
+    [apps, altZone, loc.protocol, loc.hostname],
+  );
   // v1.52.4：分区级间距——首组距分区 / 标题与卡片上间距 / 卡片与下一组下间距
   const firstGap = zoneCfg?.zoneFirstGroupGap ?? 20;
   const titleGap = zoneCfg?.groupCardGapTop ?? 20;
@@ -348,6 +365,7 @@ export function NavBoard({
                 onCardDrop={onCardDrop}
                 editMode={!!editMode}
                 onEditApp={onEditApp}
+                onContextMenu={(e) => onAppContextMenu?.(a, altUrls[i], altZone, e)}
               />
               {/* 编辑按钮是卡片 <button> 的兄弟节点，绝不嵌套（保留 disabled={!url} 语义）。
                   v1.51.18：仅 editMode 态渲染，且常显（opacity-100）以提示可编辑。

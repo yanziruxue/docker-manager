@@ -286,7 +286,7 @@ ok("SystemSettings 已移除 nav 字段", !typesSrc.includes("nav: NavConfig"));
 
 // v1.52.0：分区 → 分组 → 卡片三级结构
 ok("★ NavPage 分区角标 = 分区下应用总数", navPage.includes("reduce((s, g) => s + (g.apps?.length || 0), 0)"));
-ok("★ 选中分区高亮放大（字号 ~1.5 倍 + 轻微 scale）", navPage.includes("text-[18px]") && navPage.includes("scale-[1.04]"));
+ok("★ 选中分区高亮放大（v1.52.19 起 scale 1.2 倍）", navPage.includes("text-[18px]") && navPage.includes("scale-[1.2]"));
 ok("★ 「全部」标签合并所有分区", navPage.includes('"__all__"') && navPage.includes("显示全部分区的分组"));
 ok("★ NavBoard 支持 zoneTag（全部视图标注所属分区）", board.includes("zoneTag") && navPage.includes("zoneTag={isAll ? zone.name : undefined}"));
 ok("★ 分区下内联「添加分组」入口", navPage.includes("addGroupToZone") && navPage.includes("添加分组"));
@@ -440,6 +440,23 @@ ok("★ 环境天气 5 项全部平铺（不再用下拉框）",
   navSettingsModal.includes('value={draft.weather || "none"}') &&
   !navSettingsModal.includes("<select") && navSettingsModal.includes("flex flex-wrap gap-1.5"));
 
+// ── v1.52.19：分区标签透明度/放大 + 卡片右键上下文菜单 ──
+ok("★ v1.52.19 分区标签未选中透明度 30%（hover 回升）、选中放大 1.2 倍",
+  navPage.includes("scale-[1.2]") && navPage.includes("opacity-30") &&
+  !navPage.includes("scale-[1.04]"));
+ok("★ v1.52.19 卡片右键上下文菜单接线（NavBoard altZone 反向解析 → NavPage 菜单）",
+  navPage.includes("onAppContextMenu={openAppContextMenu}") &&
+  board.includes("onAppContextMenu?:") && board.includes("onContextMenu={(e) => onAppContextMenu?.(") &&
+  board.includes("const effectiveZone: WebuiZone") && board.includes("const altZone: WebuiZone") &&
+  board.includes("resolveCardUrl(a, altZone, altZone, loc)"));
+ok("★ v1.52.19 右键菜单三项目（另一种网络模式打开 / 编辑 / 删除）",
+  navPage.includes("外网链接打开") && navPage.includes("内网链接打开") &&
+  navPage.includes("openEditApp(ctxMenu.app)") && navPage.includes("handleDeleteApp(ctxMenu.app.id)"));
+ok("★ v1.52.19 右键菜单关闭（点外 / Escape / 再右键）",
+  navPage.includes('className="fixed inset-0 z-[900]"') &&
+  navPage.includes('if (e.key === "Escape") setCtxMenu(null)') &&
+  navPage.includes("onContextMenu={(e) => { e.preventDefault(); setCtxMenu(null); }}"));
+
 console.log("== ③ 负向自检（注入回归 → 检出 → 还原） ==");
 // 注入「内网缺 lanUrl 不回落 url」回归：应被 ⑤ 号用例检出
 const TARGET = "src/webui-url.ts";
@@ -566,6 +583,23 @@ if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
       name: "注入 v1.52.17 编辑态仍显示跳转图标回归（ExternalLink 门控移除）",
       rel: "src/components/NavBoard.tsx",
       inject: (s) => s.replaceAll("!editMode && url && (", "url && ("),
+    },
+    {
+      name: "注入 v1.52.19 分区标签样式回退回归（撤销 30% 透明 / 1.2 倍放大）",
+      inject: (s) => s.replaceAll("scale-[1.2]", "scale-[1.04]").replaceAll("opacity-30", "opacity-100"),
+    },
+    {
+      name: "注入 v1.52.19 右键菜单接线缺失回归（NavPage 不下传 onAppContextMenu）",
+      inject: (s) => s.replace("onAppContextMenu={openAppContextMenu}", ""),
+    },
+    {
+      name: "注入 v1.52.19 右键删除项缺失回归（handleDeleteApp 不再被菜单调用）",
+      inject: (s) => s.replace("handleDeleteApp(ctxMenu.app.id)", ""),
+    },
+    {
+      name: "注入 v1.52.19 altZone 反向解析缺失回归（NavBoard 不再计算相反分区）",
+      rel: "src/components/NavBoard.tsx",
+      inject: (s) => s.replace("const altZone: WebuiZone = effectiveZone === \"intranet\" ? \"internet\" : \"intranet\";", ""),
     },
     {
       name: "注入容器图标回归（重新引用 c.icon）",

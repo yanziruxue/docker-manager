@@ -9,15 +9,18 @@
  * v1.51.11：移除「管理导航」(NavEditor)，项目 CRUD 直达。
  * v1.52.1：入口全部收敛顶栏图标条「编辑 | ＋添加项目 | ⚙分区/分组设置 | 页面设置」；
  *          分组标题行不再渲染 ＋/齿轮；顶栏齿轮 = 设置当前分区（弹窗自动定位）。
+ * v1.52.19：分区标签未选中态透明度 30%（hover 回升）、选中态放大 1.2 倍；
+ *          卡片右键上下文菜单：①用另一种网络模式打开（内网⇄外网）②编辑 ③删除。
  */
 import React, { useState, useEffect, useCallback } from "react";
-import { Compass, Pencil, Plus, Settings, SlidersHorizontal } from "lucide-react";
+import { Compass, Globe, House, Pencil, Plus, Settings, SlidersHorizontal, Trash2 } from "lucide-react";
 import { NavBoard, useNavIconMap } from "../components/NavBoard";
 import { NavAppModal } from "../components/NavAppModal";
 import { NavGroupSettingsModal } from "../components/NavGroupSettingsModal";
 import { NavPageSettingsModal } from "../components/NavPageSettingsModal";
 import { WeatherEffect } from "../components/WeatherEffect";
 import type { Container, NavAppItem, NavGroup, NavZone, NavPageSettings, NavNetworkMode, NavTheme } from "../types";
+import type { WebuiZone } from "../webui-url";
 
 interface NavPageProps {
   /** 导航分区（v1.52.0：分区 → 分组 → 卡片三级结构） */
@@ -80,6 +83,24 @@ export function NavPage({ navZones, onSaveNavZones, containers, navPageSettings,
   const [editMode, setEditMode] = useState(false);
   // v1.51.19：编辑态拖拽状态（被拖拽项目的 id 与来源分组）
   const [drag, setDrag] = useState<{ appId: string; fromGroupId: string } | null>(null);
+  // v1.52.19：卡片右键上下文菜单（另一种网络模式打开 / 编辑 / 删除）
+  const [ctxMenu, setCtxMenu] = useState<{ app: NavAppItem; altUrl: string; altZone: WebuiZone; x: number; y: number } | null>(null);
+  const openAppContextMenu = useCallback(
+    (app: NavAppItem, altUrl: string, altZone: WebuiZone, e: React.MouseEvent) => {
+      e.preventDefault();
+      // 视口右/下边缘内缩，避免菜单溢出
+      const x = Math.min(e.clientX, window.innerWidth - 190);
+      const y = Math.min(e.clientY, window.innerHeight - 140);
+      setCtxMenu({ app, altUrl, altZone, x, y });
+    },
+    [],
+  );
+  useEffect(() => {
+    if (!ctxMenu) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setCtxMenu(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [ctxMenu]);
   // v1.52.8：仅编辑态且确实有卡片被拖拽时，才开启空分组 / 空白区放置目标
   const dragActive = editMode && !!drag;
   // v1.52.10：dragActive 全分区生效，跨分区落点不再按来源分区裁剪。
@@ -269,11 +290,11 @@ export function NavPage({ navZones, onSaveNavZones, containers, navPageSettings,
                     }
                   : undefined
               }
-              // 选中分区：高亮 + 字号放大(~1.5倍) + 轻微 scale；分区名仅作标签，不另起大标题
+              // v1.52.19：未选中透明度 30%（hover 回升）、选中放大 1.2 倍；选中仍高亮白底
               className={`rounded-full backdrop-blur-sm transition-all ${
                 active
-                  ? "bg-white text-fuchsia-600 font-bold shadow-md text-[18px] scale-[1.04] py-2 px-5"
-                  : "bg-white/60 text-slate-600 hover:bg-white/85 text-[13px] py-1.5 px-4"
+                  ? "bg-white text-fuchsia-600 font-bold shadow-md text-[18px] scale-[1.2] py-2 px-5"
+                  : "bg-white/60 text-slate-600 hover:bg-white/85 hover:opacity-90 text-[13px] py-1.5 px-4 opacity-30"
               } ${dragActive ? "ring-2 ring-fuchsia-400/70" : ""}`}
             >
               {z.name}
@@ -289,8 +310,8 @@ export function NavPage({ navZones, onSaveNavZones, containers, navPageSettings,
           onClick={() => setNavTab("__all__")}
           className={`rounded-full backdrop-blur-sm transition-all ${
             isAll
-              ? "bg-white text-fuchsia-600 font-bold shadow-md text-[18px] scale-[1.04] py-2 px-5"
-              : "bg-white/60 text-slate-600 hover:bg-white/85 text-[13px] py-1.5 px-4"
+              ? "bg-white text-fuchsia-600 font-bold shadow-md text-[18px] scale-[1.2] py-2 px-5"
+              : "bg-white/60 text-slate-600 hover:bg-white/85 hover:opacity-90 text-[13px] py-1.5 px-4 opacity-30"
           }`}
           title="显示全部分区的分组"
         >
@@ -369,6 +390,7 @@ export function NavPage({ navZones, onSaveNavZones, containers, navPageSettings,
                 onCardDragStart={onCardDragStart}
                 onCardDragEnd={onCardDragEnd}
                 onCardDrop={onCardDrop}
+                onAppContextMenu={openAppContextMenu}
               />
             ))
           )}
@@ -384,6 +406,48 @@ export function NavPage({ navZones, onSaveNavZones, containers, navPageSettings,
             新建分区
           </button>
         </div>
+      )}
+
+      {/* v1.52.19：卡片右键上下文菜单——①另一种网络模式打开（当前内网⇒外网，反之亦然）②编辑 ③删除 */}
+      {ctxMenu && (
+        <>
+          <div
+            className="fixed inset-0 z-[900]"
+            onClick={() => setCtxMenu(null)}
+            onContextMenu={(e) => { e.preventDefault(); setCtxMenu(null); }}
+          />
+          <div
+            className="fixed z-[901] min-w-[170px] rounded-xl bg-white shadow-xl border border-slate-200 py-1"
+            style={{ left: ctxMenu.x, top: ctxMenu.y }}
+          >
+            <button
+              type="button"
+              disabled={!ctxMenu.altUrl}
+              onClick={() => { window.open(ctxMenu.altUrl, "_blank", "noopener"); setCtxMenu(null); }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-[13px] text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed text-left"
+            >
+              {ctxMenu.altZone === "internet" ? <Globe size={13} /> : <House size={13} />}
+              {ctxMenu.altZone === "internet" ? "外网链接打开" : "内网链接打开"}
+            </button>
+            <button
+              type="button"
+              onClick={() => { openEditApp(ctxMenu.app); setCtxMenu(null); }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-[13px] text-slate-700 hover:bg-slate-50 text-left"
+            >
+              <Pencil size={13} /> 编辑
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (window.confirm(`确定删除项目「${ctxMenu.app.name}」？`)) handleDeleteApp(ctxMenu.app.id);
+                setCtxMenu(null);
+              }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-[13px] text-rose-600 hover:bg-rose-50 text-left"
+            >
+              <Trash2 size={13} /> 删除
+            </button>
+          </div>
+        </>
       )}
 
       {/* 添加 / 编辑项目弹窗（v1.51.11：不再经 NavEditor，直接落盘） */}
