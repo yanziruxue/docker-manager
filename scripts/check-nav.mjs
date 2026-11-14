@@ -457,6 +457,22 @@ ok("★ v1.52.19 右键菜单关闭（点外 / Escape / 再右键）",
   navPage.includes('if (e.key === "Escape") setCtxMenu(null)') &&
   navPage.includes("onContextMenu={(e) => { e.preventDefault(); setCtxMenu(null); }}"));
 
+// ── v1.52.20：图标/卡片 = 2/3 ──
+ok("★ v1.52.20 卡片大小变化联动图标 = 卡片 × 2/3（滑块保留微调）",
+  gs.includes("cardSize: v, iconSize: Math.round((v * 2) / 3)"));
+ok("★ v1.52.20 图标默认 80 / 滑块上限 200（前端与服务端 clamp 同步）",
+  gs.includes("iconSize: 80") && gs.includes("max={200}") &&
+  navMod.includes("num(z?.iconSize ?? g0?.iconSize, 16, 200, 80)"));
+ok("★ v1.52.20 竖排卡片定高 = 卡宽 × 1.25，图标区 flex-1 占约 2/3、居中偏上",
+  board.includes("const cardH = Math.round(cardSize * 1.25);") &&
+  board.includes("style={{ width: cardSize, height: cardH }}") &&
+  board.includes('className="flex-1 min-h-0 w-full flex items-center justify-center"'));
+ok("★ v1.52.20 名称 + 描述钉在卡片底部（无描述时占位对齐）",
+  board.includes('<span className="text-[13px] font-medium truncate w-full text-center px-1"') &&
+  board.includes('<span className="h-[15px]" aria-hidden="true" />'));
+ok("★ v1.52.20 编辑弹窗「分区→分组」两级联动保留（changeZone 回落首分组）",
+  appModal.includes('setGroupId(z?.groups?.[0]?.id || "");'));
+
 console.log("== ③ 负向自检（注入回归 → 检出 → 还原） ==");
 // 注入「内网缺 lanUrl 不回落 url」回归：应被 ⑤ 号用例检出
 const TARGET = "src/webui-url.ts";
@@ -600,6 +616,21 @@ if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
       name: "注入 v1.52.19 altZone 反向解析缺失回归（NavBoard 不再计算相反分区）",
       rel: "src/components/NavBoard.tsx",
       inject: (s) => s.replace("const altZone: WebuiZone = effectiveZone === \"intranet\" ? \"internet\" : \"intranet\";", ""),
+    },
+    {
+      name: "注入 v1.52.20 竖排卡片定高回退回归（撤销 2/3 图标区排版）",
+      rel: "src/components/NavBoard.tsx",
+      inject: (s) => s.replace("const cardH = Math.round(cardSize * 1.25);", ""),
+    },
+    {
+      name: "注入 v1.52.20 图标区 flex-1 移除回归（图标不再居中偏上）",
+      rel: "src/components/NavBoard.tsx",
+      inject: (s) => s.replace('className="flex-1 min-h-0 w-full flex items-center justify-center"', 'className=""'),
+    },
+    {
+      name: "注入 v1.52.20 图标/卡片 2/3 联动缺失回归（卡片滑块不再带动图标）",
+      rel: "src/components/NavGroupSettingsModal.tsx",
+      inject: (s) => s.replace("cardSize: v, iconSize: Math.round((v * 2) / 3)", "cardSize: v"),
     },
     {
       name: "注入容器图标回归（重新引用 c.icon）",

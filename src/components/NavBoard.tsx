@@ -10,6 +10,7 @@
  * v1.52.6：弹窗内示意卡小样已移除，AppCard 仅本组件内部使用、不再导出。
  * v1.52.17：编辑态点击卡片**任意位置**直达编辑弹窗（不再只能点左上角 ✎），
  *           且编辑态点击绝不跳转链接（含右上角跳转指示图标一并隐藏）。
+ * v1.52.20：竖排卡片重排版——图标区约占卡片 2/3（居中偏上），名称 + 描述钉在底部，定高 = 卡宽 × 1.25。
  */
 import { useEffect, useMemo, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
 import { ExternalLink, Pencil } from "lucide-react";
@@ -196,6 +197,9 @@ function AppCard({
     );
   }
 
+  // v1.52.20：竖排卡片定高 = 卡宽 × 1.25；图标区占卡片约 2/3（flex-1 居中），
+  // 名称 + 描述钉在底部 ⇒ 图标视觉中心位于卡片中心偏上，比例合理美观
+  const cardH = Math.round(cardSize * 1.25);
   return (
       <button
         onClick={open}
@@ -205,12 +209,19 @@ function AppCard({
         onContextMenu={onContextMenu}
         onDragStart={(e) => { if (onCardDragStart) { e.stopPropagation(); onCardDragStart(app.id, groupForDnd || ""); } }}
         onDragEnd={() => onCardDragEnd?.()}
-        className={`group relative flex flex-col items-center gap-2 p-4 rounded-2xl ${styleCls} transition-all disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0`}
-      style={{ width: cardSize }}
+        className={`group relative flex flex-col items-center p-3 rounded-2xl ${styleCls} transition-all disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0`}
+      style={{ width: cardSize, height: cardH }}
     >
-      {iconBlock}
-      <span className="text-[13px] font-medium truncate w-full text-center" style={{ color: titleColor }}>{app.name}</span>
-      {subtitle && <span className="text-[11px] text-slate-400 truncate w-full text-center -mt-1.5">{subtitle}</span>}
+      {/* 图标区：占据名称之上的全部剩余空间（约卡片 2/3），图标在其中水平垂直居中 */}
+      <span className="flex-1 min-h-0 w-full flex items-center justify-center">
+        {iconBlock}
+      </span>
+      <span className="text-[13px] font-medium truncate w-full text-center px-1" style={{ color: titleColor }}>{app.name}</span>
+      {subtitle ? (
+        <span className="text-[11px] text-slate-400 truncate w-full text-center px-1">{subtitle}</span>
+      ) : (
+        <span className="h-[15px]" aria-hidden="true" />
+      )}
       {!editMode && url && (
         <ExternalLink
           size={12}
@@ -284,7 +295,7 @@ export function NavBoard({
   const layout = zoneCfg?.cardLayout || "vertical";
   const cardSize = zoneCfg?.cardSize || 120;
   const gridGap = zoneCfg?.gridGap ?? 16;
-  const iconSize = zoneCfg?.iconSize || 48;
+  const iconSize = zoneCfg?.iconSize || 80; // v1.52.20：默认 = 卡片 × 2/3（120 → 80）
   // v1.51.9：分组卡片样式 / 图标形状（参照 FlatNas），缺省回落与 v1.51.8 视觉一致
   const cardStyle: NavCardStyle = zoneCfg?.cardStyle || "solid";
   const iconShape: NavIconShape = zoneCfg?.iconShape || "rounded";

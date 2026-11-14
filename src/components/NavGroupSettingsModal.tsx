@@ -47,7 +47,8 @@ const DEFAULT_APPEARANCE = {
   cardLayout: "vertical" as const,
   cardSize: 120,
   gridGap: 16,
-  iconSize: 48,
+  // v1.52.20：图标/卡片 = 2/3（120 × 2/3 ≈ 80）
+  iconSize: 80,
   cardStyle: "solid" as NavCardStyle,
   iconShape: "rounded" as NavIconShape,
   // v1.52.4：分区级间距（与改动前视觉一致：标签条 20 / 标题下 20 / 组间 32）
@@ -650,13 +651,14 @@ export function NavGroupSettingsModal({
                     min={60}
                     max={240}
                     unit="px"
-                    onChange={(v) => patchZone({ cardSize: v })}
+                    // v1.52.20：卡片大小变化时图标联动为卡片 × 2/3（仍可用「图标大小」滑块微调）
+                    onChange={(v) => patchZone({ cardSize: v, iconSize: Math.round((v * 2) / 3) })}
                   />
                   <SliderRow
                     label="图标大小"
-                    value={activeZone.iconSize ?? 48}
+                    value={activeZone.iconSize ?? 80}
                     min={16}
-                    max={96}
+                    max={200}
                     unit="px"
                     onChange={(v) => patchZone({ iconSize: v })}
                   />

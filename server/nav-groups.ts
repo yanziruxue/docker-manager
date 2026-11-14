@@ -89,7 +89,8 @@ function zoneAppearanceFromRaw(z: any): Record<string, unknown> {
     cardLayout: z?.cardLayout === "horizontal" || g0?.cardLayout === "horizontal" ? "horizontal" : "vertical",
     cardSize: num(z?.cardSize ?? g0?.cardSize, 60, 240, 120),
     gridGap: num(z?.gridGap ?? g0?.gridGap, 0, 60, 16),
-    iconSize: num(z?.iconSize ?? g0?.iconSize, 16, 96, 48),
+    // v1.52.20：图标/卡片默认比例 2/3（默认 120/80）；上限 200 以容纳 240 × 2/3 = 160
+    iconSize: num(z?.iconSize ?? g0?.iconSize, 16, 200, 80),
     cardStyle: pick(z?.cardStyle ?? g0?.cardStyle, CARD_STYLES, "solid"),
     iconShape: pick(z?.iconShape ?? g0?.iconShape, ICON_SHAPES, "rounded"),
     // v1.52.4：分区级间距（0–120），旧数据缺字段回落为改动前的视觉值
