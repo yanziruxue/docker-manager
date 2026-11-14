@@ -3,11 +3,11 @@ name: build-docker-image
 # ============================================================
 # Docker 镜像构建工作流（Gitea Actions）
 #
-# 触发规则（2026-11-13 修正：手动 dispatch 恢复 target 选择）：
-#   - 打 tag (v*) 推送            → 自动构建并推送 Gitea 内置容器镜像库
-#                                   192.168.24.10:8024/yanzi/dockermanagementyanzi  (:版本 + :latest)
+# 触发规则（2026-11-14 起：仅手动触发，不随 tag 自动构建）：
 #   - 手动触发 workflow_dispatch  → target 可选 gitea（默认）/ ghcr；
 #                                   可用 version 输入手动指定镜像版本号，留空 = 取 package.json
+#   - 打 tag 推送不再自动触发镜像构建（v1.53.0 起移除 push tags 触发器，
+#     SEA 二进制发布仍走 build.yml 的 tag 自动构建，互不影响）
 #
 # 前置硬条件：Gitea Actions runner 必须已安装 Docker 守护进程
 #   （docker build 需要；若 runner 无 docker，须改用 docker:dind 服务容器 privileged）。
@@ -24,9 +24,6 @@ name: build-docker-image
 # ============================================================
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
     inputs:
       target:
@@ -68,10 +65,8 @@ jobs:
       - name: 计算版本与镜像名
         id: meta
         run: |
-          # tag 事件用 tag 名（如 v1.51.18）；手动触发优先用 version 输入，留空回落 package.json 版本
-          if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
-            VERSION="${GITHUB_REF_NAME}"
-          elif [ -n "${{ inputs.version }}" ]; then
+          # 仅手动触发：优先用 version 输入，留空回落 package.json 版本
+          if [ -n "${{ inputs.version }}" ]; then
             VERSION="${{ inputs.version }}"
           else
             VERSION="v$(node -p "require('./package.json').version")"
@@ -93,8 +88,8 @@ jobs:
             --build-arg APT_MIRROR=mirrors.aliyun.com \
             .
 
-      - name: 推送 Gitea 容器镜像库（tag 自动触发，或手动选 target=gitea）
-        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.target == 'gitea') }}
+      - name: 推送 Gitea 容器镜像库（手动选 target=gitea，默认）
+        if: ${{ inputs.target == 'gitea' }}
         env:
           DOCKER_USER: ${{ secrets.DOCKER_USER }}
           DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
@@ -104,7 +99,7 @@ jobs:
           docker push "${{ steps.meta.outputs.gitea_image }}:latest"
 
       - name: 推送 ghcr.io（仅手动选 target=ghcr）
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.target == 'ghcr' }}
+        if: ${{ inputs.target == 'ghcr' }}
         env:
           GHCR_USER: ${{ secrets.GHCR_USER }}
           GHCR_PAT: ${{ secrets.GHCR_PAT }}

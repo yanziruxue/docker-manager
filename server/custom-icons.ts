@@ -146,6 +146,10 @@ const ICON_CT_EXT: Record<string, string> = {
 };
 const ICON_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico"]);
 
+/** v1.53.0：EROFS 的修复指引——zip/deb 直装走 systemd 时最常见根因是 ProtectSystem=strict 沙箱白名单未含图标目录 */
+const EROFS_HINT =
+  "若以 systemd 服务（zip/deb 安装）运行，多为沙箱白名单限制：请执行 sudo systemctl edit dockermanagementyanzi 添加一行 ReadWritePaths=-<该目录>，保存后 sudo systemctl daemon-reload && sudo systemctl restart dockermanagementyanzi";
+
 /** 图标文件写入统一收口（下载 / 上传共用）：探测可写 → 防穿越 → 写入（EROFS 等给中文提示） */
 function writeIconFile(dir: string, file: string, buf: Buffer): { url: string; file: string } {
   // 写入前二次确认目录未被替换成软链接，且目标落在该目录内
@@ -156,7 +160,7 @@ function writeIconFile(dir: string, file: string, buf: Buffer): { url: string; f
   } catch (e: any) {
     // v1.52.18：写入阶段被拒（如探测通过后被重新挂载为只读）也给出人话错误
     const code = String(e?.code || "");
-    if (code === "EROFS") throw new Error("写入失败：目录是只读挂载（EROFS），请将该目录改为读写挂载或换一个可写的图标库目录");
+    if (code === "EROFS") throw new Error(`写入失败：目录是只读挂载（EROFS），请将该目录改为读写挂载或换一个可写的图标库目录。${EROFS_HINT}`);
     if (code === "EACCES" || code === "EPERM") throw new Error("写入失败：服务运行账号对该目录没有写权限，请检查目录属主/权限");
     throw e;
   }
@@ -304,7 +308,7 @@ export function probeIconDirWritable(dir: string): { writable: boolean; error: s
     return { writable: true, error: "" };
   } catch (e: any) {
     const code = String(e?.code || "");
-    if (code === "EROFS") return { writable: false, error: "目录是只读挂载（EROFS）" };
+    if (code === "EROFS") return { writable: false, error: `目录是只读挂载（EROFS）。${EROFS_HINT}` };
     if (code === "EACCES" || code === "EPERM") return { writable: false, error: "服务运行账号对该目录没有写权限" };
     return { writable: false, error: `目录不可写：${e?.message || code || "未知错误"}` };
   }

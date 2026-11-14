@@ -16,6 +16,20 @@
 
 ---
 
+## v1.53.0 — 2026-11-14（**main 分支 · 已构建 · 已推 Gitea**）
+
+### EROFS 提示附 systemd 沙箱修复指引
+
+- **背景**：用户 zip 直装（非容器）下载图标仍报 `EROFS`，根因是 `.service` 的 `ProtectSystem=strict` 沙箱——整个文件系统只读，仅 `ReadWritePaths=` 白名单（安装目录 / docker.sock / /etc/docker）可写，图标库目录（如 `/vol1/1000/photos/图标`）不在白名单，宿主机 777 权限也无济于事（命名空间层拦截）。
+- **服务端**（`server/custom-icons.ts`）：新增 `EROFS_HINT` 指引常量（`sudo systemctl edit dockermanagementyanzi` 添加 `ReadWritePaths=-<该目录>` + `daemon-reload` + `restart`），接入 `writeIconFile` 写入失败与 `probeIconDirWritable` 探测两处 EROFS 分支；探测错误经 `/api/custom-icons/check` 的 `warn` 字段自动透传前端设置页黄色警告，前端零改动。
+- **门禁**：`check-custom-icons` +1 断言（EROFS_HINT 常量 + systemctl edit + ReadWritePaths=- + 两处模板接线）→ **77 PASS / 0 FAIL**；`check-nav` 260 ok / 0 FAIL；`test:gates` 22 组全绿；双 `tsc` 0 错。
+- **验证（硬证据）**：二进制 130,616,512 B / SHA-256 `b7a19aa7…a9430`（全串 `b7a19aa7a17632c7c9a1e9b2b678922b6392ec0835e483efb947dcf9716a9430`）；ELF `7f454c46` + e_machine=62；版本锚点 1.53.0 ×1、旧版 1.52.23 归零；**EROFS 指引字符串已嵌入二进制**（`systemctl edit dockermanagementyanzi` / `ReadWritePaths=-` 命中）；zip（43,138,274 B / SHA `2d6bab17…6d44f`）与 deb（42,853,218 B / SHA `615c644b…11e9b`）内二进制与 postject 产物 SHA 逐字节一致。
+- **同版工程改动**：`.gitea/workflows/build-docker.yml` 移除 tag 推送自动触发，Docker 镜像构建改为**仅手动 workflow_dispatch**（SEA 二进制发布仍走 build.yml 的 tag 自动构建，互不影响）。
+- **未完成 / 已知限制**：无。
+- **下一步**：无。
+
+---
+
 ## v1.52.23 — 2026-11-14（**main 分支 · 已构建 · 已推 Gitea**）
 
 ### 编辑项目「上传」图标（与「从链接下载」并列）

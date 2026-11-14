@@ -178,6 +178,11 @@ ok("v1.52.18 写入失败人话错误（EROFS/EACCES）",
 ok("v1.52.18 检测接口回报 writable/warn", indexSrc.includes("probeIconDirWritable(dir);") &&
   indexSrc.includes("writable: w.writable") && indexSrc.includes("warn: w.writable"));
 ok("v1.52.18 前端检测结果显示不可写警告", settingsSrc.includes("目录可读但不可写"));
+// v1.53.0：EROFS 提示附 systemd 沙箱修复指引（ProtectSystem=strict + ReadWritePaths drop-in）
+ok("v1.53.0 EROFS 指引常量与两处文案接线和引导", ciSrc.includes("const EROFS_HINT") &&
+  ciSrc.includes("systemctl edit dockermanagementyanzi") &&
+  ciSrc.includes("ReadWritePaths=-") &&
+  ciSrc.includes("${EROFS_HINT}"));
 // v1.52.23：编辑项目「上传本地图片」与「从链接下载」并列（服务端 upload 路由 + 前端按钮）
 ok("v1.52.23 导出 uploadCustomIcon（探测可写 → CT 映射扩展名 → 落盘）",
   ciSrc.includes("export function uploadCustomIcon") &&
