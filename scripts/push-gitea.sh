@@ -115,6 +115,9 @@ if [ -n "$(git status --porcelain)" ]; then
   say ""
 fi
 
+# v1.53.4：rc 必须在使用前初始化——未设置 GITEA_TOKEN 时推送分支不给它赋值，
+# set -u 下 fix_tracking 后的检查会报「rc: unbound variable」并提前退出（末尾清扫永远到不了）。
+rc=0
 say "=== 推送 → $REMOTE/$BRANCH ==="
 say "  Gitea 若问账号密码：用户名 = yanzi；密码 = 访问令牌（见脚本头部注释）。"
 if [ "$DRY" = 1 ]; then
@@ -174,6 +177,7 @@ if [ -n "${GITEA_TOKEN:-}" ]; then
 else
   if [ -n "${GIT_PUSH_OPTS:-}" ]; then
     GIT_TERMINAL_PROMPT=0 git $GIT_PUSH_OPTS push -u "$REMOTE" "$BRANCH"
+    rc=$?
   else
     GIT_TERMINAL_PROMPT=0 git -c http.sslBackend=openssl -c http.proxy= -c https.proxy= push -u "$REMOTE" "$BRANCH"
     rc=$?

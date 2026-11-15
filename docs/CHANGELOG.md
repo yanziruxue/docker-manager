@@ -29,6 +29,7 @@
   - `scripts/check-nav.mjs`：遮罩断言升级为**扫描全部 4 个弹窗遮罩标签内零 onClick**（含多行写法，修复漏检根因）；翻转拖动旧断言；新增 Esc 栈 / 复用 / 4 弹窗接线 / 下拉与内联改名优先级 / 发布清扫共 5 条断言 + 5 类负向注入自检。
   - `scripts/push-gitea.sh`：发布成功后自动 `rm -rf .gate-nav-*`（项目根精确前缀，无残留静默跳过）——落实「每次发布完自动清理」。
   - `scripts/check-nav.mjs` 自身：临时目录改 `process.on("exit")` 必清（FAIL / 中途退出也清）+ 启动时清扫 mtime >1h 的陈旧残留（阈值避免误删并发门禁正在用的目录）。
+  - `scripts/push-gitea.sh` 顺带修掉既有 `set -u` 坑：`rc` 未初始化（未设 `GITEA_TOKEN` / 带 `GIT_PUSH_OPTS` 的分支不赋值）会在 `fix_tracking` 后报 `rc: unbound variable` **提前退出**，导致末尾清扫永远执行不到；并在 `GIT_PUSH_OPTS` 分支补 `rc=$?` 捕获真实推送结果。**该脚本不在交付包 5 成员内，二进制与 zip/deb SHA 不变**。
 - **附带清理**（用户拍板，非代码改动）：删除 `build-upload` 下两个 v1.52.6 Docker 镜像离线包（491,524,096 B tar + 187,223,336 B tar.gz，共 648 MB），`build-upload` 1.9 GB → 1.3 GB。
 - **验证**：双 `tsc` 0 错；`check-nav` **273 ok / 0 FAIL**（+5 断言、+5 负向注入）；22 组门禁全绿；`bash -n scripts/push-gitea.sh` 通过；造 2 小时前的 `.gate-nav-oldtest` 实测启动清扫删除、本次临时目录 exit 钩子清干净。
 - **产物**：SEA 二进制 130,616,512 B / SHA `1c6b355528b49188824b1980eadf242c0e4dce2edabdc7b213e75c73230ea5d9`（ELF `7f454c46` / e_machine=62；锚点 1.53.4 ×1、1.53.3 归零）；zip 43,136,408 B / SHA `01be935c…e027`；deb 42,851,396 B / SHA `631be600…df77c`（zip 成员 5、zip/deb 内二进制与 postject 产物逐字节一致；前端 dist 命中 `Escape` ×10 与 `body.style.overflow`）。
