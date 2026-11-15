@@ -81,6 +81,7 @@ import {
   uploadCustomIcon,
   probeIconDirWritable,
   listCustomIconEntries,
+  listUnreadableIconFiles,
   buildCustomIconMap,
   resolveCustomIconFile,
   downloadCustomIcon,
@@ -1283,7 +1284,12 @@ app.get("/api/custom-icons", (_req, res) => {
       return;
     }
   }
-  res.json({ success: true, data: { bound, dir, error, entries, map: buildCustomIconMap(entries) } });
+  // v1.53.3：存在但无读取权限的文件被扫描跳过，汇总成 warn 提示（典型：fnOS ACL 区 cp 出的 000 权限文件）
+  const unreadable = listUnreadableIconFiles(dir);
+  const warn = unreadable.length
+    ? `${unreadable.length} 个图标文件无读取权限已被跳过：请在服务端执行 chmod 644 修正（如 ${unreadable.slice(0, 3).join("、")}${unreadable.length > 3 ? " 等" : ""}）`
+    : "";
+  res.json({ success: true, data: { bound, dir, error, warn, entries, map: buildCustomIconMap(entries) } });
 });
 
 /** 从链接下载图标写入图标库目录（v1.52.15：导航页 / 堆栈 LABELS / SETTINGS 三处入口统一使用） */
@@ -1383,7 +1389,16 @@ app.get("/api/custom-icons/:file", (req, res) => {
   }
   res.setHeader("Content-Type", ICON_EXT_CT[path.extname(file).toLowerCase()] || "image/png");
   res.setHeader("Cache-Control", "no-cache");
-  res.send(readFileSync(file));
+  // v1.53.3：读取失败给人话错误（典型场景：手动迁移的图标权限位 000，fnOS ACL 区 cp 出来的文件）
+  try {
+    res.send(readFileSync(file));
+  } catch (e: any) {
+    if (e?.code === "EACCES" || e?.code === "EPERM") {
+      res.status(403).send(`图标文件无读取权限：请在服务端执行 chmod 644 修正该文件权限（${file}）`);
+    } else {
+      res.status(404).send(`图标文件读取失败：${e?.message || "未知错误"}`);
+    }
+  }
 });
 
 /** 检查堆栈更新 */

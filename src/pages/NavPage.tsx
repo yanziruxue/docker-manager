@@ -102,7 +102,11 @@ export function NavPage({ navZones, onSaveNavZones, containers, navPageSettings,
   // v1.52.8：仅编辑态且确实有卡片被拖拽时，才开启空分组 / 空白区放置目标
   const dragActive = editMode && !!drag;
   // v1.52.10：dragActive 全分区生效，跨分区落点不再按来源分区裁剪。
-  const navIconMap = useNavIconMap();
+  // v1.53.3：图标映射可刷新——弹窗打开即重拉（新上传/下载的图标立刻参与自动匹配）
+  const [navIconMap, refreshNavIconMap] = useNavIconMap();
+  useEffect(() => {
+    if (appModal.open) refreshNavIconMap();
+  }, [appModal.open, refreshNavIconMap]);
   // 打开页面设置弹窗（整页外观/环境）
   const openPageSettings = useCallback(() => setNavPageSettingsOpen(true), []);
   // 打开分区/分组设置弹窗（v1.52.0：管理分区与分组；可聚焦到某分组；v1.52.1 支持定位某分区）
@@ -454,6 +458,7 @@ export function NavPage({ navZones, onSaveNavZones, containers, navPageSettings,
           zones={zones}
           containers={containers}
           iconMap={navIconMap}
+          onIconLibChanged={refreshNavIconMap}
           initial={appModal.initial}
           initialGroupId={appModal.groupId || effectiveTab || undefined}
           onSave={handleSaveApp}

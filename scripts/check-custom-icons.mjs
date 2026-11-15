@@ -210,6 +210,27 @@ ok("v1.52.23 编辑项目弹窗「上传」按钮在「从链接下载」左侧�
   read("src/components/NavAppModal.tsx").includes('ref={iconUploadRef}') &&
   read("src/components/NavAppModal.tsx").indexOf("<Upload size={11} /> 上传") <
   read("src/components/NavAppModal.tsx").indexOf("从链接下载"));
+// v1.53.3：权限可读性 —— 扫描跳过不可读文件 + 取图 EACCES 人话报错 + 映射表可刷新
+ok("v1.53.3 扫描跳过无读取权限文件并导出 listUnreadableIconFiles",
+  ciSrc.includes("fs.accessSync(path.join(dir, ent.name), fs.constants.R_OK)") &&
+  ciSrc.includes("export function listUnreadableIconFiles"));
+ok("v1.53.3 列表接口回报 warn（chmod 644 提示）",
+  indexSrc.includes("listUnreadableIconFiles(dir)") &&
+  indexSrc.includes("无读取权限已被跳过") && indexSrc.includes("chmod 644"));
+ok("v1.53.3 取图接口 EACCES/EPERM 人话报错（403 + chmod 提示）",
+  /catch \(e: any\) \{\s*\n\s*if \(e\?\.code === "EACCES" \|\| e\?\.code === "EPERM"\)/.test(indexSrc) &&
+  indexSrc.includes("图标文件无读取权限：请在服务端执行 chmod 644"));
+ok("v1.53.3 前端 payload 类型补 warn 字段", read("src/custom-icons.ts").includes("warn?: string"));
+const navBoardSrc = read("src/components/NavBoard.tsx");
+ok("v1.53.3 useNavIconMap 返回 [map, refresh]（防过期快照）",
+  navBoardSrc.includes("useNavIconMap(): [Record<string, string>, () => void]") &&
+  navBoardSrc.includes("return [map, refresh];"));
+const navPageSrc = read("src/pages/NavPage.tsx");
+ok("v1.53.3 弹窗打开即刷新图标映射", navPageSrc.includes("if (appModal.open) refreshNavIconMap()") &&
+  navPageSrc.includes("onIconLibChanged={refreshNavIconMap}"));
+const navAppModalSrc = read("src/components/NavAppModal.tsx");
+ok("v1.53.3 上传/下载成功后回调刷新映射", navAppModalSrc.includes("onIconLibChanged?.(); // v1.53.3") &&
+  navAppModalSrc.includes("onDownloaded={(u) => { setIcon(u); onIconLibChanged?.(); }}"));
 const pkg = JSON.parse(read("package.json"));
 // 语义比较「不低于引入版」：避免后续升版本时硬编码断言假红
 const verCmp = (a, b) => {

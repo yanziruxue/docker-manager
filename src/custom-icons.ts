@@ -17,6 +17,8 @@ export interface CustomIconsPayload {
   bound: boolean;
   dir: string;
   error: string;
+  /** v1.53.3：存在但无读取权限被扫描跳过的文件警告（提示 chmod 644 修正）；无问题时为空 */
+  warn?: string;
   entries: CustomIconEntry[];
   /** stem → 取图 URL，服务端已按格式优先级去重 */
   map: Record<string, string>;

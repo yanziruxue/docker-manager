@@ -16,6 +16,25 @@
 
 ---
 
+## v1.53.3 — 2026-11-15（**main 分支 · 已构建 · 已推 Gitea**）
+
+### 图标可读性人话报错 + 导航图标映射可刷新（两项合并）
+
+- **背景**：用户手动迁移图标文件权限位为 0000（fnOS 相册 ACL 区 `cp` 沿袭），扫描能列出（`readdir`+`stat` 不需要读内容）但取图 `readFileSync` 报 `EACCES` → 卡片图标空白且无提示；另发现 `useNavIconMap` 挂载时一次性快照、永不刷新，上传/下载新图标后自动匹配不到。
+- **改动**：
+  - `server/custom-icons.ts`：`listCustomIconEntries` 扫描时 `accessSync(R_OK)` 跳过无读取权限文件（不再出现「下拉有、卡片空白」）；新增 `listUnreadableIconFiles(dir)` 汇总被跳过的文件名。
+  - `server/index.ts`：`GET /api/custom-icons` payload 新增 `warn`（N 个图标文件无读取权限已被跳过 + chmod 644 提示）；`GET /api/custom-icons/:file` 读文件包 try/catch，`EACCES`/`EPERM` 返回 403 +「图标文件无读取权限：请在服务端执行 chmod 644 修正该文件权限（完整路径）」，其余读取异常 404 人话错误。
+  - `src/custom-icons.ts`：`CustomIconsPayload` 补 `warn?: string`。
+  - `src/components/NavBoard.tsx`：`useNavIconMap` 改返回 `[map, refresh]`（序号防过期响应），映射不再是一次性快照。
+  - `src/pages/NavPage.tsx`：`useEffect` 监听 `appModal.open`，添加/编辑项目弹窗**打开即刷新映射**；`refreshNavIconMap` 经 `onIconLibChanged` 下传。
+  - `src/components/NavAppModal.tsx`：上传成功 / 从链接下载成功后调用 `onIconLibChanged?.()`，新图标立刻参与自动匹配（容器预设填图标 + 保存留空兜底匹配 + 卡片按名渲染）。
+- **验证**：双 `tsc` 0 错；`check-custom-icons` +8 断言；22 组门禁全绿；SEA 硬核验见下。
+- **产物**：SEA 二进制 130,616,512 B / SHA `b81381ed6d0cc74a789473bfba24df15b717ee9cd60effa4ddcc69eae81edbf9`（ELF `7f454c46` / e_machine=62）；zip 43,136,447 B / SHA `a682b1f6…654a9`；deb 42,851,406 B / SHA `c6ecaed5…e5530`（zip/deb 内二进制与 postject 产物逐字节一致；服务端中文经 esbuild **大写 `\uXXXX` 转义**嵌入——`无读取权限已被跳过`、`个图标文件无读取权限`、取图 chmod 644 文案均命中，前端 dist 命中 `refreshNavIconMap`/`onIconLibChanged`）。
+- **未完成 / 已知限制**：`IconAutoComplete` 下拉列表仍为弹窗内一次性加载（弹窗重开即刷新），同一弹窗会话内上传后的下拉不实时——图标输入框已直接回填 URL，不影响使用。
+- **下一步**：无。
+
+---
+
 ## v1.53.2 — 2026-11-14（**main 分支 · 已构建 · 已推 Gitea**）
 
 ### 移除「堆栈图标双击」设置卡片，双击行为固定常开

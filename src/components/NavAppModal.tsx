@@ -46,6 +46,8 @@ export function NavAppModal({
   initialGroupId,
   onSave,
   onDelete,
+  /** v1.53.3：图标库变更回调（上传 / 从链接下载成功后触发）——父级重拉图标映射，新图标立即参与自动匹配 */
+  onIconLibChanged,
   onClose,
 }: {
   /** 导航分区（v1.52.0）：内部展开全部分组用于归属下拉 / 名称唯一 / 容器已添加判定 */
@@ -61,6 +63,8 @@ export function NavAppModal({
   onSave: (groupId: string, app: NavAppItem) => void;
   /** 编辑态删除项目（v1.51.11）：由 NavPage 从所有分组移除同 id 条目并落盘 */
   onDelete?: (appId: string) => void;
+  /** v1.53.3：图标库变更回调（上传 / 从链接下载成功后触发父级刷新映射表） */
+  onIconLibChanged?: () => void;
   onClose: () => void;
 }) {
   const editing = !!initial;
@@ -127,6 +131,7 @@ export function NavAppModal({
       const j = await res.json().catch(() => null);
       if (!res.ok || !j?.success) throw new Error(j?.error || `上传失败（HTTP ${res.status}）`);
       setIcon(j.data.url);
+      onIconLibChanged?.(); // v1.53.3：新图标入库后立刻刷新映射，自动匹配即刻可用
     } catch (err: any) {
       window.alert(err?.message || "上传图标失败");
     } finally {
@@ -438,7 +443,7 @@ export function NavAppModal({
       {iconDownloadOpen && (
         <NavIconDownloadModal
           suggestedName={name.trim()}
-          onDownloaded={(u) => setIcon(u)}
+          onDownloaded={(u) => { setIcon(u); onIconLibChanged?.(); }}
           onClose={() => setIconDownloadOpen(false)}
         />
       )}

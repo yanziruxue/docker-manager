@@ -12,7 +12,7 @@
  *           且编辑态点击绝不跳转链接（含右上角跳转指示图标一并隐藏）。
  * v1.52.20：竖排卡片重排版——图标区约占卡片 2/3（居中偏上），名称 + 描述钉在底部，定高 = 卡宽 × 1.25。
  */
-import { useEffect, useMemo, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
 import { ExternalLink, Pencil } from "lucide-react";
 import type { NavAppItem, NavCardStyle, NavGroup, NavIconShape, NavNetworkMode, NavZone } from "../types";
 import { getNetworkZoneApi, listCustomIconsApi, listNavIconsApi } from "../api";
@@ -400,21 +400,22 @@ export function NavBoard({
   );
 }
 
-/** 便捷 hook：合并导航专属图标库（同名优先）与 Docker 自定义图标库（兜底） */
-export function useNavIconMap(): Record<string, string> {
+/** 便捷 hook：合并导航专属图标库（同名优先）与 Docker 自定义图标库（兜底）。
+ * v1.53.3：返回 [map, refresh]——映射不再是挂载时一次性快照，调用 refresh() 立即重拉，
+ * 供「添加/编辑项目弹窗打开时」与「上传/下载图标成功后」刷新，新图标马上参与自动匹配。 */
+export function useNavIconMap(): [Record<string, string>, () => void] {
   const [map, setMap] = useState<Record<string, string>>({});
-  useEffect(() => {
-    let alive = true;
+  const seq = useRef(0);
+  const refresh = useCallback(() => {
+    const id = ++seq.current;
     Promise.all([
       listCustomIconsApi().catch(() => null),
       listNavIconsApi().catch(() => null),
     ]).then(([custom, nav]) => {
-      if (!alive) return;
+      if (seq.current !== id) return; // 已有更新的请求，丢弃过期结果
       setMap({ ...(custom?.map || {}), ...(nav?.map || {}) });
     });
-    return () => {
-      alive = false;
-    };
   }, []);
-  return map;
+  useEffect(() => { refresh(); }, [refresh]);
+  return [map, refresh];
 }

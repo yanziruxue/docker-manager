@@ -65,7 +65,9 @@ export function resolveCustomIconDir(raw: unknown): { dir: string; error: string
   }
 }
 
-/** 枚举目录内的图标文件（普通文件 + 白名单 + 10MB 以内），按名称与格式优先级排序 */
+/** 枚举目录内的图标文件（普通文件 + 白名单 + 10MB 以内 + **可读**），按名称与格式优先级排序。
+ * v1.53.3：无读取权限的文件（如 fnOS ACL 区 cp 出来的 000 权限文件）跳过不进映射——
+ * 列出来也取不了图，只会造成「下拉有、卡片空白」的困惑；数量经 listUnreadableIconFiles 汇总成 warn。 */
 export function listCustomIconEntries(dir: string): CustomIconEntry[] {
   if (!dir) return [];
   const out: CustomIconEntry[] = [];
@@ -76,6 +78,7 @@ export function listCustomIconEntries(dir: string): CustomIconEntry[] {
     let size = 0;
     try { size = fs.statSync(path.join(dir, ent.name)).size; } catch { continue; }
     if (size > CUSTOM_ICON_MAX_BYTES) continue;
+    try { fs.accessSync(path.join(dir, ent.name), fs.constants.R_OK); } catch { continue; }
     out.push({
       name: ent.name,
       url: `/api/custom-icons/${encodeURIComponent(ent.name)}`,
@@ -84,6 +87,19 @@ export function listCustomIconEntries(dir: string): CustomIconEntry[] {
     });
   }
   return sortCustomIconEntries(out);
+}
+
+/** v1.53.3：列出目录内「存在但无读取权限」的图标文件名（用于 /api/custom-icons 的 warn 提示） */
+export function listUnreadableIconFiles(dir: string): string[] {
+  if (!dir) return [];
+  const out: string[] = [];
+  try {
+    for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (!ent.isFile() || !CUSTOM_ICON_FILE_RE.test(ent.name)) continue;
+      try { fs.accessSync(path.join(dir, ent.name), fs.constants.R_OK); } catch { out.push(ent.name); }
+    }
+  } catch { /* 目录不可读时由 resolveCustomIconDir 的 error 兜底 */ }
+  return out;
 }
 
 /** 排序：名称升序 → 格式优先级 → 文件名（保证映射构建确定性） */
