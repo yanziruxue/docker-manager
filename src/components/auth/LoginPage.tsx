@@ -53,15 +53,18 @@ export function LoginPage({ onDone, notice }: Props) {
  * 右侧白色表单区；小屏（<lg）左栏隐藏、只显表单。
  * v1.50.35：品牌区配色与 docs/images/banner.svg 同源（深海军蓝渐变），
  * 底部嵌入 banner 主视觉（public/login-banner.svg，vite 复制进 dist 由 SEA 嵌入）。
+ * v1.53.8：左半区文案刷新为当前能力（导航页 / 图标库 / 镜像清理 / 多引擎 / 安全），
+ * 亮点 6→7 条并压缩间距防小屏溢出；右侧表单与配色保持不变。
  */
 function AuthLayout({ children }: { children: React.ReactNode }) {
   const features: { icon: React.ReactNode; text: string; badge?: string }[] = [
-    { icon: <Container size={14} />, text: "容器与堆栈管理：启停、重建、终端，一目了然" },
+    { icon: <Container size={14} />, text: "容器与堆栈：启停、重建、终端、日志" },
+    { icon: <Globe size={14} />, text: "内外网入口与图标，分区分组一页直达", badge: "导航页" },
     { icon: <Gauge size={14} />, text: "资源监控：CPU / 内存 / 网络 / 磁盘实时曲线" },
-    { icon: <Globe size={14} />, text: "WebUI 自动识别：服务端口一键直达" },
-    { icon: <Database size={14} />, text: "镜像 / 数据卷 / 网络全景可视" },
-    { icon: <Layers size={14} />, text: "服务标签与描述：LABELS 让团队读得懂", badge: "LABELS" },
-    { icon: <KeyRound size={14} />, text: "找回码 + 双重验证：凭据自助恢复", badge: "安全" },
+    { icon: <Database size={14} />, text: "镜像 / 卷 / 网络全景，镜像清理与锁定保护", badge: "清理" },
+    { icon: <Layers size={14} />, text: "多引擎 Socket / TCP / SSH，WebUI 端口直达", badge: "多引擎" },
+    { icon: <Boxes size={14} />, text: "图标库：上传 / 链接 / SVG 代码，按名称自动匹配", badge: "图标库" },
+    { icon: <KeyRound size={14} />, text: "找回码 + 双重验证 + 空闲超时，凭据自助恢复", badge: "安全" },
   ];
 
   return (
@@ -81,18 +84,18 @@ function AuthLayout({ children }: { children: React.ReactNode }) {
           <span className="font-semibold tracking-wide">Docker 管理</span>
         </div>
 
-        {/* 主标语 + 功能亮点 */}
+        {/* 主标语 + 功能亮点（v1.53.8 文案刷新） */}
         <div className="relative">
           <h1 className="text-3xl font-bold leading-snug">
-            每一台容器
+            从容器到服务入口
             <br />
-            都该有「在哪、什么状态」的答案
+            一页，看清整台服务器
           </h1>
           <p className="mt-4 text-sm leading-relaxed text-blue-100/80 max-w-md">
             面向自托管 NAS / 服务器的 Docker 可视化管理平台：
-            容器、堆栈、镜像、数据卷、网络集中管理，资源曲线实时呈现，数据全部留在自己手里。
+            容器与堆栈集中管理，资源曲线实时呈现；导航页把内外网入口、自定义图标与分区分组整理成一张卡片墙，账号与数据全部留在自己手里。
           </p>
-          <ul className="mt-6 space-y-2.5 max-w-md">
+          <ul className="mt-5 space-y-2 max-w-md">
             {features.map((f, i) => (
               <li key={i} className="flex items-center gap-2.5 text-[13px] text-blue-50/90">
                 <span className="w-5 h-5 rounded-md bg-white/10 flex items-center justify-center flex-shrink-0">

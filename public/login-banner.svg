@@ -65,10 +65,10 @@
     </g>
   </g>
 
-  <!-- 右侧：标题与副标题 -->
+  <!-- 右侧：标题与副标题（v1.53.8 文案刷新，几何与配色不变） -->
   <g>
     <text x="420" y="128" fill="#FFFFFF" font-size="56" font-weight="700" letter-spacing="1">Docker Manager <tspan fill="#38BDF8">Yanzi</tspan></text>
-    <text x="424" y="170" fill="#94A3B8" font-size="21">面向自建 NAS / 服务器的一体化 Docker 可视化管理面板</text>
+    <text x="424" y="170" fill="#94A3B8" font-size="21">容器 · 堆栈 · 服务入口，一页掌控的自托管管理平台</text>
 
     <!-- 特性徽章 -->
     <g font-size="16" font-weight="600">
@@ -85,12 +85,12 @@
       <g>
         <rect x="756" y="204" width="150" height="38" rx="19" fill="none" stroke="#FFC66B" stroke-width="1.5"/>
         <circle cx="780" cy="223" r="5" fill="#FFC66B"/>
-        <text x="794" y="229" fill="#FDE68A">实时资源监控</text>
+        <text x="794" y="229" fill="#FDE68A">导航页与图标</text>
       </g>
       <g>
         <rect x="922" y="204" width="150" height="38" rx="19" fill="none" stroke="#A78BFA" stroke-width="1.5"/>
         <circle cx="946" cy="223" r="5" fill="#A78BFA"/>
-        <text x="960" y="229" fill="#DDD6FE">应用内 OTA</text>
+        <text x="960" y="229" fill="#DDD6FE">镜像清理</text>
       </g>
     </g>
 

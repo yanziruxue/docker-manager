@@ -173,6 +173,17 @@ try {
   check("登录表单标题「登录」在位", T.loginPlain.includes("登录"));
   check("「重置密码」入口在位", T.loginPlain.includes("重置密码"));
 
+  // ---------- C2. v1.53.8：左半区品牌内容刷新（只锁文案，不锁样式） ----------
+  check("★ 左半区新主标语在位",
+    T.loginPlain.includes("从容器到服务入口") && T.loginPlain.includes("一页，看清整台服务器"));
+  check("★ 旧主标语已移除（负向对照）", !T.loginPlain.includes("每一台容器"));
+  for (const word of ["导航页", "图标库", "镜像清理", "Socket / TCP / SSH", "空闲超时"]) {
+    check(`★ 左半区亮点覆盖新功能「${word}」`, T.loginPlain.includes(word));
+  }
+  check("★ 功能亮点为 7 条", (r.loginPlain.match(/<li/g) || []).length === 7,
+    "实得 " + (r.loginPlain.match(/<li/g) || []).length);
+  check("★ 右半区表单文案未被改动", T.loginPlain.includes("忘记密码？重置密码"));
+
   // ---------- D. 渲染期零网络 ----------
   check("★ 渲染期零网络请求", r.fetchCalls === 0, "fetchCalls=" + r.fetchCalls);
 
