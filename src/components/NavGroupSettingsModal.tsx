@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { ArrowDown, ArrowUp, CopyPlus, Move, Pencil, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import type { NavCardStyle, NavGroup, NavIconShape, NavZone } from "../types";
+import { useEscapeClose } from "../hooks/useEscapeClose";
 
 /** 随机 id（与项目弹窗同风格：时间戳 36 进制 + 随机尾） */
 function genId(): string {
@@ -137,7 +138,8 @@ function InlineEdit({
       onBlur={() => onCommit(v.trim() || value)}
       onKeyDown={(e) => {
         if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-        else if (e.key === "Escape") setV(value);
+        // v1.53.4：内联改名时 Esc 只还原输入，不冒泡到全局 Esc 栈关闭整个弹窗
+        else if (e.key === "Escape") { e.stopPropagation(); setV(value); }
       }}
       className={className}
     />
@@ -187,8 +189,7 @@ export function NavGroupSettingsModal({
   const dragRef = useRef<{
     startX: number; startY: number; baseX: number; baseY: number; w: number; h: number;
   } | null>(null);
-  // 拖动结束后紧跟的 click 会冒泡到遮罩；用它抑制「拖完顺手把弹窗关掉」
-  const dragMovedRef = useRef(false);
+  // 拖动结束后紧跟的 click 不再有「误关弹窗」风险（v1.53.4 遮罩已不挂 onClick）
   const onDragHandlePointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     // 标题栏上的按钮（✕ 等）与输入控件不触发拖动
     if ((e.target as HTMLElement).closest("button, input, select, textarea, [data-no-drag]")) return;
@@ -199,7 +200,6 @@ export function NavGroupSettingsModal({
       baseX: dragOffset.x, baseY: dragOffset.y,
       w: rect.width, h: rect.height,
     };
-    dragMovedRef.current = false;
     e.preventDefault(); // 阻止拖选文本
   };
   useEffect(() => {
@@ -209,17 +209,13 @@ export function NavGroupSettingsModal({
       if (!d) return;
       const dx = e.clientX - d.startX;
       const dy = e.clientY - d.startY;
-      if (Math.abs(dx) + Math.abs(dy) > 3) dragMovedRef.current = true;
       // 面板初始居中：允许偏移到「只留 80px 在视口内」，再远就拖不出去（避免找不回弹窗）
       const maxX = Math.max(0, (window.innerWidth - d.w) / 2 + 80);
       const maxY = Math.max(0, (window.innerHeight - d.h) / 2 + 80);
       setDragOffset({ x: clamp(d.baseX + dx, -maxX, maxX), y: clamp(d.baseY + dy, -maxY, maxY) });
     };
     const onUp = () => {
-      if (!dragRef.current) return;
       dragRef.current = null;
-      // click 在 pointerup 后派发，留到下一轮再清除标记供遮罩消费
-      window.setTimeout(() => { dragMovedRef.current = false; }, 0);
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
@@ -244,6 +240,14 @@ export function NavGroupSettingsModal({
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   // v1.52.13：「应用到其他分区」下拉菜单开关
   const [applyMenuOpen, setApplyMenuOpen] = useState(false);
+
+  // v1.53.4 防误关策略：遮罩点击不关闭；Esc 为唯一快捷关闭方式。
+  // 下拉菜单 / 内联改名打开时，第一次 Esc 先收起它们，不直接关掉整个弹窗（避免丢草稿）。
+  useEscapeClose(() => {
+    if (applyMenuOpen) { setApplyMenuOpen(false); return; }
+    if (editingZoneId || editingGroupId) { setEditingZoneId(null); setEditingGroupId(null); return; }
+    onClose();
+  });
 
   const activeZone = draft.find((z) => z.id === selectedZoneId) || null;
 
@@ -348,14 +352,8 @@ export function NavGroupSettingsModal({
   );
 
   return (
-    <div
-      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/40 p-4"
-      onClick={() => {
-        // 刚拖动过标题栏时，pointerup 派发的 click 不应被当成「点遮罩关闭」
-        if (dragMovedRef.current) { dragMovedRef.current = false; return; }
-        onClose();
-      }}
-    >
+    // v1.53.4 防误关策略：遮罩不挂 onClick，点弹窗外区域一律不关闭；仅 X / 取消 / Esc 可关
+    <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/40 p-4">
       <div
         ref={panelRef}
         className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[88vh] flex flex-col overflow-hidden"

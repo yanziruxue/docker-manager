@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import { Download, FolderOpen, Loader2, X } from "lucide-react";
 import { downloadCustomIconApi, listCustomIconsApi } from "../api";
 import type { CustomIconsPayload } from "../custom-icons";
+import { useEscapeClose } from "../hooks/useEscapeClose";
 
 const inputCls =
   "w-full px-2.5 py-1.5 text-[13px] border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-fuchsia-500/30 focus:border-fuchsia-400 bg-white text-slate-700 disabled:bg-slate-100";
@@ -35,6 +36,9 @@ export function NavIconDownloadModal({
   onDownloaded?: (url: string) => void;
   onClose: () => void;
 }) {
+  // v1.53.4：叠加在项目弹窗之上，后入栈优先——Esc 先关本弹窗，再按一次才关项目弹窗
+  useEscapeClose(onClose);
+
   const [payload, setPayload] = useState<CustomIconsPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [url, setUrl] = useState("");

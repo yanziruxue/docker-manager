@@ -16,6 +16,27 @@
 
 ---
 
+## v1.53.4 — 2026-11-15（**main 分支 · 已构建 · 已推 Gitea**）
+
+### 弹窗统一「防误关 + Esc 可关」（长期约定）+ 发布后自动清扫门禁残留
+
+- **背景**：用户报「分组和分区弹窗点弹窗外区域会自动关闭、Esc 不能关闭」。定位为 `NavGroupSettingsModal` 遮罩挂了**多行** `onClick={() => { …; onClose(); }}`，而 v1.52.14 门禁只断言一行式 `onClick={onClose}` 的另外三个弹窗 → 该写法被漏放；同时 4 个导航自绘弹窗都没有键盘监听（通用 `Modal` 默认 Esc 可关，行为不一致）。用户拍板并确立**长期约定**：以后所有弹窗一律「防误关（点外部不关）+ 通用弹窗的 Esc 习惯」。
+- **改动**：
+  - 新增 `src/hooks/useEscapeClose.ts`：全局 Esc 栈（模块级），仅最上层弹窗响应（priority 大者优先、同级后入栈优先），栈非空时锁背景滚动、栈空还原；`close` 走 ref，父组件重渲染不重复注册。
+  - `src/components/Modal.tsx`：删私有 `escStack` / `useId` / 两段重复 `useEffect`，`Modal` 与 `Drawer` 统一调用共享 hook，避免两套栈各自判定栈顶导致叠加弹窗同时被关。
+  - `src/components/NavGroupSettingsModal.tsx`：遮罩 `onClick` 整体移除（含拖动抑制标记 `dragMovedRef` 死代码清理）；接入 Esc，且「应用到其他分区」下拉 / 内联改名打开时第一次 Esc 先收起它们、不直接关弹窗；`InlineName` 的 Escape 加 `stopPropagation()`，只还原输入不冒泡关弹窗。
+  - `NavAppModal` / `NavPageSettingsModal` / `NavIconDownloadModal`：统一接入 Esc；项目弹窗与下载弹窗叠加时后打开者优先响应（按一次关下载、再按一次关项目）。
+  - `scripts/check-nav.mjs`：遮罩断言升级为**扫描全部 4 个弹窗遮罩标签内零 onClick**（含多行写法，修复漏检根因）；翻转拖动旧断言；新增 Esc 栈 / 复用 / 4 弹窗接线 / 下拉与内联改名优先级 / 发布清扫共 5 条断言 + 5 类负向注入自检。
+  - `scripts/push-gitea.sh`：发布成功后自动 `rm -rf .gate-nav-*`（项目根精确前缀，无残留静默跳过）——落实「每次发布完自动清理」。
+  - `scripts/check-nav.mjs` 自身：临时目录改 `process.on("exit")` 必清（FAIL / 中途退出也清）+ 启动时清扫 mtime >1h 的陈旧残留（阈值避免误删并发门禁正在用的目录）。
+- **附带清理**（用户拍板，非代码改动）：删除 `build-upload` 下两个 v1.52.6 Docker 镜像离线包（491,524,096 B tar + 187,223,336 B tar.gz，共 648 MB），`build-upload` 1.9 GB → 1.3 GB。
+- **验证**：双 `tsc` 0 错；`check-nav` **273 ok / 0 FAIL**（+5 断言、+5 负向注入）；22 组门禁全绿；`bash -n scripts/push-gitea.sh` 通过；造 2 小时前的 `.gate-nav-oldtest` 实测启动清扫删除、本次临时目录 exit 钩子清干净。
+- **产物**：SEA 二进制 130,616,512 B / SHA `1c6b355528b49188824b1980eadf242c0e4dce2edabdc7b213e75c73230ea5d9`（ELF `7f454c46` / e_machine=62；锚点 1.53.4 ×1、1.53.3 归零）；zip 43,136,408 B / SHA `01be935c…e027`；deb 42,851,396 B / SHA `631be600…df77c`（zip 成员 5、zip/deb 内二进制与 postject 产物逐字节一致；前端 dist 命中 `Escape` ×10 与 `body.style.overflow`）。
+- **未完成 / 已知限制**：`Drawer`（容器详情查看类半页抽屉）沿用 `dismissable=true` 点遮罩关闭，未按「弹窗防误关」策略改动——查看类无草稿可丢，范围刻意不扩。
+- **下一步**：无。
+
+---
+
 ## v1.53.3 — 2026-11-15（**main 分支 · 已构建 · 已推 Gitea**）
 
 ### 图标可读性人话报错 + 导航图标映射可刷新（两项合并）

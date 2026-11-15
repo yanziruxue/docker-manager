@@ -1,9 +1,9 @@
-import React, { useEffect, useId, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
+import { useEscapeClose } from "../hooks/useEscapeClose";
 
-// ESC 关闭栈：仅栈顶弹窗响应 Esc，避免叠加弹窗（如 Drawer 上的 ConfirmDialog）同时误关。
-// 不同组件共享同一栈，open 时 push 自己的 id，close/卸载时 splice。
-const escStack: string[] = [];
+// v1.53.4：ESC 关闭栈统一收敛到 src/hooks/useEscapeClose.ts，
+// 通用 Modal / Drawer 与导航页自绘弹窗共用同一栈，避免叠加弹窗各自判定栈顶而同时误关。
 
 interface ModalProps {
   open: boolean;
@@ -46,28 +46,10 @@ const sizeMap = {
 };
 
 export function Modal({ open, onClose, title, children, size = "md", bodyClassName, footer, dismissable = false, fitWidth = false, closeOnEsc = true }: ModalProps) {
-  const id = useId();
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
-
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: KeyboardEvent) => {
-      // ESC 始终可关（键盘主动操作，不会误触）；仅栈顶弹窗响应，避免叠加误关
-      if (e.key === "Escape" && closeOnEsc && escStack[escStack.length - 1] === id) {
-        onCloseRef.current();
-      }
-    };
-    escStack.push(id);
-    document.addEventListener("keydown", handler);
-    if (escStack.length === 1) document.body.style.overflow = "hidden";
-    return () => {
-      document.removeEventListener("keydown", handler);
-      const i = escStack.lastIndexOf(id);
-      if (i >= 0) escStack.splice(i, 1);
-      if (escStack.length === 0) document.body.style.overflow = "";
-    };
-  }, [open, closeOnEsc, id]);
+  // v1.53.4：防误关策略下 Esc 是唯一快捷关闭方式；仅最上层弹窗响应
+  useEscapeClose(() => onCloseRef.current(), 0, open && closeOnEsc);
 
   if (!open) return null;
 
@@ -146,9 +128,10 @@ export function Drawer({
   maxWidthRatio = 0.92,
   closeOnEsc = true,
 }: DrawerProps) {
-  const id = useId();
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  // v1.53.4：与通用 Modal 共用 Esc 栈（抽屉为查看类，点遮罩关闭沿用 dismissable 默认值）
+  useEscapeClose(() => onCloseRef.current(), 0, open && closeOnEsc);
 
   /** null = 未拖动过，沿用 `panelClassName` 的响应式宽度 */
   const [width, setWidth] = useState<number | null>(null);
@@ -157,25 +140,6 @@ export function Drawer({
   const justDraggedRef = useRef(false);
   const startXRef = useRef(0);
   const startWidthRef = useRef(0);
-
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: KeyboardEvent) => {
-      // ESC 始终可关；仅栈顶弹窗响应，避免叠加误关
-      if (e.key === "Escape" && closeOnEsc && escStack[escStack.length - 1] === id) {
-        onCloseRef.current();
-      }
-    };
-    escStack.push(id);
-    document.addEventListener("keydown", handler);
-    if (escStack.length === 1) document.body.style.overflow = "hidden";
-    return () => {
-      document.removeEventListener("keydown", handler);
-      const i = escStack.lastIndexOf(id);
-      if (i >= 0) escStack.splice(i, 1);
-      if (escStack.length === 0) document.body.style.overflow = "";
-    };
-  }, [open, closeOnEsc, id]);
 
   // 拖动改宽：向左拖（clientX 变小）变宽，向右拖变窄
   useEffect(() => {

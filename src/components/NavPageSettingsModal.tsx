@@ -7,6 +7,7 @@ import { useRef, useState } from "react";
 import { X } from "lucide-react";
 import type { NavPageSettings, NavWeather, NavTheme, NavNetworkMode } from "../types";
 import { uploadNavAssetApi } from "../api";
+import { useEscapeClose } from "../hooks/useEscapeClose";
 
 const inputCls =
   "w-full px-2.5 py-1.5 text-[13px] border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-500/30 focus:border-rose-400 bg-white text-slate-700";
@@ -72,6 +73,9 @@ export function NavPageSettingsModal({
   onSave: (s: NavPageSettings) => void;
   onClose: () => void;
 }) {
+  // v1.53.4 防误关策略：点弹窗外不关闭，Esc 为唯一快捷关闭方式
+  useEscapeClose(onClose);
+
   const [draft, setDraft] = useState<NavPageSettings>({
     bgImage: initial.bgImage || "",
     bgBlur: initial.bgBlur ?? 0,

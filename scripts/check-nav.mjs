@@ -50,7 +50,19 @@ console.log("== ① 真模块断言（src/webui-url.ts 编译运行） ==");
 // 用 esbuild 把 TS 编译成 CJS 临时文件再 require（与 check-webui-zone 同思路；
 // 独立编译保证自包含，负向注入后重编即编译被破坏的版本）
 const { execFileSync } = await import("node:child_process");
+// v1.53.4：启动时清扫历史残留——只清 1 小时以上的，避免误删并发门禁正在使用的目录
+for (const ent of fs.readdirSync(ROOT, { withFileTypes: true })) {
+  if (!ent.isDirectory() || !ent.name.startsWith(".gate-nav-")) continue;
+  const p = path.join(ROOT, ent.name);
+  try {
+    if (Date.now() - fs.statSync(p).mtimeMs > 60 * 60 * 1000) {
+      fs.rmSync(p, { recursive: true, force: true });
+    }
+  } catch { /* 并发进程刚删掉，忽略 */ }
+}
 const tmpDir = fs.mkdtempSync(path.join(ROOT, ".gate-nav-"));
+// v1.53.4：断言 FAIL / 中途退出也必清本次临时目录（原先只在脚本末尾清一次）
+process.on("exit", () => fs.rmSync(tmpDir, { recursive: true, force: true }));
 const jsFile = path.join(tmpDir, "webui-url.cjs");
 /** 每次编译 **当前** src/webui-url.ts（负向注入后重编即编译被破坏的版本）并清缓存 require */
 function buildAndLoad() {
@@ -329,13 +341,38 @@ ok("★ 分区配置应用按钮弹下拉（其他分区可单选 + 底部全部
   gs.includes("onClick={() => applyAppearanceTo(null)}") &&
   gs.includes("disabled={draft.length <= 1}"));
 
-// v1.52.14：Nav 弹窗移除「点弹窗外区域自动关闭」——遮罩不再挂 onClick={onClose}
+// v1.53.4 防误关策略（用户长期约定）：4 个导航弹窗遮罩标签内零 onClick。
+// 旧断言只查一行式 onClick={onClose}，漏放过 NavGroupSettingsModal 的多行箭头函数写法（本次回归根因）。
 const pageSettingsModal = read("src/components/NavPageSettingsModal.tsx");
-ok("★ Nav 弹窗点击弹窗外区域不自动关闭（遮罩零 onClick={onClose}，仅 X/取消关闭）（v1.52.14）",
-  !appModal.includes('bg-black/40 p-4" onClick={onClose}') &&
-  !pageSettingsModal.includes('bg-black/40 p-4" onClick={onClose}') &&
-  !read("src/components/NavIconDownloadModal.tsx").includes('bg-black/40 p-4" onClick={onClose}') &&
-  !gs.includes('bg-black/40 p-4"\n      onClick={onClose}'));
+const navOverlayFiles = {
+  "编辑项目": appModal,
+  "分区与分组设置": gs,
+  "页面设置": pageSettingsModal,
+  "图标下载": read("src/components/NavIconDownloadModal.tsx"),
+};
+const overlayClickRe = /<div[^>]*className="fixed inset-0[^"]*bg-black\/40[^"]*"[^>]*\bonClick=/s;
+ok("★ 防误关：4 个导航弹窗遮罩零 onClick（点弹窗外一律不关闭）（v1.53.4）",
+  Object.values(navOverlayFiles).every((src) => !overlayClickRe.test(src)));
+// v1.53.4：Esc 习惯——全局栈仅最上层响应，通用 Modal/Drawer 与导航自绘弹窗共用一套栈
+const escHookSrc = read("src/hooks/useEscapeClose.ts");
+const modalSrc = read("src/components/Modal.tsx");
+ok("★ 全局 Esc 栈：仅最上层响应 + 栈空解锁背景滚动（v1.53.4）",
+  escHookSrc.includes("export function useEscapeClose") &&
+  escHookSrc.includes("let top = stack[0]") &&
+  escHookSrc.includes('document.addEventListener("keydown", onKeyDown)') &&
+  escHookSrc.includes('document.body.style.overflow = "hidden"') &&
+  escHookSrc.includes("stack.length === 0"));
+ok("★ 通用 Modal / Drawer 复用同一 Esc 栈（不再各自维护 escStack）",
+  (modalSrc.match(/useEscapeClose\(/g) || []).length >= 2 &&
+  !modalSrc.includes("const escStack") && !modalSrc.includes("useId"));
+ok("★ 4 个导航弹窗全部接入 Esc 关闭",
+  Object.values(navOverlayFiles).every((src) => src.includes("useEscapeClose(")));
+ok("★ 分区设置：下拉 / 内联改名时 Esc 先收起，不直接关弹窗",
+  gs.includes("if (applyMenuOpen) { setApplyMenuOpen(false); return; }") &&
+  gs.includes("e.stopPropagation(); setV(value)"));
+ok("★ v1.53.4 发布完成后自动清扫 .gate-nav-* 残留",
+  read("scripts/push-gitea.sh").includes("rm -rf") &&
+  read("scripts/push-gitea.sh").includes(".gate-nav-*"));
 
 // v1.52.4：分区级间距 / 分区与分组移动 / 导航页专属图标库（含链接下载）
 const navIconsMod = read("server/nav-icons.ts");
@@ -433,8 +470,8 @@ ok("★ 分区设置弹窗标题栏可拖动（pointer + transform 偏移 + 视�
   ["onDragHandlePointerDown", "onPointerDown={onDragHandlePointerDown}", "pointermove",
    "pointerup", "dragOffset", "transform: `translate(", "cursor-grab",
    "Math.max(0, (window.innerWidth - d.w) / 2 + 80)"].every((k) => gs.includes(k)));
-ok("★ 拖动后遮罩不会误关闭（取消 / 恢复不被打断）",
-  gs.includes("if (dragMovedRef.current) { dragMovedRef.current = false; return; }"));
+ok("★ 拖动标题栏保留（遮罩抑制标记 dragMovedRef 已随防误关清零）",
+  !gs.includes("dragMovedRef") && gs.includes("onDragHandlePointerDown") && gs.includes("dragRef"));
 ok("★ 图标形状 10 项全部平铺（不再用下拉框）",
   gs.includes("options={ICON_SHAPE_OPTIONS}") && !gs.includes("<select") && !gs.includes('className={inputCls}'));
 ok("★ 环境天气 5 项全部平铺（不再用下拉框）",
@@ -785,6 +822,32 @@ if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
       name: "注入图标下载弹窗遮罩点击关闭回归",
       rel: "src/components/NavIconDownloadModal.tsx",
       inject: (s) => s.replace('bg-black/40 p-4">', 'bg-black/40 p-4" onClick={onClose}>'),
+    },
+    // v1.53.4：防误关 + 全局 Esc 栈 + 发布自动清扫
+    {
+      name: "注入分区设置弹窗遮罩点击关闭回归（多行箭头写法）",
+      rel: "src/components/NavGroupSettingsModal.tsx",
+      inject: (s) => s.replace('bg-black/40 p-4">', 'bg-black/40 p-4" onClick={() => onClose()}>'),
+    },
+    {
+      name: "注入分区设置弹窗缺失 Esc 关闭回归",
+      rel: "src/components/NavGroupSettingsModal.tsx",
+      inject: (s) => s.replace("useEscapeClose(() => {", "useEscapeClose_DISABLED(() => {"),
+    },
+    {
+      name: "注入内联改名 Esc 未阻止冒泡回归",
+      rel: "src/components/NavGroupSettingsModal.tsx",
+      inject: (s) => s.replace("e.stopPropagation(); setV(value)", "setV(value)"),
+    },
+    {
+      name: "注入通用 Modal 脱离全局 Esc 栈回归",
+      rel: "src/components/Modal.tsx",
+      inject: (s) => s.replace("useEscapeClose(() => onCloseRef.current(), 0, open && closeOnEsc);", "// no esc"),
+    },
+    {
+      name: "注入发布脚本缺失 .gate-nav-* 清扫回归",
+      rel: "scripts/push-gitea.sh",
+      inject: (s) => s.replace("rm -rf .gate-nav-*", "# no cleanup"),
     },
     // v1.53.1：图标库目录固定，跳转链路零残留
     {

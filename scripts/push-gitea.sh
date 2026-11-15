@@ -201,3 +201,11 @@ fi
 say ""
 say "✓ 已推送 → $(git remote get-url "$REMOTE")  分支 $BRANCH"
 say "  网页：${GITEA_BASE}/yanzi/dockermanagementyanzi"
+
+# v1.53.4：发布完成后自动清扫导航门禁临时目录残留（.gate-nav-* 已被 .gitignore 忽略）。
+# 只匹配项目根下该前缀的目录，绝不触碰其它文件；无残留时静默跳过。
+n_gate_nav="$(find . -maxdepth 1 -type d -name '.gate-nav-*' 2>/dev/null | wc -l | tr -d ' ')"
+if [ "$n_gate_nav" -gt 0 ]; then
+  rm -rf .gate-nav-*
+  say "  · 已清理 .gate-nav-* 残留 ${n_gate_nav} 个"
+fi

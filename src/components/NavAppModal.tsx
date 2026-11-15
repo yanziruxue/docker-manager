@@ -18,6 +18,7 @@ import { Download, Globe, List, Trash2, Upload, X } from "lucide-react";
 import type { Container, NavAppItem, NavZone } from "../types";
 import { IconAutoComplete } from "./IconAutoComplete";
 import { NavIconDownloadModal } from "./NavIconDownloadModal";
+import { useEscapeClose } from "../hooks/useEscapeClose";
 
 function genId(): string {
   return `n${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
@@ -73,6 +74,10 @@ export function NavAppModal({
     () => (zones || []).flatMap((z) => z.groups || []),
     [zones],
   );
+
+  // v1.53.4 防误关策略：点弹窗外不关闭，Esc 为唯一快捷关闭方式；
+  // 与「从链接下载图标」弹窗共用全局栈，后打开者优先响应，不会一次关掉两层。
+  useEscapeClose(onClose);
 
   const [groupId, setGroupId] = useState<string>(() => {
     if (initial) {
