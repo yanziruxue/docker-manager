@@ -7,7 +7,8 @@
  *   v1.51.15 项目弹窗图标统一改用堆栈 IconAutoComplete，移除智能匹配等自研图标功能；
  *   v1.51.16 勾选自托管后新增「容器列表」按钮，选容器一次填入名称/内网端口/外网链接/图标；
  *   v1.51.17 背景图上传上限提到 20MB、超限返回 JSON、前端预校验与友好兜底；
- *   v1.51.18 顶栏「页面设置」左侧新增「编辑」切换按钮，仅编辑态渲染卡片 ✎ 编辑入口，浏览态隐藏）
+ *   v1.51.18 顶栏「页面设置」左侧新增「编辑」切换按钮，仅编辑态渲染卡片 ✎ 编辑入口，浏览态隐藏；
+ *   v1.53.4 全部弹窗防误关 + 通用 Esc 栈；v1.53.5 新建项目自托管默认不勾选、编辑态沿用 initial.kind）
  *  - 真模块断言：编译运行 src/webui-url.ts 的 resolveNavAppUrl / normalizeNavLanUrl，
  *    覆盖内外网优先级链、`:端口` / `host:端口` / 完整 URL 三种内网写法、auto 分区分派；
  *  - 源码接线断言：导航配置完全收口在独立模块 server/nav-groups.ts（不污染 main settings.json），
@@ -15,7 +16,7 @@
  *    v1.51.11 起 NavEditor 弹窗已删除，项目 CRUD 由 NavPage + NavAppModal 直接落盘、
  *    分组新建/删除由 NavGroupSettingsModal 接管、卡片 hover ✎ 由 NavBoard.onEditApp 直达；
  *  - 负向自检①：注入「内网缺 lanUrl 不回落 url」回归 → 重载模块应检出差异 → 还原 → 复核全绿；
- *  - 负向自检②：进程级注入 48 类回归（<NavEditor / 顶栏分组设置文字按钮 / 齿轮接线缺失 /
+ *  - 负向自检②：进程级注入 64 类回归（<NavEditor / 顶栏分组设置文字按钮 / 齿轮接线缺失 /
  *    顶栏添加项目按钮 / 高级字段折叠区 / 智能匹配 / 全局图库被 engineId 阻挡 /
  *    容器列表接线缺失 / 容器四字段映射缺失 / 背景图上限回退 2mb / 超限 JSON 中间件缺失 /
  *    上传兜底文案回退 / 前端体积预校验缺失 / 编辑按钮缺失 / editMode 未下传 NavBoard /
@@ -181,6 +182,14 @@ ok("★ 高级字段保存时从 initial 透传（编辑已有项目不丢数据
     return !!seg && ["initial?.titleColor", "initial?.urlBackups", "initial?.lanBackups",
       "initial?.isPublic", "initial?.iconZoom"].every((k) => seg.includes(k));
   })());
+
+// v1.53.5：新建项目自托管默认不勾选，编辑态仍沿用已有项目类型
+ok("★ 添加新项目自托管默认不勾选（新建态 false，v1.53.5）",
+  appModal.includes('useState<boolean>(initial ? initial.kind !== "ext" : false)') &&
+  !appModal.includes('useState<boolean>(initial?.kind !== "ext")'));
+ok("★ 编辑态自托管沿用 initial.kind，且保存仍按勾选值落 self/ext",
+  appModal.includes('initial ? initial.kind !== "ext" : false') &&
+  appModal.includes('kind: selfHosted ? "self" : "ext"'));
 
 // v1.52.7：项目归属两级「分区 → 该分区下的分组」
 ok("★ 编辑项目归属两级：分区下拉 + 仅列该分区分组的下拉",
@@ -534,8 +543,8 @@ if (BROKEN === ORIGINAL) {
   ok("还原字节级一致", read(TARGET) === ORIGINAL);
 }
 
-console.log("== ④ 负向自检（进程级注入 48 类回归 → 重跑本门禁应 exit 1） ==");
-// 父进程注入 48 类回归文本，子进程跳过 ④（NAV_GATE_NEGATIVE_CHILD=1）只跑 ①②③，
+console.log("== ④ 负向自检（进程级注入 64 类回归 → 重跑本门禁应 exit 1） ==");
+// 父进程注入 64 类回归文本，子进程跳过 ④（NAV_GATE_NEGATIVE_CHILD=1）只跑 ①②③，
 // 若 ② 的对应断言确实生效，子进程必因 FAIL 而 exit 1。
 if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
   const NAV_PAGE_REL = "src/pages/NavPage.tsx";
@@ -859,6 +868,17 @@ if (!process.env.NAV_GATE_NEGATIVE_CHILD) {
       name: "注入堆栈 LABELS 下载入口缺失回归",
       rel: "src/pages/Stacks.tsx",
       inject: (s) => s.replace('setIconDownloadTarget({ kind: "label", index: i })', "undefined"),
+    },
+    // v1.53.5：新建项目自托管默认不勾选（编辑态不得被一并重置）
+    {
+      name: "注入新建项目自托管恢复默认勾选回归",
+      rel: "src/components/NavAppModal.tsx",
+      inject: (s) => s.replaceAll('useState<boolean>(initial ? initial.kind !== "ext" : false)', 'useState<boolean>(initial?.kind !== "ext")'),
+    },
+    {
+      name: "注入编辑态沿用已有自托管状态丢失回归",
+      rel: "src/components/NavAppModal.tsx",
+      inject: (s) => s.replaceAll('useState<boolean>(initial ? initial.kind !== "ext" : false)', 'useState<boolean>(false)'),
     },
   ];
   for (const c of cases) {

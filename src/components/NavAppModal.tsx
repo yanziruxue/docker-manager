@@ -11,6 +11,8 @@
  *   选择容器后把名称 / 内网端口 / 外网 WebUI 地址 / 图标一次填入对应字段。
  * - v1.52.7：项目归属改为两级「分区 → 该分区下的分组」，切换分区自动回落首分组；
  *   扁平 groups 仅保留给「名称全局唯一」校验，不再用于归属下拉。
+ * - v1.53.5：新建项目「自托管」默认不勾选（保存为 ext，点卡片直接打开外网链接）；
+ *   编辑态仍沿用 initial.kind，避免把既有自托管项目误改成外链。
  * 保存经 onSave(groupId, app) 由 NavPage 直接落盘；编辑态可经 onDelete(appId) 删除项目（v1.51.11）。
  */
 import { useMemo, useRef, useState } from "react";
@@ -103,7 +105,8 @@ export function NavAppModal({
     setGroupId(z?.groups?.[0]?.id || "");
   };
 
-  const [selfHosted, setSelfHosted] = useState<boolean>(initial?.kind !== "ext");
+  // v1.53.5：新建态默认不勾选（保存为 ext）；编辑态沿用已有项目类型，防止把 self 误改成 ext
+  const [selfHosted, setSelfHosted] = useState<boolean>(initial ? initial.kind !== "ext" : false);
   const [name, setName] = useState(initial?.name || "");
   const [description, setDescription] = useState(initial?.description || "");
   const [remark, setRemark] = useState(initial?.remark || "");

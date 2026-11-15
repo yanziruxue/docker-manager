@@ -905,7 +905,8 @@ export interface NavAppItem {
   remark?: string;
   /** 描述（v1.51.9）：卡片上显示的副标题文字；水平布局按行显示 */
   description?: string;
-  /** 类型：self=自托管（默认，v1.51.7 起）；ext=非自托管外链（点击直接打开 url） */
+  /** 类型：self=自托管；ext=非自托管外链（点击直接打开 url）。
+   *  缺省按 self 处理（v1.51.7 起，兼容旧数据）；但 v1.53.5 起「添加新项目」弹窗默认不勾选，新建保存为 ext。 */
   kind?: NavAppKind;
   /** 标题颜色（卡片名称文字色，Hex；v1.51.7） */
   titleColor?: string;
