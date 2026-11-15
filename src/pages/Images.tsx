@@ -554,16 +554,37 @@ export function Images({ images, loading, error, engineId, onRefresh, onImagesRe
     const deleted = Array.isArray(result.ImagesDeleted) ? result.ImagesDeleted : [];
     const space = typeof result.SpaceReclaimed === "number" ? result.SpaceReclaimed : 0;
     const locked = typeof result.Locked === "number" ? result.Locked : 0;
+    const candidates = typeof result.Candidates === "number" ? result.Candidates : null;
+    const used = typeof result.Used === "number" ? result.Used : 0;
+    const failures: { ref?: string; reason?: string }[] = Array.isArray(result.Failed) ? result.Failed : [];
     const lines: string[] = [];
     if (deleted.length === 0) {
-      lines.push("无需清理（没有可删除的未使用镜像）");
+      // v1.53.7：有候选却一个都没删掉，不能再说「无需清理」——逐条给出 Docker 的拒绝原因
+      if (candidates !== null && candidates > 0) {
+        lines.push(`本次有 ${candidates} 个待清理镜像，但删除请求被拒绝（未删除任何镜像）：`);
+        for (const f of failures.slice(0, 8)) {
+          lines.push(`- ${f.ref || "镜像"}：${f.reason || "未知原因"}`);
+        }
+        if (failures.length > 8) lines.push(`- 其余 ${failures.length - 8} 条失败原因已省略（详见服务端日志）`);
+        if (failures.length === 0) lines.push("- 服务端未返回具体原因，请查看服务端日志或刷新后重试");
+      } else {
+        lines.push("无需清理（没有可删除的未使用镜像）");
+        if (used > 0) lines.push(`另有 ${used} 个镜像实际被容器引用，已跳过（列表可能未刷新，请刷新页面）`);
+      }
     } else {
       lines.push(`已删除 ${deleted.length} 个镜像：`);
       for (const d of deleted) {
         lines.push(`- ${d.Deleted || d.Untagged || JSON.stringify(d)}`);
       }
+      if (failures.length > 0) {
+        lines.push(`另有 ${failures.length} 个镜像删除失败：`);
+        for (const f of failures.slice(0, 8)) {
+          lines.push(`- ${f.ref || "镜像"}：${f.reason || "未知原因"}`);
+        }
+      }
     }
     if (locked > 0) lines.push(`已跳过 ${locked} 个标记为「不被清理」的镜像（取消标记后才会被清理）`);
+    if (deleted.length > 0 && space === 0) lines.push("镜像层仍被其他镜像或容器共享，本次未释放空间");
     lines.push(`释放空间：${formatBytes(space)}`);
     return lines.join("\n");
   };
@@ -931,8 +952,17 @@ export function Images({ images, loading, error, engineId, onRefresh, onImagesRe
     setPruneError(null);
     try {
       const result = await pruneImagesApi(engineId, true);
-      addOpLog({ action: "清理未使用镜像", target: "全部未使用镜像", status: "success", engineId });
-      showOutput({ title: "清理未使用镜像", name: "全部未使用镜像", output: formatImagePrune(result) });
+      const deletedCount = Array.isArray(result?.ImagesDeleted) ? result.ImagesDeleted.length : 0;
+      const candidateCount = typeof result?.Candidates === "number" ? result.Candidates : 0;
+      // v1.53.7：有候选却零删除属于失败（旧版静默记 success，用户只看到「无需清理」）
+      const silentFailure = deletedCount === 0 && candidateCount > 0;
+      if (silentFailure) {
+        addOpLog({ action: "清理未使用镜像", target: "全部未使用镜像", status: "failed", detail: "有候选镜像但删除被拒绝，详见输出", engineId });
+        showOutput({ title: "清理未使用镜像", name: "全部未使用镜像", output: formatImagePrune(result), failed: true });
+      } else {
+        addOpLog({ action: "清理未使用镜像", target: "全部未使用镜像", status: "success", engineId });
+        showOutput({ title: "清理未使用镜像", name: "全部未使用镜像", output: formatImagePrune(result) });
+      }
       setConfirmCleanUnused(false);
       onRefresh?.();
     } catch (e: any) {

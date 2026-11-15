@@ -16,6 +16,42 @@
 
 ---
 
+## v1.53.7 — 2026-11-15（**main 分支 · 已构建 · 已推 Gitea**）
+
+### 修复「清理未使用镜像」清理不掉（确认弹窗说删 1 个，结果 0 个 / 释放 0 B）
+
+- **现象**（用户截图）：确认弹窗列出 `docker.1panel.live/henrygd/beszel:latest · 32.5 MB`，说明「未使用共 6 个，其中 5 个标记为不被清理，本次跳过」；点「清理」后输出「无需清理（没有可删除的未使用镜像）/ 已跳过 5 个 / 释放空间 0 B」，镜像仍在列表里。
+- **根因**：存在锁定项时走 `pruneImagesKeepLocked()`，逐个调用 `docker.getImage(id).remove()` **未带 `force`**。Docker 对多 RepoTag 镜像（同一 ID 在 `docker.1panel.live/...` 与其他 registry 各有一个 tag）会以 409 `image is referenced in multiple repositories (must be forced)` 拒绝；异常被 `catch {}` 静默吞掉，两轮重试全败后返回 `ImagesDeleted: []` / `SpaceReclaimed: 0`，前端无条件显示「无需清理」。而 `transformImages` 按 `sha256 + stripRegistryHost(repository) + tag` 去重，恰好把多 registry 同名 tag 收敛成一行，放大了「UI 说 1 个，Docker 侧是多个引用」的不一致。
+- **改动**：
+  - `server/image-prune.ts`（新）：把 `classifyImageRemoveError` 从 `docker.ts` 迁入（由 `docker.ts` 重导出保持原调用路径兼容）；新增 `describeImageRemoveError()`（dockerode HTTP 409 与 SSH CLI conflict 文本统一转中文人话）、`removePruneCandidates()`（**force**、逐轮重试直到无进展最多 4 轮、失败项带 ref + 原因、成功项不重复计数）。
+  - `server/docker.ts`：socket/tcp 分支改 `remove({ force: true })`；SSH 分支改 `docker rmi -f`，并把 `docker images` 按 tag 的逐行输出**先按 ID 合并再判锁定**（force 删 ID 会移除该 ID 下全部 tag，避免连带删掉被锁定的兄弟 tag）；两分支回传 `Candidates` / `Used` / `Failed`。三个字段设为可选，**无锁定分支（原生 prune）零改动**。
+  - `server/index.ts`：候选 > 0 却零删除时写 warn 日志（含失败明细），便于服务端回溯。
+  - `src/pages/Images.tsx`：结果区分「真的无可删」「有候选但删除请求被拒绝（逐条原因）」「部分成功（列出失败项）」；零删除但有候选时操作日志记 `failed`、输出弹窗标红；新增共享层未释放空间说明。
+  - `scripts/check-image-prune.mjs`（新）+ `package.json`：新增第 **23** 组门禁 —— esbuild data URL 真实执行共享模块（409 分类 / CLI 文本归一化 / 全部成功 / 父子依赖多轮重试 / 持续冲突零删除带原因 / 部分成功 / 无进展提前退出）+ 源码接线断言 + 3 类进程级负向注入自检（同名双声明用 `replaceAll`，避免 `replace` 只命中第一处漏检）。
+- **安全边界**：已标记「不被清理」的镜像仍按 ID 或任一 `repo:tag` **整枚跳过**；`force` 只解决 Docker 的标签冲突，无法删除被容器引用的镜像（此时返回「正在被容器使用」中文提示）。
+- **验证**：见本版末尾「验证 / 产物」。
+
+### 容器页右键「添加到导航页」（仅导航页启用时）
+
+- **需求**：用户要求「当导航页启用时，容器页面右键容器，在右键菜单详情按钮上方增加添加到导航页按钮，弹出弹窗，可以选择把该容器添加到某个分区分组下」。
+- **改动**：
+  - `src/nav-from-container.ts`（新，纯函数）：从容器派生 WebUI 端口（LABELS `webuiPort` 优先、回退宿主端口映射）→ 预填 `:端口` 内网简写 / `webuiUrl` 外网链接；组装 `NavAppItem`（`kind: "self"`、图标留空按名称自动匹配图标库、备用地址为空、描述透传 LABELS）。
+  - `src/components/AddToNavModal.tsx`（新）：**分区 → 分组两级下拉**（切换分区自动回落首分组，与 `NavAppModal` 一致）；项目名称可改且做**全局唯一**校验；内外网链接可改且要求至少填一个（未识别到端口/外网链接时给出提示）；无分区/分组时引导先去导航页新建；保存 `await` 真实落盘，失败在弹窗内展示、不静默关闭。弹窗遵循长期约定：点外部不关，仅 X / 取消 / 确定可关，Esc 走 `useEscapeClose` 共享栈。
+  - `src/pages/Containers.tsx`：右键菜单在「详情」**上方**插入「添加到导航页」（`Plus` 图标），仅 `navEnabled && onAddToNav` 时渲染；点击按容器 id 取最新对象打开弹窗。
+  - `src/App.tsx`：新增 `handleAddContainerToNav(groupId, app)` —— 校验目标分组存在 → 从全部分组剥离同 id → 插入目标分组 → `await saveNavGroupsApi(next)` → `setNavZones(saved)`（写独立 `/api/nav-groups`，不污染 settings）；并把 `navEnabled`（由 `hiddenPages` 是否含 `navigation` 判定）/ `navZones` / 回调传给容器页。
+  - `scripts/check-container-add-nav.mjs`（新）+ `package.json`：第 **24** 组门禁 —— esbuild data URL 真实执行纯函数（端口派生、`:端口`、字段 trim、自托管、ID 唯一）+ 源码接线（菜单顺序、启用条件、落盘回调、两级下拉、防误关、共享 Esc）+ 3 类进程级负向注入自检。
+- **行为**：卡片按「自托管」保存，内外网地址可互相回退（`webui-url#resolveNavAppUrl`）；至少填一个链接才能保存，避免生成点了没反应的死卡片。**不改导航页现有组件、不改 `nav-groups.json` 结构、不动服务端**。
+- **未完成 / 已知限制**：源码级门禁不覆盖真实点击与真实 Docker 数据；建议人工冒烟：设置中心开启导航页 → 容器页右键 →「添加到导航页」→ 选分区/分组 → 保存 → 导航页对应分组出现卡片且可点击跳转。
+
+### 验证 / 产物
+
+- **验证**：双 `tsc` 0 错；`check-image-prune` **54 PASS / 0 FAIL**（3 类负向注入均被检出且还原字节级一致）；`check-container-add-nav` **49 PASS / 0 FAIL**（3 类负向注入同理）；`check-nav` 279 ok / 0 FAIL；`test:gates` **24 组全绿**；SEA 硬核验见下。
+- **产物**（SEA 交叉构建，硬核验全通过）：二进制 **130,682,048 B** / SHA `949fc651cfe19ec70e5a4be409bc05150035b28c4387727d004a85d4767388aa`（ELF `7f454c46` / e_machine=62；精确锚点 `var CURRENT_VERSION = true ? "1.53.7" : "0.0.0-dev"` ×1、v1.53.6 归零）；zip **43,143,075 B** / SHA `c4a455be5fa2f21c99f0778c582ba0487343a11b2860f49984bc62fd34c49b28`；deb **42,858,206 B** / SHA `ea166cf7e8501ae2bae434b27fcf9bf5ec24512b51dc85cedef4e3b679000559`。zip 成员固定 5 个、zip/deb 内二进制与 postject 产物 **SHA 逐字节一致**；bundle 内 5 个前端 base64 解码与 `dist/` 逐字节一致，且最大段（=`dist/assets/index-B3yMP1p5.js`，1,234,355 B / SHA `0f57bd2b…c4ac`）在二进制中命中。**嵌入核验**：服务端 `removePruneCandidates` / `docker rmi -f` / `describeImageRemoveError` 与 2 条中文报错（esbuild 大写 `\uXXXX`）在 bundle 与二进制命中；前端解码产物命中「添加到导航页」×3、「导航页尚无分区或分组」「但删除请求被拒绝」「有候选镜像但删除被拒绝，详见输出」「目标分组不存在」各 ×1。
+- **未完成 / 已知限制**：确认弹窗清单仍由前端 `images` 快照推导，与服务端枚举可能因刷新时序不一致（结果弹窗现在会给出真实候选数与失败原因）；源码级门禁不覆盖真实 Docker 409 / 真实右键点击，建议按上文两处冒烟清单各跑一次。
+- **下一步**：无。
+
+---
+
 ## v1.53.6 — 2026-11-15（**main 分支 · 已构建 · 已推 Gitea**）
 
 ### 「从链接下载」支持粘贴 SVG 代码 → 生成 .svg 文件保存到图标库

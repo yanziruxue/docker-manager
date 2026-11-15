@@ -2811,6 +2811,10 @@ app.post("/api/engines/:id/images/prune", async (req, res) => {
   try {
     const result = await pruneImages(engine, { all });
     apiLog.info(`${label}完成 | 引擎=${engine.name} 结果=${JSON.stringify(result).slice(0, 200)}`);
+    // v1.53.7：有候选却零删除不再静默 —— 写 warn 便于从服务端日志回溯 Docker 拒绝原因
+    if (all && (result.Candidates ?? 0) > 0 && result.ImagesDeleted.length === 0) {
+      apiLog.warn(`${label}无删除 | 引擎=${engine.name} 候选=${result.Candidates} 失败=${JSON.stringify(result.Failed || []).slice(0, 800)}`);
+    }
     res.json({ success: true, data: result });
   } catch (err: any) {
     apiLog.error(`${label}失败 | 引擎=${engine.name} 错误=${err.message}`);

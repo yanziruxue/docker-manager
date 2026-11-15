@@ -15,6 +15,9 @@ import { resolveBackupDir, backupFilePath, runTar, copyTree, BACKUP_NAME_PREFIX,
 import { zipDirectory, extractZip } from "./zip.js";
 import { collectGpuStats, type GpuStat } from "./telemetry.js";
 import { demuxDockerLogStream } from "./log-demux.js";
+import { removePruneCandidates, describeImageRemoveError, type PruneCandidate, type PruneFailure } from "./image-prune.js";
+// v1.53.7：冲突分类迁到 image-prune.ts（可独立门禁测试），保持原导出路径不变
+export { classifyImageRemoveError } from "./image-prune.js";
 
 /**
  * 拼接路径：SSH 引擎用 POSIX 路径（远程 Linux），本地引擎用系统路径
@@ -2630,46 +2633,20 @@ export async function removeImage(engine: DockerEngine, imageId: string, force: 
 }
 
 /**
- * 分类镜像删除的 409 冲突错误，返回前端可直接展示的中文提示与机器可读 code。
- * 返回 null 表示非冲突类错误（交由上层按 500 处理）。
- *
- * 区分两类 409，因为处置方式完全不同：
- * - IMAGE_REFERENCED：镜像被多个仓库标签引用 → force 可解决（会移除所有引用标签）
- * - IMAGE_IN_USE：镜像正被容器使用 → force 也无效，必须先处理容器
+ * 清理结果：`Locked` 为本次被锁定跳过、未参与清理的镜像数（供前端提示）。
+ * v1.53.7：有锁定分支额外回传候选数 / 使用中跳过数 / 删除失败明细，
+ * 让前端区分「真的没有可删镜像」与「有候选但 Docker 拒绝删除」。
  */
-export function classifyImageRemoveError(
-  err: any
-): { code: string; message: string; status: number } | null {
-  const msg = String(err?.message || "");
-  const statusCode = Number(err?.statusCode || 0);
-  if (statusCode !== 409 && !/\(HTTP code 409\)/.test(msg)) return null;
-
-  if (/must be forced|referenced in multiple repositories/.test(msg)) {
-    return {
-      code: "IMAGE_REFERENCED",
-      status: 409,
-      message: "该镜像被多个仓库标签引用，普通删除被拒绝。强制删除将移除此镜像 ID 下的所有引用标签。",
-    };
-  }
-  if (/being used by (a )?(running|stopped|created) container|cannot be forced/.test(msg)) {
-    return {
-      code: "IMAGE_IN_USE",
-      status: 409,
-      message: "该镜像正在被容器使用，强制删除也无法移除。请先删除或更新使用此镜像的容器。",
-    };
-  }
-  return {
-    code: "IMAGE_CONFLICT",
-    status: 409,
-    message: msg.replace(/^\(HTTP code \d+\)\s*\w+\s*-\s*/, "") || "镜像删除冲突",
-  };
-}
-
-/** 清理结果：`Locked` 为本次被锁定跳过、未参与清理的镜像数（供前端提示） */
 export interface PruneImagesResult {
   ImagesDeleted: any[];
   SpaceReclaimed: number;
   Locked: number;
+  /** 枚举到的可删候选数（仅「有锁定」分支回传） */
+  Candidates?: number;
+  /** 因被容器引用而跳过的镜像数 */
+  Used?: number;
+  /** 删除失败明细（人话原因） */
+  Failed?: PruneFailure[];
 }
 
 /**
@@ -2733,7 +2710,8 @@ function imageRefsOf(img: any): { id: string; repoTags: string[] } {
 /**
  * 有锁定时的清理（socket / tcp）：
  * 枚举「未被任何容器引用」的镜像 → 排除锁定项 → 逐个删除。
- * 分两轮删除：`docker rmi` 删父镜像时若其子镜像仍在会失败，故把失败的留到下一轮重试。
+ * v1.53.7：删除必须带 force（多 RepoTag 镜像否则 409），逐轮重试直到无进展，
+ * 失败原因随结果回传，不再静默吞异常。
  */
 async function pruneImagesKeepLocked(
   docker: Docker,
@@ -2757,11 +2735,16 @@ async function pruneImagesKeepLocked(
   const allImages = (rawImages || []).map(imageRefsOf);
   pruneStaleLocks(engine.id, allImages);
 
-  const candidates: { id: string; repoTags: string[]; size: number }[] = [];
+  const candidates: PruneCandidate[] = [];
   let lockedCount = 0;
+  let usedCount = 0;
   for (let i = 0; i < allImages.length; i++) {
     const { id, repoTags } = allImages[i];
-    if (!id || usedIds.has(id)) continue;
+    if (!id) continue;
+    if (usedIds.has(id)) {
+      usedCount++;
+      continue;
+    }
     if (isImageLocked(locks, { id, repoTags })) {
       lockedCount++;
       continue;
@@ -2770,34 +2753,30 @@ async function pruneImagesKeepLocked(
   }
 
   if (candidates.length === 0) {
-    return { ImagesDeleted: [], SpaceReclaimed: 0, Locked: lockedCount };
+    return {
+      ImagesDeleted: [], SpaceReclaimed: 0, Locked: lockedCount,
+      Candidates: 0, Used: usedCount, Failed: [],
+    };
   }
 
   const before = await imageLayersSize(docker);
-  const deleted: any[] = [];
-  let fallbackBytes = 0;
-  let remaining = candidates;
-  for (let round = 0; round < 2 && remaining.length > 0; round++) {
-    const next: typeof remaining = [];
-    for (const cand of remaining) {
-      try {
-        await withTimeout(docker.getImage(cand.id).remove(), 20000);
-        // 一个镜像对应一条记录（前端按条数统计「已删除 N 个镜像」，不能重复计数）
-        deleted.push(
-          cand.repoTags.length > 0 ? { Untagged: cand.repoTags[0] } : { Deleted: `sha256:${cand.id}` }
-        );
-        fallbackBytes += cand.size;
-      } catch {
-        next.push(cand);
-      }
-    }
-    remaining = next;
-  }
+  // v1.53.7：必须 force —— 多 RepoTag 镜像不带 force 会被 Docker 以 409「must be forced」拒绝，
+  // 旧实现静默吞异常后返回空结果，前端误报「无需清理 / 释放空间 0 B」。
+  const outcome = await removePruneCandidates(candidates, async (id) => {
+    await withTimeout(docker.getImage(id).remove({ force: true }), 20000);
+  });
 
   const after = before !== null ? await imageLayersSize(docker) : null;
   const reclaimed =
-    before !== null && after !== null && before >= after ? before - after : fallbackBytes;
-  return { ImagesDeleted: deleted, SpaceReclaimed: reclaimed, Locked: lockedCount };
+    before !== null && after !== null && before >= after ? before - after : outcome.fallbackBytes;
+  return {
+    ImagesDeleted: outcome.deleted,
+    SpaceReclaimed: reclaimed,
+    Locked: lockedCount,
+    Candidates: candidates.length,
+    Used: usedCount,
+    Failed: outcome.failures,
+  };
 }
 
 /** SSH 远程引擎：通过 `docker image prune` 清理镜像，并解析输出来适配前端格式。
@@ -2852,7 +2831,7 @@ function sshImagesDfSize(engine: DockerEngine): number | null {
   }
 }
 
-/** 有锁定时（SSH）：枚举未使用镜像 → 排除锁定 → `docker rmi`（Docker 自身按依赖顺序处理） */
+/** 有锁定时（SSH）：枚举未使用镜像 → 排除锁定 → `docker rmi -f`（Docker 自身按依赖顺序处理） */
 function pruneImagesCliKeepLocked(engine: DockerEngine, locks: ImageLock[]): PruneImagesResult {
   const usedRaw = sshExec(
     engine,
@@ -2866,56 +2845,90 @@ function pruneImagesCliKeepLocked(engine: DockerEngine, locks: ImageLock[]): Pru
     "docker images --no-trunc --format '{{.ID}}|{{.Repository}}|{{.Tag}}' 2>/dev/null",
     { timeout: 30000 }
   );
-  const candidates: { id: string; ref: string }[] = [];
-  let lockedCount = 0;
+  // v1.53.7：docker images 按 tag 逐行输出，同 ID 多 tag 必须先合并再判锁定；
+  // 否则 force 删除该 ID 会连带移除被锁定的兄弟 tag。
+  const grouped = new Map<string, { id: string; refs: string[] }>();
   for (const line of listRaw.split("\n")) {
     const [rawId, repo, tag] = line.trim().split("|");
     const id = normalizeId(rawId || "");
-    if (!id || usedIds.has(id)) continue;
+    if (!id) continue;
     const dangling = !repo || repo === "<none>" || tag === "<none>";
     const ref = dangling ? "" : `${repo}:${tag}`;
-    if (isImageLocked(locks, { id, repoTags: ref ? [ref] : [] })) {
+    const g = grouped.get(id) || { id, refs: [] };
+    if (ref && !g.refs.includes(ref)) g.refs.push(ref);
+    grouped.set(id, g);
+  }
+
+  const candidates: { id: string; ref: string }[] = [];
+  let lockedCount = 0;
+  let usedCount = 0;
+  for (const g of grouped.values()) {
+    if (usedIds.has(g.id)) {
+      usedCount++;
+      continue;
+    }
+    if (isImageLocked(locks, { id: g.id, repoTags: g.refs })) {
       lockedCount++;
       continue;
     }
-    candidates.push({ id, ref });
+    candidates.push({ id: g.id, ref: g.refs[0] || "" });
   }
   if (candidates.length === 0) {
-    return { ImagesDeleted: [], SpaceReclaimed: 0, Locked: lockedCount };
+    return {
+      ImagesDeleted: [], SpaceReclaimed: 0, Locked: lockedCount,
+      Candidates: 0, Used: usedCount, Failed: [],
+    };
   }
 
   const before = sshImagesDfSize(engine);
+  // -f 必须：多 RepoTag 镜像不带 force 会被 409「must be forced」拒绝（v1.53.7）
   const out = sshExec(
     engine,
-    `docker rmi ${candidates.map((c) => c.id).join(" ")} 2>&1 || true`,
+    `docker rmi -f ${candidates.map((c) => c.id).join(" ")} 2>&1 || true`,
     { timeout: 300000 }
   );
   const removed: any[] = [];
+  const errLines: string[] = [];
   for (const rawLine of out.split("\n")) {
     const line = rawLine.trim();
     const untagged = line.match(/^Untagged:\s*(\S+)/);
     const deleted = line.match(/^Deleted:\s*(\S+)/);
     if (untagged) removed.push({ Untagged: untagged[1] });
     else if (deleted) removed.push({ Deleted: deleted[1] });
+    else if (/^(Error|conflict:)/i.test(line)) errLines.push(line);
   }
-  // 批量删除一条都没成功（如依赖顺序问题）→ 逐个兜底重试
+  const failures: PruneFailure[] = [];
+  // 一条都没成功（依赖顺序 / 冲突）→ 逐个兜底重试并保留失败原因
   if (removed.length === 0) {
     for (const cand of candidates) {
+      const ref = cand.ref || `sha256:${cand.id}`;
       try {
-        const one = sshExec(engine, `docker rmi ${cand.id} 2>&1 || true`, { timeout: 120000 });
+        const one = sshExec(engine, `docker rmi -f ${cand.id} 2>&1 || true`, { timeout: 120000 });
         const u = one.match(/^Untagged:\s*(\S+)/m);
         const d = one.match(/^Deleted:\s*(\S+)/m);
         if (u) removed.push({ Untagged: u[1] });
         else if (d) removed.push({ Deleted: d[1] });
-      } catch {
-        // 单个失败不影响其余
+        else {
+          const errLine = one.split("\n").map((l) => l.trim()).find((l) => /^(Error|conflict:)/i.test(l)) || "";
+          failures.push({
+            ref,
+            reason: describeImageRemoveError({ message: errLine || "删除未返回 Untagged/Deleted" }),
+          });
+        }
+      } catch (e) {
+        failures.push({ ref, reason: describeImageRemoveError(e) });
       }
     }
+  } else if (errLines.length > 0) {
+    failures.push({ ref: "部分镜像", reason: describeImageRemoveError({ message: errLines[0] }) });
   }
 
   const after = before !== null ? sshImagesDfSize(engine) : null;
   const reclaimed = before !== null && after !== null && before >= after ? before - after : 0;
-  return { ImagesDeleted: removed, SpaceReclaimed: reclaimed, Locked: lockedCount };
+  return {
+    ImagesDeleted: removed, SpaceReclaimed: reclaimed, Locked: lockedCount,
+    Candidates: candidates.length, Used: usedCount, Failed: failures,
+  };
 }
 
 /** 解析 docker 输出的容量（如 1.234GB / 512.3MB / 0B）为字节数 */

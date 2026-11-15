@@ -48,7 +48,7 @@ import {
   transformStacks,
   transformActivityLogs,
 } from "./transforms";
-import type { PageKey, Container, DockerImage, DockerVolume, DockerEngine, Stack, SystemSettings, ActivityLog, EngineResourceStats, UpdateInfo, ImageUpdateDetail, ImageUpdateSummaryView, ImageUpdateStatusView, ResourceTag, NavZone, NavPageSettings } from "./types";
+import type { PageKey, Container, DockerImage, DockerVolume, DockerEngine, Stack, SystemSettings, ActivityLog, EngineResourceStats, UpdateInfo, ImageUpdateDetail, ImageUpdateSummaryView, ImageUpdateStatusView, ResourceTag, NavZone, NavAppItem, NavPageSettings } from "./types";
 import { randomTagColor } from "./components/TagPicker";
 import {
   shouldAutoFillIcon,
@@ -734,6 +734,25 @@ export default function App() {
     [],
   );
 
+  // v1.53.7：容器页右键「添加到导航页」——按目标分组插入，并从其他分组剥离同 id（跨分组移动语义）。
+  // 直接 await /api/nav-groups，失败时由弹窗展示错误，不静默关闭。
+  const handleAddContainerToNav = useCallback(
+    async (groupId: string, app: NavAppItem): Promise<void> => {
+      const hit = navZones.some((z) => (z.groups || []).some((g) => g.id === groupId));
+      if (!hit) throw new Error("目标分组不存在，请刷新后重试");
+      const next: NavZone[] = navZones.map((z) => ({
+        ...z,
+        groups: z.groups.map((g) => {
+          const apps = (g.apps || []).filter((a) => a.id !== app.id);
+          return g.id === groupId ? { ...g, apps: [...apps, app] } : { ...g, apps };
+        }),
+      }));
+      const saved = await saveNavGroupsApi(next);
+      setNavZones(saved);
+    },
+    [navZones],
+  );
+
   // 导航页「页面设置」落盘（v1.51.8：独立通道，不借道 settings / SystemSettings）
   const handleSaveNavPageSettings = useCallback(
     (s: NavPageSettings) => {
@@ -1012,6 +1031,9 @@ export default function App() {
               focusContainerName={focusContainerName}
               focusContainerTab={focusContainerTab}
               onFocusContainerConsumed={() => { setFocusContainerName(""); setFocusContainerTab(""); }}
+              navEnabled={!(settings?.modal?.hiddenPages || []).includes("navigation")}
+              navZones={navZones}
+              onAddToNav={handleAddContainerToNav}
             />
           )}
           {page === "stacks" && (

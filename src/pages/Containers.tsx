@@ -35,7 +35,7 @@ import {
   FolderPlus,
   Home,
 } from "lucide-react";
-import type { Container, LogEntry, ContainerFileEntry, Stack } from "../types";
+import type { Container, LogEntry, ContainerFileEntry, Stack, NavZone, NavAppItem } from "../types";
 import { StatusBadge, Tag } from "../components/Badge";
 import { ContextMenu } from "../components/ContextMenu";
 import { Modal, ConfirmDialog, Drawer } from "../components/Modal";
@@ -55,6 +55,7 @@ import {
 import { transformLogs, shortImageRef } from "../transforms";
 import { addOpLog } from "../opLog";
 import { XTermTerminal } from "../components/XTermTerminal";
+import { AddToNavModal } from "../components/AddToNavModal";
 import { LineChart, type LineSeries } from "../components/LineChart";
 // v1.50.36 内外网 WebUI 分派：纯函数解析器 + 分区查询
 import {
@@ -85,6 +86,12 @@ interface ContainersProps {
   focusContainerTab?: "info" | "logs" | "terminal" | "";
   /** 堆栈列表：用于按 container.stackId 映射出所属堆栈名称 */
   stacks?: Stack[];
+  /** v1.53.7：导航页是否已启用（页面设置里未被隐藏）——仅此时右键菜单才出现「添加到导航页」 */
+  navEnabled?: boolean;
+  /** 导航分区（分区 → 分组 → 卡片），供弹窗选择归属 */
+  navZones?: NavZone[];
+  /** 把容器写入指定分组；真实落盘 /api/nav-groups，Promise 失败时弹窗内提示 */
+  onAddToNav?: (groupId: string, app: NavAppItem) => Promise<void>;
 }
 
 // 堆栈配色：一个堆栈一种颜色用于区分。完整字面量（含 dot 的 bg-X-500），
@@ -118,7 +125,7 @@ function uptimeDays(uptime: string): string {
   return m[2].toLowerCase() === "month" ? `${n * 30}天` : `${n}天`;
 }
 
-export function Containers({ containers, onNavigate, onRefresh, loading, error, engineId, defaultVisibleColumns, containerDetailStyle = "drawer", focusContainerName, focusContainerTab = "", onFocusContainerConsumed, stacks }: ContainersProps) {
+export function Containers({ containers, onNavigate, onRefresh, loading, error, engineId, defaultVisibleColumns, containerDetailStyle = "drawer", focusContainerName, focusContainerTab = "", onFocusContainerConsumed, stacks, navEnabled = false, navZones = [], onAddToNav }: ContainersProps) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -126,6 +133,8 @@ export function Containers({ containers, onNavigate, onRefresh, loading, error, 
   const [detailTab, setDetailTab] = useState<"info" | "logs" | "stats" | "terminal" | "file">("info");
   /** v1.50.27：行右键菜单；存容器 id 而非对象快照，避免刷新后详情数据陈旧 */
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; containerId: string } | null>(null);
+  /** v1.53.7：右键「添加到导航页」弹窗对应的容器（存快照，弹窗生命周期内不随列表刷新丢失） */
+  const [addToNavContainer, setAddToNavContainer] = useState<Container | null>(null);
 
   // 弹窗中始终使用最新的容器数据
   const activeContainer = useMemo(() => {
@@ -725,12 +734,22 @@ export function Containers({ containers, onNavigate, onRefresh, loading, error, 
         danger
       />
 
-      {/* v1.50.27：容器行右键菜单 —— 目前仅「详情」，与点击状态列打开同一个详情弹窗 */}
+      {/* v1.50.27：容器行右键菜单；v1.53.7 在「详情」上方新增「添加到导航页」（仅导航页启用时） */}
       {contextMenu && (
         <ContextMenu
           x={contextMenu.x}
           y={contextMenu.y}
           items={[
+            ...(navEnabled && onAddToNav
+              ? [{
+                  label: "添加到导航页",
+                  icon: <Plus size={14} />,
+                  onClick: () => {
+                    const target = containers.find((c) => c.id === contextMenu.containerId);
+                    if (target) setAddToNavContainer(target);
+                  },
+                }]
+              : []),
             {
               label: "详情",
               icon: <Search size={14} />,
@@ -741,6 +760,16 @@ export function Containers({ containers, onNavigate, onRefresh, loading, error, 
             },
           ]}
           onClose={() => setContextMenu(null)}
+        />
+      )}
+
+      {/* v1.53.7：右键「添加到导航页」→ 选分区/分组后落盘 */}
+      {addToNavContainer && onAddToNav && (
+        <AddToNavModal
+          container={addToNavContainer}
+          zones={navZones}
+          onSave={onAddToNav}
+          onClose={() => setAddToNavContainer(null)}
         />
       )}
     </div>
