@@ -16,6 +16,24 @@
 
 ---
 
+## v1.53.6 — 2026-11-15（**main 分支 · 已构建 · 已推 Gitea**）
+
+### 「从链接下载」支持粘贴 SVG 代码 → 生成 .svg 文件保存到图标库
+
+- **需求**：用户要求「从链接下载支持 svg 代码转成 svg 文件保存到图标库」。原弹窗只接受 http(s) 链接，服务端 `downloadCustomIcon` 只走网络下载，粘贴 SVG 源码会被当成非法 URL。
+- **改动**：
+  - `server/custom-icons.ts`：新增 `saveSvgIconCode(rawCode, rawName, dir)` —— 校验完整 `<svg …>…</svg>`（允许 XML 声明 / 注释前缀）、**强制 `.svg` 扩展名**、名称净化（先剥掉入参自带扩展名，避免 `a.png.svg` 破坏自动匹配键）、重名追加 `-2`、10MB 上限、写入前可写性探测（EROFS / 无权限人话错误），与下载 / 上传共用 `writeIconFile` 落盘安全逻辑。
+  - `server/index.ts`：新增 `POST /api/custom-icons/svg`；在全局 `express.json()`（默认 100kb）**之前**挂路径专属 `express.json({ limit: "10mb" })`，避免大 SVG 被 100kb 限制挡住；新增该路径的局部错误中间件，把 413 / 解析失败统一转 JSON（前端 `res.json()` 不炸）；`.svg` 取图 MIME 早已是 `image/svg+xml`，无需改动。
+  - `src/api.ts`：新增 `saveSvgIconApi(code, name)`。
+  - `src/components/NavIconDownloadModal.tsx`：下载区新增「链接下载 / SVG 代码」双 tab，代码模式用 textarea 粘贴；**链接框直接粘贴以 `<svg` / `<?xml` / `<!--` 开头的内容会自动切到代码模式**；两种模式共用名称输入、结果预览、「应用到项目」与图标映射刷新（导航页 / 堆栈 LABELS / SETTINGS 三处入口同时生效，无需各自改动）。
+- **安全边界**：保存的 .svg 位于同源 `/api/custom-icons/`，被直接打开时内嵌脚本可执行 ⇒ 新通道拒收 `<script>` / `<iframe>` / `<object>` / `<embed>` / `<foreignObject>`、`on*=` 事件属性、`javascript:`、`<!DOCTYPE` / `<!ENTITY`（XXE）、`xlink:href` 外部引用。**既有「上传本地 SVG 文件」与「下载 SVG 链接」通道不改**（保持向后兼容），仅新增通道做过滤。
+- **验证**：双 `tsc` 0 错；`check-custom-icons` **104 PASS / 0 FAIL**（新增 20 条：真实临时目录落盘逐字节比对、重名 / 名称净化、9 类非法或不安全输入拒绝、服务端 / 前端接线、2 类进程级负向注入自检均被检出且还原字节级一致）；`check-nav` 279 ok / 0 FAIL；`test:gates` **22 组全绿**；SEA 硬核验见下。
+- **产物**（SEA 交叉构建，硬核验全通过）：二进制 **130,682,048 B** / SHA `89ddcb93004922975500081e305dd0e6d572c7ef5a96a0439051a3e7af7b7764`（比上版 +64KB，blob 跨段对齐所致；ELF `7f454c46` / e_machine=62；精确锚点 `var CURRENT_VERSION = true ? "1.53.6" : "0.0.0-dev"` ×1、v1.53.5 归零）；zip **43,138,426 B** / SHA `12e4fbf375624c8f3309cd1e561942f5dcecd7d697dac2898370f0f72500e7ff`；deb **42,853,434 B** / SHA `1b60e11a4cbfae1c3b802bbc6a0a6544d5205564b6d27279cf7a1e940264376c`。zip 成员固定 5 个、zip/deb 内二进制与 postject 产物 **SHA 逐字节一致**；bundle 内 5 个前端 base64 解码与 `dist/` 逐字节一致且二进制命中。**嵌入核验**：服务端路由 `/api/custom-icons/svg`、`saveSvgIconCode`、`SVG_CODE_UNSAFE_RE` 在 bundle 与二进制中均命中；4 条中文报错按 esbuild **大写 `\uXXXX`** 转义在 bundle / 二进制各命中；前端 `dist/assets/index-BPyyb4dr.js` 命中「SVG 代码」×11、「保存为 SVG 文件」×1、`/custom-icons/svg` ×1。
+- **未完成 / 已知限制**：仅支持**单段完整** `<svg>…</svg>` 源码（自闭合空 SVG / 多个根元素会拒绝）；源码级门禁不覆盖真实点击，建议人工冒烟：项目弹窗「从链接下载」→ 切「SVG 代码」→ 粘贴图标源码 → 保存为 .svg → 应用到项目 → 卡片显示。
+- **下一步**：无。
+
+---
+
 ## v1.53.5 — 2026-11-15（**main 分支 · 已构建 · 已推 Gitea**）
 
 ### 添加新项目「自托管」复选框默认不勾选

@@ -313,6 +313,38 @@ export function uploadCustomIcon(rawName: unknown, contentType: unknown, buf: Bu
   return writeIconFile(dir, file, buf);
 }
 
+// ==================== v1.53.6：粘贴 SVG 代码 → 保存为 .svg 图标文件 ====================
+/** 必须是完整一段 <svg …>…</svg>（允许 XML 声明 / 注释 / 空白开头，忽略大小写） */
+const SVG_CODE_ROOT_RE = /^\s*(?:<\?xml[\s\S]*?\?>\s*)?(?:<!--[\s\S]*?-->\s*)?<svg[\s>]/i;
+const SVG_CODE_END_RE = /<\/svg\s*>\s*$/i;
+/** 同源 SVG 被直接打开时脚本会执行：拒绝脚本 / 事件属性 / 危险标签 / 外部实体 / 外部引用 */
+const SVG_CODE_UNSAFE_RE =
+  /<script\b|<iframe\b|<object\b|<embed\b|<foreignObject\b|\son[a-z]+\s*=|\bjavascript\s*:|<!DOCTYPE|<!ENTITY|\bxlink:href\s*=\s*["'](?:https?:)?\/\//i;
+
+/**
+ * 把用户粘贴的 SVG 源码写成 <图标库>/<name>.svg（v1.53.6）。
+ * 与下载 / 上传共用 writeIconFile（可写探测、防穿越、EROFS 人话错误、重名追加序号）。
+ * 目录固定由 boundCustomIconDir() 提供；扩展名强制 .svg，不信任入参名称里的扩展名。
+ */
+export function saveSvgIconCode(rawCode: unknown, rawName: unknown, dir: string): { url: string; file: string } {
+  if (!dir) throw new Error("没有绑定图标库目录");
+  const code = String(rawCode ?? "").replace(/^\uFEFF/, "").trim();
+  if (!code) throw new Error("请粘贴 SVG 代码");
+  if (Buffer.byteLength(code, "utf8") > CUSTOM_ICON_MAX_BYTES) throw new Error("SVG 代码超过 10MB，请精简后重试");
+  if (!SVG_CODE_ROOT_RE.test(code) || !SVG_CODE_END_RE.test(code)) {
+    throw new Error("SVG 代码格式不正确：需要完整的 <svg …>…</svg>");
+  }
+  if (SVG_CODE_UNSAFE_RE.test(code)) {
+    throw new Error("SVG 代码包含脚本、事件或外部引用，已拒绝保存");
+  }
+  const w = probeIconDirWritable(dir);
+  if (!w.writable) throw new Error(`${w.error}；请将该目录改为读写挂载，或换一个可写的图标库目录`);
+  // 名称里若带扩展名先剥掉，避免生成 a.png.svg 导致自动匹配键错位
+  const base = String(rawName ?? "").trim().replace(/\.[^.]+$/, "") || "icon";
+  const file = dedupeIconFile(dir, iconFilename(base, ".svg"));
+  return writeIconFile(dir, file, Buffer.from(code, "utf8"));
+}
+
 /**
  * 目录可写性探测（v1.52.18）：accessSync(W_OK)。
  * 只读挂载返回 EROFS（对 root 也生效），权限不足返回 EACCES/EPERM。

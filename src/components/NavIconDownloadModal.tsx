@@ -4,11 +4,13 @@
  *  - 弹窗展示当前图库目录与图标数，目录不可读时仅提示错误（不再有「前往设置」跳转）；
  *  - 输入图片链接 + 名称（默认预填当前上下文名称：项目名称 / 服务名称 / 堆栈名称，可手动修改）
  *    → 下载写入图标库目录，同名自动匹配；
- *  - 下载成功可一键回填当前正在编辑的图标位（onDownloaded）。
+ *  - 下载成功可一键回填当前正在编辑的图标位（onDownloaded）；
+ *  - v1.53.6：新增「SVG 代码」模式——粘贴完整 <svg>…</svg> 源码，服务端校验后保存为 .svg 文件；
+ *    链接框里直接粘贴 SVG 源码会自动切到该模式，两种来源共用名称输入、结果预览与应用到项目。
  */
 import { useEffect, useState } from "react";
 import { Download, FolderOpen, Loader2, X } from "lucide-react";
-import { downloadCustomIconApi, listCustomIconsApi } from "../api";
+import { downloadCustomIconApi, listCustomIconsApi, saveSvgIconApi } from "../api";
 import type { CustomIconsPayload } from "../custom-icons";
 import { useEscapeClose } from "../hooks/useEscapeClose";
 
@@ -41,7 +43,10 @@ export function NavIconDownloadModal({
 
   const [payload, setPayload] = useState<CustomIconsPayload | null>(null);
   const [loading, setLoading] = useState(true);
+  // v1.53.6：链接下载 / SVG 代码两种来源，共用名称输入与结果预览
+  const [mode, setMode] = useState<"url" | "svg">("url");
   const [url, setUrl] = useState("");
+  const [svgCode, setSvgCode] = useState("");
   const [name, setName] = useState(suggestedName || "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -61,8 +66,25 @@ export function NavIconDownloadModal({
   // dir 为 realpath 后的绝对路径；error 非空说明目录不可读，同样视为未就绪
   const bound = !!payload && payload.bound && !payload.error && !!payload.dir;
 
-  const onDownload = async () => {
-    if (!url.trim()) {
+  /** 链接框里直接粘贴 SVG 源码时自动切到「SVG 代码」模式，避免被当成非法 URL */
+  const onUrlChange = (v: string) => {
+    if (/^\s*(?:<\?xml|<!--|<svg)/i.test(v)) {
+      setMode("svg");
+      setSvgCode(v);
+      setUrl("");
+      return;
+    }
+    setUrl(v);
+  };
+
+  /** 提交：URL 走下载通道；SVG 源码走 /api/custom-icons/svg 直接落盘为 .svg */
+  const onSubmit = async () => {
+    const isSvg = mode === "svg";
+    if (isSvg && !svgCode.trim()) {
+      setErr("请粘贴 SVG 代码");
+      return;
+    }
+    if (!isSvg && !url.trim()) {
       setErr("请填写图标链接");
       return;
     }
@@ -70,12 +92,14 @@ export function NavIconDownloadModal({
     setErr("");
     setResult(null);
     try {
-      const finalName = name.trim() || nameFromUrl(url.trim()) || "icon";
-      const r = await downloadCustomIconApi(url.trim(), finalName);
+      const finalName = name.trim() || (isSvg ? (suggestedName || "icon") : (nameFromUrl(url.trim()) || "icon"));
+      const r = isSvg
+        ? await saveSvgIconApi(svgCode.trim(), finalName)
+        : await downloadCustomIconApi(url.trim(), finalName);
       setResult(r);
       setPayload(await listCustomIconsApi());
     } catch (e: any) {
-      setErr(e?.message || "下载图标失败");
+      setErr(e?.message || (isSvg ? "保存 SVG 图标失败" : "下载图标失败"));
     } finally {
       setBusy(false);
     }
@@ -118,33 +142,61 @@ export function NavIconDownloadModal({
                 {payload?.error && <p className="text-[11px] text-amber-600">{payload.error}</p>}
               </section>
 
-              {/* 下载区 */}
+              {/* 下载区：v1.53.6 起支持「链接下载」与「SVG 代码」两种来源 */}
               <section className="rounded-xl border border-slate-100 bg-slate-50/60 p-3 space-y-2">
                 <p className="text-xs font-medium text-slate-600">下载图标</p>
-                <input
-                  className={inputCls}
-                  value={url}
-                  onChange={(e) => setUrl(e.target.value)}
-                  placeholder="https://example.com/icon.png"
-                  disabled={!bound}
-                />
+                <div className="flex items-center gap-1 rounded-lg bg-slate-200/60 p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setMode("url")}
+                    className={`flex-1 px-2 py-1 text-[12px] rounded-md ${mode === "url" ? "bg-white text-fuchsia-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+                  >
+                    链接下载
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMode("svg")}
+                    className={`flex-1 px-2 py-1 text-[12px] rounded-md ${mode === "svg" ? "bg-white text-fuchsia-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+                  >
+                    SVG 代码
+                  </button>
+                </div>
+                {mode === "svg" ? (
+                  <textarea
+                    className={`${inputCls} font-mono text-[12px] leading-4`}
+                    rows={6}
+                    value={svgCode}
+                    onChange={(e) => setSvgCode(e.target.value)}
+                    placeholder={'粘贴完整 SVG 代码，例如 <svg xmlns="http://www.w3.org/2000/svg" …>…</svg>'}
+                    disabled={!bound}
+                  />
+                ) : (
+                  <input
+                    className={inputCls}
+                    value={url}
+                    onChange={(e) => onUrlChange(e.target.value)}
+                    placeholder="https://example.com/icon.png（也可直接粘贴 SVG 代码）"
+                    disabled={!bound}
+                  />
+                )}
                 <input
                   className={inputCls}
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder={`图标名称（默认${suggestedName ? `「${suggestedName}」` : "取链接文件名"}，可手动修改）`}
+                  placeholder={`图标名称（默认${suggestedName ? `「${suggestedName}」` : (mode === "svg" ? "icon" : "取链接文件名")}，可手动修改）`}
                   disabled={!bound}
                 />
                 <button
                   type="button"
-                  onClick={onDownload}
-                  disabled={!bound || busy || !url.trim()}
+                  onClick={onSubmit}
+                  disabled={!bound || busy || (mode === "svg" ? !svgCode.trim() : !url.trim())}
                   className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-[13px] text-white bg-fuchsia-600 rounded-lg hover:bg-fuchsia-700 disabled:opacity-40"
                 >
-                  {busy ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} 下载到图标库
+                  {busy ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+                  {mode === "svg" ? "保存为 SVG 文件" : "下载到图标库"}
                 </button>
                 <p className="text-[11px] text-slate-400 leading-4">
-                  支持 png / jpg / gif / svg / webp / ico，单张 ≤10MB；重名自动追加序号，不会覆盖已有图标。同名项目 / 服务 / 堆栈会自动匹配该图标。
+                  链接支持 png / jpg / gif / svg / webp / ico，单张 ≤10MB；「SVG 代码」模式粘贴完整源码即可生成 .svg 文件（含脚本 / 事件 / 外部引用的会被拒绝）。重名自动追加序号，不会覆盖已有图标。同名项目 / 服务 / 堆栈会自动匹配该图标。
                 </p>
               </section>
 

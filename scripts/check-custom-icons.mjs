@@ -59,6 +59,7 @@ const {
   listCustomIconEntries,
   buildCustomIconMap,
   resolveCustomIconFile,
+  saveSvgIconCode,
 } = server;
 const { shouldAutoFillIcon, iconNameCandidates, pickCustomIcon } = client;
 
@@ -241,6 +242,101 @@ const verCmp = (a, b) => {
 };
 ok(`版本号不低于 1.50.32（当前 ${pkg.version}）`, verCmp(pkg.version, "1.50.32") >= 0);
 ok("门禁已接入 test:gates", (pkg.scripts["test:gates"] || "").includes("test:customicons"));
+
+/* ---------- v1.53.6：粘贴 SVG 代码 → 真实落盘成 .svg 文件 ---------- */
+const svgDir = fs.mkdtempSync(path.join(os.tmpdir(), "dmgr-svg-code-"));
+const SVG_OK = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M0 0h24v24H0z" fill="#f0f"/></svg>';
+try {
+  const r1 = saveSvgIconCode(SVG_OK, "myicon", svgDir);
+  ok("v1.53.6 合法 SVG 代码保存为 .svg 且内容逐字节一致",
+    r1.file === "myicon.svg" && r1.url === "/api/custom-icons/myicon.svg" &&
+    fs.readFileSync(path.join(svgDir, r1.file), "utf8") === SVG_OK);
+  const r2 = saveSvgIconCode(`<?xml version="1.0"?><!-- hi -->\n${SVG_OK}`, "myicon", svgDir);
+  ok("v1.53.6 重名追加序号且 XML 声明 / 注释前缀可识别",
+    r2.file === "myicon-2.svg" && fs.existsSync(path.join(svgDir, r2.file)));
+  const r3 = saveSvgIconCode(SVG_OK, "../evil.png", svgDir);
+  ok("v1.53.6 名称净化 + 强制 .svg 扩展名（防穿越）",
+    r3.file.endsWith(".svg") && !r3.file.includes("..") && !r3.file.includes("/") &&
+    fs.existsSync(path.join(svgDir, r3.file)));
+  const rejects = [
+    ["空内容", ""],
+    ["普通文本", "hello"],
+    ["缺闭合标签", '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0"/>'],
+    ["内嵌 script", SVG_OK.replace("</svg>", "<script>alert(1)</script></svg>")],
+    ["事件属性", SVG_OK.replace("<svg", '<svg onload="alert(1)"')],
+    ["javascript: 链接", SVG_OK.replace("</svg>", '<a href="javascript:alert(1)">x</a></svg>')],
+    ["外部实体 DOCTYPE", '<!DOCTYPE svg [<!ENTITY x "y">]>' + SVG_OK],
+    ["超过 10MB", SVG_OK.replace("</svg>", `<desc>${"x".repeat(CUSTOM_ICON_MAX_BYTES)}</desc></svg>`)],
+    ["未绑定目录", null],
+  ];
+  for (const [label, code] of rejects) {
+    let threw = false;
+    try {
+      saveSvgIconCode(code === null ? SVG_OK : code, "bad", code === null ? "" : svgDir);
+    } catch {
+      threw = true;
+    }
+    ok(`v1.53.6 拒绝非法 / 不安全 SVG（${label}）`, threw);
+  }
+  ok("v1.53.6 拒绝操作未落盘任何文件", !fs.existsSync(path.join(svgDir, "bad.svg")));
+} finally {
+  await fs.promises.rm(svgDir, { recursive: true, force: true });
+}
+
+const dlModalSrc = read("src/components/NavIconDownloadModal.tsx");
+ok("v1.53.6 服务端导出 saveSvgIconCode 且含 SVG 安全过滤常量",
+  ciSrc.includes("export function saveSvgIconCode") && ciSrc.includes("const SVG_CODE_UNSAFE_RE") &&
+  ciSrc.includes('return writeIconFile(dir, file, Buffer.from(code, "utf8"));'));
+ok("v1.53.6 /api/custom-icons/svg 路由 + 10mb JSON 解析 + 413 JSON 兜底",
+  indexSrc.includes('app.post("/api/custom-icons/svg"') &&
+  indexSrc.includes('app.use("/api/custom-icons/svg", express.json({ limit: "10mb" }))') &&
+  indexSrc.includes("saveSvgIconCode(code, name, dir)") &&
+  indexSrc.includes("SVG 代码超过 10MB，请精简后重试"));
+ok("v1.53.6 前端 saveSvgIconApi + 双 tab + textarea + 粘贴自动识别",
+  read("src/api.ts").includes('request("/custom-icons/svg"') &&
+  dlModalSrc.includes("saveSvgIconApi") && dlModalSrc.includes("SVG 代码") &&
+  dlModalSrc.includes("<textarea") && dlModalSrc.includes("onUrlChange") &&
+  dlModalSrc.includes("onSubmit"));
+
+/* ---------- v1.53.6 负向自检：注入回归 → 子进程 exit 1 → 还原 → 全绿 ---------- */
+if (!process.env.CUSTOM_ICONS_GATE_NEGATIVE_CHILD) {
+  const { execFileSync } = await import("node:child_process");
+  const cases = [
+    {
+      name: "注入 SVG 安全过滤被移除回归",
+      rel: "server/custom-icons.ts",
+      inject: (s) => s.replaceAll("if (SVG_CODE_UNSAFE_RE.test(code)) {", "if (false) {"),
+    },
+    {
+      name: "注入前端 SVG 代码模式接线缺失回归",
+      rel: "src/components/NavIconDownloadModal.tsx",
+      inject: (s) => s.replaceAll("saveSvgIconApi", "undefinedApi"),
+    },
+  ];
+  for (const c of cases) {
+    const orig = read(c.rel);
+    const mutated = c.inject(orig);
+    if (mutated === orig) {
+      fail++;
+      console.log(`  FAIL  负向自检锚点失效（${c.name}，请更新门禁）`);
+      continue;
+    }
+    fs.writeFileSync(path.join(ROOT, c.rel), mutated, "utf8");
+    let childFailed = false;
+    try {
+      execFileSync(process.execPath, [fileURLToPath(import.meta.url)], {
+        stdio: "pipe",
+        env: { ...process.env, CUSTOM_ICONS_GATE_NEGATIVE_CHILD: "1" },
+      });
+    } catch (e) {
+      childFailed = e.status === 1;
+    } finally {
+      fs.writeFileSync(path.join(ROOT, c.rel), orig, "utf8");
+    }
+    ok(`${c.name}被检出（子进程 exit 1）`, childFailed);
+    ok(`${c.name}还原字节级一致`, read(c.rel) === orig);
+  }
+}
 
 await fs.promises.rm(tmp, { recursive: true, force: true });
 console.log(`\n结果: PASS=${pass} FAIL=${fail}`);

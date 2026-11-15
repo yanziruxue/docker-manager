@@ -1014,6 +1014,11 @@ export function downloadCustomIconApi(url: string, name: string): Promise<{ url:
   return request("/custom-icons/download", { method: "POST", body: JSON.stringify({ url, name }) });
 }
 
+/** 粘贴 SVG 代码 → 服务端保存为 <图标库>/<name>.svg（v1.53.6，与链接下载共用弹窗） */
+export function saveSvgIconApi(code: string, name: string): Promise<{ url: string; file: string }> {
+  return request("/custom-icons/svg", { method: "POST", body: JSON.stringify({ code, name }) });
+}
+
 // ============ 导航页专属图标库（v1.52.4 历史通道；v1.52.15 已统一进 custom-icons，仅保留兼容读取） ============
 
 /** 列出导航图标库（绑定状态 / 目录 / 文件清单 / stem→URL 映射） */

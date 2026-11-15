@@ -85,6 +85,7 @@ import {
   buildCustomIconMap,
   resolveCustomIconFile,
   downloadCustomIcon,
+  saveSvgIconCode,
   type CustomIconEntry,
 } from "./custom-icons.js";
 import {
@@ -258,6 +259,9 @@ const __filename = typeof BUILD_BINARY !== "undefined" && BUILD_BINARY ? process
 const __dirname = path.dirname(__filename);
 
 app.use(cors());
+// v1.53.6：SVG 源码可能较大，单独放宽该路由的 JSON 体积上限（全局 express.json 默认仅 100kb）；
+// body-parser 已解析过的请求会被后面的全局中间件自动跳过，不影响其它接口。
+app.use("/api/custom-icons/svg", express.json({ limit: "10mb" }));
 app.use(express.json());
 
 /**
@@ -1306,6 +1310,31 @@ app.post("/api/custom-icons/download", async (req, res) => {
   } catch (err: any) {
     res.status(400).json({ success: false, error: err?.message || "下载图标失败" });
   }
+});
+
+/** 粘贴 SVG 代码 → 保存为 .svg 图标文件（v1.53.6：从链接下载弹窗的「SVG 代码」模式） */
+app.post("/api/custom-icons/svg", (req, res) => {
+  const { dir, error } = boundCustomIconDir();
+  if (!dir) {
+    res.status(400).json({ success: false, error: error || "没有绑定图标库目录" });
+    return;
+  }
+  try {
+    const { code, name } = (req.body as any) || {};
+    const r = saveSvgIconCode(code, name, dir);
+    res.json({ success: true, data: r });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err?.message || "保存 SVG 图标失败" });
+  }
+});
+
+/** 局部错误中间件：JSON 超限(413) / 解析失败统一转 JSON（前端 res.json() 不会解析失败） */
+app.use("/api/custom-icons/svg", (err: any, _req: any, res: any, _next: any) => {
+  const tooLarge = err?.status === 413 || err?.type === "entity.too.large";
+  res.status(tooLarge ? 413 : 400).json({
+    success: false,
+    error: tooLarge ? "SVG 代码超过 10MB，请精简后重试" : `保存 SVG 图标失败：${err?.message || "请求体无效"}`,
+  });
 });
 
 /** 上传本地图片到图标库目录（v1.52.23）：raw body + X-Filename/X-Name 头（同 nav-assets 模式） */
